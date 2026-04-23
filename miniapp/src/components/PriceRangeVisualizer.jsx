@@ -108,11 +108,11 @@ export default function PriceRangeVisualizer({
         return `${currentLabel} · ${TEXT.belowLower} ${formatPercent(outOfRangeInfo.percent)}`;
     }, [currentPriceNum, outOfRangeInfo, visualInRange]);
 
-    const detailText = useMemo(() => {
-        const parts = [];
-        if (taskRangeText) parts.push(`${TEXT.taskRange} ${taskRangeText}`);
-        if (runningDuration) parts.push(`${TEXT.running} ${runningDuration}`);
-        return parts.join(' · ');
+    const detailItems = useMemo(() => {
+        const items = [];
+        if (taskRangeText) items.push({ key: 'task', label: TEXT.taskRange, value: taskRangeText });
+        if (runningDuration) items.push({ key: 'running', label: TEXT.running, value: runningDuration });
+        return items;
     }, [runningDuration, taskRangeText]);
 
     const gridLines = useMemo(() => {
@@ -219,12 +219,23 @@ export default function PriceRangeVisualizer({
                 >
                     <NumberFlowValue value={statusText} formatter={() => statusText} />
                 </div>
-                {detailText ? (
-                    <div
-                        className="mt-1 truncate whitespace-nowrap leading-relaxed text-zinc-700 dark:text-zinc-300"
-                        title={detailText}
-                    >
-                        <NumberFlowValue value={detailText} formatter={() => detailText} />
+                {detailItems.length > 0 ? (
+                    <div className="mt-1 flex items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] font-semibold text-amber-600 dark:text-amber-300">
+                        {detailItems.map((item, index) => (
+                            <React.Fragment key={item.key}>
+                                {index > 0 ? (
+                                    <span className="shrink-0 text-amber-500/60 dark:text-amber-200/45">•</span>
+                                ) : null}
+                                <span className="inline-flex min-w-0 shrink items-center gap-1 align-middle leading-none">
+                                    <span className="shrink-0 leading-none">{item.label}</span>
+                                    <NumberFlowValue
+                                        value={item.value}
+                                        formatter={() => item.value}
+                                        className="min-w-0 shrink truncate leading-none"
+                                    />
+                                </span>
+                            </React.Fragment>
+                        ))}
                     </div>
                 ) : null}
             </div>
