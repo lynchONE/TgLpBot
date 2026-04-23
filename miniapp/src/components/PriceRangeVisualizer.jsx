@@ -1,6 +1,27 @@
 import React, { useMemo } from 'react';
 import NumberFlowValue from './NumberFlowValue.jsx';
 
+const TEXT = {
+    rangeTitle: '\u4ef7\u683c\u533a\u95f4',
+    unknown: '\u672a\u77e5',
+    total: '\u5171',
+    grids: '\u683c',
+    approx: '\u7ea6',
+    perGrid: '%/\u683c',
+    lower: '\u4e0b\u9650',
+    middle: '\u4e2d\u4f4d',
+    upper: '\u4e0a\u9650',
+    currentPrice: '\u5f53\u524d\u4ef7',
+    unavailable: '\u6682\u4e0d\u53ef\u7528',
+    inRange: '\u5728\u533a\u95f4\u5185',
+    outOfRange: '\u8d85\u51fa\u533a\u95f4',
+    aboveUpper: '\u9ad8\u4e8e\u4e0a\u9650',
+    belowLower: '\u4f4e\u4e8e\u4e0b\u9650',
+    currentBand: '\u5f53\u524d\u533a\u95f4',
+    taskRange: '\u4efb\u52a1\u533a\u95f4',
+    running: '\u8fd0\u884c',
+};
+
 const formatPrice = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return '--';
@@ -79,26 +100,26 @@ export default function PriceRangeVisualizer({
     const visualInRange = hasRange ? !outOfRangeInfo : Boolean(inRange);
 
     const statusText = useMemo(() => {
-        const currentLabel = `当前价 ${formatPrice(currentPriceNum)}`;
-        if (!Number.isFinite(currentPriceNum)) return `${currentLabel} · 暂不可用`;
-        if (visualInRange) return `${currentLabel} · 在区间内`;
-        if (!outOfRangeInfo) return `${currentLabel} · 超出区间`;
-        if (outOfRangeInfo.direction === 'above') return `${currentLabel} · 高于上限 ${formatPercent(outOfRangeInfo.percent)}`;
-        return `${currentLabel} · 低于下限 ${formatPercent(outOfRangeInfo.percent)}`;
+        const currentLabel = `${TEXT.currentPrice} ${formatPrice(currentPriceNum)}`;
+        if (!Number.isFinite(currentPriceNum)) return `${currentLabel} · ${TEXT.unavailable}`;
+        if (visualInRange) return `${currentLabel} · ${TEXT.inRange}`;
+        if (!outOfRangeInfo) return `${currentLabel} · ${TEXT.outOfRange}`;
+        if (outOfRangeInfo.direction === 'above') return `${currentLabel} · ${TEXT.aboveUpper} ${formatPercent(outOfRangeInfo.percent)}`;
+        return `${currentLabel} · ${TEXT.belowLower} ${formatPercent(outOfRangeInfo.percent)}`;
     }, [currentPriceNum, outOfRangeInfo, visualInRange]);
 
     const currentRangeText = useMemo(() => {
         const lower = Number(currentGridLower);
         const upper = Number(currentGridUpper);
         if (!Number.isFinite(lower) || !Number.isFinite(upper)) return '';
-        return `当前区间 ${formatPrice(lower)} - ${formatPrice(upper)}`;
+        return `${TEXT.currentBand} ${formatPrice(lower)} - ${formatPrice(upper)}`;
     }, [currentGridLower, currentGridUpper]);
 
     const detailText = useMemo(() => {
         const parts = [];
+        if (taskRangeText) parts.push(`${TEXT.taskRange} ${taskRangeText}`);
         if (currentRangeText) parts.push(currentRangeText);
-        if (taskRangeText) parts.push(`任务区间 ${taskRangeText}`);
-        if (runningDuration) parts.push(`运行 ${runningDuration}`);
+        if (runningDuration) parts.push(`${TEXT.running} ${runningDuration}`);
         return parts.join(' · ');
     }, [currentRangeText, runningDuration, taskRangeText]);
 
@@ -121,18 +142,20 @@ export default function PriceRangeVisualizer({
         <div className="mt-2 rounded-xl border border-zinc-200/60 bg-[#1c1e22]/5 p-2.5 dark:border-white/5 dark:bg-[#1f2227]">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-zinc-900 dark:text-zinc-100">
                 <div className="text-[10px] font-bold opacity-85">
-                    价格区间 ({pairLabel || '未知'}
+                    {TEXT.rangeTitle} ({pairLabel || TEXT.unknown}
                     {hasGridCount ? (
                         <>
-                            {' · 共 '}
+                            {' · '}
+                            {TEXT.total}
                             <NumberFlowValue value={Number(gridCount)} formatOptions={{ maximumFractionDigits: 0 }} />
-                            {' 格'}
+                            {` ${TEXT.grids}`}
                         </>
                     ) : null}
                     {Number.isFinite(gridStepPct) ? (
                         <>
-                            {' · 约 '}
-                            <NumberFlowValue value={gridStepPct} formatter={(v) => `${Number(v).toFixed(2)}%/格`} />
+                            {' · '}
+                            {TEXT.approx}
+                            <NumberFlowValue value={gridStepPct} formatter={(v) => `${Number(v).toFixed(2)}${TEXT.perGrid}`} />
                         </>
                     ) : null}
                     )
@@ -145,9 +168,9 @@ export default function PriceRangeVisualizer({
             </div>
 
             <div className="mb-1 flex justify-between px-1 text-[10px] font-bold">
-                <span className="text-emerald-600 dark:text-emerald-500">下限</span>
-                <span className="text-zinc-400 dark:text-zinc-500">中位</span>
-                <span className="text-rose-600 dark:text-rose-500">上限</span>
+                <span className="text-emerald-600 dark:text-emerald-500">{TEXT.lower}</span>
+                <span className="text-zinc-400 dark:text-zinc-500">{TEXT.middle}</span>
+                <span className="text-rose-600 dark:text-rose-500">{TEXT.upper}</span>
             </div>
 
             <div className="relative flex h-4 items-center overflow-hidden rounded-full bg-[#e4e4e7] shadow-inner dark:bg-[#333539]">
@@ -197,7 +220,7 @@ export default function PriceRangeVisualizer({
                 }`}
             >
                 <div
-                    className={`leading-relaxed ${
+                    className={`truncate whitespace-nowrap leading-relaxed ${
                         visualInRange ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                     }`}
                     title={statusText}
@@ -205,7 +228,10 @@ export default function PriceRangeVisualizer({
                     <NumberFlowValue value={statusText} formatter={() => statusText} />
                 </div>
                 {detailText ? (
-                    <div className="mt-1 break-words leading-relaxed text-zinc-700 dark:text-zinc-300" title={detailText}>
+                    <div
+                        className="mt-1 truncate whitespace-nowrap leading-relaxed text-zinc-700 dark:text-zinc-300"
+                        title={detailText}
+                    >
                         <NumberFlowValue value={detailText} formatter={() => detailText} />
                     </div>
                 ) : null}
