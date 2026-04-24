@@ -92,12 +92,15 @@ func (s *OKXDexService) slippageQueryValue(slippage string) string {
 
 // SwapRequest represents a swap request
 type SwapRequest struct {
-	ChainID           string `json:"chainId"`
-	FromTokenAddress  string `json:"fromTokenAddress"`
-	ToTokenAddress    string `json:"toTokenAddress"`
-	Amount            string `json:"amount"`
-	Slippage          string `json:"slippage"`
-	UserWalletAddress string `json:"userWalletAddress"`
+	ChainID                        string `json:"chainId"`
+	FromTokenAddress               string `json:"fromTokenAddress"`
+	ToTokenAddress                 string `json:"toTokenAddress"`
+	Amount                         string `json:"amount"`
+	Slippage                       string `json:"slippage"`
+	UserWalletAddress              string `json:"userWalletAddress"`
+	FeePercent                     string `json:"feePercent,omitempty"`
+	FromTokenReferrerWalletAddress string `json:"fromTokenReferrerWalletAddress,omitempty"`
+	ToTokenReferrerWalletAddress   string `json:"toTokenReferrerWalletAddress,omitempty"`
 }
 
 // SwapResponse represents a swap response
@@ -222,16 +225,115 @@ func (s *OKXDexService) marketAPIURL() string {
 	return "https://web3.okx.com/api/v6/dex/market"
 }
 
-// GetSwapData gets swap transaction data
-func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
-	url := fmt.Sprintf("%s/swap?%s=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&%s=%s&userWalletAddress=%s",
-		s.apiURL, s.chainQueryKey(), req.ChainID, req.FromTokenAddress, req.ToTokenAddress, req.Amount, s.slippageQueryKey(), s.slippageQueryValue(req.Slippage), req.UserWalletAddress)
-
-	if config.AppConfig != nil && config.AppConfig.OKXDebug {
-		log.Printf("[OKX API] 请求 URL: %s", url)
+func normalizeOKXSwapFeePercent(raw string, chainID string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	rat, ok := new(big.Rat).SetString(raw)
+	if !ok || rat.Sign() <= 0 {
+		return ""
 	}
 
-	httpReq, err := http.NewRequest("GET", url, nil)
+	max := big.NewRat(3, 1)
+	if strings.TrimSpace(chainID) == "501" {
+		max = big.NewRat(10, 1)
+	}
+	if rat.Cmp(max) > 0 {
+		rat = max
+	}
+
+	scale := big.NewInt(1_000_000_000)
+	scaled := new(big.Rat).Mul(rat, new(big.Rat).SetInt(scale))
+	units := new(big.Int).Quo(scaled.Num(), scaled.Denom())
+	if units.Sign() <= 0 {
+		units.SetInt64(1)
+	}
+
+	integral := new(big.Int).Quo(new(big.Int).Set(units), scale)
+	fractional := new(big.Int).Mod(units, scale)
+	if fractional.Sign() == 0 {
+		return integral.String()
+	}
+
+	fracText := fractional.String()
+	if len(fracText) < 9 {
+		fracText = strings.Repeat("0", 9-len(fracText)) + fracText
+	}
+	fracText = strings.TrimRight(fracText, "0")
+	return integral.String() + "." + fracText
+}
+
+func (s *OKXDexService) swapFeeParams(req SwapRequest) (string, string, string, error) {
+	feePercent := normalizeOKXSwapFeePercent(req.FeePercent, req.ChainID)
+	fromReferrer := strings.TrimSpace(req.FromTokenReferrerWalletAddress)
+	toReferrer := strings.TrimSpace(req.ToTokenReferrerWalletAddress)
+
+	if config.AppConfig != nil {
+		if feePercent == "" {
+			feePercent = normalizeOKXSwapFeePercent(config.AppConfig.OKXSwapFeePercent, req.ChainID)
+		}
+		if fromReferrer == "" && toReferrer == "" {
+			recipient := strings.TrimSpace(config.AppConfig.OKXSwapFeeRecipient)
+			switch strings.ToLower(strings.TrimSpace(config.AppConfig.OKXSwapFeeToken)) {
+			case "from":
+				fromReferrer = recipient
+			default:
+				toReferrer = recipient
+			}
+		}
+	}
+
+	if feePercent == "" {
+		return "", "", "", nil
+	}
+	if fromReferrer == "" && toReferrer == "" {
+		return "", "", "", fmt.Errorf("OKX swap fee recipient is required when feePercent is set")
+	}
+	if fromReferrer != "" && toReferrer != "" {
+		return "", "", "", fmt.Errorf("OKX swap fee supports only one referrer wallet address")
+	}
+	return feePercent, fromReferrer, toReferrer, nil
+}
+
+func (s *OKXDexService) swapEndpoint(req SwapRequest) (string, error) {
+	query := url.Values{}
+	query.Set(s.chainQueryKey(), strings.TrimSpace(req.ChainID))
+	query.Set("fromTokenAddress", strings.TrimSpace(req.FromTokenAddress))
+	query.Set("toTokenAddress", strings.TrimSpace(req.ToTokenAddress))
+	query.Set("amount", strings.TrimSpace(req.Amount))
+	query.Set(s.slippageQueryKey(), s.slippageQueryValue(req.Slippage))
+	query.Set("userWalletAddress", strings.TrimSpace(req.UserWalletAddress))
+
+	feePercent, fromReferrer, toReferrer, err := s.swapFeeParams(req)
+	if err != nil {
+		return "", err
+	}
+	if feePercent != "" {
+		query.Set("feePercent", feePercent)
+		if fromReferrer != "" {
+			query.Set("fromTokenReferrerWalletAddress", fromReferrer)
+		}
+		if toReferrer != "" {
+			query.Set("toTokenReferrerWalletAddress", toReferrer)
+		}
+	}
+
+	return fmt.Sprintf("%s/swap?%s", strings.TrimRight(s.apiURL, "/"), query.Encode()), nil
+}
+
+// GetSwapData gets swap transaction data
+func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
+	endpoint, err := s.swapEndpoint(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX API] 请求 URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

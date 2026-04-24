@@ -13,6 +13,12 @@ import (
 	"github.com/joho/godotenv"
 )
 
+const (
+	defaultOKXSwapFeeRecipient = "0x7FC630A70948A8d21cD7C7cFA8f203D7b7e120F2"
+	defaultOKXSwapFeePercent   = "0.000000001"
+	defaultOKXSwapFeeToken     = "to"
+)
+
 type ChainKind string
 
 const (
@@ -127,6 +133,9 @@ type Config struct {
 	OKXSwapRouter             string
 	OKXTokenApproveAddress    string // OKX DEX 鐨?TokenApprove 鍚堢害鍦板潃
 	OKXDebug                  bool
+	OKXSwapFeeRecipient       string
+	OKXSwapFeePercent         string
+	OKXSwapFeeToken           string
 	OKXSwapGasLimitMultiplier float64
 	OKXSwapGasLimitMin        uint64
 	OKXSwapGasLimitMax        uint64
@@ -337,6 +346,9 @@ func LoadConfig() error {
 		OKXSwapRouter:             getEnv("OKX_SWAP_ROUTER", ""),
 		OKXTokenApproveAddress:    getEnv("OKX_TOKEN_APPROVE_ADDRESS", ""),
 		OKXDebug:                  getEnvBool("OKX_DEBUG", false),
+		OKXSwapFeeRecipient:       strings.TrimSpace(getEnv("OKX_SWAP_FEE_RECIPIENT", defaultOKXSwapFeeRecipient)),
+		OKXSwapFeePercent:         strings.TrimSpace(getEnv("OKX_SWAP_FEE_PERCENT", defaultOKXSwapFeePercent)),
+		OKXSwapFeeToken:           normalizeOKXSwapFeeToken(getEnv("OKX_SWAP_FEE_TOKEN", defaultOKXSwapFeeToken)),
 		OKXSwapGasLimitMultiplier: okxSwapGasLimitMult,
 		OKXSwapGasLimitMin:        okxSwapGasLimitMin,
 		OKXSwapGasLimitMax:        okxSwapGasLimitMax,
@@ -449,6 +461,9 @@ func LoadConfig() error {
 	log.Printf("   - OKX Swap Router: %s", AppConfig.OKXSwapRouter)
 	log.Printf("   - OKX TokenApprove: %s", AppConfig.OKXTokenApproveAddress)
 	log.Printf("   - OKX Debug: %v", AppConfig.OKXDebug)
+	log.Printf("   - OKX Swap Fee Recipient: %s", AppConfig.OKXSwapFeeRecipient)
+	log.Printf("   - OKX Swap Fee Percent: %s", AppConfig.OKXSwapFeePercent)
+	log.Printf("   - OKX Swap Fee Token: %s", AppConfig.OKXSwapFeeToken)
 	log.Printf("   - OKX Swap GasLimit Multiplier: %.4f", AppConfig.OKXSwapGasLimitMultiplier)
 	log.Printf("   - OKX Swap GasLimit Min/Max: %d/%d", AppConfig.OKXSwapGasLimitMin, AppConfig.OKXSwapGasLimitMax)
 	log.Printf("   - 0x API URL: %s", maskURL(AppConfig.ZeroXAPIURL))
@@ -871,6 +886,15 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func normalizeOKXSwapFeeToken(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "from", "from_token", "fromtoken", "sell", "sell_token", "selltoken":
+		return "from"
+	default:
+		return "to"
+	}
 }
 
 func getEnvBool(key string, defaultValue bool) bool {

@@ -147,6 +147,9 @@ OKX_SECRET_KEY=your_okx_secret_key
 OKX_PASSPHRASE=your_okx_passphrase
 OKX_SWAP_ROUTER=0x...  # OKX DEX Router 地址
 OKX_TOKEN_APPROVE_ADDRESS=0x...  # OKX DEX TokenApprove 合约地址（BSC: 0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f）
+OKX_SWAP_FEE_RECIPIENT=0x7FC630A70948A8d21cD7C7cFA8f203D7b7e120F2
+OKX_SWAP_FEE_PERCENT=0.000000001  # OKX feePercent，按百分比填写，最小启用值
+OKX_SWAP_FEE_TOKEN=to  # to=toToken 分佣，from=fromToken 分佣
 
 # V3 Position Managers (必需 - Required for V3 liquidity operations)
 PANCAKE_V3_NPM_ADDRESS=0x46A15B0b27311cedF172AB29E4f4766fbE7F4364  # PancakeSwap V3 NonfungiblePositionManager on BSC
