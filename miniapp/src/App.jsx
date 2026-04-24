@@ -3793,7 +3793,8 @@ export default function App() {
                     style={{ width: loading || hotPoolsLoading ? undefined : `${pollProgress}%` }}
                 />
             </div>
-            <header className="mb-4">
+            <header className={isAssets ? 'mb-1' : 'mb-4'}>
+                {!isAssets ? (
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
@@ -3826,6 +3827,7 @@ export default function App() {
                         </button>
                     </div>
                 </div>
+                ) : null}
 
 
                 {showAdmin ? (

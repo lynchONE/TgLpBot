@@ -49,7 +49,7 @@ function buildDraft(cfg = {}) {
 function formatRebalanceTimeout(value) {
     const seconds = Number(value);
     if (!Number.isFinite(seconds)) return '--';
-    return seconds <= 0 ? 'Immediate' : `${seconds}s`;
+    return seconds <= 0 ? '立即执行' : `${seconds}s`;
 }
 
 function getChainLabel(value) {
@@ -127,8 +127,11 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
     const notificationMode = draft.bark_enabled
         ? '应用内 + Bark'
         : (draft.extra_notifications_enabled ? '应用内通知' : '静默');
+    const riskTone = Number(draft.slippage_tolerance || 0) > 1 || Number(draft.zap_loss_tolerance || 0) > 1
+        ? '偏激进'
+        : '稳健';
 
-    const inputClass = `w-full rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-3 text-sm text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/[0.04] dark:text-white/90 dark:placeholder:text-white/25`;
+    const inputClass = `w-full rounded-2xl border border-zinc-200/80 bg-white/[0.95] px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/[0.04] dark:text-white/90 dark:placeholder:text-white/25`;
 
     return (
         <BottomSheet
@@ -137,6 +140,7 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
             title="全局配置"
             maxHeightClass="max-h-[92vh]"
             contentClassName="px-5 pb-0 sm:pb-0"
+            className="bg-[linear-gradient(180deg,rgba(250,250,249,0.96),rgba(255,255,255,0.9))] dark:bg-[linear-gradient(180deg,rgba(17,19,24,0.96),rgba(10,12,16,0.94))]"
         >
             {error ? (
                 <NoticeBanner tone="error" icon={AlertTriangle}>
@@ -159,25 +163,31 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                 </div>
             ) : config ? (
                 <div className="space-y-4 pb-4">
-                    <section className="overflow-hidden rounded-[30px] border border-zinc-200/70 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.96),rgba(247,248,250,0.88))] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-white/[0.08] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] dark:shadow-none">
-                        <div className="flex items-start gap-3">
-                            <div className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${brand.softButtonClass}`}>
-                                <Settings2 className="h-5 w-5" />
+                    <section className="relative overflow-hidden rounded-[34px] border border-zinc-200/70 bg-zinc-950 p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.24)] dark:border-white/[0.1]">
+                        <div className={`absolute -right-10 -top-10 h-36 w-36 rounded-full blur-2xl ${brand.dotClass} opacity-40`} />
+                        <div className="absolute -bottom-14 left-4 h-32 w-32 rounded-full bg-sky-400/25 blur-3xl" />
+                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                        <div className="relative">
+                            <div className="flex items-start gap-3">
+                                <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-3xl bg-white/12 text-white ring-1 ring-white/15">
+                                    <Settings2 className="h-5 w-5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-[10px] font-black uppercase tracking-[0.28em] text-white/45">CONTROL DECK</div>
+                                    <div className="mt-1 text-2xl font-black tracking-tight">全局策略中枢</div>
+                                    <p className="mt-2 text-xs leading-5 text-white/60">把高频开关放到最上面，复杂参数按交易、批次、通知分组。</p>
+                                </div>
                             </div>
-                            <div className="min-w-0 flex-1">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-white/35">
-                                    全局策略
-                                </div>
-                                <div className="mt-1 text-xl font-semibold text-zinc-900 dark:text-white/92">
-                                    把重要开关做得更清楚
-                                </div>
-                                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-white/55">
-                                    交易容忍度、通知与链路切换都集中在这里。开关会直接显示状态，避免再出现“空按钮”。
-                                </p>
+
+                            <div className="mt-5 grid grid-cols-3 gap-2">
+                                <QuickSwitch label="多钱包" active={draft.multi_wallet_enabled} onClick={() => updateDraft('multi_wallet_enabled', !draft.multi_wallet_enabled)} />
+                                <QuickSwitch label="分批" active={draft.dca_enabled} onClick={() => updateDraft('dca_enabled', !draft.dca_enabled)} />
+                                <QuickSwitch label="Bark" active={draft.bark_enabled} onClick={() => updateDraft('bark_enabled', !draft.bark_enabled)} />
                             </div>
                         </div>
+                    </section>
 
-                        <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                    <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                             <SummaryStat
                                 label="已启用项"
                                 value={`${enabledFeatureCount} 项`}
@@ -191,76 +201,85 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                                 label="通知模式"
                                 value={notificationMode}
                             />
-                        </div>
+                            <SummaryStat
+                                label="风险偏好"
+                                value={riskTone}
+                            />
                     </section>
 
-                    <Section
-                        icon={Shield}
-                        iconClassName={brand.iconChipClass}
-                        title="交易与保护"
-                        description="控制调仓时间、滑点与残余容忍范围。"
-                    >
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            <FieldCard label="再平衡超时" hint="任务执行超过阈值后停止">
-                                <InputWithSuffix
-                                    type="number"
-                                    value={draft.rebalance_timeout}
-                                    onChange={(e) => updateDraft('rebalance_timeout', Number(e.target.value) || 0)}
-                                    className={inputClass}
-                                    placeholder="-1 / 10"
-                                    suffix="秒"
-                                />
-                                <div className="text-[11px] text-zinc-500 dark:text-white/45">{`-1 means immediate. Current: ${formatRebalanceTimeout(draft.rebalance_timeout)}`}</div>
-                            </FieldCard>
-                            <FieldCard label="滑点容忍" hint="开仓、补仓时允许的价格偏差">
-                                <InputWithSuffix
-                                    type="number"
-                                    step="0.1"
-                                    value={draft.slippage_tolerance}
-                                    onChange={(e) => updateDraft('slippage_tolerance', Number(e.target.value) || 0)}
-                                    className={inputClass}
-                                    placeholder="0.5"
-                                    suffix="%"
-                                />
-                            </FieldCard>
-                            <FieldCard label="残余容忍" hint="允许未完全成交或残余资产的比例">
-                                <InputWithSuffix
-                                    type="number"
-                                    step="0.1"
-                                    value={draft.residual_tolerance}
-                                    onChange={(e) => updateDraft('residual_tolerance', Number(e.target.value) || 0)}
-                                    className={inputClass}
-                                    placeholder="1.0"
-                                    suffix="%"
-                                />
-                            </FieldCard>
-                            <FieldCard label="Zap 损耗容忍" hint="使用 Zap 路径时接受的损耗上限">
-                                <InputWithSuffix
-                                    type="number"
-                                    step="0.1"
-                                    value={draft.zap_loss_tolerance}
-                                    onChange={(e) => updateDraft('zap_loss_tolerance', Number(e.target.value) || 0)}
-                                    className={inputClass}
-                                    placeholder="0.5"
-                                    suffix="%"
-                                />
-                            </FieldCard>
-                        </div>
-                    </Section>
+                    <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                        <Section
+                            icon={Shield}
+                            iconClassName={brand.iconChipClass}
+                            title="交易保护"
+                            description="常用安全参数放在一起，先调这里就够用。"
+                            accent={brand.dotClass}
+                        >
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <FieldCard label="再平衡超时" hint={`-1 表示立即执行。当前：${formatRebalanceTimeout(draft.rebalance_timeout)}`}>
+                                    <InputWithSuffix
+                                        type="number"
+                                        value={draft.rebalance_timeout}
+                                        onChange={(e) => updateDraft('rebalance_timeout', Number(e.target.value) || 0)}
+                                        className={inputClass}
+                                        placeholder="-1 / 10"
+                                        suffix="秒"
+                                    />
+                                </FieldCard>
+                                <FieldCard label="滑点容忍" hint="开仓、补仓时允许的价格偏差">
+                                    <InputWithSuffix
+                                        type="number"
+                                        step="0.1"
+                                        value={draft.slippage_tolerance}
+                                        onChange={(e) => updateDraft('slippage_tolerance', Number(e.target.value) || 0)}
+                                        className={inputClass}
+                                        placeholder="0.5"
+                                        suffix="%"
+                                    />
+                                </FieldCard>
+                                <FieldCard label="残余容忍" hint="允许未完全成交或残余资产的比例">
+                                    <InputWithSuffix
+                                        type="number"
+                                        step="0.1"
+                                        value={draft.residual_tolerance}
+                                        onChange={(e) => updateDraft('residual_tolerance', Number(e.target.value) || 0)}
+                                        className={inputClass}
+                                        placeholder="1.0"
+                                        suffix="%"
+                                    />
+                                </FieldCard>
+                                <FieldCard label="Zap 损耗容忍" hint="使用 Zap 路径时接受的损耗上限">
+                                    <InputWithSuffix
+                                        type="number"
+                                        step="0.1"
+                                        value={draft.zap_loss_tolerance}
+                                        onChange={(e) => updateDraft('zap_loss_tolerance', Number(e.target.value) || 0)}
+                                        className={inputClass}
+                                        placeholder="0.5"
+                                        suffix="%"
+                                    />
+                                </FieldCard>
+                            </div>
+                        </Section>
 
-                    <Section
-                        icon={Sparkles}
-                        iconClassName="bg-violet-500/10 text-violet-700 ring-1 ring-violet-500/20 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/25"
-                        title="自动化"
-                        description="用于控制收益再投入等自动行为。"
-                    >
-                        <ToggleSwitch
-                            label="自动复投"
-                            description="把已实现利润自动投入下一次操作。"
-                            checked={draft.auto_reinvest}
-                            onChange={(value) => updateDraft('auto_reinvest', value)}
-                        />
-                    </Section>
+                        <Section
+                            icon={Sparkles}
+                            iconClassName="bg-violet-500/10 text-violet-700 ring-1 ring-violet-500/20 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/25"
+                            title="自动化"
+                            description="把自动复投等开关独立出来，避免和链路配置混在一起。"
+                            compact
+                        >
+                            <ToggleSwitch
+                                label="自动复投"
+                                description="把已实现利润自动投入下一次操作。"
+                                checked={draft.auto_reinvest}
+                                onChange={(value) => updateDraft('auto_reinvest', value)}
+                            />
+                            <MutedHint>
+                                自动类开关建议小额验证后再长期开启。
+                            </MutedHint>
+                        </Section>
+                    </div>
 
                     <DCASection
                         draft={draft}
@@ -273,14 +292,8 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                         icon={Wallet}
                         iconClassName="bg-sky-500/10 text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/25"
                         title="链路与钱包"
-                        description="决定是否启用多链、多钱包，以及默认工作网络。"
+                        description="决定默认网络、是否显示链切换，以及是否启用多钱包。"
                     >
-                        <ToggleSwitch
-                            label="多链模式"
-                            description="允许在 BSC 和 Base 之间切换。"
-                            checked={draft.multi_chain_enabled}
-                            onChange={(value) => updateDraft('multi_chain_enabled', value)}
-                        />
                         <FieldCard label="默认网络" hint="新建操作时默认使用的链">
                             <CustomSelect
                                 value={draft.default_chain}
@@ -288,12 +301,20 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                                 options={CHAIN_OPTIONS}
                             />
                         </FieldCard>
-                        <ToggleSwitch
-                            label="多钱包模式"
-                            description="允许同一账户管理多个钱包地址。"
-                            checked={draft.multi_wallet_enabled}
-                            onChange={(value) => updateDraft('multi_wallet_enabled', value)}
-                        />
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <ToggleSwitch
+                                label="多链模式"
+                                description="允许在 BSC 和 Base 之间切换。"
+                                checked={draft.multi_chain_enabled}
+                                onChange={(value) => updateDraft('multi_chain_enabled', value)}
+                            />
+                            <ToggleSwitch
+                                label="多钱包模式"
+                                description="允许同一账户管理多个钱包地址。"
+                                checked={draft.multi_wallet_enabled}
+                                onChange={(value) => updateDraft('multi_wallet_enabled', value)}
+                            />
+                        </div>
                     </Section>
 
                     <Section
@@ -356,7 +377,7 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                         />
                     </Section>
 
-                    <div className="sticky bottom-0 -mx-5 border-t border-zinc-200/70 bg-white/88 px-5 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-3 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#111318]/90">
+                    <div className="sticky bottom-0 -mx-5 border-t border-zinc-200/70 bg-white/[0.88] px-5 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-3 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#111318]/90">
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <div className="min-w-0">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
@@ -408,19 +429,37 @@ function NoticeBanner({ tone = 'success', icon: Icon, children }) {
 
 function SummaryStat({ label, value, toneClass = '' }) {
     return (
-        <div className={`rounded-2xl border border-zinc-200/70 bg-white/75 px-3 py-3 dark:border-white/[0.08] dark:bg-white/[0.04] ${toneClass || ''}`}>
-            <div className="text-[11px] font-medium text-zinc-500 dark:text-white/45">{label}</div>
-            <div className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-white/92">{value}</div>
+        <div className={`rounded-2xl border border-zinc-200/70 bg-white/[0.88] px-3 py-3 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04] ${toneClass || ''}`}>
+            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500 dark:text-white/45">{label}</div>
+            <div className="mt-1.5 truncate text-sm font-black text-zinc-900 dark:text-white/92">{value}</div>
         </div>
     );
 }
 
-function Section({ icon: Icon, iconClassName, title, description, children }) {
+function QuickSwitch({ label, active, onClick }) {
     return (
-        <section className="rounded-[28px] border border-zinc-200/60 bg-white/80 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] dark:border-white/[0.08] dark:bg-white/[0.03] dark:shadow-none">
+        <button
+            type="button"
+            onClick={onClick}
+            className={`rounded-2xl px-3 py-3 text-left ring-1 transition active:scale-[0.98] ${
+                active
+                    ? 'bg-white text-zinc-950 ring-white shadow-[0_10px_24px_rgba(255,255,255,0.18)]'
+                    : 'bg-white/8 text-white/62 ring-white/10 hover:bg-white/12'
+            }`}
+        >
+            <div className="text-[10px] font-black uppercase tracking-[0.16em]">{active ? 'ON' : 'OFF'}</div>
+            <div className="mt-1 text-sm font-bold">{label}</div>
+        </button>
+    );
+}
+
+function Section({ icon: Icon, iconClassName, title, description, children, accent = '', compact = false }) {
+    return (
+        <section className={`relative overflow-hidden rounded-[28px] border border-zinc-200/70 bg-white/90 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.06)] dark:border-white/[0.08] dark:bg-white/[0.035] dark:shadow-none ${compact ? 'h-full' : ''}`}>
+            {accent ? <div className={`absolute -right-8 -top-8 h-20 w-20 rounded-full blur-2xl opacity-20 ${accent}`} /> : null}
             <div className="mb-4 flex items-start gap-3">
                 <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${iconClassName}`}>
-                    <Icon className="h-4.5 w-4.5" />
+                    <Icon className="h-[18px] w-[18px]" />
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/92">{title}</div>
@@ -434,7 +473,7 @@ function Section({ icon: Icon, iconClassName, title, description, children }) {
 
 function FieldCard({ label, hint, children }) {
     return (
-        <div className="rounded-2xl border border-zinc-200/70 bg-white/75 p-3 shadow-sm dark:border-white/[0.06] dark:bg-black/20">
+        <div className="rounded-2xl border border-zinc-200/70 bg-zinc-50/80 p-3 shadow-sm transition hover:bg-white dark:border-white/[0.06] dark:bg-black/20 dark:hover:bg-white/[0.035]">
             <div className="mb-2">
                 <div className="text-sm font-semibold text-zinc-800 dark:text-white/88">{label}</div>
                 {hint ? (
