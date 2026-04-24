@@ -1,5 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRightLeft, ChevronLeft, ChevronRight, Crown, Medal, RefreshCw, Search, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, ChevronLeft, ChevronRight, Crown, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
     fetchAssetHistory,
@@ -7,8 +7,11 @@ import {
     fetchAssetOverview,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
+import GlobalConfigPage from './GlobalConfigPage.jsx';
 import MiniChart from './MiniChart.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
+import TradeHistoryPage from './TradeHistoryPage.jsx';
+import WalletManagePage from './WalletManagePage.jsx';
 
 const AVATAR_URLS = Object.entries(
     import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
@@ -806,6 +809,13 @@ export default function AssetManagementPage({
     onNotice,
 }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
+    const tabs = useMemo(() => [
+        { key: 'my_assets', label: '我的资产', icon: Wallet },
+        { key: 'global_config', label: '全局配置', icon: Settings2 },
+        { key: 'wallet_manage', label: '钱包管理', icon: Wallet },
+        { key: 'trade_history', label: '交易记录', icon: History },
+    ], []);
+    const [activeTab, setActiveTab] = useState('my_assets');
 
     const [historyDays, setHistoryDays] = useState(30);
     const [assetsData, setAssetsData] = useState({ overview: null, history: null, lp: null });
@@ -887,6 +897,7 @@ export default function AssetManagementPage({
 
     const isLoading = assetsLoading || assetsRefreshing;
     const canManualRefresh = hasInitData;
+    const openPanelTab = activeTab !== 'my_assets' ? activeTab : null;
 
     return (
         <div className="flex flex-col gap-3">
@@ -895,9 +906,9 @@ export default function AssetManagementPage({
                 <div className="px-3.5 pt-3 pb-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">我的资产</div>
+                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">我的</div>
                             <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                {hasInitData ? '钱包、仓位、收益日历统一看板' : '需要有效的 Telegram initData'}
+                                {hasInitData ? '我的资产 / 全局配置 / 钱包管理 / 交易记录' : '需要有效的 Telegram initData'}
                             </div>
                         </div>
                         <button
@@ -910,9 +921,38 @@ export default function AssetManagementPage({
                         </button>
                     </div>
                 </div>
+                <div className="flex border-t border-zinc-100 dark:border-white/[0.04]">
+                    {tabs.map((tab) => {
+                        const Icon = tab.icon;
+                        const active = activeTab === tab.key;
+                        return (
+                            <button
+                                key={tab.key}
+                                type="button"
+                                onClick={() => setActiveTab(tab.key)}
+                                className={`relative flex flex-1 flex-col items-center justify-center gap-1 px-1.5 py-2.5 text-[10px] font-bold transition sm:flex-row sm:text-[11px] ${
+                                    active
+                                        ? `${brand.textClass}`
+                                        : 'text-zinc-400 hover:text-zinc-600 dark:text-white/35 dark:hover:text-white/60'
+                                }`}
+                            >
+                                <Icon className="h-3.5 w-3.5" />
+                                <span className="truncate">{tab.label}</span>
+                                {active ? (
+                                    <span className={`absolute bottom-0 left-1/2 h-[2px] w-6 -translate-x-1/2 rounded-full ${brand.dotClass}`} />
+                                ) : null}
+                            </button>
+                        );
+                    })}
+                </div>
             </Card>
 
             <>
+                    {openPanelTab ? (
+                        <div className="rounded-2xl border border-zinc-200/70 bg-white/80 px-3 py-2.5 text-[11px] text-zinc-500 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.035] dark:text-white/45">
+                            已打开 {tabs.find((tab) => tab.key === openPanelTab)?.label}，关闭面板后返回我的资产。
+                        </div>
+                    ) : null}
                     {assetsError && (
                         <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2.5 text-[11px] font-medium text-red-600 ring-1 ring-red-500/15 dark:text-red-300">{assetsError}</div>
                     )}
@@ -1036,6 +1076,27 @@ export default function AssetManagementPage({
                         ) : <div className="mt-2.5"><Empty text={assetsLoading ? '加载中...' : '暂无钱包数据'} /></div>}
                     </Card>
             </>
+            <GlobalConfigPage
+                open={openPanelTab === 'global_config'}
+                onClose={() => setActiveTab('my_assets')}
+                apiBaseUrl={apiBaseUrl}
+                initData={initData}
+                accentTheme={accentTheme}
+                onConfigChanged={onNotice ? () => onNotice('全局配置已保存', 'success') : undefined}
+            />
+            <WalletManagePage
+                open={openPanelTab === 'wallet_manage'}
+                onClose={() => setActiveTab('my_assets')}
+                apiBaseUrl={apiBaseUrl}
+                initData={initData}
+                accentTheme={accentTheme}
+            />
+            <TradeHistoryPage
+                open={openPanelTab === 'trade_history'}
+                onClose={() => setActiveTab('my_assets')}
+                apiBaseUrl={apiBaseUrl}
+                initData={initData}
+            />
         </div>
     );
 }

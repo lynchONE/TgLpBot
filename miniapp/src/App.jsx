@@ -895,7 +895,7 @@ function buildTopNavItems({ isAdmin }) {
     const items = [
         { key: 'hot_pools', label: '热门池' },
         { key: 'positions', label: '仓位' },
-        { key: 'assets', label: '资产' },
+        { key: 'assets', label: '我的' },
         { key: 'smart_money', label: '聪明钱' },
     ];
     if (isAdmin) {
@@ -3694,9 +3694,9 @@ export default function App() {
             subtitle: walletAddress ? `钱包 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '钱包未连接',
         },
         assets: {
-            title: '资产',
+            title: '我的',
             icon: icons.wallet,
-            subtitle: '资产总览 / 全局配置 / 钱包 / 交易历史',
+            subtitle: '我的资产 / 全局配置 / 钱包管理 / 交易记录',
         },
         smart_money: {
             title: '聪明钱',
