@@ -1298,17 +1298,12 @@ func (s *RealtimePositionsService) buildV3Position(
 		TaskPaused:           taskPaused,
 		TaskRebalanceEnabled: taskRebalanceEnabled,
 		TaskMode:             taskMode,
-		TaskAmountUSDT: func() float64 {
-			if task == nil || task.AmountUSDT <= 0 {
-				return 0
-			}
-			return task.AmountUSDT
-		}(),
-		StatusLabel: statusLabel,
-		InRange:     inRange,
-		CurrentTick: currentTick,
-		TickLower:   tickLower,
-		TickUpper:   tickUpper,
+		TaskAmountUSDT:       displayTaskAmountUSDT(task),
+		StatusLabel:          statusLabel,
+		InRange:              inRange,
+		CurrentTick:          currentTick,
+		TickLower:            tickLower,
+		TickUpper:            tickUpper,
 		TickSpacing: func() int {
 			if task != nil && task.TickSpacing > 0 {
 				return task.TickSpacing
@@ -1356,6 +1351,19 @@ func getTaskActualInvested(task *models.StrategyTask) (float64, bool) {
 		return 0, false
 	}
 	return val, true
+}
+
+func displayTaskAmountUSDT(task *models.StrategyTask) float64 {
+	if task == nil {
+		return 0
+	}
+	if task.DCAEnabled && task.DCATotalAmountUSDT > task.AmountUSDT {
+		return task.DCATotalAmountUSDT
+	}
+	if task.AmountUSDT > 0 {
+		return task.AmountUSDT
+	}
+	return 0
 }
 
 type taskPnLViewMetrics struct {
@@ -1644,7 +1652,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		TaskPaused:           task.Paused,
 		TaskRebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:             models.EffectiveStrategyTaskMode(task),
-		TaskAmountUSDT:       task.AmountUSDT,
+		TaskAmountUSDT:       displayTaskAmountUSDT(task),
 		StatusLabel:          statusLabelFromTask(task),
 		InRange:              inRange,
 		CurrentTick:          currentTick,
@@ -1888,7 +1896,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		TaskPaused:           task.Paused,
 		TaskRebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:             models.EffectiveStrategyTaskMode(task),
-		TaskAmountUSDT:       task.AmountUSDT,
+		TaskAmountUSDT:       displayTaskAmountUSDT(task),
 		StatusLabel:          statusLabelFromTask(task),
 		InRange:              inRange,
 		CurrentTick:          currentTick,

@@ -1,6 +1,9 @@
 package realtime
 
-import "testing"
+import (
+	"TgLpBot/base/models"
+	"testing"
+)
 
 func TestFinalizeTaskPnLViewMetricsRestoresInitialCostWhenCurrentValueExists(t *testing.T) {
 	t.Parallel()
@@ -39,5 +42,32 @@ func TestFinalizeTaskPnLViewMetricsKeepsZeroWhenNoCurrentValue(t *testing.T) {
 	}
 	if metrics.hasPnL {
 		t.Fatal("hasPnL = true, want false")
+	}
+}
+
+func TestDisplayTaskAmountUSDT(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		task *models.StrategyTask
+		want float64
+	}{
+		{name: "nil", task: nil, want: 0},
+		{name: "regular amount", task: &models.StrategyTask{AmountUSDT: 500}, want: 500},
+		{name: "dca total still pending", task: &models.StrategyTask{DCAEnabled: true, DCATotalAmountUSDT: 500, AmountUSDT: 400}, want: 500},
+		{name: "dca current catches up", task: &models.StrategyTask{DCAEnabled: true, DCATotalAmountUSDT: 500, AmountUSDT: 500}, want: 500},
+		{name: "dca current exceeds stale total", task: &models.StrategyTask{DCAEnabled: true, DCATotalAmountUSDT: 500, AmountUSDT: 600}, want: 600},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := displayTaskAmountUSDT(tt.task); got != tt.want {
+				t.Fatalf("displayTaskAmountUSDT() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

@@ -130,7 +130,7 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 		}
 
 		updates := map[string]interface{}{
-			"amount_usdt": task.AmountUSDT + actualSpent,
+			"amount_usdt": task.AmountUSDT + amountUSDT,
 		}
 		if increaseRes != nil && increaseRes.CurrentLiquidity != "" {
 			updates["current_liquidity"] = increaseRes.CurrentLiquidity

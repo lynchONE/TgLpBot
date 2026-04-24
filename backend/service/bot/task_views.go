@@ -258,20 +258,23 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 				}
 				if len(dustParts) > 0 {
 					dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f %s)", strings.Join(dustParts, " + "), pnl.DustValueUSDT, stableSym)
+				} else if pnl.DustValueUSDT > 0 {
+					dustLine = fmt.Sprintf("\n🧹 开仓残余：≈%.2f %s", pnl.DustValueUSDT, stableSym)
 				}
 
-				// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）更准确反映仓位内金额
-				actualInvested := pnl.NetInvestedUSDT
-				if actualInvested < 0 {
-					actualInvested = 0
+				// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）计算收益；
+				// 展示时单独列出总投入/实际花费/净投入，避免把扣除残余后的净投入误认为用户计划投入。
+				netInvested := pnl.NetInvestedUSDT
+				if netInvested < 0 {
+					netInvested = 0
 				}
-				if actualInvested <= 0 && pnl.DustValueUSDT <= 0 {
-					actualInvested = pnl.InitialCostUSDT
-					if actualInvested <= 0 {
-						actualInvested = task.AmountUSDT
+				if netInvested <= 0 && pnl.DustValueUSDT <= 0 {
+					netInvested = pnl.InitialCostUSDT
+					if netInvested <= 0 {
+						netInvested = task.AmountUSDT
 					}
 				}
-				displayAbsolutePnL := pnl.CurrentValueUSDT - actualInvested
+				displayAbsolutePnL := pnl.CurrentValueUSDT - netInvested
 				sign = "+"
 				if displayAbsolutePnL < 0 {
 					sign = ""
@@ -285,14 +288,28 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 				if abs := math.Abs(pnl.UnclaimedFeesUSDT); abs > 0 && abs < 0.01 {
 					feesText = fmt.Sprintf("%.4f", pnl.UnclaimedFeesUSDT)
 				}
+				grossInvested := task.AmountUSDT
+				if task.DCAEnabled && task.DCATotalAmountUSDT > task.AmountUSDT {
+					grossInvested = task.DCATotalAmountUSDT
+				}
+				if grossInvested <= 0 {
+					grossInvested = pnl.InitialCostUSDT
+				}
+				actualSpent := pnl.InitialCostUSDT
+				if actualSpent <= 0 {
+					actualSpent = grossInvested
+				}
+				investLine := fmt.Sprintf("💵 总投入：%.2f %s\n💰 净投入：%.2f %s", grossInvested, stableSym, netInvested, stableSym)
+				if math.Abs(actualSpent-grossInvested) > 0.01 {
+					investLine = fmt.Sprintf("💵 总投入：%.2f %s\n💸 实际花费：%.2f %s\n💰 净投入：%.2f %s", grossInvested, stableSym, actualSpent, stableSym, netInvested, stableSym)
+				}
 
 				amountLine = fmt.Sprintf(
-					"📊 资产状况：\n📈 绝对盈亏：%s%.2f %s %s\n💵 当前价值：%.2f %s\n🎁 未领手续费：%s %s\n💰 实际投入：%.2f %s (预期 %.2f %s)%s",
+					"📊 资产状况：\n📈 绝对盈亏：%s%.2f %s %s\n💵 当前价值：%.2f %s\n🎁 未领手续费：%s %s\n%s%s",
 					sign, displayAbsolutePnL, stableSym, emojiStr,
 					pnl.HoldingsUSDT, stableSym,
 					feesText, stableSym,
-					actualInvested, stableSym,
-					task.AmountUSDT, stableSym,
+					investLine,
 					dustLine,
 				)
 			}
