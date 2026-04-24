@@ -20,6 +20,34 @@ const (
 	ExitActionSwitch         = "switch"
 )
 
+func localizeExitReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "撤出流动性"
+	}
+
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{old: "upper breakout out of range: exit liquidity and stop", new: "向上突破出区间：撤出流动性并停止任务"},
+		{old: "lower breakout out of range: exit liquidity and stop", new: "向下跌破出区间：撤出流动性并停止任务"},
+		{old: "upper breakout out of range: rebalance", new: "向上突破出区间：执行再平衡"},
+		{old: "lower breakout out of range: rebalance", new: "向下跌破出区间：执行再平衡"},
+		{old: "upper breakout", new: "向上突破"},
+		{old: "lower breakout", new: "向下跌破"},
+		{old: "out of range", new: "出区间"},
+		{old: "exit liquidity and stop", new: "撤出流动性并停止任务"},
+		{old: "rebalance", new: "再平衡"},
+		{old: "manual stop", new: "手动停止"},
+		{old: "stop loss", new: "止损"},
+	}
+	for _, repl := range replacements {
+		reason = strings.ReplaceAll(reason, repl.old, repl.new)
+	}
+	return reason
+}
+
 var exitRetrySchedule = []time.Duration{
 	500 * time.Millisecond,
 	1 * time.Second,
@@ -286,6 +314,7 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 	if reason == "" {
 		reason = "撤出流动性"
 	}
+	reason = localizeExitReason(reason)
 
 	if attempt == 1 {
 		if task.ExitLiquidityRemoved {
@@ -322,7 +351,7 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 	case ExitActionManualStop:
 		title := "🛑 手动停止"
 		if pendingReason != "" {
-			title = pendingReason
+			title = localizeExitReason(pendingReason)
 		}
 		s.finishStopAfterExit(&task, now, title, txHashes)
 	default:
@@ -919,7 +948,7 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 	task.RebalanceLastError = ""
 	task.ErrorMessage = ""
 
-	msg := fmt.Sprintf("✅ %s 完成，任务已停止。", title)
+	msg := fmt.Sprintf("✅ %s 完成，任务已停止。", localizeExitReason(title))
 	if len(txHashes) > 0 {
 		msg += "\n📝 *交易记录：*\n"
 		hasSwapTx := false

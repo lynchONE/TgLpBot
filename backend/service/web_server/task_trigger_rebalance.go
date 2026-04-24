@@ -23,7 +23,7 @@ type taskTriggerRebalanceResponse struct {
 
 func (s *Server) handleTaskTriggerRebalance(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -32,13 +32,13 @@ func (s *Server) handleTaskTriggerRebalance(w http.ResponseWriter, r *http.Reque
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求 JSON 格式无效", http.StatusBadRequest)
 		return
 	}
 
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
-		http.Error(w, "missing taskId", http.StatusBadRequest)
+		http.Error(w, "缺少 taskId", http.StatusBadRequest)
 		return
 	}
 
@@ -64,19 +64,19 @@ func (s *Server) handleTaskTriggerRebalance(w http.ResponseWriter, r *http.Reque
 	taskService := strategy.NewStrategyTaskService()
 	task, err := taskService.GetByID(user.ID, req.TaskID)
 	if err != nil {
-		http.Error(w, "task not found", http.StatusNotFound)
+		http.Error(w, "任务不存在", http.StatusNotFound)
 		return
 	}
 
 	if task.Status == models.StrategyStatusStopped || task.Status == models.StrategyStatusStopping {
-		http.Error(w, "task is stopped or stopping", http.StatusBadRequest)
+		http.Error(w, "任务已停止或正在停止中", http.StatusBadRequest)
 		return
 	}
 
 	// Trigger rebalance by setting exit_pending_action to "rebalance"
 	currentLiq := strings.TrimSpace(task.CurrentLiquidity)
 	if currentLiq == "" || currentLiq == "0" {
-		http.Error(w, "no liquidity to rebalance", http.StatusBadRequest)
+		http.Error(w, "没有可再平衡的流动性", http.StatusBadRequest)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (s *Server) handleTaskTriggerRebalance(w http.ResponseWriter, r *http.Reque
 		"error_message":       "",
 	}
 	if err := taskService.Update(user.ID, req.TaskID, updates); err != nil {
-		http.Error(w, "failed to trigger rebalance: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "触发再平衡失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

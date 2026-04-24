@@ -27,7 +27,7 @@ type taskWithdrawLiquidityResponse struct {
 
 func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -36,13 +36,13 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求 JSON 格式无效", http.StatusBadRequest)
 		return
 	}
 
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
-		http.Error(w, "missing taskId", http.StatusBadRequest)
+		http.Error(w, "缺少 taskId", http.StatusBadRequest)
 		return
 	}
 
@@ -68,18 +68,18 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 	taskService := strategy.NewStrategyTaskService()
 	task, err := taskService.GetByID(user.ID, req.TaskID)
 	if err != nil {
-		http.Error(w, "task not found", http.StatusNotFound)
+		http.Error(w, "任务不存在", http.StatusNotFound)
 		return
 	}
 
 	if task.Status == models.StrategyStatusStopped {
-		http.Error(w, "task already stopped", http.StatusBadRequest)
+		http.Error(w, "任务已停止", http.StatusBadRequest)
 		return
 	}
 
 	currentLiq := strings.TrimSpace(task.CurrentLiquidity)
 	if currentLiq == "" || currentLiq == "0" {
-		http.Error(w, "no liquidity to withdraw", http.StatusBadRequest)
+		http.Error(w, "没有可撤出的流动性", http.StatusBadRequest)
 		return
 	}
 
@@ -111,11 +111,11 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 	})
 
 	if err != nil {
-		http.Error(w, "failed to schedule withdrawal: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "提交撤出流动性失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		http.Error(w, "wallet is busy, please try again later", http.StatusConflict)
+		http.Error(w, "钱包正在处理其他交易，请稍后再试", http.StatusConflict)
 		return
 	}
 

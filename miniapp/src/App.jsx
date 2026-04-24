@@ -3349,18 +3349,18 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
 
         const wantPaused = Boolean(paused);
-        const ok = await requestConfirm({
-            title: wantPaused ? 'Pause task' : 'Resume task',
-            message: wantPaused
-                ? 'Pause this task?\nIt will stop creating new orders.'
-                : 'Resume this task?\nIt will continue creating new orders.',
-            confirmText: wantPaused ? 'Pause' : 'Resume',
-        });
+		const ok = await requestConfirm({
+			title: wantPaused ? '暂停任务' : '恢复任务',
+			message: wantPaused
+				? '确认暂停该任务？\n暂停后不会创建新的订单。'
+				: '确认恢复该任务？\n恢复后会继续按策略创建订单。',
+			confirmText: wantPaused ? '暂停' : '恢复',
+		});
         if (!ok) return;
 
         try {
             await setTaskPaused({ apiBaseUrl, initData, taskId: id, paused: wantPaused });
-            showNotice(wantPaused ? 'Task paused.' : 'Task resumed.', 'success');
+			showNotice(wantPaused ? '任务已暂停。' : '任务已恢复。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3371,12 +3371,12 @@ export default function App() {
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
 
-        const ok = await requestConfirm({
-            title: 'Stop position',
-            message: 'Stop this position?\nIt will close the related task and settle outstanding value in USDT.',
-            confirmText: 'Stop',
-            tone: 'danger',
-        });
+		const ok = await requestConfirm({
+			title: '停止仓位',
+			message: '确认停止该仓位？\n系统会关闭相关任务，并尽量将剩余价值结算为 USDT。',
+			confirmText: '停止',
+			tone: 'danger',
+		});
         if (!ok) return;
 
         setOperationProgress({ operation: 'close_position', taskId: id, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
@@ -3399,7 +3399,7 @@ export default function App() {
             const msg = String(e?.message || e || '').trim();
             if (msg.includes('task not found')) {
                 setOperationProgress(null);
-                showNotice(`Task #${id} was not found. It may have already been closed or deleted.`, 'warning');
+				showNotice(`任务 #${id} 未找到，可能已关闭或删除。`, 'warning');
                 try {
                     const resp = await fetchRealtimePositions({ apiBaseUrl, initData });
                     setData(resp);
@@ -3408,8 +3408,8 @@ export default function App() {
                 }
                 return;
             }
-            setOperationProgress(prev => prev?.operation === 'close_position'
-                ? { ...prev, status: 'error', error: msg || 'Stop position failed.' } : prev);
+			setOperationProgress(prev => prev?.operation === 'close_position'
+				? { ...prev, status: 'error', error: msg || '停止仓位失败。' } : prev);
         }
     };
 
@@ -3437,17 +3437,17 @@ export default function App() {
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
 
-        const ok = await requestConfirm({
-            title: 'Delete task',
-            message: 'Delete this task?\nThis action cannot be undone and will remove its configuration.',
-            confirmText: 'Delete',
-            tone: 'danger',
-        });
+		const ok = await requestConfirm({
+			title: '删除任务',
+			message: '确认删除该任务？\n此操作不可撤销，并会移除该任务配置。',
+			confirmText: '删除',
+			tone: 'danger',
+		});
         if (!ok) return;
 
         try {
             const resp = await deleteTask({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || 'Task deleted.', 'success');
+			showNotice(resp?.message || '任务已删除。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3588,7 +3588,7 @@ export default function App() {
         const range = parseRangeInput(taskRangeLower, taskRangeUpper);
         const amount = Number(String(taskRangeAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) {
-            setTaskRangeError('Amount must be greater than 0 USDT.');
+			setTaskRangeError('金额必须大于 0 USDT。');
             return;
         }
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
@@ -3596,11 +3596,11 @@ export default function App() {
             return;
         }
 
-        const ok = await requestConfirm({
-            title: 'Update task range',
-            message: 'Update the task range?\nThe bot will use the new range and amount after confirmation.',
-            confirmText: 'Update',
-        });
+		const ok = await requestConfirm({
+			title: '更新任务区间',
+			message: '确认更新任务区间？\n确认后机器人会使用新的区间和金额。',
+			confirmText: '更新',
+		});
         if (!ok) return;
 
         setTaskRangeLoading(true);
@@ -3621,7 +3621,7 @@ export default function App() {
             setTaskRangeUpperAuto(true);
             setTaskRangeAmount('');
         } catch (e) {
-            setTaskRangeError(String(e?.message || e || 'Update failed.'));
+			setTaskRangeError(String(e?.message || e || '更新失败。'));
         } finally {
             setTaskRangeLoading(false);
         }

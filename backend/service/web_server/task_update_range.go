@@ -31,7 +31,7 @@ type taskUpdateRangeResponse struct {
 
 func (s *Server) handleTaskUpdateRange(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -40,13 +40,13 @@ func (s *Server) handleTaskUpdateRange(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求 JSON 格式无效", http.StatusBadRequest)
 		return
 	}
 
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
-		http.Error(w, "missing taskId", http.StatusBadRequest)
+		http.Error(w, "缺少 taskId", http.StatusBadRequest)
 		return
 	}
 	if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
@@ -84,11 +84,11 @@ func (s *Server) handleTaskUpdateRange(w http.ResponseWriter, r *http.Request) {
 	taskService := strategy.NewStrategyTaskService()
 	task, err := taskService.GetByID(user.ID, req.TaskID)
 	if err != nil || task == nil {
-		http.Error(w, "task not found", http.StatusNotFound)
+		http.Error(w, "任务不存在", http.StatusNotFound)
 		return
 	}
 	if task.Status == models.StrategyStatusStopped {
-		http.Error(w, "task already stopped", http.StatusConflict)
+		http.Error(w, "任务已停止", http.StatusConflict)
 		return
 	}
 

@@ -191,9 +191,9 @@ func (s *StrategyService) pauseUserTasks(userID uint, reason string) {
 
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		reason = "access expired"
+		reason = "访问权限已过期"
 	}
-	s.notify(userID, fmt.Sprintf("Task monitoring paused.\n\nReason: %s", reason))
+	s.notify(userID, fmt.Sprintf("任务监控已暂停。\n\n原因：%s", reason))
 }
 
 // processTask handles the logic for a single task
@@ -258,14 +258,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		if ShouldDelayOutOfRangeHandling(task) {
 			updates["range_activation_pending"] = false
 			if s.extraNotificationsEnabled(task.UserID) {
-				s.notify(task.UserID, fmt.Sprintf("Task #%d entered range and auto handling is active.", task.ID))
+				s.notify(task.UserID, fmt.Sprintf("任务 #%d 已进入区间，自动处理已启用。", task.ID))
 			}
 			log.Printf("[Strategy] task #%d first entered range, auto handling enabled", task.ID)
 		}
 
 		if task.OutOfRangeSince != nil {
 			updates["out_of_range_since"] = nil
-			s.notify(task.UserID, fmt.Sprintf("Task #%d returned to range.\n%s\n%s\n%s", task.ID, alertLines.Current, alertLines.Lower, alertLines.Upper))
+			s.notify(task.UserID, fmt.Sprintf("任务 #%d 已回到区间。\n%s\n%s\n%s", task.ID, alertLines.Current, alertLines.Lower, alertLines.Upper))
 			log.Printf("[Strategy] task #%d returned to range", task.ID)
 		}
 
@@ -324,29 +324,29 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	}
 
 	alertBoundary := alertLines.Upper
-	actionPrefix := "upper breakout"
+	directionText := "向上突破"
 	if isDown {
 		alertBoundary = alertLines.Lower
-		actionPrefix = "lower breakout"
+		directionText = "向下跌破"
 	}
 
-	actionText := "rebalance"
+	actionText := "再平衡"
 	if action == OutOfRangeActionExit {
-		actionText = "exit liquidity and stop"
+		actionText = "撤出流动性并停止任务"
 	}
 
 	if isFirstTimeOutOfRange {
 		if s.extraNotificationsEnabled(task.UserID) {
-			s.notify(task.UserID, fmt.Sprintf("閳跨媴绗?娴犺濮?#%d %s\n%s\n%s\n婵″倹鐏?%s 閸愬懍绗夐崶鐐插煂閸栨椽妫块敍灞界殺%s",
+			s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d %s\n%s\n%s\n将在 %s 后执行：%s",
 				task.ID,
-				actionPrefix,
+				directionText,
 				alertLines.Current,
 				alertBoundary,
 				FormatDelayTime(task.ReopenDelaySeconds),
 				actionText,
 			))
 		}
-		log.Printf("[Strategy] task #%d %s, countdown=%ds action=%s", task.ID, actionPrefix, task.ReopenDelaySeconds, actionText)
+		log.Printf("[Strategy] task #%d %s, countdown=%ds action=%s", task.ID, directionText, task.ReopenDelaySeconds, actionText)
 	}
 
 	threshold := time.Duration(task.ReopenDelaySeconds) * time.Second
@@ -355,11 +355,11 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	}
 
 	if action == OutOfRangeActionExit {
-		s.executeOutOfRangeStop(task, now, fmt.Sprintf("%s out of range: exit liquidity and stop", actionPrefix))
+		s.executeOutOfRangeStop(task, now, fmt.Sprintf("%s出区间：撤出流动性并停止任务", directionText))
 		return
 	}
 
-	s.executeRebalance(task, currentTick, now, fmt.Sprintf("%s out of range: rebalance", actionPrefix))
+	s.executeRebalance(task, currentTick, now, fmt.Sprintf("%s出区间：执行再平衡", directionText))
 	return
 
 }

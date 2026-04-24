@@ -24,7 +24,7 @@ type taskStopResponse struct {
 
 func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -33,13 +33,13 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求 JSON 格式无效", http.StatusBadRequest)
 		return
 	}
 
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
-		http.Error(w, "missing taskId", http.StatusBadRequest)
+		http.Error(w, "缺少 taskId", http.StatusBadRequest)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	taskService := strategy.NewStrategyTaskService()
 	task, err := taskService.GetByID(user.ID, req.TaskID)
 	if err != nil {
-		http.Error(w, "task not found", http.StatusNotFound)
+		http.Error(w, "任务不存在", http.StatusNotFound)
 		return
 	}
 
@@ -152,7 +152,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 				"rebalance_last_error":    "",
 				"error_message":           "",
 			}); err != nil {
-				http.Error(w, "failed to stop task", http.StatusInternalServerError)
+				http.Error(w, "停止任务失败", http.StatusInternalServerError)
 				return
 			}
 			if s != nil && s.Realtime != nil {
@@ -174,7 +174,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 				"status":        models.StrategyStatusStopped,
 				"error_message": "",
 			}); err != nil {
-				http.Error(w, "failed to stop task", http.StatusInternalServerError)
+				http.Error(w, "停止任务失败", http.StatusInternalServerError)
 				return
 			}
 			if s != nil && s.Realtime != nil {
@@ -191,7 +191,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		http.Error(w, "cannot stop: missing position info", http.StatusBadRequest)
+		http.Error(w, "无法停止：缺少仓位信息", http.StatusBadRequest)
 		return
 	}
 

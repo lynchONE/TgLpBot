@@ -21,7 +21,7 @@ type taskDeleteResponse struct {
 
 func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -30,13 +30,13 @@ func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求 JSON 格式无效", http.StatusBadRequest)
 		return
 	}
 
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
-		http.Error(w, "missing taskId", http.StatusBadRequest)
+		http.Error(w, "缺少 taskId", http.StatusBadRequest)
 		return
 	}
 

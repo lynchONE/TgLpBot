@@ -25,7 +25,7 @@ type taskSwapDustResponse struct {
 
 func (s *Server) handleTaskSwapDust(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -34,13 +34,13 @@ func (s *Server) handleTaskSwapDust(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求 JSON 格式无效", http.StatusBadRequest)
 		return
 	}
 
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
-		http.Error(w, "missing taskId", http.StatusBadRequest)
+		http.Error(w, "缺少 taskId", http.StatusBadRequest)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (s *Server) handleTaskSwapDust(w http.ResponseWriter, r *http.Request) {
 	taskService := strategy.NewStrategyTaskService()
 	task, err := taskService.GetByID(user.ID, req.TaskID)
 	if err != nil {
-		http.Error(w, "task not found", http.StatusNotFound)
+		http.Error(w, "任务不存在", http.StatusNotFound)
 		return
 	}
 
@@ -87,11 +87,11 @@ func (s *Server) handleTaskSwapDust(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		http.Error(w, "failed to schedule swap: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "提交兑换残余失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if !ok {
-		http.Error(w, "wallet is busy, please try again later", http.StatusConflict)
+		http.Error(w, "钱包正在处理其他交易，请稍后再试", http.StatusConflict)
 		return
 	}
 
