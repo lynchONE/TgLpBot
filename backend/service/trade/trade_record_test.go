@@ -1,6 +1,7 @@
 package trade
 
 import (
+	"TgLpBot/base/config"
 	"math/big"
 	"testing"
 )
@@ -60,5 +61,29 @@ func TestTradeProfitUSDT(t *testing.T) {
 				t.Fatalf("tradeProfitUSDT(%s, %s, %s) = %v, want %s", tt.closeRecv, tt.openSpent, tt.totalGasUSDT, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStableAmountTo18(t *testing.T) {
+	previous := config.AppConfig
+	config.AppConfig = &config.Config{
+		Chains: map[string]config.ChainConfig{
+			"base": {Chain: "base", StableDecimals: 6},
+		},
+	}
+	t.Cleanup(func() {
+		config.AppConfig = previous
+	})
+
+	got := stableAmountTo18("base", big.NewInt(123456789))
+	want := "123456789000000000000"
+	if got == nil || got.String() != want {
+		t.Fatalf("stableAmountTo18(base, 123456789) = %v, want %s", got, want)
+	}
+
+	got = stableAmountTo18("bsc", big.NewInt(1234567890000000000))
+	want = "1234567890000000000"
+	if got == nil || got.String() != want {
+		t.Fatalf("stableAmountTo18(bsc, 1234567890000000000) = %v, want %s", got, want)
 	}
 }

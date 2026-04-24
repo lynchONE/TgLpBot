@@ -166,7 +166,7 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 	}
 	openStableBefore, _ := parseBigInt(rec.OpenStableBefore)
 
-	nextSpent := new(big.Int).Add(openSpent, nonNilBigInt(stableSpentWei))
+	nextSpent := new(big.Int).Add(openSpent, stableAmountTo18(task.Chain, stableSpentWei))
 	nextGas := new(big.Int).Add(openGas, nonNilBigInt(gasSpentWei))
 	nextDust0 := new(big.Int).Set(openDust0)
 	nextDust1 := new(big.Int).Set(openDust1)
@@ -489,6 +489,23 @@ func nonNilBigInt(v *big.Int) *big.Int {
 		return big.NewInt(0)
 	}
 	return v
+}
+
+func stableAmountTo18(chain string, amount *big.Int) *big.Int {
+	if amount == nil || amount.Sign() <= 0 {
+		return big.NewInt(0)
+	}
+	decimals := 18
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok && cc.StableDecimals > 0 {
+			decimals = cc.StableDecimals
+		}
+	}
+	scaled, err := convert.ScaleDecimals(amount, decimals, 18)
+	if err != nil || scaled == nil {
+		return new(big.Int).Set(amount)
+	}
+	return scaled
 }
 
 func parseBigInt(s string) (*big.Int, error) {
