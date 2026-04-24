@@ -1770,7 +1770,7 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	to := common.HexToAddress(txObj.To)
 	data := common.FromHex(txObj.Data)
 	if len(data) == 0 {
-		return "", fmt.Errorf("OKX tx.data empty")
+		return "", fmt.Errorf("OKX tx.data empty; OKX did not return executable calldata, the selected route may not support referrer fee")
 	}
 
 	value := new(big.Int)

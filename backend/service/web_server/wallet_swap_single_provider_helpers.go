@@ -243,9 +243,17 @@ func buildOKXProviderQuote(
 		return newUnavailableSwapProviderQuote("okx", chain, fmt.Errorf("empty OKX quote response"))
 	}
 
+	txObj := resp.Data[0].Tx
+	if !common.IsHexAddress(strings.TrimSpace(txObj.To)) {
+		return newUnavailableSwapProviderQuote("okx", chain, fmt.Errorf("OKX tx.to invalid: %s", txObj.To))
+	}
+	if len(common.FromHex(strings.TrimSpace(txObj.Data))) == 0 {
+		return newUnavailableSwapProviderQuote("okx", chain, fmt.Errorf("OKX did not return executable tx.data; this route may not support OKX referrer fee"))
+	}
+
 	toAmount := strings.TrimSpace(resp.Data[0].RouterResult.ToTokenAmount)
-	estimatedGas := strings.TrimSpace(resp.Data[0].Tx.Gas)
-	estimatedGasPrice := strings.TrimSpace(resp.Data[0].Tx.GasPrice)
+	estimatedGas := strings.TrimSpace(txObj.Gas)
+	estimatedGasPrice := strings.TrimSpace(txObj.GasPrice)
 	minAmount := minAmountWithSlippage(toAmount, slippagePercent)
 	route := extractOKXRouteHops(resp.Data[0].RouterResult.DexRouterList)
 	gasNative, gasUSD := estimateGasCosts(chain, estimatedGas, estimatedGasPrice, client)

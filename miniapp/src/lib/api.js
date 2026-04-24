@@ -1167,13 +1167,14 @@ export async function walletSwapSingleQuote({ apiBaseUrl, initData, chain, walle
     return resp.json();
 }
 
-export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, signal }) {
+export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, provider, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = base + '/api/settings?endpoint=wallet_swap_single';
     const payload = { initData, action: 'swap', from_token: fromToken, to_token: toToken, amount };
     if (chain) payload.chain = String(chain);
     if (walletId) payload.wallet_id = Number(walletId);
     if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+    if (provider) payload.provider = String(provider);
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

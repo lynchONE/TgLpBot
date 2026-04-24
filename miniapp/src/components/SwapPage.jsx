@@ -112,7 +112,7 @@ export default function SwapPage({ open, onClose, apiBaseUrl, initData, accentTh
         setExecSuccess('');
         try {
             const resp = await walletSwapSingleExecute({
-                apiBaseUrl, initData, chain, walletId: selectedWalletId, fromToken, toToken, amount, slippagePercent: parseFloat(slippage)
+                apiBaseUrl, initData, chain, walletId: selectedWalletId, fromToken, toToken, amount, slippagePercent: parseFloat(slippage), provider: quoteInfo?.best_provider || quoteInfo?.provider
             });
             setExecSuccess(resp?.tx_hash || '交易已提交');
             setShowConfirm(false);

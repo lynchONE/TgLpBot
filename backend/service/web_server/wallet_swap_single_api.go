@@ -423,11 +423,33 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 
 	case "swap":
 		provider := strings.ToLower(strings.TrimSpace(req.Provider))
-		if provider == "" {
-			provider = "okx"
-		}
 		if provider == "lifi" {
 			provider = "li.fi"
+		}
+		if provider == "" {
+			quotes := aggregateSwapProviderQuotes(
+				chain,
+				cc,
+				client,
+				walletAddr,
+				fromTokenStr,
+				toTokenStr,
+				fromToken,
+				toToken,
+				amount,
+				slippageDecimal,
+				slippage,
+				int(toDecimals),
+			)
+			_, best := normalizeProviderQuotes(quotes)
+			if best == nil || best.Status != "available" || strings.TrimSpace(best.Provider) == "" {
+				http.Error(w, "swap failed: no executable swap provider available", http.StatusBadRequest)
+				return
+			}
+			provider = strings.ToLower(strings.TrimSpace(best.Provider))
+			if provider == "lifi" {
+				provider = "li.fi"
+			}
 		}
 
 		pkHex, err := walletService.GetPrivateKey(wlt)

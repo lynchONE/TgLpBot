@@ -249,7 +249,7 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 	to := common.HexToAddress(txObj.To)
 	data := common.FromHex(txObj.Data)
 	if len(data) == 0 {
-		return nil, fmt.Errorf("OKX tx.data empty")
+		return nil, fmt.Errorf("OKX tx.data empty; OKX did not return executable calldata, the selected route may not support referrer fee")
 	}
 
 	value := new(big.Int)
