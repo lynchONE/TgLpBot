@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal,
 } from 'lucide-react';
 
 const LazySmartMoneyAssetsPage = lazy(() => import('./SmartMoneyAssetsPage.jsx'));
@@ -919,6 +919,26 @@ function formatWalletBalance(value) {
     return formatUSDCompact(num);
 }
 
+function parseOptionalNumber(value) {
+    const text = String(value ?? '').replace(/,/g, '').trim();
+    if (!text) return null;
+    const match = text.match(/-?\d+(\.\d+)?/);
+    if (!match) return null;
+    const num = Number(match[0]);
+    if (!Number.isFinite(num)) return null;
+    return Math.max(0, num);
+}
+
+function formatOptionalNumber(value) {
+    return Number.isFinite(value) ? String(value) : '';
+}
+
+function getPoolFeePercent(pool) {
+    const feeTier = Number(pool?.fee_tier);
+    if (!Number.isFinite(feeTier) || feeTier <= 0) return NaN;
+    return feeTier / 10000;
+}
+
 function formatRangePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '—';
@@ -1632,6 +1652,9 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
     const [search, setSearch] = useState('');
     const [protocolFilter, setProtocolFilter] = useState('all');
     const [page, setPage] = useState(1);
+    const [filterOpen, setFilterOpen] = useState(false);
+    const [poolFilter, setPoolFilter] = useState({ minSmartMoneyUsd: null, maxFeeRate: null });
+    const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
@@ -1678,7 +1701,46 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
         setPage(1);
     }, [protocolFilter, searchKeyword]);
 
-    const hasFilter = Boolean(searchKeyword) || protocolFilter !== 'all';
+    const poolFilterActive = useMemo(
+        () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
+        [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd],
+    );
+    const openPoolFilter = useCallback(() => {
+        setPoolFilterDraft({
+            minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
+            maxFeeRate: formatOptionalNumber(poolFilter.maxFeeRate),
+        });
+        setFilterOpen((prev) => !prev);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]);
+    const applyPoolFilter = useCallback(() => {
+        setPoolFilter({
+            minSmartMoneyUsd: parseOptionalNumber(poolFilterDraft.minSmartMoneyUsd),
+            maxFeeRate: parseOptionalNumber(poolFilterDraft.maxFeeRate),
+        });
+        setFilterOpen(false);
+        setPage(1);
+    }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minSmartMoneyUsd]);
+    const clearPoolFilter = useCallback(() => {
+        setPoolFilter({ minSmartMoneyUsd: null, maxFeeRate: null });
+        setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '' });
+        setFilterOpen(false);
+        setPage(1);
+    }, []);
+    const filteredPools = useMemo(() => {
+        let list = pools;
+        if (Number.isFinite(poolFilter.minSmartMoneyUsd)) {
+            list = list.filter((pool) => Number(pool?.total_position_amount_usd || 0) >= poolFilter.minSmartMoneyUsd);
+        }
+        if (Number.isFinite(poolFilter.maxFeeRate)) {
+            list = list.filter((pool) => {
+                const feePercent = getPoolFeePercent(pool);
+                return Number.isFinite(feePercent) && feePercent <= poolFilter.maxFeeRate;
+            });
+        }
+        return list;
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, pools]);
+
+    const hasFilter = Boolean(searchKeyword) || protocolFilter !== 'all' || poolFilterActive;
 
     return (
         <div>
@@ -1708,17 +1770,74 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
                         </button>
                     );
                 })}
+                <button
+                    type="button"
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 ${getFilterButtonClass(poolFilterActive, brand)}`}
+                    onClick={openPoolFilter}
+                >
+                    <SlidersHorizontal size={13} />
+                    筛选
+                </button>
             </div>
+
+            {filterOpen ? (
+                <div className="mb-4 rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-3 shadow-[0_18px_50px_-32px_rgba(0,0,0,0.95)]">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                            <div className="text-sm font-semibold text-zinc-100">池子筛选</div>
+                            <div className="mt-0.5 text-[11px] text-zinc-500">按当前页聪明钱仓位和池子费率过滤</div>
+                        </div>
+                        <button
+                            type="button"
+                            className="rounded-full p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+                            onClick={() => setFilterOpen(false)}
+                            aria-label="关闭筛选"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[11px] text-zinc-500">
+                            <span className="mb-1 block">聪明钱仓位 ≥ (USD)</span>
+                            <input
+                                className={getInputClass(brand)}
+                                value={poolFilterDraft.minSmartMoneyUsd}
+                                onChange={(e) => setPoolFilterDraft((prev) => ({ ...prev, minSmartMoneyUsd: e.target.value }))}
+                                inputMode="decimal"
+                                placeholder="可选"
+                            />
+                        </label>
+                        <label className="text-[11px] text-zinc-500">
+                            <span className="mb-1 block">池子费率 ≤ (%)</span>
+                            <input
+                                className={getInputClass(brand)}
+                                value={poolFilterDraft.maxFeeRate}
+                                onChange={(e) => setPoolFilterDraft((prev) => ({ ...prev, maxFeeRate: e.target.value }))}
+                                inputMode="decimal"
+                                placeholder="可选"
+                            />
+                        </label>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(true, brand)}`} onClick={applyPoolFilter}>
+                            应用
+                        </button>
+                        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(false, brand)}`} onClick={clearPoolFilter}>
+                            清空
+                        </button>
+                    </div>
+                </div>
+            ) : null}
 
             {loading ? (
                 <div className="py-8 text-center text-zinc-500">加载中...</div>
-            ) : pools.length === 0 ? (
+            ) : filteredPools.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
                     {hasFilter ? '暂无符合条件的池子' : '暂无活跃仓位的池子'}
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {pools.map(pool => (
+                    {filteredPools.map(pool => (
                         <button
                             key={pool.pool_address}
                             type="button"

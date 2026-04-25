@@ -400,6 +400,7 @@ function parseKlineMarkerFilterUsd(raw) {
 const HOT_POOLS_FILTER_DEFAULTS = {
   minFees: 60,
   minFeeRate: 0.3,
+  maxFeeRate: null,
   minActiveFeeRate: null,
   minTvl: 1000,
   minVolume: 2000,
@@ -446,6 +447,9 @@ function normalizeHotPoolsFilter(value) {
   if (Object.prototype.hasOwnProperty.call(value, 'minFeeRate')) {
     base.minFeeRate = parseNullableNumber(value.minFeeRate);
   }
+  if (Object.prototype.hasOwnProperty.call(value, 'maxFeeRate')) {
+    base.maxFeeRate = parseNullableNumber(value.maxFeeRate);
+  }
   if (Object.prototype.hasOwnProperty.call(value, 'minActiveFeeRate')) {
     base.minActiveFeeRate = parseNullableNumber(value.minActiveFeeRate);
   }
@@ -481,6 +485,7 @@ function buildHotPoolsFilterDraft(filter) {
     keyword: String(filter?.keyword || ''),
     minFees: formatDraftNumber(filter?.minFees),
     minFeeRate: formatDraftNumber(filter?.minFeeRate),
+    maxFeeRate: formatDraftNumber(filter?.maxFeeRate),
     minActiveFeeRate: formatDraftNumber(filter?.minActiveFeeRate),
     minTvl: formatDraftNumber(filter?.minTvl),
     minVolume: formatDraftNumber(filter?.minVolume),
@@ -674,6 +679,7 @@ export default function App() {
     const hasNumbers = [
       hotPoolsFilter.minFees,
       hotPoolsFilter.minFeeRate,
+      hotPoolsFilter.maxFeeRate,
       hotPoolsFilter.minActiveFeeRate,
       hotPoolsFilter.minTvl,
       hotPoolsFilter.minVolume,
@@ -708,6 +714,7 @@ export default function App() {
       : '';
     const minFees = hotPoolsFilterEnabled ? hotPoolsFilter.minFees : null;
     const minFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.minFeeRate : null;
+    const maxFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.maxFeeRate : null;
     const minActiveFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.minActiveFeeRate : null;
     const minTvl = hotPoolsFilterEnabled ? hotPoolsFilter.minTvl : null;
     const minVolume = hotPoolsFilterEnabled ? hotPoolsFilter.minVolume : null;
@@ -726,7 +733,7 @@ export default function App() {
       .filter((row) => {
         const addr = normalizePoolAddress(row?.pool_address || row?.pool_id);
         const hasPosition = Boolean(addr && positionPoolMap.has(addr));
-        if (hasPosition) return true;
+        if (hasPosition && !hotPoolsFilterEnabled) return true;
 
         if (q) {
           const pair = String(row?.trading_pair || '').toLowerCase();
@@ -749,6 +756,8 @@ export default function App() {
 
         const fees = parseMetricNumber(row?.total_fees);
         const feeRate = parseMetricNumber(row?.fee_rate);
+        if (Number.isFinite(maxFeeRate) && (!Number.isFinite(feeRate) || feeRate > maxFeeRate)) return false;
+
         const activeFeeRate = computeHotPoolActiveFeeRate(row);
         const tvl = parseMetricNumber(row?.current_pool_value);
         const volume = parseMetricNumber(row?.total_volume);
@@ -1026,6 +1035,7 @@ export default function App() {
       keyword: String(hotPoolsFilterDraft.keyword || '').trim(),
       minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
       minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
+      maxFeeRate: parseDraftNumber(hotPoolsFilterDraft.maxFeeRate),
       minActiveFeeRate: parseDraftNumber(hotPoolsFilterDraft.minActiveFeeRate),
       minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
       minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
@@ -1052,6 +1062,7 @@ export default function App() {
       keyword: '',
       minFees: null,
       minFeeRate: null,
+      maxFeeRate: null,
       minActiveFeeRate: null,
       minTvl: null,
       minVolume: null,
@@ -2082,6 +2093,16 @@ export default function App() {
                     onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
                     inputMode="decimal"
                     placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minFeeRate)}
+                  />
+                </label>
+
+                <label className="kline-filter-field">
+                  <span>排除费率 &gt; (%)</span>
+                  <input
+                    value={hotPoolsFilterDraft.maxFeeRate}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, maxFeeRate: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder="可选"
                   />
                 </label>
 

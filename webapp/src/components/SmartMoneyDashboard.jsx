@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
@@ -125,6 +125,26 @@ function formatWalletBalance(value) {
     if (!Number.isFinite(num)) return '--';
     if (num === 0) return '$0';
     return formatUSDCompact(num);
+}
+
+function parseOptionalNumber(value) {
+    const text = String(value ?? '').replace(/,/g, '').trim();
+    if (!text) return null;
+    const match = text.match(/-?\d+(\.\d+)?/);
+    if (!match) return null;
+    const num = Number(match[0]);
+    if (!Number.isFinite(num)) return null;
+    return Math.max(0, num);
+}
+
+function formatOptionalNumber(value) {
+    return Number.isFinite(value) ? String(value) : '';
+}
+
+function getPoolFeePercent(pool) {
+    const feeTier = Number(pool?.fee_tier);
+    if (!Number.isFinite(feeTier) || feeTier <= 0) return NaN;
+    return feeTier / 10000;
 }
 
 function formatRangePercent(value) {
@@ -837,6 +857,9 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [proto, setProto] = useState('all');
+    const [filterOpen, setFilterOpen] = useState(false);
+    const [poolFilter, setPoolFilter] = useState({ minSmartMoneyUsd: null, maxFeeRate: null });
+    const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
     const normalizedActivePoolAddress = useMemo(
         () => normalizePoolSelectionId(activePoolAddress),
         [activePoolAddress]
@@ -867,6 +890,31 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
         return () => clearInterval(timer);
     }, [loadPools, refreshIntervalMs]);
 
+    const poolFilterActive = useMemo(
+        () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
+        [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]
+    );
+    const openPoolFilter = useCallback(() => {
+        setPoolFilterDraft({
+            minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
+            maxFeeRate: formatOptionalNumber(poolFilter.maxFeeRate),
+        });
+        setFilterOpen((prev) => !prev);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]);
+    const applyPoolFilter = useCallback(() => {
+        setPoolFilter({
+            minSmartMoneyUsd: parseOptionalNumber(poolFilterDraft.minSmartMoneyUsd),
+            maxFeeRate: parseOptionalNumber(poolFilterDraft.maxFeeRate),
+        });
+        setFilterOpen(false);
+    }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minSmartMoneyUsd]);
+    const clearPoolFilter = useCallback(() => {
+        const next = { minSmartMoneyUsd: null, maxFeeRate: null };
+        setPoolFilter(next);
+        setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '' });
+        setFilterOpen(false);
+    }, []);
+
     const filtered = useMemo(() => {
         let l = pools;
         if (search) {
@@ -874,8 +922,17 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             l = l.filter((p) => getPairLabel(p).toLowerCase().includes(q) || getPoolIdentifier(p).toLowerCase().includes(q));
         }
         if (proto !== 'all') l = l.filter(p => p.protocol === proto);
+        if (Number.isFinite(poolFilter.minSmartMoneyUsd)) {
+            l = l.filter(p => Number(p?.total_position_amount_usd || 0) >= poolFilter.minSmartMoneyUsd);
+        }
+        if (Number.isFinite(poolFilter.maxFeeRate)) {
+            l = l.filter(p => {
+                const feePercent = getPoolFeePercent(p);
+                return Number.isFinite(feePercent) && feePercent <= poolFilter.maxFeeRate;
+            });
+        }
         return l;
-    }, [pools, search, proto]);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, pools, search, proto]);
 
     return (
         <div>
@@ -894,10 +951,69 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                             </button>
                         );
                     })}
+                    <div className="smd-pool-filter-wrap">
+                        <button
+                            type="button"
+                            className={`smd-filter-btn${poolFilterActive ? ' active' : ''}`}
+                            onClick={openPoolFilter}
+                            aria-pressed={poolFilterActive}
+                            title="筛选池子"
+                        >
+                            <SlidersHorizontal size={13} />
+                            筛选
+                        </button>
+                        {filterOpen ? (
+                            <div className="kline-filter-popover smd-pool-filter-popover">
+                                <div className="kline-filter-popover-head">
+                                    <div>
+                                        <div className="kline-filter-popover-title">池子筛选</div>
+                                        <div className="kline-filter-popover-sub">按当前聪明钱仓位和池子费率过滤</div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="icon-link"
+                                        onClick={() => setFilterOpen(false)}
+                                        title="Close"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+
+                                <label className="kline-filter-field">
+                                    <span>聪明钱仓位 ≥ (USD)</span>
+                                    <input
+                                        value={poolFilterDraft.minSmartMoneyUsd}
+                                        onChange={(e) => setPoolFilterDraft((prev) => ({ ...prev, minSmartMoneyUsd: e.target.value }))}
+                                        inputMode="decimal"
+                                        placeholder="可选"
+                                    />
+                                </label>
+
+                                <label className="kline-filter-field">
+                                    <span>池子费率 ≤ (%)</span>
+                                    <input
+                                        value={poolFilterDraft.maxFeeRate}
+                                        onChange={(e) => setPoolFilterDraft((prev) => ({ ...prev, maxFeeRate: e.target.value }))}
+                                        inputMode="decimal"
+                                        placeholder="可选"
+                                    />
+                                </label>
+
+                                <div className="kline-filter-actions">
+                                    <button type="button" className="ghost-chip active" onClick={applyPoolFilter}>
+                                        应用
+                                    </button>
+                                    <button type="button" className="ghost-chip" onClick={clearPoolFilter}>
+                                        清空
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
             </div>
             {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
-                <div className="smd-empty">暂无活跃仓位的池子</div>
+                <div className="smd-empty">{poolFilterActive ? '当前筛选条件下暂无池子' : '暂无活跃仓位的池子'}</div>
             ) : (
                 <div className="smd-pool-cards">
                     {filtered.map((p) => {
