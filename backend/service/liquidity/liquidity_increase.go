@@ -30,9 +30,128 @@ type IncreaseLiquidityResult struct {
 	ActualStableSpentWei *big.Int
 	Dust0Wei             *big.Int
 	Dust1Wei             *big.Int
+	ExtraDust            []models.TradeRecordDustAsset
 	Token0               common.Address
 	Token1               common.Address
 	GasSpentWei          *big.Int
+}
+
+type trackedIncreaseDustToken struct {
+	Symbol  string
+	Address common.Address
+}
+
+func appendTrackedIncreaseDustToken(tokens []trackedIncreaseDustToken, seen map[common.Address]struct{}, symbol string, addr common.Address) []trackedIncreaseDustToken {
+	if addr == (common.Address{}) {
+		return tokens
+	}
+	if _, ok := seen[addr]; ok {
+		return tokens
+	}
+	seen[addr] = struct{}{}
+	return append(tokens, trackedIncreaseDustToken{
+		Symbol:  strings.ToUpper(strings.TrimSpace(symbol)),
+		Address: addr,
+	})
+}
+
+func buildIncreaseDustTrackers(cc config.ChainConfig, task *models.StrategyTask, plan *entryTokenPlan, stableToken common.Address) []trackedIncreaseDustToken {
+	seen := make(map[common.Address]struct{})
+	tokens := make([]trackedIncreaseDustToken, 0, 8)
+	addHex := func(symbol, addr string) {
+		if common.IsHexAddress(addr) {
+			tokens = appendTrackedIncreaseDustToken(tokens, seen, symbol, common.HexToAddress(addr))
+		}
+	}
+
+	tokens = appendTrackedIncreaseDustToken(tokens, seen, cc.StableSymbol, stableToken)
+	addHex("USDT", cc.USDTAddress)
+	addHex("USDC", cc.USDCAddress)
+	addHex("BUSD", cc.BUSDAddress)
+	addHex(cc.WrappedNativeSymbol, cc.WrappedNativeAddress)
+
+	if task != nil {
+		addHex(task.Token0Symbol, task.Token0Address)
+		addHex(task.Token1Symbol, task.Token1Address)
+	}
+	if plan != nil {
+		tokens = appendTrackedIncreaseDustToken(tokens, seen, plan.EntrySymbol, plan.EntryToken)
+		tokens = appendTrackedIncreaseDustToken(tokens, seen, "", plan.Token0)
+		tokens = appendTrackedIncreaseDustToken(tokens, seen, "", plan.Token1)
+	}
+	return tokens
+}
+
+func captureIncreaseDustBalances(exec chainexec.EVMExecutor, walletAddr common.Address, tokens []trackedIncreaseDustToken) map[common.Address]*big.Int {
+	out := make(map[common.Address]*big.Int, len(tokens))
+	for _, token := range tokens {
+		if token.Address == (common.Address{}) {
+			continue
+		}
+		out[token.Address] = tokenBalanceOrZero(exec, token.Address, walletAddr)
+	}
+	return out
+}
+
+func maxBigInt(a, b *big.Int) *big.Int {
+	if a == nil || a.Sign() <= 0 {
+		if b == nil {
+			return big.NewInt(0)
+		}
+		return new(big.Int).Set(b)
+	}
+	if b == nil || b.Cmp(a) <= 0 {
+		return new(big.Int).Set(a)
+	}
+	return new(big.Int).Set(b)
+}
+
+func finalizeIncreaseLiquidityAccounting(
+	exec chainexec.EVMExecutor,
+	cc config.ChainConfig,
+	walletAddr common.Address,
+	stableToken common.Address,
+	tracked []trackedIncreaseDustToken,
+	before map[common.Address]*big.Int,
+	res *IncreaseLiquidityResult,
+) {
+	if exec == nil || res == nil {
+		return
+	}
+	after := captureIncreaseDustBalances(exec, walletAddr, tracked)
+	if stableToken != (common.Address{}) {
+		if spent := spentBalanceDelta(before[stableToken], after[stableToken]); spent.Sign() > 0 {
+			res.ActualStableSpentWei = spent
+			res.ActualStableSpent = amountToFloat(spent, cc.StableDecimals)
+		}
+	}
+
+	extra := make([]models.TradeRecordDustAsset, 0)
+	for _, token := range tracked {
+		addr := token.Address
+		if addr == (common.Address{}) {
+			continue
+		}
+		delta := positiveBalanceDelta(before[addr], after[addr])
+		if delta.Sign() <= 0 {
+			continue
+		}
+		switch {
+		case res.Token0 != (common.Address{}) && addr == res.Token0:
+			res.Dust0Wei = maxBigInt(res.Dust0Wei, delta)
+		case res.Token1 != (common.Address{}) && addr == res.Token1:
+			res.Dust1Wei = maxBigInt(res.Dust1Wei, delta)
+		default:
+			extra = append(extra, models.TradeRecordDustAsset{
+				Symbol:  strings.ToUpper(strings.TrimSpace(token.Symbol)),
+				Address: addr.Hex(),
+				Amount:  delta.String(),
+			})
+		}
+	}
+	if len(extra) > 0 {
+		res.ExtraDust = append(res.ExtraDust, extra...)
+	}
 }
 
 // IncreaseLiquidityForTask adds liquidity to an existing V3/V4 position.
@@ -77,6 +196,12 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
 	}
 	usdtAddr := common.HexToAddress(cc.StableAddress)
+	plan, err := s.planEntryToken(task)
+	if err != nil {
+		return nil, err
+	}
+	trackedDustTokens := buildIncreaseDustTrackers(cc, task, plan, usdtAddr)
+	trackedDustBefore := captureIncreaseDustBalances(exec, walletAddr, trackedDustTokens)
 
 	// Cap to wallet balance
 	usdtBal, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
@@ -93,19 +218,25 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	if config.AppConfig.AtomicAddLiquidityEnabled && config.AppConfig.PrivateZapEnabled {
+		var res *IncreaseLiquidityResult
 		switch version {
 		case "v4":
-			return s.increaseV4LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
+			res, err = s.increaseV4LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
 		default:
-			return s.increaseV3LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
+			res, err = s.increaseV3LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
 		}
+		if err != nil {
+			return nil, err
+		}
+		finalizeIncreaseLiquidityAccounting(exec, cc, walletAddr, usdtAddr, trackedDustTokens, trackedDustBefore, res)
+		if res != nil && (res.ActualStableSpentWei == nil || res.ActualStableSpentWei.Sign() <= 0) {
+			res.ActualStableSpentWei = new(big.Int).Set(usdtAmount)
+			res.ActualStableSpent = amountToFloat(usdtAmount, cc.StableDecimals)
+		}
+		return res, nil
 	}
 
 	// Convert USDT to entry token if needed (same logic as EnterTaskFromUSDT)
-	plan, err := s.planEntryToken(task)
-	if err != nil {
-		return nil, err
-	}
 	entryToken := usdtAddr
 	entryAmount := new(big.Int).Set(usdtAmount)
 	if plan.RequiresSwap {
@@ -134,6 +265,7 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 	if err != nil {
 		return nil, err
 	}
+	finalizeIncreaseLiquidityAccounting(exec, cc, walletAddr, usdtAddr, trackedDustTokens, trackedDustBefore, res)
 	if res != nil && (res.ActualStableSpentWei == nil || res.ActualStableSpentWei.Sign() <= 0) {
 		res.ActualStableSpentWei = new(big.Int).Set(usdtAmount)
 		res.ActualStableSpent = amountToFloat(usdtAmount, cc.StableDecimals)

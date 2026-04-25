@@ -15,6 +15,12 @@ const (
 	TradeStatusOrphaned TradeRecordStatus = "orphaned"
 )
 
+type TradeRecordDustAsset struct {
+	Symbol  string `json:"symbol,omitempty"`
+	Address string `json:"address,omitempty"`
+	Amount  string `json:"amount,omitempty"` // raw token units
+}
+
 // TradeRecord represents one full cycle: enter (open) + exit (close).
 type TradeRecord struct {
 	ID     uint   `gorm:"primaryKey" json:"id"`
@@ -36,6 +42,7 @@ type TradeRecord struct {
 	OpenGasSpentWei  string    `gorm:"type:varchar(78)" json:"open_gas_spent_wei"` // BNB wei (1e18)
 	OpenDust0        string    `gorm:"type:varchar(78)" json:"open_dust0"`         // token0 dust wei
 	OpenDust1        string    `gorm:"type:varchar(78)" json:"open_dust1"`         // token1 dust wei
+	OpenExtraDust    string    `gorm:"type:text" json:"open_extra_dust"`           // JSON encoded []TradeRecordDustAsset
 
 	ClosedAt          *time.Time        `gorm:"index" json:"closed_at"`
 	CloseTxHash       string            `gorm:"size:66" json:"close_tx_hash"`

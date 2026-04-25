@@ -5,8 +5,10 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +19,111 @@ type TradeRecordService struct{}
 
 func NewTradeRecordService() *TradeRecordService {
 	return &TradeRecordService{}
+}
+
+func DustAsset(symbol string, address common.Address, amount *big.Int) models.TradeRecordDustAsset {
+	if amount == nil {
+		amount = big.NewInt(0)
+	}
+	return models.TradeRecordDustAsset{
+		Symbol:  strings.ToUpper(strings.TrimSpace(symbol)),
+		Address: address.Hex(),
+		Amount:  amount.String(),
+	}
+}
+
+func ParseOpenDustAssets(raw string) []models.TradeRecordDustAsset {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var assets []models.TradeRecordDustAsset
+	if err := json.Unmarshal([]byte(raw), &assets); err != nil {
+		return nil
+	}
+	return normalizeDustAssets(assets)
+}
+
+func EncodeOpenDustAssets(assets []models.TradeRecordDustAsset) string {
+	assets = normalizeDustAssets(assets)
+	if len(assets) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(assets)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func MergeOpenDustAssets(existing []models.TradeRecordDustAsset, additions []models.TradeRecordDustAsset) []models.TradeRecordDustAsset {
+	return normalizeDustAssets(append(existing, additions...))
+}
+
+func flattenDustAssets(groups ...[]models.TradeRecordDustAsset) []models.TradeRecordDustAsset {
+	var out []models.TradeRecordDustAsset
+	for _, group := range groups {
+		out = append(out, group...)
+	}
+	return out
+}
+
+func normalizeDustAssets(assets []models.TradeRecordDustAsset) []models.TradeRecordDustAsset {
+	type bucket struct {
+		asset  models.TradeRecordDustAsset
+		amount *big.Int
+	}
+	buckets := make(map[string]*bucket)
+	for _, asset := range assets {
+		symbol := strings.ToUpper(strings.TrimSpace(asset.Symbol))
+		addr := strings.TrimSpace(asset.Address)
+		if common.IsHexAddress(addr) {
+			addr = common.HexToAddress(addr).Hex()
+		}
+		amount, err := parseBigInt(asset.Amount)
+		if err != nil || amount == nil || amount.Sign() <= 0 {
+			continue
+		}
+		key := strings.ToLower(addr)
+		if key == "" || !common.IsHexAddress(addr) {
+			key = "symbol:" + symbol
+		}
+		if key == "symbol:" {
+			continue
+		}
+		if cur, ok := buckets[key]; ok {
+			cur.amount.Add(cur.amount, amount)
+			if cur.asset.Symbol == "" && symbol != "" {
+				cur.asset.Symbol = symbol
+			}
+			if cur.asset.Address == "" && addr != "" {
+				cur.asset.Address = addr
+			}
+			continue
+		}
+		buckets[key] = &bucket{
+			asset: models.TradeRecordDustAsset{
+				Symbol:  symbol,
+				Address: addr,
+			},
+			amount: new(big.Int).Set(amount),
+		}
+	}
+	keys := make([]string, 0, len(buckets))
+	for key := range buckets {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]models.TradeRecordDustAsset, 0, len(keys))
+	for _, key := range keys {
+		item := buckets[key]
+		if item == nil || item.amount == nil || item.amount.Sign() <= 0 {
+			continue
+		}
+		item.asset.Amount = item.amount.String()
+		out = append(out, item.asset)
+	}
+	return out
 }
 
 func (s *TradeRecordService) GetLatestOpenRecord(userID uint, taskID uint) (*models.TradeRecord, error) {
@@ -39,6 +146,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 	openStableBeforeWei *big.Int,
 	dust0Wei *big.Int,
 	dust1Wei *big.Int,
+	extraDust ...[]models.TradeRecordDustAsset,
 ) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
@@ -81,6 +189,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 		OpenGasSpentWei:   safeBigIntString(openGasSpentWei),
 		OpenDust0:         safeBigIntString(dust0Wei),
 		OpenDust1:         safeBigIntString(dust1Wei),
+		OpenExtraDust:     EncodeOpenDustAssets(flattenDustAssets(extraDust...)),
 		Status:            models.TradeStatusOpen,
 		CloseUSDTReceived: "0",
 		CloseStableBefore: "0",
@@ -134,6 +243,7 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 	gasSpentWei *big.Int,
 	dust0Wei *big.Int,
 	dust1Wei *big.Int,
+	extraDust ...models.TradeRecordDustAsset,
 ) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
@@ -171,6 +281,8 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 	nextDust0 := new(big.Int).Set(openDust0)
 	nextDust1 := new(big.Int).Set(openDust1)
 	nextStableAfter := balanceAfterSpend(openStableBefore, nextSpent)
+	nextExtraDust := ParseOpenDustAssets(rec.OpenExtraDust)
+	nextExtraDust = MergeOpenDustAssets(nextExtraDust, extraDust)
 
 	primaryStable := common.HexToAddress("")
 	if config.AppConfig != nil {
@@ -178,10 +290,22 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 			primaryStable = common.HexToAddress(cc.StableAddress)
 		}
 	}
-	if !common.IsHexAddress(task.Token0Address) || common.HexToAddress(task.Token0Address) != primaryStable {
+	if common.IsHexAddress(task.Token0Address) && common.HexToAddress(task.Token0Address) == primaryStable {
+		if dust0Wei != nil && dust0Wei.Sign() > 0 {
+			nextExtraDust = MergeOpenDustAssets(nextExtraDust, []models.TradeRecordDustAsset{
+				DustAsset(task.Token0Symbol, common.HexToAddress(task.Token0Address), dust0Wei),
+			})
+		}
+	} else {
 		nextDust0.Add(nextDust0, nonNilBigInt(dust0Wei))
 	}
-	if !common.IsHexAddress(task.Token1Address) || common.HexToAddress(task.Token1Address) != primaryStable {
+	if common.IsHexAddress(task.Token1Address) && common.HexToAddress(task.Token1Address) == primaryStable {
+		if dust1Wei != nil && dust1Wei.Sign() > 0 {
+			nextExtraDust = MergeOpenDustAssets(nextExtraDust, []models.TradeRecordDustAsset{
+				DustAsset(task.Token1Symbol, common.HexToAddress(task.Token1Address), dust1Wei),
+			})
+		}
+	} else {
 		nextDust1.Add(nextDust1, nonNilBigInt(dust1Wei))
 	}
 
@@ -191,6 +315,7 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 		"open_gas_spent_wei": safeBigIntString(nextGas),
 		"open_dust0":         safeBigIntString(nextDust0),
 		"open_dust1":         safeBigIntString(nextDust1),
+		"open_extra_dust":    EncodeOpenDustAssets(nextExtraDust),
 	}).Error
 }
 

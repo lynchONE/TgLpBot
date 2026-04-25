@@ -133,6 +133,7 @@ func autoMigrate() error {
 	ensureColumn("monitored_wallets", "avatar_url", "VARCHAR(512) NULL AFTER label")
 	ensureColumn("trade_records", "open_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER open_usdt_spent")
 	ensureColumn("trade_records", "open_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER open_stable_before")
+	ensureColumn("trade_records", "open_extra_dust", "TEXT NULL AFTER open_dust1")
 	ensureColumn("trade_records", "close_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_usdt_received")
 	ensureColumn("trade_records", "close_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_stable_before")
 	ensureColumn("global_configs", "open_position_target_share_min", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER multi_wallet_enabled")

@@ -256,6 +256,20 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 						dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token1Symbol)))
 					}
 				}
+				for _, extra := range pnl.ExtraDust {
+					if extra.Amount <= 0 {
+						continue
+					}
+					formatted := formatDustAmount(extra.Amount)
+					if formatted == "0" {
+						continue
+					}
+					sym := strings.TrimSpace(extra.Symbol)
+					if sym == "" {
+						sym = extra.Address
+					}
+					dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(sym)))
+				}
 				if len(dustParts) > 0 {
 					dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f %s)", strings.Join(dustParts, " + "), pnl.DustValueUSDT, stableSym)
 				} else if pnl.DustValueUSDT > 0 {

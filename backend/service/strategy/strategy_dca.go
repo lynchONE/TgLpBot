@@ -251,7 +251,7 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	updates := map[string]interface{}{
 		"dca_executed_count": newExecuted,
 		"dca_retry_count":    0,
-		"amount_usdt":        task.AmountUSDT + amountUSDT,
+		"amount_usdt":        task.AmountUSDT + spent,
 	}
 	if res != nil && res.CurrentLiquidity != "" {
 		updates["current_liquidity"] = res.CurrentLiquidity
@@ -271,6 +271,10 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 		deltaWei = res.ActualStableSpentWei
 	} else if conv, convErr := convert.FloatUSDTToWei(spent); convErr == nil && conv != nil && conv.Sign() > 0 {
 		deltaWei = conv
+	}
+	extraDust := []models.TradeRecordDustAsset(nil)
+	if res != nil {
+		extraDust = res.ExtraDust
 	}
 	if tradeErr := trade.NewTradeRecordService().ApplyAddLiquidityDelta(
 		&task,
@@ -293,12 +297,13 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 			}
 			return nil
 		}(),
+		extraDust...,
 	); tradeErr != nil {
 		log.Printf("[Strategy] DCA task #%d batch %d failed to update trade record: %v", task.ID, batchNum, tradeErr)
 	}
 
 	if newExecuted >= total {
-		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓完成：共 %d/%d 批，累计投入约 $%.2f", newExecuted, total, task.AmountUSDT+amountUSDT))
+		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓完成：共 %d/%d 批，累计投入约 $%.2f", newExecuted, total, task.AmountUSDT+spent))
 	} else {
 		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓 %d/%d 完成（本批 $%.2f），下一批 %s 后执行", newExecuted, total, spent, formatDCAInterval(task.DCAIntervalSeconds)))
 	}

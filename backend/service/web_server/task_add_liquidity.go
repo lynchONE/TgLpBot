@@ -130,7 +130,7 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 		}
 
 		updates := map[string]interface{}{
-			"amount_usdt": task.AmountUSDT + amountUSDT,
+			"amount_usdt": task.AmountUSDT + actualSpent,
 		}
 		if increaseRes != nil && increaseRes.CurrentLiquidity != "" {
 			updates["current_liquidity"] = increaseRes.CurrentLiquidity
@@ -148,6 +148,10 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 			deltaWei = conv
 		}
 
+		extraDust := []models.TradeRecordDustAsset(nil)
+		if increaseRes != nil {
+			extraDust = increaseRes.ExtraDust
+		}
 		if tradeErr := trade.NewTradeRecordService().ApplyAddLiquidityDelta(
 			task,
 			deltaWei,
@@ -169,6 +173,7 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 				}
 				return nil
 			}(),
+			extraDust...,
 		); tradeErr != nil {
 			log.Printf("[WebAPI] add_liquidity: update trade record failed: task_id=%d err=%v", taskID, tradeErr)
 		}

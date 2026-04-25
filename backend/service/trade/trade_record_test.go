@@ -2,8 +2,11 @@ package trade
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 	"math/big"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestBalanceAfterSpend(t *testing.T) {
@@ -85,5 +88,39 @@ func TestStableAmountTo18(t *testing.T) {
 	want = "1234567890000000000"
 	if got == nil || got.String() != want {
 		t.Fatalf("stableAmountTo18(bsc, 1234567890000000000) = %v, want %s", got, want)
+	}
+}
+
+func TestOpenDustAssetsEncodeParseMerge(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	assets := MergeOpenDustAssets(
+		[]models.TradeRecordDustAsset{
+			DustAsset("usdc", addr, big.NewInt(100)),
+		},
+		[]models.TradeRecordDustAsset{
+			{Symbol: "USDC", Address: "0x00000000000000000000000000000000000000AA", Amount: "250"},
+			{Symbol: "ZERO", Address: "0x00000000000000000000000000000000000000bb", Amount: "0"},
+		},
+	)
+
+	if len(assets) != 1 {
+		t.Fatalf("len(assets) = %d, want 1: %#v", len(assets), assets)
+	}
+	if assets[0].Symbol != "USDC" {
+		t.Fatalf("symbol = %q, want USDC", assets[0].Symbol)
+	}
+	if assets[0].Address != addr.Hex() {
+		t.Fatalf("address = %q, want %q", assets[0].Address, addr.Hex())
+	}
+	if assets[0].Amount != "350" {
+		t.Fatalf("amount = %q, want 350", assets[0].Amount)
+	}
+
+	encoded := EncodeOpenDustAssets(assets)
+	parsed := ParseOpenDustAssets(encoded)
+	if len(parsed) != 1 || parsed[0].Amount != "350" || parsed[0].Address != addr.Hex() {
+		t.Fatalf("ParseOpenDustAssets(%q) = %#v", encoded, parsed)
 	}
 }

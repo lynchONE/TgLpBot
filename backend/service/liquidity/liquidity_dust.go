@@ -7,6 +7,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
+	tradepkg "TgLpBot/service/trade"
 	"fmt"
 	"math/big"
 	"strings"
@@ -50,7 +51,8 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 	if dust1 == nil {
 		dust1 = big.NewInt(0)
 	}
-	if dust0.Sign() <= 0 && dust1.Sign() <= 0 {
+	extraDust := tradepkg.ParseOpenDustAssets(rec.OpenExtraDust)
+	if dust0.Sign() <= 0 && dust1.Sign() <= 0 && len(extraDust) == 0 {
 		return nil, fmt.Errorf("no dust to swap")
 	}
 
@@ -232,6 +234,101 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 				}
 				txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT|%s", sym, txHash))
 			}
+		}
+	}
+
+	if len(extraDust) > 0 {
+		remainingExtra := append([]models.TradeRecordDustAsset(nil), extraDust...)
+		persistExtraDust := func() {
+			openStableAfterWei := new(big.Int).Sub(new(big.Int).Set(openStableBeforeWei), openSpentWei)
+			if openStableAfterWei.Sign() < 0 {
+				openStableAfterWei = big.NewInt(0)
+			}
+			_ = database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
+				"open_extra_dust":    tradepkg.EncodeOpenDustAssets(remainingExtra),
+				"open_usdt_spent":    openSpentWei.String(),
+				"open_stable_after":  openStableAfterWei.String(),
+				"open_gas_spent_wei": openGasWei.String(),
+			}).Error
+		}
+
+		for idx := 0; idx < len(remainingExtra); {
+			asset := remainingExtra[idx]
+			amount, _ := convert.ParseBigInt(asset.Amount)
+			if amount == nil || amount.Sign() <= 0 {
+				remainingExtra = append(remainingExtra[:idx], remainingExtra[idx+1:]...)
+				persistExtraDust()
+				continue
+			}
+			if !common.IsHexAddress(asset.Address) {
+				idx++
+				continue
+			}
+			tokenAddr := common.HexToAddress(asset.Address)
+			sym := strings.TrimSpace(asset.Symbol)
+			if sym == "" {
+				sym = tokenAddr.Hex()
+			}
+			if tokenAddr == usdtAddr {
+				idx++
+				continue
+			}
+
+			nativeBefore, _ := blockchain.GetBalanceWithClient(client, walletAddr)
+			if nativeBefore == nil {
+				nativeBefore = big.NewInt(0)
+			}
+			usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
+			if usdtBefore == nil {
+				usdtBefore = big.NewInt(0)
+			}
+			txHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, tokenAddr, usdtAddr, amount, task.SlippageTolerance)
+			if err != nil {
+				return txHashes, err
+			}
+			if txHash == "" {
+				idx++
+				continue
+			}
+
+			nativeAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
+			if nativeAfter == nil {
+				nativeAfter = big.NewInt(0)
+			}
+			gasSpentWei := new(big.Int).Sub(nativeBefore, nativeAfter)
+			if gasSpentWei.Sign() < 0 {
+				gasSpentWei = big.NewInt(0)
+			}
+			if gasSpentWei.Sign() > 0 {
+				openGasWei.Add(openGasWei, gasSpentWei)
+			}
+
+			usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
+			if usdtAfter == nil {
+				usdtAfter = big.NewInt(0)
+			}
+			usdtDeltaRaw := new(big.Int).Sub(usdtAfter, usdtBefore)
+			if usdtDeltaRaw.Sign() < 0 {
+				usdtDeltaRaw = big.NewInt(0)
+			}
+			if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(txHash)); rerr == nil && receipt != nil {
+				if d := ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
+					usdtDeltaRaw = d
+				}
+			}
+			usdtDeltaWei, derr := convert.ScaleDecimals(usdtDeltaRaw, cc.StableDecimals, 18)
+			if derr != nil || usdtDeltaWei == nil {
+				usdtDeltaWei = new(big.Int).Set(usdtDeltaRaw)
+			}
+			if usdtDeltaWei.Sign() > 0 && openSpentWei.Sign() > 0 {
+				openSpentWei.Sub(openSpentWei, usdtDeltaWei)
+				if openSpentWei.Sign() < 0 {
+					openSpentWei = big.NewInt(0)
+				}
+			}
+			txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT|%s", sym, txHash))
+			remainingExtra = append(remainingExtra[:idx], remainingExtra[idx+1:]...)
+			persistExtraDust()
 		}
 	}
 

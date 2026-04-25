@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
+	"TgLpBot/service/trade"
 	"context"
 	"fmt"
 	"log"
@@ -87,7 +88,15 @@ type PnLInfo struct {
 	HoldingsUSDT      float64 // Current position value (excluding fees)
 	DustToken0        float64
 	DustToken1        float64
+	ExtraDust         []PnLDustAsset
 	DustValueUSDT     float64
+}
+
+type PnLDustAsset struct {
+	Symbol    string
+	Address   string
+	Amount    float64
+	ValueUSDT float64
 }
 
 // GetTaskPnL calculates PnL for a task
@@ -175,6 +184,26 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		dustUSDTValue += weiToFloat(dust1, pricing.GetTokenDecimals(task.Chain, task.Token1Address))
 	}
 
+	extraDust := make([]PnLDustAsset, 0)
+	if rec != nil {
+		for _, asset := range trade.ParseOpenDustAssets(rec.OpenExtraDust) {
+			info, raw, dec, primaryStable, ok := s.recordedDustAssetValueUSDT(task.Chain, asset)
+			if !ok {
+				continue
+			}
+			extraDust = append(extraDust, info)
+			dustValueUSDT += info.ValueUSDT
+			if primaryStable {
+				dustUSDTValue += info.ValueUSDT
+				if scaled, err := convert.ScaleDecimals(raw, dec, 18); err == nil && scaled != nil {
+					dustUSDTWei.Add(dustUSDTWei, scaled)
+				} else {
+					dustUSDTWei.Add(dustUSDTWei, raw)
+				}
+			}
+		}
+	}
+
 	// NetInvestedUSDT aims to reflect the USDT amount actually locked in the position.
 	// For non-USDT dust, it should always be excluded (since it was bought with USDT spent).
 	// For USDT dust, OpenUSDTSpent is usually derived from wallet USDT delta and already excludes refunded USDT dust.
@@ -235,6 +264,7 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		HoldingsUSDT:      holdingsValue,
 		DustToken0:        weiToFloat(dust0, dec0),
 		DustToken1:        weiToFloat(dust1, dec1),
+		ExtraDust:         extraDust,
 		DustValueUSDT:     dustValueUSDT,
 	}, nil
 }
@@ -656,6 +686,87 @@ func weiToFloat(wei *big.Int, decimals int) float64 {
 	f.Quo(f, div)
 	val, _ := f.Float64()
 	return val
+}
+
+func (s *PnLService) recordedDustAssetValueUSDT(chain string, asset models.TradeRecordDustAsset) (PnLDustAsset, *big.Int, int, bool, bool) {
+	symbol := strings.ToUpper(strings.TrimSpace(asset.Symbol))
+	addr := strings.TrimSpace(asset.Address)
+	raw, err := convert.ParseBigInt(asset.Amount)
+	if err != nil || raw == nil || raw.Sign() <= 0 {
+		return PnLDustAsset{}, nil, 0, false, false
+	}
+	if common.IsHexAddress(addr) {
+		addr = common.HexToAddress(addr).Hex()
+	}
+
+	decimals := pricing.DefaultTokenDecimals
+	if common.IsHexAddress(addr) {
+		if dec := pricing.GetTokenDecimals(chain, addr); dec > 0 {
+			decimals = dec
+		}
+	}
+	amount := weiToFloat(raw, decimals)
+	if amount <= 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return PnLDustAsset{}, nil, 0, false, false
+	}
+
+	valueUSDT := 0.0
+	primaryStable := isPrimaryStableToken(chain, symbol, addr)
+	switch {
+	case primaryStable || pricing.IsStableSymbol(symbol) || pricing.IsStableAddress(chain, addr):
+		valueUSDT = amount
+	case isWrappedNativeToken(chain, symbol, addr):
+		valueUSDT = amount * pricing.GetNativePriceUSD(chain)
+	case common.IsHexAddress(addr):
+		prices, priceErr := pricing.NewTokenPriceService().GetUSDPrices(config.NormalizeChain(chain), []string{addr})
+		if priceErr == nil {
+			if price := prices[strings.ToLower(addr)]; price > 0 {
+				valueUSDT = amount * price
+			}
+		}
+	}
+	if valueUSDT <= 0 || math.IsNaN(valueUSDT) || math.IsInf(valueUSDT, 0) {
+		return PnLDustAsset{}, nil, 0, primaryStable, false
+	}
+	if symbol == "" {
+		symbol = addr
+	}
+	return PnLDustAsset{
+		Symbol:    symbol,
+		Address:   addr,
+		Amount:    amount,
+		ValueUSDT: valueUSDT,
+	}, raw, decimals, primaryStable, true
+}
+
+func isWrappedNativeToken(chain, symbol, addr string) bool {
+	chain = config.NormalizeChain(chain)
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	addr = strings.TrimSpace(addr)
+
+	wrappedSym := ""
+	wrappedAddr := ""
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			wrappedSym = strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+			wrappedAddr = strings.TrimSpace(cc.WrappedNativeAddress)
+		}
+	}
+	nativeSym := strings.TrimPrefix(wrappedSym, "W")
+	if wrappedSym == "" {
+		switch chain {
+		case "base":
+			wrappedSym = "WETH"
+			nativeSym = "ETH"
+		default:
+			wrappedSym = "WBNB"
+			nativeSym = "BNB"
+		}
+	}
+	if symbol != "" && (symbol == wrappedSym || symbol == nativeSym) {
+		return true
+	}
+	return common.IsHexAddress(wrappedAddr) && strings.EqualFold(addr, wrappedAddr)
 }
 
 func stableTokenForChain(chain string) (symbol string, addr string, decimals int) {
