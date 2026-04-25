@@ -141,6 +141,49 @@ function formatOptionalNumber(value) {
     return Number.isFinite(value) ? String(value) : '';
 }
 
+const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
+const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
+
+function normalizeStoredSmartMoneyPoolFilter(value) {
+    if (!value || typeof value !== 'object') {
+        return { ...EMPTY_SMART_MONEY_POOL_FILTER };
+    }
+    return {
+        minSmartMoneyUsd: Number.isFinite(Number(value.minSmartMoneyUsd)) ? Number(value.minSmartMoneyUsd) : null,
+        maxFeeRate: Number.isFinite(Number(value.maxFeeRate)) ? Number(value.maxFeeRate) : null,
+    };
+}
+
+function readStoredSmartMoneyPoolFilter() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return { ...EMPTY_SMART_MONEY_POOL_FILTER };
+    }
+    try {
+        const raw = window.localStorage.getItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
+        if (!raw) return { ...EMPTY_SMART_MONEY_POOL_FILTER };
+        return normalizeStoredSmartMoneyPoolFilter(JSON.parse(raw));
+    } catch {
+        return { ...EMPTY_SMART_MONEY_POOL_FILTER };
+    }
+}
+
+function writeStoredSmartMoneyPoolFilter(value) {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return;
+    }
+    try {
+        const normalized = normalizeStoredSmartMoneyPoolFilter(value);
+        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd) && !Number.isFinite(normalized.maxFeeRate);
+        if (isEmpty) {
+            window.localStorage.removeItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
+            return;
+        }
+        window.localStorage.setItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY, JSON.stringify(normalized));
+    } catch {
+        // ignore storage failures
+    }
+}
+
 function getPoolFeePercent(pool) {
     const feeTier = Number(pool?.fee_tier);
     if (!Number.isFinite(feeTier) || feeTier <= 0) return NaN;
@@ -858,7 +901,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     const [search, setSearch] = useState('');
     const [proto, setProto] = useState('all');
     const [filterOpen, setFilterOpen] = useState(false);
-    const [poolFilter, setPoolFilter] = useState({ minSmartMoneyUsd: null, maxFeeRate: null });
+    const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
     const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
     const normalizedActivePoolAddress = useMemo(
         () => normalizePoolSelectionId(activePoolAddress),
@@ -902,15 +945,18 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
         setFilterOpen((prev) => !prev);
     }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]);
     const applyPoolFilter = useCallback(() => {
-        setPoolFilter({
+        const next = {
             minSmartMoneyUsd: parseOptionalNumber(poolFilterDraft.minSmartMoneyUsd),
             maxFeeRate: parseOptionalNumber(poolFilterDraft.maxFeeRate),
-        });
+        };
+        setPoolFilter(next);
+        writeStoredSmartMoneyPoolFilter(next);
         setFilterOpen(false);
     }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minSmartMoneyUsd]);
     const clearPoolFilter = useCallback(() => {
         const next = { minSmartMoneyUsd: null, maxFeeRate: null };
         setPoolFilter(next);
+        writeStoredSmartMoneyPoolFilter(next);
         setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '' });
         setFilterOpen(false);
     }, []);
