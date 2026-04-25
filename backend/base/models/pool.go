@@ -8,7 +8,7 @@ import "time"
 type Pool struct {
 	ID      string `gorm:"column:id;type:varchar(128);primaryKey" json:"id"`
 	Type    string `gorm:"column:type;type:varchar(32);not null;default:''" json:"type"`
-	Address string `gorm:"column:address;type:varchar(128);not null;index:idx_pools_address" json:"address"`
+	Address string `gorm:"column:address;type:varchar(128);not null;index:idx_pools_address;index:idx_pools_chain_address,priority:2" json:"address"`
 
 	// Legacy compatibility fields still used by existing code paths.
 	Name                          string     `gorm:"column:name;type:varchar(255);not null;default:''" json:"name"`
@@ -48,7 +48,7 @@ type Pool struct {
 	TransactionsH24Sellers        uint32     `gorm:"column:transactions_h24_sellers;type:int unsigned;not null;default:0" json:"transactions_h24_sellers"`
 
 	// PoolM top-fees/5 source metadata.
-	Chain                       string     `gorm:"column:chain;type:varchar(32);not null;default:'';index:idx_pools_chain" json:"chain"`
+	Chain                       string     `gorm:"column:chain;type:varchar(32);not null;default:'';index:idx_pools_chain;index:idx_pools_chain_address,priority:1;index:idx_pools_chain_updated_at,priority:1" json:"chain"`
 	ProtocolVersion             string     `gorm:"column:protocol_version;type:varchar(16);not null;default:''" json:"protocol_version"`
 	FactoryName                 string     `gorm:"column:factory_name;type:varchar(64);not null;default:''" json:"factory_name"`
 	FactoryAddress              string     `gorm:"column:factory_address;type:varchar(128);not null;default:''" json:"factory_address"`
@@ -88,7 +88,7 @@ type Pool struct {
 	LiquidityTickSpacing        int        `gorm:"column:liquidity_tick_spacing;type:int;not null;default:0" json:"liquidity_tick_spacing"`
 	SourceTimeframe             string     `gorm:"column:source_timeframe;type:varchar(64);not null;default:''" json:"source_timeframe"`
 	SourceRequestedLimit        int        `gorm:"column:source_requested_limit;type:int;not null;default:0" json:"source_requested_limit"`
-	SourceRequestedChain        string     `gorm:"column:source_requested_chain;type:varchar(32);not null;default:''" json:"source_requested_chain"`
+	SourceRequestedChain        string     `gorm:"column:source_requested_chain;type:varchar(32);not null;default:'';index:idx_pools_source_chain_updated_at,priority:1" json:"source_requested_chain"`
 	SourceTotalPools            int        `gorm:"column:source_total_pools;type:int;not null;default:0" json:"source_total_pools"`
 	SourceRequestedProtocolJSON string     `gorm:"column:source_requested_protocol_json;type:json" json:"source_requested_protocol_json"`
 	SourceRequestedDexJSON      string     `gorm:"column:source_requested_dex_json;type:json" json:"source_requested_dex_json"`
@@ -99,7 +99,7 @@ type Pool struct {
 	BadgesJSON                  string     `gorm:"column:badges_json;type:json" json:"badges_json"`
 	SourcePayloadJSON           string     `gorm:"column:source_payload_json;type:json" json:"source_payload_json"`
 
-	UpdatedAt time.Time `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime:milli;index:idx_pools_updated_at" json:"updated_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime:milli;index:idx_pools_updated_at;index:idx_pools_chain_updated_at,priority:2;index:idx_pools_source_chain_updated_at,priority:2" json:"updated_at"`
 }
 
 func (Pool) TableName() string {

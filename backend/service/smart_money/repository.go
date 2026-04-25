@@ -7,6 +7,7 @@ import (
 	"TgLpBot/base/models"
 	"context"
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -70,6 +71,7 @@ LEFT JOIN (
 const smartMoneyNetAmountOrderExpr = "COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)"
 const smartMoneyPositionTable = "sm_lp_positions"
 const smartMoneyDisplayRecentWindow = 24 * time.Hour
+const smartMoneyPoolRecentOperationWindow = 2 * time.Hour
 
 func smartMoneyDisplayRecentCutoff() time.Time {
 	return time.Now().Add(-smartMoneyDisplayRecentWindow)
@@ -430,7 +432,11 @@ func (r *Repository) InsertLPEvent(tx *gorm.DB, event *models.SmartMoneyLPEvent)
 	if tx == nil || event == nil {
 		return false, nil
 	}
-	event.WalletAddress = strings.ToLower(event.WalletAddress)
+	event.WalletAddress = strings.ToLower(strings.TrimSpace(event.WalletAddress))
+	event.PoolAddress = strings.ToLower(strings.TrimSpace(event.PoolAddress))
+	event.Token0Address = strings.ToLower(strings.TrimSpace(event.Token0Address))
+	event.Token1Address = strings.ToLower(strings.TrimSpace(event.Token1Address))
+	event.TxHash = strings.ToLower(strings.TrimSpace(event.TxHash))
 	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(event)
 	if res.Error != nil {
 		return false, res.Error
@@ -441,10 +447,10 @@ func (r *Repository) InsertLPEvent(tx *gorm.DB, event *models.SmartMoneyLPEvent)
 func (r *Repository) ListLPEvents(ctx context.Context, wallet, pool string, page, size int) ([]models.SmartMoneyLPEvent, int64, error) {
 	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPEvent{})
 	if wallet != "" {
-		db = db.Where("LOWER(wallet_address) = ?", strings.ToLower(wallet))
+		db = db.Where("wallet_address = ?", strings.ToLower(strings.TrimSpace(wallet)))
 	}
 	if pool != "" {
-		db = db.Where("LOWER(pool_address) = ?", strings.ToLower(pool))
+		db = db.Where("pool_address = ?", strings.ToLower(strings.TrimSpace(pool)))
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -701,10 +707,10 @@ func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, pr
 		}
 	}
 	if wallet != "" {
-		db = db.Where("LOWER("+smartMoneyPositionTable+".wallet_address) = ?", strings.ToLower(wallet))
+		db = db.Where(smartMoneyPositionTable+".wallet_address = ?", strings.ToLower(strings.TrimSpace(wallet)))
 	}
 	if pool != "" {
-		db = db.Where("LOWER("+smartMoneyPositionTable+".pool_address) = ?", strings.ToLower(pool))
+		db = db.Where(smartMoneyPositionTable+".pool_address = ?", strings.ToLower(strings.TrimSpace(pool)))
 	}
 	if protocol != "" {
 		db = db.Where(smartMoneyPositionTable+".protocol = ?", protocol)
@@ -798,7 +804,7 @@ func (r *Repository) ListPositionsNeedingMetadataRepair(ctx context.Context, poo
 	}
 	args := make([]interface{}, 0, 1)
 	if len(poolIdentifiers) > 0 {
-		conditions = append(conditions, "LOWER(pool_address) IN ?")
+		conditions = append(conditions, "pool_address IN ?")
 		args = append(args, poolIdentifiers)
 	}
 
@@ -931,7 +937,7 @@ func (r *Repository) applyPoolSnapshotToActive(tx *gorm.DB, active *models.Smart
 
 	var poolRow models.Pool
 	if err := tx.Model(&models.Pool{}).
-		Where("LOWER(address) = ?", addr).
+		Where("address = ?", addr).
 		First(&poolRow).Error; err != nil {
 		return
 	}
@@ -1466,7 +1472,7 @@ func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddre
 	`
 	args := []interface{}{recentCutoff}
 	if len(normalizedPools) > 0 {
-		query += ` AND LOWER(p.pool_address) IN ?`
+		query += ` AND p.pool_address IN ?`
 		args = append(args, normalizedPools)
 	}
 	query += `
@@ -1517,10 +1523,15 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 			p.fee_tier,
 			p.protocol,
 			p.chain_id,
-			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? THEN p.wallet_address END) AS wallet_count,
-			MAX(CASE WHEN p.status='open' AND p.opened_at >= ? THEN p.opened_at END) AS latest_event_at,
-			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
+			COUNT(*) AS open_position_count,
+			COUNT(DISTINCT p.wallet_address) AS wallet_count,
+			MAX(GREATEST(
+				p.opened_at,
+				COALESCE(ap.last_add_at, p.opened_at),
+				COALESCE(ap.last_remove_at, p.opened_at),
+				COALESCE(evt_net.latest_event_at, p.opened_at)
+			)) AS latest_event_at,
+			COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS total_position_amount_usd
 		FROM sm_lp_positions p
 		LEFT JOIN sm_lp_active_positions ap
 			ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id
@@ -1534,18 +1545,53 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 						WHEN event_type = 'remove' THEN -COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
 						ELSE 0
 					END
-				) AS net_amount_usd
+				) AS net_amount_usd,
+				MAX(tx_timestamp) AS latest_event_at
 			FROM sm_lp_events
 			WHERE event_type IN ('add', 'remove')
 			GROUP BY chain_id, nft_token_id
 		) evt_net
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.nft_token_id = p.nft_token_id
+		WHERE p.status = 'open' AND p.opened_at >= ?
 		GROUP BY p.pool_address, p.token0_symbol, p.token1_symbol, p.token0_address, p.token1_address, p.fee_tier, p.protocol, p.chain_id
-		HAVING open_position_count > 0
 		ORDER BY total_position_amount_usd DESC, latest_event_at DESC
-	`, cutoff, cutoff, cutoff, cutoff).Scan(&rows).Error
-	return rows, err
+	`, cutoff).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	sortPoolAggRows(rows, time.Now())
+	return rows, nil
+}
+
+func sortPoolAggRows(rows []PoolAggRow, now time.Time) {
+	recentCutoff := now.Add(-smartMoneyPoolRecentOperationWindow)
+	sort.SliceStable(rows, func(i, j int) bool {
+		left := rows[i]
+		right := rows[j]
+		leftRecent := !left.LatestEventAt.IsZero() && !left.LatestEventAt.Before(recentCutoff)
+		rightRecent := !right.LatestEventAt.IsZero() && !right.LatestEventAt.Before(recentCutoff)
+
+		if leftRecent != rightRecent {
+			return leftRecent
+		}
+		if leftRecent {
+			if !left.LatestEventAt.Equal(right.LatestEventAt) {
+				return left.LatestEventAt.After(right.LatestEventAt)
+			}
+			if left.TotalPositionAmountUSD != right.TotalPositionAmountUSD {
+				return left.TotalPositionAmountUSD > right.TotalPositionAmountUSD
+			}
+			return left.PoolAddress < right.PoolAddress
+		}
+		if left.TotalPositionAmountUSD != right.TotalPositionAmountUSD {
+			return left.TotalPositionAmountUSD > right.TotalPositionAmountUSD
+		}
+		if !left.LatestEventAt.Equal(right.LatestEventAt) {
+			return left.LatestEventAt.After(right.LatestEventAt)
+		}
+		return left.PoolAddress < right.PoolAddress
+	})
 }
 
 type PoolStats struct {
@@ -1609,7 +1655,7 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 		) evt_net
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE LOWER(p.pool_address) = ?
+		WHERE p.pool_address = ?
 		GROUP BY p.pool_address
 	`, recentCutoff, recentCutoff, today, recentCutoff, poolAddress).Scan(&stats).Error
 	if err != nil {
@@ -1724,12 +1770,13 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 		Select(`
 			p.wallet_address,
 			p.chain_id,
-			SUM(CASE WHEN p.status = 'open' AND p.opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN p.status = 'open' AND p.opened_at >= ? THEN p.pool_address END) AS active_pool_count,
-			COALESCE(SUM(CASE WHEN p.status = 'open' AND p.opened_at >= ? THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
-		`, recentCutoff, recentCutoff, recentCutoff).
+			COUNT(*) AS open_position_count,
+			COUNT(DISTINCT p.pool_address) AS active_pool_count,
+			COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS total_position_amount_usd
+		`).
 		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id").
 		Joins("LEFT JOIN (?) evt_net ON evt_net.chain_id = p.chain_id AND evt_net.nft_token_id = p.nft_token_id", eventNetSubQuery).
+		Where("p.status = ? AND p.opened_at >= ?", "open", recentCutoff).
 		Group("p.wallet_address, p.chain_id")
 
 	walletEventSubQuery := database.DB.WithContext(ctx).

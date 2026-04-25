@@ -887,7 +887,7 @@ func loadSmartMoneyPoolMarketSnapshot(ctx context.Context, poolAddress string) (
 	var row models.Pool
 	if err := database.DB.WithContext(ctx).
 		Model(&models.Pool{}).
-		Where("LOWER(address) = ?", poolAddress).
+		Where("address = ?", poolAddress).
 		First(&row).Error; err != nil {
 		return "", 0
 	}
@@ -1006,7 +1006,7 @@ func smartMoneyLoadPoolsByAddress(ctx context.Context, positions []models.SmartM
 	var pools []models.Pool
 	if err := database.DB.WithContext(ctx).
 		Model(&models.Pool{}).
-		Where("LOWER(address) IN ?", addresses).
+		Where("address IN ?", addresses).
 		Find(&pools).Error; err != nil {
 		return nil, err
 	}

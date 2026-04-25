@@ -310,9 +310,9 @@ func buildSmartMoneyMarkerEstimates(
 	var historyEvents []models.SmartMoneyLPEvent
 	db := database.DB.WithContext(ctx).
 		Model(&models.SmartMoneyLPEvent{}).
-		Where("chain_id = ? AND LOWER(pool_address) = ?", chainID, poolID).
+		Where("chain_id = ? AND pool_address = ?", chainID, poolID).
 		Where("tx_timestamp <= ?", queryEnd).
-		Where("LOWER(wallet_address) IN ?", wallets).
+		Where("wallet_address IN ?", wallets).
 		Where("event_type IN ?", []string{"add", "remove"})
 	if protocolFilter := poolVersionProtocolFilter(poolVersion); protocolFilter != "" {
 		db = db.Where("LOWER(protocol) LIKE ?", protocolFilter)
@@ -414,7 +414,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	var events []models.SmartMoneyLPEvent
 	db := database.DB.WithContext(ctx).
 		Model(&models.SmartMoneyLPEvent{}).
-		Where("chain_id = ? AND LOWER(pool_address) = ?", cc.ChainID, poolID).
+		Where("chain_id = ? AND pool_address = ?", cc.ChainID, poolID).
 		Where("tx_timestamp BETWEEN ? AND ?", queryStart, queryEnd)
 	if protocolFilter := poolVersionProtocolFilter(poolVersion); protocolFilter != "" {
 		db = db.Where("LOWER(protocol) LIKE ?", protocolFilter)
@@ -441,7 +441,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	var poolMeta models.Pool
 	if err := database.DB.WithContext(ctx).
 		Model(&models.Pool{}).
-		Where("LOWER(address) = ?", poolID).
+		Where("address = ?", poolID).
 		First(&poolMeta).Error; err != nil {
 		poolMeta = models.Pool{}
 	}

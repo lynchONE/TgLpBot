@@ -115,7 +115,7 @@ func (r *Repository) ListFreshPools(ctx context.Context, chain string, since tim
 	err := database.DB.WithContext(ctx).
 		Model(&models.Pool{}).
 		Select(freshPoolSelectColumns).
-		Where("(LOWER(chain) = ? OR LOWER(source_requested_chain) = ?) AND updated_at >= ?", chain, chain, since).
+		Where("(chain = ? OR source_requested_chain = ?) AND updated_at >= ?", chain, chain, since).
 		Order("updated_at DESC").
 		Find(&rows).Error
 	return rows, err

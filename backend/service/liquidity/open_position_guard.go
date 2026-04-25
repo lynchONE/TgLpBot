@@ -134,7 +134,7 @@ func readPoolSnapshotLiquidityUSDWithSource(chain string, poolID string) (float6
 
 	var row models.Pool
 	err := database.DB.
-		Where("chain = ? AND LOWER(address) = ?", normalizedChain, strings.ToLower(normalizedPoolID)).
+		Where("chain = ? AND address = ?", normalizedChain, strings.ToLower(normalizedPoolID)).
 		Order("updated_at DESC").
 		First(&row).Error
 	if err != nil {

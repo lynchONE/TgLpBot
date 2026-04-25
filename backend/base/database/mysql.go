@@ -146,6 +146,7 @@ func autoMigrate() error {
 	ensureColumn("system_configs", "open_position_target_share_max", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_min")
 	ensureColumn("system_configs", "open_position_risk_cap_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_max")
 	ensureColumn("system_configs", "open_position_risk_cap_ratio", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_risk_cap_usd")
+	ensureSmartMoneyQueryIndexes()
 	DB.Exec(`
 		UPDATE strategy_tasks
 		SET out_of_range_mode = CASE
@@ -180,6 +181,55 @@ func ensureColumn(table, column, definition string) {
 		DB.Exec(fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN `%s` %s", table, column, definition))
 		log.Printf("[DB] added column %s.%s", table, column)
 	}
+}
+
+func ensureIndex(table, indexName, columns string) {
+	if DB == nil {
+		return
+	}
+	var count int64
+	if err := DB.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = ?
+		  AND INDEX_NAME = ?
+	`, table, indexName).Scan(&count).Error; err != nil {
+		log.Printf("[DB] inspect index %s.%s failed: %v", table, indexName, err)
+		return
+	}
+	if count > 0 {
+		return
+	}
+	if err := DB.Exec(fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (%s)", table, indexName, columns)).Error; err != nil {
+		log.Printf("[DB] add index %s.%s failed: %v", table, indexName, err)
+		return
+	}
+	log.Printf("[DB] added index %s.%s", table, indexName)
+}
+
+func ensureSmartMoneyQueryIndexes() {
+	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_time", "`wallet_address`, `chain_id`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_type_time", "`wallet_address`, `chain_id`, `event_type`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_chain_pool_time", "`chain_id`, `pool_address`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_chain_type_time", "`chain_id`, `event_type`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_type_chain_nft", "`event_type`, `chain_id`, `nft_token_id`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_chain_nft_time", "`chain_id`, `nft_token_id`, `tx_timestamp`")
+
+	ensureIndex("sm_lp_positions", "idx_sm_pos_wallet_chain_status_opened", "`wallet_address`, `chain_id`, `status`, `opened_at`")
+	ensureIndex("sm_lp_positions", "idx_sm_pos_pool_status_opened", "`pool_address`, `status`, `opened_at`")
+	ensureIndex("sm_lp_positions", "idx_sm_pos_status_opened_pool", "`status`, `opened_at`, `pool_address`")
+	ensureIndex("sm_lp_positions", "idx_sm_pos_status_closed", "`status`, `closed_at`")
+	ensureIndex("sm_lp_positions", "idx_sm_pos_chain_nft", "`chain_id`, `nft_token_id`")
+
+	ensureIndex("sm_lp_active_positions", "idx_sm_active_chain_nft", "`chain_id`, `nft_token_id`")
+	ensureIndex("monitored_wallets", "idx_sm_wallet_active_created", "`is_active`, `created_at`")
+	ensureIndex("monitored_wallets", "idx_sm_wallet_source_active_created", "`source`, `is_active`, `created_at`")
+	ensureIndex("watch_contracts", "idx_sm_watch_contract_active", "`is_active`")
+
+	ensureIndex("pools", "idx_pools_chain_address", "`chain`, `address`")
+	ensureIndex("pools", "idx_pools_chain_updated_at", "`chain`, `updated_at`")
+	ensureIndex("pools", "idx_pools_source_chain_updated_at", "`source_requested_chain`, `updated_at`")
 }
 
 func normalizeTradeRecordProfitFormula() {
