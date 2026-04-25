@@ -88,6 +88,7 @@ func autoMigrate() error {
 		&models.SmartMoneyActivePosition{},
 		&models.SmartMoneyWalletTransferEvent{},
 		&models.SmartMoneyWalletDailySnapshot{},
+		&models.SmartMoneyWalletLiveState{},
 		&models.SmartMoneyLPDailyStat{},
 		&models.SmartMoneyGoldenDogConfig{},
 		&models.SmartMoneyWatchWallet{},
@@ -225,7 +226,19 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("sm_lp_active_positions", "idx_sm_active_chain_nft", "`chain_id`, `nft_token_id`")
 	ensureIndex("monitored_wallets", "idx_sm_wallet_active_created", "`is_active`, `created_at`")
 	ensureIndex("monitored_wallets", "idx_sm_wallet_source_active_created", "`source`, `is_active`, `created_at`")
+	ensureIndex("monitored_wallets", "idx_sm_wallet_active_address_chain", "`is_active`, `address`, `chain_id`")
 	ensureIndex("watch_contracts", "idx_sm_watch_contract_active", "`is_active`")
+
+	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_total", "`snapshot_day`, `total_usd`")
+	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_wallet", "`snapshot_day`, `wallet_address`, `chain_id`")
+	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_chain_wallet_day", "`chain_id`, `wallet_address`, `snapshot_day`")
+
+	ensureIndex("sm_lp_daily_stats", "idx_sm_lp_stat_day_wallet", "`stat_day`, `wallet_address`, `chain_id`")
+	ensureIndex("sm_lp_daily_stats", "idx_sm_lp_stat_day_pnl", "`stat_day`, `estimated_realized_pnl_usd`")
+
+	ensureIndex("sm_wallet_live_states", "idx_sm_wallet_live_refreshed", "`refreshed_at`")
+	ensureIndex("sm_wallet_live_states", "idx_sm_wallet_live_total", "`total_usd`")
+	ensureIndex("sm_wallet_live_states", "idx_sm_wallet_live_chain_wallet", "`chain_id`, `wallet_address`")
 
 	ensureIndex("pools", "idx_pools_chain_address", "`chain`, `address`")
 	ensureIndex("pools", "idx_pools_chain_updated_at", "`chain`, `updated_at`")

@@ -401,7 +401,7 @@ export default function SmartMoneyAssetsPanel({
       if (view === 'wallets' && detailWalletId && selectedWallet) {
         loadWalletDetail();
       }
-    }, Math.max(10, Number(refreshInterval || 10)) * 1000);
+    }, Math.max(60, Number(refreshInterval || 10)) * 1000);
     return () => clearInterval(timer);
   }, [detailWalletId, hasInitData, isAdmin, loadSmartMoney, loadWalletDetail, refreshInterval, selectedWallet, view]);
 

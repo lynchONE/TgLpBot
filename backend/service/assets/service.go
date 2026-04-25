@@ -40,6 +40,8 @@ type Service struct {
 	stopCh   chan struct{}
 	ticker   *time.Ticker
 
+	smartMoneyLiveRefreshMu sync.Mutex
+
 	decimalsMu    sync.RWMutex
 	decimalsCache map[string]int
 }
@@ -106,9 +108,11 @@ func (s *Service) runScheduler() {
 	time.Sleep(90 * time.Second)
 	lastSnapshotDay := ""
 	lastCompleted := ""
+	lastSmartMoneyLiveRefresh := time.Time{}
 	for {
 		s.tryCapturePreviousDayUserAssetSnapshots(&lastSnapshotDay)
 		s.tryAggregatePreviousDay(&lastCompleted)
+		s.tryRefreshSmartMoneyLiveStates(&lastSmartMoneyLiveRefresh)
 		select {
 		case <-s.stopCh:
 			return

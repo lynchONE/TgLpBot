@@ -6,24 +6,31 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/base/timeutil"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"gorm.io/gorm"
 )
 
 const (
 	recognizedAssetBasis = "原生币 + 稳定币 + 近30天参与LP的代币余额 + 当前open LP估算持仓"
 	// Reuse one short-lived Redis entry for all smart-money wallet balance reads.
-	smartMoneyWalletLiveCacheTTL  = 5 * time.Minute
-	smartMoneyLeaderboardCacheTTL = 72 * time.Hour
-	smartMoneyDefaultPageSize     = 10
-	smartMoneyMaxPageSize         = 50
+	smartMoneyWalletLiveCacheTTL        = 5 * time.Minute
+	smartMoneyWalletLiveRefreshInterval = 5 * time.Minute
+	smartMoneyWalletLiveRefreshTimeout  = 4 * time.Minute
+	smartMoneyWalletLiveRefreshWorkers  = 3
+	smartMoneyLeaderboardCacheTTL       = 72 * time.Hour
+	smartMoneyDefaultPageSize           = 10
+	smartMoneyMaxPageSize               = 50
 )
 
 var smartMoneyLeaderboardMetrics = []string{"pnl", "yield_rate", "participation"}
@@ -103,6 +110,33 @@ func (c cachedSmartMoneyWalletLiveState) liveState() smartMoneyWalletLiveState {
 		lastActiveAt:    c.LastActiveAt,
 		warnings:        c.Warnings,
 	}
+}
+
+func readCachedSmartMoneyWalletLiveState(chainID int, address string) (smartMoneyWalletLiveState, bool) {
+	var state smartMoneyWalletLiveState
+	if database.RedisClient == nil {
+		return state, false
+	}
+	raw, err := database.GetCache(smartMoneyWalletLiveCacheKey(chainID, address))
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return state, false
+	}
+	var cached cachedSmartMoneyWalletLiveState
+	if err := json.Unmarshal([]byte(raw), &cached); err != nil {
+		return state, false
+	}
+	return cached.liveState(), true
+}
+
+func writeCachedSmartMoneyWalletLiveState(chainID int, address string, state smartMoneyWalletLiveState) {
+	if database.RedisClient == nil {
+		return
+	}
+	body, err := json.Marshal(newCachedSmartMoneyWalletLiveState(state))
+	if err != nil {
+		return
+	}
+	_ = database.SetCache(smartMoneyWalletLiveCacheKey(chainID, address), string(body), smartMoneyWalletLiveCacheTTL)
 }
 
 func clampSmartMoneyPage(page int) int {
@@ -392,6 +426,26 @@ func smartMoneyWalletSummaryFromSnapshot(walletRow models.MonitoredWallet, snaps
 	return summary
 }
 
+func smartMoneyWalletLiveStateFromModel(row models.SmartMoneyWalletLiveState) smartMoneyWalletLiveState {
+	state := smartMoneyWalletLiveState{
+		assets: smartMoneyAssetBreakdown{
+			NativeUSD:         round2(row.NativeUSD),
+			StableUSD:         round2(row.StableUSD),
+			TrackedTokenUSD:   round2(row.TrackedTokenUSD),
+			OpenLPUSD:         round2(row.OpenLPUSD),
+			TotalUSD:          round2(row.TotalUSD),
+			TrackedTokenCount: row.TrackedTokenCount,
+		},
+		activePoolCount: row.ActivePoolCount,
+		todayEventCount: row.TodayEventCount,
+		lastActiveAt:    row.LastActiveAt,
+	}
+	if msg := strings.TrimSpace(row.ErrorMessage); msg != "" {
+		state.warnings = append(state.warnings, fmt.Sprintf("last live-state refresh error: %s", msg))
+	}
+	return state
+}
+
 func (s *Service) GetSmartMoneyWalletBalance(ctx context.Context, address string, chainID int, forceRefresh bool) (*float64, error) {
 	address = normalizeAddress(address)
 	if address == "" {
@@ -419,10 +473,6 @@ func (s *Service) GetSmartMoneyOverview(ctx context.Context, days int, page int,
 	size = clampSmartMoneyPageSize(size)
 	keyword = strings.TrimSpace(keyword)
 
-	allWallets, err := s.loadActiveSmartMoneyWallets(ctx)
-	if err != nil {
-		return nil, err
-	}
 	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
 	pageWallets, total, err := s.loadPagedSmartMoneyWallets(ctx, snapshotDay, page, size, keyword)
 	if err != nil {
@@ -445,13 +495,13 @@ func (s *Service) GetSmartMoneyOverview(ctx context.Context, days int, page int,
 
 	start := dayStart(timeutil.Now()).AddDate(0, 0, -defaultHistoryDays)
 	end := dayStart(timeutil.Now())
-	history, err := s.loadSmartMoneyHistory(ctx, allWallets, start, end)
+	history, err := s.loadSmartMoneyAggregateHistory(ctx, start, end)
 	if err != nil {
 		return nil, err
 	}
 	resp.History = history
 
-	summaryHistory, err := s.loadSmartMoneyHistory(ctx, allWallets, snapshotDay, snapshotDay.Add(24*time.Hour))
+	summaryHistory, err := s.loadSmartMoneyAggregateHistory(ctx, snapshotDay, snapshotDay.Add(24*time.Hour))
 	if err != nil {
 		return nil, err
 	}
@@ -477,25 +527,124 @@ func (s *Service) GetSmartMoneyOverview(ctx context.Context, days int, page int,
 	}
 
 	for _, walletRow := range pageWallets {
-		live, err := s.loadSmartMoneyWalletLiveStateCached(ctx, walletRow, forceRefresh)
+		live, ok, err := s.loadSmartMoneyWalletLiveStateForOverview(ctx, walletRow, forceRefresh)
 		if err != nil {
-			resp.Warnings = append(resp.Warnings, fmt.Sprintf("wallet %s unavailable: %v", walletRow.Address, err))
-			key := formatDay(snapshotDay) + "|" + smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
-			resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromSnapshot(walletRow, snapshotMap[key], lpStatMap[smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]))
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("wallet %s local state unavailable: %v", walletRow.Address, err))
+		}
+		if ok {
+			resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromLive(walletRow, live))
+			resp.Warnings = append(resp.Warnings, live.warnings...)
 			continue
 		}
-		resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromLive(walletRow, live))
-		resp.Warnings = append(resp.Warnings, live.warnings...)
+		key := formatDay(snapshotDay) + "|" + smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
+		resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromSnapshot(walletRow, snapshotMap[key], lpStatMap[smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]))
 	}
 
-	windowStart := dayStart(timeutil.Now()).AddDate(0, 0, -days)
-	statsByWallet, err := s.computeSmartMoneyStats(ctx, allWallets, windowStart, timeutil.Now())
+	window, err := s.loadSmartMoneyWindowStatsFromDaily(ctx, days)
+	if err != nil {
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf("daily smart-money stats unavailable: %v", err))
+		resp.Windows = []SmartMoneyWindowStats{{Days: days}}
+	} else {
+		resp.Windows = []SmartMoneyWindowStats{window}
+	}
+	resp.Warnings = dedupeStrings(resp.Warnings)
+	return resp, nil
+}
+
+func (s *Service) loadSmartMoneyAggregateHistory(ctx context.Context, start time.Time, end time.Time) ([]SmartMoneyHistoryPoint, error) {
+	if !start.Before(end) {
+		return nil, nil
+	}
+
+	var rows []smartMoneyHistoryDayRow
+	openLPSelect := "COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd"
+	if database.DB != nil && !database.DB.Migrator().HasColumn(&models.SmartMoneyWalletDailySnapshot{}, "OpenLPUSD") {
+		openLPSelect = "0 AS open_lp_usd"
+	}
+	err := database.DB.WithContext(ctx).
+		Raw(fmt.Sprintf(`
+			SELECT
+				s.snapshot_day AS day,
+				COALESCE(SUM(s.native_usd), 0) AS native_usd,
+				COALESCE(SUM(s.stable_usd), 0) AS stable_usd,
+				COALESCE(SUM(s.tracked_token_usd), 0) AS tracked_token_usd,
+				%s,
+				COALESCE(SUM(s.total_usd), 0) AS total_usd,
+				MAX(CASE WHEN s.has_transfer_in THEN 1 ELSE 0 END) AS has_transfer_in,
+				MAX(CASE WHEN s.has_transfer_out THEN 1 ELSE 0 END) AS has_transfer_out,
+				COALESCE(SUM(s.transfer_in_count), 0) AS transfer_in_count,
+				COALESCE(SUM(s.transfer_out_count), 0) AS transfer_out_count,
+				COALESCE(SUM(s.transfer_in_usd), 0) AS transfer_in_usd,
+				COALESCE(SUM(s.transfer_out_usd), 0) AS transfer_out_usd
+			FROM sm_wallet_daily_snapshots s
+			INNER JOIN monitored_wallets w
+				ON w.address = s.wallet_address
+				AND w.chain_id = s.chain_id
+				AND w.is_active = 1
+			WHERE s.snapshot_day >= ?
+			  AND s.snapshot_day < ?
+			GROUP BY s.snapshot_day
+			ORDER BY s.snapshot_day ASC
+		`, openLPSelect), formatDay(start), formatDay(end)).
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	resp.Windows = []SmartMoneyWindowStats{aggregateSmartMoneyWindowStats(days, statsByWallet)}
-	resp.Warnings = dedupeStrings(resp.Warnings)
-	return resp, nil
+	return buildSmartMoneyHistoryPoints(rows), nil
+}
+
+func (s *Service) loadSmartMoneyWindowStatsFromDaily(ctx context.Context, days int) (SmartMoneyWindowStats, error) {
+	days = clampLPDays(days)
+	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	startDay := snapshotDay.AddDate(0, 0, -(days - 1))
+
+	type row struct {
+		EstimatedRealizedPnLUSD float64 `gorm:"column:estimated_realized_pnl_usd"`
+		MatchedCostUSD          float64 `gorm:"column:matched_cost_usd"`
+		AddCount                int     `gorm:"column:add_count"`
+		RemoveCount             int     `gorm:"column:remove_count"`
+		MatchedRemoveCount      int     `gorm:"column:matched_remove_count"`
+		UnmatchedRemoveCount    int     `gorm:"column:unmatched_remove_count"`
+		ActivePoolCount         int     `gorm:"column:active_pool_count"`
+	}
+	var result row
+	err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT
+				COALESCE(SUM(s.estimated_realized_pnl_usd), 0) AS estimated_realized_pnl_usd,
+				COALESCE(SUM(s.matched_cost_usd), 0) AS matched_cost_usd,
+				COALESCE(SUM(s.add_count), 0) AS add_count,
+				COALESCE(SUM(s.remove_count), 0) AS remove_count,
+				COALESCE(SUM(s.matched_remove_count), 0) AS matched_remove_count,
+				COALESCE(SUM(s.unmatched_remove_count), 0) AS unmatched_remove_count,
+				COALESCE(SUM(s.active_pool_count), 0) AS active_pool_count
+			FROM sm_lp_daily_stats s
+			INNER JOIN monitored_wallets w
+				ON w.address = s.wallet_address
+				AND w.chain_id = s.chain_id
+				AND w.is_active = 1
+			WHERE s.stat_day >= ?
+			  AND s.stat_day <= ?
+		`, formatDay(startDay), formatDay(snapshotDay)).
+		Scan(&result).Error
+	if err != nil {
+		return SmartMoneyWindowStats{}, err
+	}
+
+	out := SmartMoneyWindowStats{
+		Days:                    days,
+		EstimatedRealizedPnLUSD: round2(result.EstimatedRealizedPnLUSD),
+		MatchedCostUSD:          round2(result.MatchedCostUSD),
+		AddCount:                result.AddCount,
+		RemoveCount:             result.RemoveCount,
+		MatchedRemoveCount:      result.MatchedRemoveCount,
+		UnmatchedRemoveCount:    result.UnmatchedRemoveCount,
+		ActivePoolCount:         result.ActivePoolCount,
+	}
+	if out.MatchedCostUSD > 0 {
+		out.YieldRate = round4(out.EstimatedRealizedPnLUSD / out.MatchedCostUSD)
+	}
+	return out, nil
 }
 
 func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chainID int, days int, forceRefresh bool) (*SmartMoneyWalletResponse, error) {
@@ -586,26 +735,19 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
-	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	if !forceRefresh {
 		if cached, ok := readCachedSmartMoneyLeaderboard(snapshotDay, metric); ok {
-			applySmartMoneyLeaderboardWalletMeta(cached, wallets)
 			cached.Timezone = timeutil.LocationName()
 			return paginateSmartMoneyLeaderboardResponse(cached, page, pageSize, keyword), nil
 		}
 	}
 
-	inputs, err := s.buildSmartMoneyLeaderboardSnapshotInputs(ctx, wallets, snapshotDay)
+	inputs, err := s.buildSmartMoneyLeaderboardSnapshotInputs(ctx, snapshotDay)
 	if err != nil {
 		return nil, err
 	}
 
 	fullResp := buildSmartMoneySnapshotLeaderboard(metric, snapshotDay, comparedDay, 0, inputs)
-	applySmartMoneyLeaderboardWalletMeta(fullResp, wallets)
 	fullResp.Timezone = timeutil.LocationName()
 	writeCachedSmartMoneyLeaderboard(snapshotDay, metric, fullResp)
 	return paginateSmartMoneyLeaderboardResponse(fullResp, page, pageSize, keyword), nil
@@ -620,30 +762,111 @@ func (s *Service) deleteCachedSmartMoneyLeaderboards(snapshotDay time.Time) {
 	}
 }
 
-func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, wallets []models.MonitoredWallet, snapshotDay time.Time) ([]smartMoneyLeaderboardSnapshotInput, error) {
+func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, snapshotDay time.Time) ([]smartMoneyLeaderboardSnapshotInput, error) {
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
-	snapshotMap, err := s.loadSmartMoneySnapshotRows(ctx, wallets, comparedDay, snapshotDay)
-	if err != nil {
-		return nil, err
+	type row struct {
+		WalletAddress string         `gorm:"column:wallet_address"`
+		ChainID       int            `gorm:"column:chain_id"`
+		Label         sql.NullString `gorm:"column:label"`
+		AvatarURL     sql.NullString `gorm:"column:avatar_url"`
+
+		CurrentTotalUSD         float64 `gorm:"column:current_total_usd"`
+		CurrentHasTransferIn    bool    `gorm:"column:current_has_transfer_in"`
+		CurrentHasTransferOut   bool    `gorm:"column:current_has_transfer_out"`
+		CurrentTransferInCount  int     `gorm:"column:current_transfer_in_count"`
+		CurrentTransferOutCount int     `gorm:"column:current_transfer_out_count"`
+		CurrentTransferInUSD    float64 `gorm:"column:current_transfer_in_usd"`
+		CurrentTransferOutUSD   float64 `gorm:"column:current_transfer_out_usd"`
+		PreviousTotalUSD        float64 `gorm:"column:previous_total_usd"`
+
+		StatWalletAddress    sql.NullString `gorm:"column:stat_wallet_address"`
+		AddCount             int            `gorm:"column:add_count"`
+		RemoveCount          int            `gorm:"column:remove_count"`
+		ActivePoolCount      int            `gorm:"column:active_pool_count"`
+		UnmatchedRemoveCount int            `gorm:"column:unmatched_remove_count"`
 	}
-	lpStatMap, err := s.loadSmartMoneyDailyStatRows(ctx, wallets, snapshotDay)
-	if err != nil {
+
+	var rows []row
+	if err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT
+				w.address AS wallet_address,
+				w.chain_id AS chain_id,
+				w.label AS label,
+				w.avatar_url AS avatar_url,
+				cur.total_usd AS current_total_usd,
+				cur.has_transfer_in AS current_has_transfer_in,
+				cur.has_transfer_out AS current_has_transfer_out,
+				cur.transfer_in_count AS current_transfer_in_count,
+				cur.transfer_out_count AS current_transfer_out_count,
+				cur.transfer_in_usd AS current_transfer_in_usd,
+				cur.transfer_out_usd AS current_transfer_out_usd,
+				prev.total_usd AS previous_total_usd,
+				stat.wallet_address AS stat_wallet_address,
+				COALESCE(stat.add_count, 0) AS add_count,
+				COALESCE(stat.remove_count, 0) AS remove_count,
+				COALESCE(stat.active_pool_count, 0) AS active_pool_count,
+				COALESCE(stat.unmatched_remove_count, 0) AS unmatched_remove_count
+			FROM monitored_wallets w
+			INNER JOIN sm_wallet_daily_snapshots cur
+				ON cur.wallet_address = w.address
+				AND cur.chain_id = w.chain_id
+				AND cur.snapshot_day = ?
+			INNER JOIN sm_wallet_daily_snapshots prev
+				ON prev.wallet_address = w.address
+				AND prev.chain_id = w.chain_id
+				AND prev.snapshot_day = ?
+			LEFT JOIN sm_lp_daily_stats stat
+				ON stat.wallet_address = w.address
+				AND stat.chain_id = w.chain_id
+				AND stat.stat_day = ?
+			WHERE w.is_active = 1
+		`, formatDay(snapshotDay), formatDay(comparedDay), formatDay(snapshotDay)).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
-	inputs := make([]smartMoneyLeaderboardSnapshotInput, 0, len(wallets))
-	for _, walletRow := range wallets {
-		key := smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
-		current := snapshotMap[formatDay(snapshotDay)+"|"+key]
-		previous := snapshotMap[formatDay(comparedDay)+"|"+key]
-		if current == nil || previous == nil {
+	inputs := make([]smartMoneyLeaderboardSnapshotInput, 0, len(rows))
+	for _, item := range rows {
+		walletRow := models.MonitoredWallet{
+			Address: normalizeAddress(item.WalletAddress),
+			ChainID: item.ChainID,
+		}
+		if walletRow.Address == "" {
 			continue
+		}
+		if item.Label.Valid {
+			label := strings.TrimSpace(item.Label.String)
+			walletRow.Label = &label
+		}
+		if item.AvatarURL.Valid {
+			avatarURL := strings.TrimSpace(item.AvatarURL.String)
+			walletRow.AvatarURL = &avatarURL
+		}
+		current := &models.SmartMoneyWalletDailySnapshot{
+			TotalUSD:         item.CurrentTotalUSD,
+			HasTransferIn:    item.CurrentHasTransferIn,
+			HasTransferOut:   item.CurrentHasTransferOut,
+			TransferInCount:  item.CurrentTransferInCount,
+			TransferOutCount: item.CurrentTransferOutCount,
+			TransferInUSD:    item.CurrentTransferInUSD,
+			TransferOutUSD:   item.CurrentTransferOutUSD,
+		}
+		previous := &models.SmartMoneyWalletDailySnapshot{TotalUSD: item.PreviousTotalUSD}
+		var dailyStat *models.SmartMoneyLPDailyStat
+		if item.StatWalletAddress.Valid {
+			dailyStat = &models.SmartMoneyLPDailyStat{
+				AddCount:             item.AddCount,
+				RemoveCount:          item.RemoveCount,
+				ActivePoolCount:      item.ActivePoolCount,
+				UnmatchedRemoveCount: item.UnmatchedRemoveCount,
+			}
 		}
 		inputs = append(inputs, smartMoneyLeaderboardSnapshotInput{
 			Wallet:    walletRow,
 			Current:   current,
 			Previous:  previous,
-			DailyStat: lpStatMap[key],
+			DailyStat: dailyStat,
 		})
 	}
 	return inputs, nil
@@ -653,11 +876,7 @@ func (s *Service) refreshSmartMoneyLeaderboardCaches(ctx context.Context, snapsh
 	if database.RedisClient == nil {
 		return nil
 	}
-	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
-	if err != nil {
-		return err
-	}
-	inputs, err := s.buildSmartMoneyLeaderboardSnapshotInputs(ctx, wallets, snapshotDay)
+	inputs, err := s.buildSmartMoneyLeaderboardSnapshotInputs(ctx, snapshotDay)
 	if err != nil {
 		return err
 	}
@@ -669,6 +888,112 @@ func (s *Service) refreshSmartMoneyLeaderboardCaches(ctx context.Context, snapsh
 	}
 	s.deleteCachedSmartMoneyLeaderboards(comparedDay)
 	return nil
+}
+
+type smartMoneyLiveRefreshResult struct {
+	refreshed int
+	skipped   int
+	failed    int
+}
+
+func (s *Service) tryRefreshSmartMoneyLiveStates(lastCompleted *time.Time) {
+	if s == nil {
+		return
+	}
+	now := timeutil.Now()
+	if lastCompleted != nil && !lastCompleted.IsZero() && now.Sub(*lastCompleted) < smartMoneyWalletLiveRefreshInterval {
+		return
+	}
+	if !s.smartMoneyLiveRefreshMu.TryLock() {
+		return
+	}
+	defer s.smartMoneyLiveRefreshMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), smartMoneyWalletLiveRefreshTimeout)
+	defer cancel()
+	result, err := s.refreshSmartMoneyWalletLiveStates(ctx)
+	if err != nil {
+		log.Printf("[Assets] smart money live-state refresh incomplete refreshed=%d skipped=%d failed=%d err=%v", result.refreshed, result.skipped, result.failed, err)
+		return
+	}
+	if lastCompleted != nil {
+		*lastCompleted = timeutil.Now()
+	}
+	if result.refreshed > 0 || result.failed > 0 {
+		log.Printf("[Assets] smart money live-state refresh completed refreshed=%d skipped=%d failed=%d", result.refreshed, result.skipped, result.failed)
+	}
+}
+
+func (s *Service) refreshSmartMoneyWalletLiveStates(ctx context.Context) (smartMoneyLiveRefreshResult, error) {
+	var result smartMoneyLiveRefreshResult
+	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
+	if err != nil {
+		return result, err
+	}
+	if len(wallets) == 0 {
+		return result, nil
+	}
+
+	workers := smartMoneyWalletLiveRefreshWorkers
+	if workers <= 0 {
+		workers = 1
+	}
+	jobs := make(chan models.MonitoredWallet)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	addResult := func(refreshed, skipped, failed int) {
+		mu.Lock()
+		result.refreshed += refreshed
+		result.skipped += skipped
+		result.failed += failed
+		mu.Unlock()
+	}
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for walletRow := range jobs {
+				if ctx.Err() != nil {
+					addResult(0, 0, 1)
+					continue
+				}
+				fresh, err := s.hasFreshSmartMoneyWalletLiveState(ctx, walletRow, smartMoneyWalletLiveCacheTTL)
+				if err == nil && fresh {
+					addResult(0, 1, 0)
+					continue
+				}
+				state, err := s.loadSmartMoneyWalletLiveStateLive(ctx, walletRow)
+				if err != nil {
+					s.recordSmartMoneyWalletLiveStateError(ctx, walletRow, err)
+					addResult(0, 0, 1)
+					continue
+				}
+				if err := s.persistSmartMoneyWalletLiveState(ctx, walletRow, state, timeutil.Now()); err != nil {
+					log.Printf("[Assets] persist smart money live state failed wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
+					addResult(0, 0, 1)
+					continue
+				}
+				writeCachedSmartMoneyWalletLiveState(walletRow.ChainID, walletRow.Address, state)
+				addResult(1, 0, 0)
+			}
+		}()
+	}
+
+sendLoop:
+	for _, walletRow := range wallets {
+		select {
+		case <-ctx.Done():
+			break sendLoop
+		case jobs <- walletRow:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func normalizeLeaderboardMetric(metric string) string {
@@ -820,14 +1145,15 @@ func (s *Service) loadPagedSmartMoneyWallets(ctx context.Context, snapshotDay ti
 
 func (s *Service) loadSmartMoneyWalletLiveStateCached(ctx context.Context, walletRow models.MonitoredWallet, forceRefresh bool) (smartMoneyWalletLiveState, error) {
 	var state smartMoneyWalletLiveState
-	cacheKey := smartMoneyWalletLiveCacheKey(walletRow.ChainID, walletRow.Address)
-	if !forceRefresh && database.RedisClient != nil {
-		raw, err := database.GetCache(cacheKey)
-		if err == nil && strings.TrimSpace(raw) != "" {
-			var cached cachedSmartMoneyWalletLiveState
-			if err := json.Unmarshal([]byte(raw), &cached); err == nil {
-				return cached.liveState(), nil
-			}
+	if !forceRefresh {
+		if cached, ok := readCachedSmartMoneyWalletLiveState(walletRow.ChainID, walletRow.Address); ok {
+			return cached, nil
+		}
+		if stored, refreshedAt, ok, err := s.loadStoredSmartMoneyWalletLiveState(ctx, walletRow); err != nil {
+			log.Printf("[Assets] read smart money live state failed wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
+		} else if ok && !refreshedAt.Before(timeutil.Now().Add(-smartMoneyWalletLiveCacheTTL)) {
+			writeCachedSmartMoneyWalletLiveState(walletRow.ChainID, walletRow.Address, stored)
+			return stored, nil
 		}
 	}
 
@@ -835,12 +1161,128 @@ func (s *Service) loadSmartMoneyWalletLiveStateCached(ctx context.Context, walle
 	if err != nil {
 		return state, err
 	}
-	if database.RedisClient != nil {
-		if body, err := json.Marshal(newCachedSmartMoneyWalletLiveState(state)); err == nil {
-			_ = database.SetCache(cacheKey, string(body), smartMoneyWalletLiveCacheTTL)
+	if err := s.persistSmartMoneyWalletLiveState(ctx, walletRow, state, timeutil.Now()); err != nil {
+		log.Printf("[Assets] persist smart money live state failed wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
+	}
+	writeCachedSmartMoneyWalletLiveState(walletRow.ChainID, walletRow.Address, state)
+	return state, nil
+}
+
+func (s *Service) loadSmartMoneyWalletLiveStateForOverview(ctx context.Context, walletRow models.MonitoredWallet, forceRefresh bool) (smartMoneyWalletLiveState, bool, error) {
+	var state smartMoneyWalletLiveState
+	if !forceRefresh {
+		if cached, ok := readCachedSmartMoneyWalletLiveState(walletRow.ChainID, walletRow.Address); ok {
+			return cached, true, nil
 		}
 	}
-	return state, nil
+	stored, _, ok, err := s.loadStoredSmartMoneyWalletLiveState(ctx, walletRow)
+	if err != nil {
+		return state, false, err
+	}
+	return stored, ok, nil
+}
+
+func (s *Service) loadStoredSmartMoneyWalletLiveState(ctx context.Context, walletRow models.MonitoredWallet) (smartMoneyWalletLiveState, time.Time, bool, error) {
+	var state smartMoneyWalletLiveState
+	if database.DB == nil {
+		return state, time.Time{}, false, fmt.Errorf("database not initialized")
+	}
+	address := normalizeAddress(walletRow.Address)
+	if address == "" {
+		return state, time.Time{}, false, nil
+	}
+
+	var row models.SmartMoneyWalletLiveState
+	err := database.DB.WithContext(ctx).
+		Where("wallet_address = ? AND chain_id = ?", address, walletRow.ChainID).
+		First(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return state, time.Time{}, false, nil
+		}
+		return state, time.Time{}, false, err
+	}
+	return smartMoneyWalletLiveStateFromModel(row), row.RefreshedAt, true, nil
+}
+
+func (s *Service) hasFreshSmartMoneyWalletLiveState(ctx context.Context, walletRow models.MonitoredWallet, maxAge time.Duration) (bool, error) {
+	if database.DB == nil {
+		return false, fmt.Errorf("database not initialized")
+	}
+	address := normalizeAddress(walletRow.Address)
+	if address == "" {
+		return true, nil
+	}
+	var count int64
+	err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyWalletLiveState{}).
+		Where("wallet_address = ? AND chain_id = ? AND refreshed_at >= ?", address, walletRow.ChainID, timeutil.Now().Add(-maxAge)).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (s *Service) persistSmartMoneyWalletLiveState(ctx context.Context, walletRow models.MonitoredWallet, state smartMoneyWalletLiveState, refreshedAt time.Time) error {
+	address := normalizeAddress(walletRow.Address)
+	if address == "" {
+		return nil
+	}
+	row := &models.SmartMoneyWalletLiveState{
+		WalletAddress:     address,
+		ChainID:           walletRow.ChainID,
+		NativeUSD:         round2(state.assets.NativeUSD),
+		StableUSD:         round2(state.assets.StableUSD),
+		TrackedTokenUSD:   round2(state.assets.TrackedTokenUSD),
+		OpenLPUSD:         round2(state.assets.OpenLPUSD),
+		TotalUSD:          round2(state.assets.TotalUSD),
+		TrackedTokenCount: state.assets.TrackedTokenCount,
+		ActivePoolCount:   state.activePoolCount,
+		TodayEventCount:   state.todayEventCount,
+		LastActiveAt:      state.lastActiveAt,
+		RefreshedAt:       refreshedAt,
+		ErrorMessage:      "",
+	}
+	return upsertByColumns(ctx, row,
+		[]string{"wallet_address", "chain_id"},
+		map[string]interface{}{
+			"native_usd":          row.NativeUSD,
+			"stable_usd":          row.StableUSD,
+			"tracked_token_usd":   row.TrackedTokenUSD,
+			"open_lp_usd":         row.OpenLPUSD,
+			"total_usd":           row.TotalUSD,
+			"tracked_token_count": row.TrackedTokenCount,
+			"active_pool_count":   row.ActivePoolCount,
+			"today_event_count":   row.TodayEventCount,
+			"last_active_at":      row.LastActiveAt,
+			"refreshed_at":        row.RefreshedAt,
+			"error_message":       "",
+			"updated_at":          refreshedAt,
+		})
+}
+
+func (s *Service) recordSmartMoneyWalletLiveStateError(ctx context.Context, walletRow models.MonitoredWallet, refreshErr error) {
+	if database.DB == nil || refreshErr == nil {
+		return
+	}
+	address := normalizeAddress(walletRow.Address)
+	if address == "" {
+		return
+	}
+	msg := strings.TrimSpace(refreshErr.Error())
+	if len(msg) > 1000 {
+		msg = msg[:1000]
+	}
+	if msg == "" {
+		return
+	}
+	if err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyWalletLiveState{}).
+		Where("wallet_address = ? AND chain_id = ?", address, walletRow.ChainID).
+		Updates(map[string]interface{}{
+			"error_message": msg,
+			"updated_at":    timeutil.Now(),
+		}).Error; err != nil {
+		log.Printf("[Assets] record smart money live state error failed wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
+	}
 }
 
 func (s *Service) loadSmartMoneyWalletLiveStateLive(ctx context.Context, walletRow models.MonitoredWallet) (smartMoneyWalletLiveState, error) {
@@ -1027,7 +1469,9 @@ func (s *Service) loadSmartMoneyOpenLPState(ctx context.Context, address string,
 						END
 					) AS net_amount_usd
 				FROM sm_lp_events
-				WHERE event_type IN ('add', 'remove')
+				WHERE wallet_address = ?
+				  AND chain_id = ?
+				  AND event_type IN ('add', 'remove')
 				GROUP BY chain_id, nft_token_id
 			) evt_net
 				ON evt_net.chain_id = p.chain_id
@@ -1035,7 +1479,7 @@ func (s *Service) loadSmartMoneyOpenLPState(ctx context.Context, address string,
 			WHERE p.wallet_address = ?
 			  AND p.chain_id = ?
 			  AND p.status = 'open'
-	`, address, chainID).
+	`, address, chainID, address, chainID).
 		Scan(&result).Error
 	return round2(result.OpenLPUSD), result.ActivePoolCount, err
 }
@@ -1406,6 +1850,9 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 		if err != nil {
 			log.Printf("[Assets] skip smart money snapshot wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
 			continue
+		}
+		if err := s.persistSmartMoneyWalletLiveState(ctx, walletRow, live, timeutil.Now()); err != nil {
+			log.Printf("[Assets] persist smart money live state from snapshot failed wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
 		}
 		activity := transferActivity[smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]
 		row := &models.SmartMoneyWalletDailySnapshot{

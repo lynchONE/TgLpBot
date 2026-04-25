@@ -142,6 +142,34 @@ func (SmartMoneyWalletDailySnapshot) TableName() string {
 	return "sm_wallet_daily_snapshots"
 }
 
+// SmartMoneyWalletLiveState stores the latest local recognized-asset state for a smart money wallet.
+type SmartMoneyWalletLiveState struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	WalletAddress string `gorm:"size:42;not null;uniqueIndex:idx_sm_wallet_live_state,priority:1" json:"wallet_address"`
+	ChainID       int    `gorm:"not null;default:56;uniqueIndex:idx_sm_wallet_live_state,priority:2" json:"chain_id"`
+
+	NativeUSD         float64 `gorm:"type:decimal(20,4);not null;default:0" json:"native_usd"`
+	StableUSD         float64 `gorm:"type:decimal(20,4);not null;default:0" json:"stable_usd"`
+	TrackedTokenUSD   float64 `gorm:"type:decimal(20,4);not null;default:0" json:"tracked_token_usd"`
+	OpenLPUSD         float64 `gorm:"type:decimal(20,4);not null;default:0" json:"open_lp_usd"`
+	TotalUSD          float64 `gorm:"type:decimal(20,4);not null;default:0;index:idx_sm_wallet_live_total" json:"total_usd"`
+	TrackedTokenCount int     `gorm:"not null;default:0" json:"tracked_token_count"`
+	ActivePoolCount   int     `gorm:"not null;default:0" json:"active_pool_count"`
+	TodayEventCount   int     `gorm:"not null;default:0" json:"today_event_count"`
+
+	LastActiveAt *time.Time `gorm:"index:idx_sm_wallet_live_last_active" json:"last_active_at"`
+	RefreshedAt  time.Time  `gorm:"not null;index:idx_sm_wallet_live_refreshed" json:"refreshed_at"`
+	ErrorMessage string     `gorm:"type:text" json:"error_message,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (SmartMoneyWalletLiveState) TableName() string {
+	return "sm_wallet_live_states"
+}
+
 // SmartMoneyLPDailyStat stores one daily smart money LP statistic row for a wallet.
 type SmartMoneyLPDailyStat struct {
 	ID uint `gorm:"primaryKey" json:"id"`
