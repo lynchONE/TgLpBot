@@ -2628,6 +2628,17 @@ const GOLDEN_DOG_INTENSITY_OPTIONS = [
     { value: 'critical_ring', label: '静音强提醒', description: '静音也响' },
 ];
 
+const GOLDEN_DOG_INTENSITY_MODE_OPTIONS = [
+    { value: 'fixed', label: '固定强度' },
+    { value: 'amount_tiers', label: '按金额阶梯' },
+];
+
+const GOLDEN_DOG_DEFAULT_AMOUNT_TIERS = [
+    { min_amount_usd: '1000', intensity: 'ring' },
+    { min_amount_usd: '5000', intensity: 'persistent_ring' },
+    { min_amount_usd: '20000', intensity: 'critical_ring' },
+];
+
 const GOLDEN_DOG_FEE_RATE_OPTIONS = [
     { value: '', label: '不限' },
     { value: '100', label: '0.0100%' },
@@ -2644,7 +2655,10 @@ function createGoldenDogDraft() {
             min_wallets: '3',
             window_minutes: '10',
             cooldown_minutes: '30',
+            min_total_amount_usd: '',
             intensity: 'ring',
+            intensity_mode: 'fixed',
+            amount_intensity_tiers: cloneGoldenDogDefaultAmountTiers(),
         },
         pool_mode: {
             enabled: false,
@@ -2660,12 +2674,38 @@ function createGoldenDogDraft() {
     };
 }
 
+function cloneGoldenDogDefaultAmountTiers() {
+    return GOLDEN_DOG_DEFAULT_AMOUNT_TIERS.map((tier) => ({ ...tier }));
+}
+
 function formatGoldenDogDraftValue(value, { emptyWhenZero = false, multiplier = 1 } = {}) {
     const num = Number(value);
     if (!Number.isFinite(num)) return emptyWhenZero ? '' : '0';
     const scaled = Number((num * multiplier).toFixed(4));
     if (emptyWhenZero && Math.abs(scaled) < 0.000001) return '';
     return String(scaled);
+}
+
+function mapGoldenDogAmountTiers(value) {
+    let rows = value;
+    if (typeof rows === 'string' && rows.trim()) {
+        try {
+            rows = JSON.parse(rows);
+        } catch {
+            rows = null;
+        }
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return cloneGoldenDogDefaultAmountTiers();
+    }
+    const mapped = rows.slice(0, 3).map((tier, index) => ({
+        min_amount_usd: formatGoldenDogDraftValue(tier?.min_amount_usd, { emptyWhenZero: false }),
+        intensity: String(tier?.intensity || GOLDEN_DOG_DEFAULT_AMOUNT_TIERS[index]?.intensity || 'ring'),
+    }));
+    while (mapped.length < 3) {
+        mapped.push({ ...GOLDEN_DOG_DEFAULT_AMOUNT_TIERS[mapped.length] });
+    }
+    return mapped;
 }
 
 function mapGoldenDogConfigToDraft(cfg) {
@@ -2675,7 +2715,10 @@ function mapGoldenDogConfigToDraft(cfg) {
     next.wallet_mode.min_wallets = String(source.min_wallets ?? 3);
     next.wallet_mode.window_minutes = String(source.window_minutes ?? 10);
     next.wallet_mode.cooldown_minutes = String(source.cooldown_minutes ?? 30);
+    next.wallet_mode.min_total_amount_usd = formatGoldenDogDraftValue(source.wallet_min_total_amount_usd, { emptyWhenZero: true });
     next.wallet_mode.intensity = String(source.wallet_intensity || 'ring');
+    next.wallet_mode.intensity_mode = String(source.wallet_intensity_mode || 'fixed');
+    next.wallet_mode.amount_intensity_tiers = mapGoldenDogAmountTiers(source.wallet_amount_intensity_tiers);
     next.pool_mode.enabled = Boolean(source.pool_enabled);
     next.pool_mode.cooldown_minutes = String(source.pool_cooldown_minutes ?? 30);
     next.pool_mode.min_total_fees = formatGoldenDogDraftValue(source.pool_min_total_fees, { emptyWhenZero: true });
@@ -2709,6 +2752,20 @@ function parseGoldenDogOptionalNumber(value, label, { max = Number.MAX_SAFE_INTE
     return num;
 }
 
+function parseGoldenDogAmountIntensityTiers(rows, intensityMode) {
+    const parsed = (Array.isArray(rows) ? rows : [])
+        .map((tier, index) => ({
+            min_amount_usd: parseGoldenDogOptionalNumber(tier?.min_amount_usd, `第 ${index + 1} 档金额`),
+            intensity: tier?.intensity || 'ring',
+        }))
+        .filter((tier) => tier.min_amount_usd > 0)
+        .sort((a, b) => a.min_amount_usd - b.min_amount_usd);
+    if (intensityMode === 'amount_tiers' && parsed.length === 0) {
+        throw new Error('按金额阶梯推送至少需要填写一档金额。');
+    }
+    return parsed;
+}
+
 function goldenDogBarkStatusText(status) {
     if (status?.bark_ready) return '已就绪';
     if (status?.bark_configured) return status?.bark_enabled ? '已配置未就绪' : '已配置未开启';
@@ -2733,6 +2790,14 @@ function countGoldenDogPoolThresholds(poolMode) {
 function goldenDogThresholdText(value, prefix = '', suffix = '') {
     const raw = String(value || '').trim();
     return raw ? `${prefix}${raw}${suffix}` : '--';
+}
+
+function goldenDogWalletTestIntensity(walletMode) {
+    if (walletMode?.intensity_mode !== 'amount_tiers') {
+        return walletMode?.intensity || 'ring';
+    }
+    const tiers = parseGoldenDogAmountIntensityTiers(walletMode?.amount_intensity_tiers, 'fixed');
+    return tiers[tiers.length - 1]?.intensity || walletMode?.intensity || 'ring';
 }
 
 function createWatchOpenAlertDraft() {
@@ -3014,6 +3079,22 @@ function GoldenDogPanelContent({
         }));
     }, []);
 
+    const updateWalletAmountTier = useCallback((index, key, value) => {
+        setDraft((prev) => {
+            const tiers = Array.isArray(prev.wallet_mode.amount_intensity_tiers)
+                ? prev.wallet_mode.amount_intensity_tiers.map((tier) => ({ ...tier }))
+                : cloneGoldenDogDefaultAmountTiers();
+            while (tiers.length < 3) {
+                tiers.push({ ...GOLDEN_DOG_DEFAULT_AMOUNT_TIERS[tiers.length] });
+            }
+            tiers[index] = { ...tiers[index], [key]: value };
+            return {
+                ...prev,
+                wallet_mode: { ...prev.wallet_mode, amount_intensity_tiers: tiers },
+            };
+        });
+    }, []);
+
     const updatePoolMode = useCallback((key, value) => {
         setDraft((prev) => ({
             ...prev,
@@ -3068,6 +3149,11 @@ function GoldenDogPanelContent({
         const walletMinWallets = parseGoldenDogRequiredInt(draft.wallet_mode.min_wallets, '钱包数量');
         const walletWindowMinutes = parseGoldenDogRequiredInt(draft.wallet_mode.window_minutes, '统计窗口');
         const walletCooldownMinutes = parseGoldenDogRequiredInt(draft.wallet_mode.cooldown_minutes, '冷却时间', { min: 0 });
+        const walletMinTotalAmountUSD = parseGoldenDogOptionalNumber(draft.wallet_mode.min_total_amount_usd, '最低合计金额');
+        const walletIntensityMode = draft.wallet_mode.intensity_mode === 'amount_tiers' ? 'amount_tiers' : 'fixed';
+        const walletAmountIntensityTiers = walletIntensityMode === 'amount_tiers'
+            ? parseGoldenDogAmountIntensityTiers(draft.wallet_mode.amount_intensity_tiers, walletIntensityMode)
+            : [];
         const poolCooldownMinutes = parseGoldenDogRequiredInt(draft.pool_mode.cooldown_minutes, '池子模式冷却时间', { min: 0 });
         const poolMinTotalFees = parseGoldenDogOptionalNumber(draft.pool_mode.min_total_fees, '最小手续费');
         const poolMinTransactionCount = parseGoldenDogOptionalNumber(draft.pool_mode.min_transaction_count, '最小交易笔数');
@@ -3094,7 +3180,10 @@ function GoldenDogPanelContent({
                 min_wallets: walletMinWallets,
                 window_minutes: walletWindowMinutes,
                 cooldown_minutes: walletCooldownMinutes,
+                min_total_amount_usd: walletMinTotalAmountUSD,
                 intensity: draft.wallet_mode.intensity || 'ring',
+                intensity_mode: walletIntensityMode,
+                amount_intensity_tiers: walletAmountIntensityTiers,
             },
             pool_mode: {
                 enabled: Boolean(draft.pool_mode.enabled),
@@ -3163,7 +3252,7 @@ function GoldenDogPanelContent({
                 const ok = await playSmartMoneyBeep();
                 setNotice(ok ? '已播放一声提示音' : '当前环境不支持播放提示音');
             } else {
-                const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
+                const intensity = mode === 'pool' ? draft.pool_mode.intensity : goldenDogWalletTestIntensity(draft.wallet_mode);
                 const resp = await testSMGoldenDogConfig({
                     apiBaseUrl, initData, chain: 'bsc', mode, intensity,
                 });
@@ -3174,7 +3263,7 @@ function GoldenDogPanelContent({
         } finally {
             setTestingMode('');
         }
-    }, [apiBaseUrl, draft.pool_mode.intensity, draft.wallet_mode.intensity, hasInitData, initData]);
+    }, [apiBaseUrl, draft.pool_mode.intensity, draft.wallet_mode, hasInitData, initData]);
 
     /* ── 渲染 ── */
     return (
@@ -3300,13 +3389,14 @@ function GoldenDogPanelContent({
                             }}>
                                 {[
                                     { l: '触发钱包', v: `${draft.wallet_mode.min_wallets || '--'}个` },
+                                    { l: '最低金额', v: goldenDogThresholdText(draft.wallet_mode.min_total_amount_usd, '$') },
                                     { l: '统计窗口', v: `${draft.wallet_mode.window_minutes || '--'}分钟` },
                                     { l: '冷却', v: `${draft.wallet_mode.cooldown_minutes || '--'}分钟` },
-                                    { l: '强度', v: goldenDogIntensityLabel(draft.wallet_mode.intensity) },
+                                    { l: '强度', v: draft.wallet_mode.intensity_mode === 'amount_tiers' ? '金额阶梯' : goldenDogIntensityLabel(draft.wallet_mode.intensity) },
                                 ].map((s, i) => (
                                     <div key={s.l} style={{
                                         flex: 1, padding: '8px 10px', textAlign: 'center',
-                                        borderRight: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                                        borderRight: i < 4 ? '1px solid rgba(255,255,255,0.04)' : 'none',
                                     }}>
                                         <div style={miniStatLabel}>{s.l}</div>
                                         <div style={miniStatValue}>{s.v}</div>
@@ -3328,11 +3418,35 @@ function GoldenDogPanelContent({
                                     <span style={fieldLabelTextCss}>冷却 (分钟)</span>
                                     <input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={fieldInputCss} />
                                 </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>最低金额 ($)</span>
+                                    <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.wallet_mode.min_total_amount_usd} onChange={(e) => updateWalletMode('min_total_amount_usd', e.target.value)} style={fieldInputCss} />
+                                </label>
                                 <div style={fieldLabelCss}>
-                                    <span style={fieldLabelTextCss}>通知强度</span>
+                                    <span style={fieldLabelTextCss}>强度模式</span>
+                                    <CustomSelect value={draft.wallet_mode.intensity_mode} options={GOLDEN_DOG_INTENSITY_MODE_OPTIONS} onChange={(v) => updateWalletMode('intensity_mode', v)} />
+                                </div>
+                                <div style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>固定强度</span>
                                     <CustomSelect value={draft.wallet_mode.intensity} options={intensityOptions} onChange={(v) => updateWalletMode('intensity', v)} />
                                 </div>
                             </div>
+                            {draft.wallet_mode.intensity_mode === 'amount_tiers' && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 10 }}>
+                                    {(draft.wallet_mode.amount_intensity_tiers || cloneGoldenDogDefaultAmountTiers()).map((tier, index) => (
+                                        <div key={index} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 6, padding: 8, borderRadius: 10, background: 'rgba(0,0,0,0.22)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                            <label style={{ ...fieldLabelCss, gap: 4 }}>
+                                                <span style={fieldLabelTextCss}>第 {index + 1} 档 ($)</span>
+                                                <input type="number" min="0" step="0.01" value={tier.min_amount_usd} onChange={(e) => updateWalletAmountTier(index, 'min_amount_usd', e.target.value)} style={fieldInputCss} />
+                                            </label>
+                                            <div style={{ ...fieldLabelCss, gap: 4 }}>
+                                                <span style={fieldLabelTextCss}>强度</span>
+                                                <CustomSelect value={tier.intensity} options={intensityOptions} onChange={(v) => updateWalletAmountTier(index, 'intensity', v)} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 

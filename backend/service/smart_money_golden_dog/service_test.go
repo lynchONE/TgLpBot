@@ -59,6 +59,81 @@ func TestPairSignalsForConfigCountsDistinctWalletsByPair(t *testing.T) {
 	}
 }
 
+func TestPairSignalsForConfigFiltersByTotalAmountUSD(t *testing.T) {
+	now := time.Now()
+	events := []models.SmartMoneyLPEvent{
+		{
+			WalletAddress: "0x00000000000000000000000000000000000000a1",
+			Token0Address: "0x0000000000000000000000000000000000000011",
+			Token1Address: "0x0000000000000000000000000000000000000022",
+			Token0Symbol:  "AAA",
+			Token1Symbol:  "BBB",
+			TotalUSD:      stringPtr("400.25"),
+			TxTimestamp:   now.Add(-2 * time.Minute),
+		},
+		{
+			WalletAddress:   "0x00000000000000000000000000000000000000b2",
+			Token0Address:   "0x0000000000000000000000000000000000000011",
+			Token1Address:   "0x0000000000000000000000000000000000000022",
+			Token0Symbol:    "AAA",
+			Token1Symbol:    "BBB",
+			Token0AmountUSD: stringPtr("350"),
+			Token1AmountUSD: stringPtr("300"),
+			TxTimestamp:     now.Add(-3 * time.Minute),
+		},
+		{
+			WalletAddress: "0x00000000000000000000000000000000000000c3",
+			Token0Address: "0x0000000000000000000000000000000000000011",
+			Token1Address: "0x0000000000000000000000000000000000000022",
+			Token0Symbol:  "AAA",
+			Token1Symbol:  "BBB",
+			TotalUSD:      stringPtr("25"),
+			TxTimestamp:   now.Add(-4 * time.Minute),
+		},
+	}
+
+	cfg := models.SmartMoneyGoldenDogConfig{
+		MinWallets:              3,
+		WindowMinutes:           10,
+		WalletMinTotalAmountUSD: 1000,
+	}
+	signals := pairSignalsForConfig(buildPairBuckets(events), now, cfg)
+	if len(signals) != 1 {
+		t.Fatalf("expected 1 signal above amount threshold, got %d", len(signals))
+	}
+	if signals[0].TotalAmountUSD < 1075.24 || signals[0].TotalAmountUSD > 1075.26 {
+		t.Fatalf("unexpected total amount %.4f", signals[0].TotalAmountUSD)
+	}
+
+	cfg.WalletMinTotalAmountUSD = 1200
+	signals = pairSignalsForConfig(buildPairBuckets(events), now, cfg)
+	if len(signals) != 0 {
+		t.Fatalf("expected no signal below amount threshold, got %d", len(signals))
+	}
+}
+
+func TestResolveWalletBarkIntensityUsesHighestAmountTier(t *testing.T) {
+	cfg := models.SmartMoneyGoldenDogConfig{
+		WalletIntensity:     BarkIntensityRing,
+		WalletIntensityMode: WalletIntensityModeAmountTiers,
+		WalletAmountIntensityTiers: EncodeAmountIntensityTiers([]AmountIntensityTier{
+			{MinAmountUSD: 1000, Intensity: BarkIntensityRing},
+			{MinAmountUSD: 5000, Intensity: BarkIntensityPersistentRing},
+			{MinAmountUSD: 20000, Intensity: BarkIntensityCriticalRing},
+		}),
+	}
+
+	if got := ResolveWalletBarkIntensity(cfg, 8000); got != BarkIntensityPersistentRing {
+		t.Fatalf("expected persistent ring for middle tier, got %q", got)
+	}
+	if got := ResolveWalletBarkIntensity(cfg, 25000); got != BarkIntensityCriticalRing {
+		t.Fatalf("expected critical ring for high tier, got %q", got)
+	}
+	if got := ResolveWalletBarkIntensity(cfg, 500); got != BarkIntensityRing {
+		t.Fatalf("expected fallback ring below tiers, got %q", got)
+	}
+}
+
 func TestCooldownActive(t *testing.T) {
 	now := time.Now()
 	state := &models.SmartMoneyGoldenDogAlertState{
@@ -137,3 +212,5 @@ func TestBarkConfigForIntensityMapsPersistentAndCritical(t *testing.T) {
 		t.Fatalf("expected empty call for critical ring, got %q", critical.Call)
 	}
 }
+
+func stringPtr(v string) *string { return &v }

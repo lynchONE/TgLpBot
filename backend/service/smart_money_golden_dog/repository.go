@@ -58,6 +58,7 @@ func (r *Repository) GetOrCreateConfig(ctx context.Context, userID uint, chain s
 		WindowMinutes:       DefaultWindowMinutes,
 		CooldownMinutes:     DefaultCooldownMinutes,
 		WalletIntensity:     BarkIntensityRing,
+		WalletIntensityMode: WalletIntensityModeFixed,
 		PoolEnabled:         false,
 		PoolCooldownMinutes: DefaultCooldownMinutes,
 		PoolIntensity:       BarkIntensityRing,
@@ -100,6 +101,9 @@ func (r *Repository) ListRecentAddEvents(ctx context.Context, chainID int, since
 			"token1_address",
 			"token0_symbol",
 			"token1_symbol",
+			"token0_amount_usd",
+			"token1_amount_usd",
+			"total_usd",
 			"tx_timestamp",
 		}).
 		Where("chain_id = ? AND event_type = ? AND tx_timestamp >= ?", chainID, "add", since).

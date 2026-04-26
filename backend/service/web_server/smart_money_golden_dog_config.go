@@ -25,11 +25,14 @@ type smartMoneyGoldenDogMessageEnvelope struct {
 }
 
 type smartMoneyGoldenDogWalletModePayload struct {
-	Enabled         *bool   `json:"enabled"`
-	MinWallets      *int    `json:"min_wallets"`
-	WindowMinutes   *int    `json:"window_minutes"`
-	CooldownMinutes *int    `json:"cooldown_minutes"`
-	Intensity       *string `json:"intensity"`
+	Enabled              *bool                      `json:"enabled"`
+	MinWallets           *int                       `json:"min_wallets"`
+	WindowMinutes        *int                       `json:"window_minutes"`
+	CooldownMinutes      *int                       `json:"cooldown_minutes"`
+	MinTotalAmountUSD    *float64                   `json:"min_total_amount_usd"`
+	Intensity            *string                    `json:"intensity"`
+	IntensityMode        *string                    `json:"intensity_mode"`
+	AmountIntensityTiers []smgd.AmountIntensityTier `json:"amount_intensity_tiers"`
 }
 
 type smartMoneyGoldenDogPoolModePayload struct {
@@ -51,20 +54,23 @@ type smartMoneyGoldenDogUpdateRequest struct {
 	WalletMode *smartMoneyGoldenDogWalletModePayload `json:"wallet_mode"`
 	PoolMode   *smartMoneyGoldenDogPoolModePayload   `json:"pool_mode"`
 
-	Enabled                     *bool    `json:"enabled"`
-	MinWallets                  *int     `json:"min_wallets"`
-	WindowMinutes               *int     `json:"window_minutes"`
-	CooldownMinutes             *int     `json:"cooldown_minutes"`
-	WalletIntensity             *string  `json:"wallet_intensity"`
-	PoolEnabled                 *bool    `json:"pool_enabled"`
-	PoolCooldownMinutes         *int     `json:"pool_cooldown_minutes"`
-	PoolMinTotalFees            *float64 `json:"pool_min_total_fees"`
-	PoolMinTransactionCount     *int     `json:"pool_min_transaction_count"`
-	PoolMinTVL                  *float64 `json:"pool_min_tvl"`
-	PoolMinVolume               *float64 `json:"pool_min_volume"`
-	PoolMinFeeRate              *float64 `json:"pool_min_fee_rate"`
-	PoolMinActiveLiquidityRatio *float64 `json:"pool_min_active_liquidity_ratio"`
-	PoolIntensity               *string  `json:"pool_intensity"`
+	Enabled                     *bool                      `json:"enabled"`
+	MinWallets                  *int                       `json:"min_wallets"`
+	WindowMinutes               *int                       `json:"window_minutes"`
+	CooldownMinutes             *int                       `json:"cooldown_minutes"`
+	WalletMinTotalAmountUSD     *float64                   `json:"wallet_min_total_amount_usd"`
+	WalletIntensity             *string                    `json:"wallet_intensity"`
+	WalletIntensityMode         *string                    `json:"wallet_intensity_mode"`
+	WalletAmountIntensityTiers  []smgd.AmountIntensityTier `json:"wallet_amount_intensity_tiers"`
+	PoolEnabled                 *bool                      `json:"pool_enabled"`
+	PoolCooldownMinutes         *int                       `json:"pool_cooldown_minutes"`
+	PoolMinTotalFees            *float64                   `json:"pool_min_total_fees"`
+	PoolMinTransactionCount     *int                       `json:"pool_min_transaction_count"`
+	PoolMinTVL                  *float64                   `json:"pool_min_tvl"`
+	PoolMinVolume               *float64                   `json:"pool_min_volume"`
+	PoolMinFeeRate              *float64                   `json:"pool_min_fee_rate"`
+	PoolMinActiveLiquidityRatio *float64                   `json:"pool_min_active_liquidity_ratio"`
+	PoolIntensity               *string                    `json:"pool_intensity"`
 }
 
 type smartMoneyGoldenDogTestRequest struct {
@@ -218,8 +224,17 @@ func applySmartMoneyGoldenDogFlatUpdates(updates map[string]any, req *smartMoney
 	if req.CooldownMinutes != nil {
 		updates["cooldown_minutes"] = clampSmartMoneyGoldenDogCooldownMinutes(*req.CooldownMinutes)
 	}
+	if req.WalletMinTotalAmountUSD != nil {
+		updates["wallet_min_total_amount_usd"] = clampSmartMoneyGoldenDogMetricFloat(*req.WalletMinTotalAmountUSD)
+	}
 	if req.WalletIntensity != nil {
 		updates["wallet_intensity"] = smgd.NormalizeBarkIntensity(*req.WalletIntensity)
+	}
+	if req.WalletIntensityMode != nil {
+		updates["wallet_intensity_mode"] = smgd.NormalizeWalletIntensityMode(*req.WalletIntensityMode)
+	}
+	if req.WalletAmountIntensityTiers != nil {
+		updates["wallet_amount_intensity_tiers"] = smgd.EncodeAmountIntensityTiers(req.WalletAmountIntensityTiers)
 	}
 	if req.PoolEnabled != nil {
 		updates["pool_enabled"] = *req.PoolEnabled
@@ -264,8 +279,17 @@ func applySmartMoneyGoldenDogNestedUpdates(updates map[string]any, walletMode *s
 		if walletMode.CooldownMinutes != nil {
 			updates["cooldown_minutes"] = clampSmartMoneyGoldenDogCooldownMinutes(*walletMode.CooldownMinutes)
 		}
+		if walletMode.MinTotalAmountUSD != nil {
+			updates["wallet_min_total_amount_usd"] = clampSmartMoneyGoldenDogMetricFloat(*walletMode.MinTotalAmountUSD)
+		}
 		if walletMode.Intensity != nil {
 			updates["wallet_intensity"] = smgd.NormalizeBarkIntensity(*walletMode.Intensity)
+		}
+		if walletMode.IntensityMode != nil {
+			updates["wallet_intensity_mode"] = smgd.NormalizeWalletIntensityMode(*walletMode.IntensityMode)
+		}
+		if walletMode.AmountIntensityTiers != nil {
+			updates["wallet_amount_intensity_tiers"] = smgd.EncodeAmountIntensityTiers(walletMode.AmountIntensityTiers)
 		}
 	}
 
@@ -315,8 +339,14 @@ func applySmartMoneyGoldenDogPreview(cfg *models.SmartMoneyGoldenDogConfig, upda
 			cfg.WindowMinutes = value.(int)
 		case "cooldown_minutes":
 			cfg.CooldownMinutes = value.(int)
+		case "wallet_min_total_amount_usd":
+			cfg.WalletMinTotalAmountUSD = value.(float64)
 		case "wallet_intensity":
 			cfg.WalletIntensity = value.(string)
+		case "wallet_intensity_mode":
+			cfg.WalletIntensityMode = value.(string)
+		case "wallet_amount_intensity_tiers":
+			cfg.WalletAmountIntensityTiers = value.(string)
 		case "pool_enabled":
 			cfg.PoolEnabled = value.(bool)
 		case "pool_cooldown_minutes":

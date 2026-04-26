@@ -14,7 +14,10 @@ type SmartMoneyGoldenDogConfig struct {
 	MinWallets                  int            `gorm:"not null;default:3" json:"min_wallets"`
 	WindowMinutes               int            `gorm:"not null;default:10" json:"window_minutes"`
 	CooldownMinutes             int            `gorm:"not null;default:30" json:"cooldown_minutes"`
+	WalletMinTotalAmountUSD     float64        `gorm:"type:double;not null;default:0" json:"wallet_min_total_amount_usd"`
 	WalletIntensity             string         `gorm:"size:32;not null;default:'ring'" json:"wallet_intensity"`
+	WalletIntensityMode         string         `gorm:"size:32;not null;default:'fixed'" json:"wallet_intensity_mode"`
+	WalletAmountIntensityTiers  string         `gorm:"type:text" json:"wallet_amount_intensity_tiers"`
 	PoolEnabled                 bool           `gorm:"not null;default:false" json:"pool_enabled"`
 	PoolCooldownMinutes         int            `gorm:"not null;default:30" json:"pool_cooldown_minutes"`
 	PoolMinTotalFees            float64        `gorm:"type:double;not null;default:0" json:"pool_min_total_fees"`

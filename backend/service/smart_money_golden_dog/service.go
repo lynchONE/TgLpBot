@@ -7,10 +7,12 @@ import (
 	"TgLpBot/base/security"
 	userSvc "TgLpBot/service/user"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,10 +32,20 @@ const (
 	BarkIntensityCriticalRing   = "critical_ring"
 )
 
+const (
+	WalletIntensityModeFixed       = "fixed"
+	WalletIntensityModeAmountTiers = "amount_tiers"
+)
+
 type BarkIntensityOption struct {
 	Value       string `json:"value"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
+}
+
+type AmountIntensityTier struct {
+	MinAmountUSD float64 `json:"min_amount_usd"`
+	Intensity    string  `json:"intensity"`
 }
 
 type BarkStatus struct {
@@ -50,16 +62,23 @@ type Service struct {
 }
 
 type pairBucket struct {
-	Key        string
-	Label      string
-	WalletSeen map[string]time.Time
+	Key    string
+	Label  string
+	Events []pairBucketEvent
+}
+
+type pairBucketEvent struct {
+	Wallet    string
+	SeenAt    time.Time
+	AmountUSD float64
 }
 
 type pairSignal struct {
-	Key         string
-	Label       string
-	WalletCount int
-	LatestAt    time.Time
+	Key            string
+	Label          string
+	WalletCount    int
+	LatestAt       time.Time
+	TotalAmountUSD float64
 }
 
 type poolSignal struct {
@@ -224,8 +243,9 @@ func (s *Service) runOnce(ctx context.Context) error {
 								continue
 							}
 
+							intensity := ResolveWalletBarkIntensity(cfg, signal.TotalAmountUSD)
 							title, body := buildWalletBarkMessage(signal, cfg)
-							if err := notify.SendBarkWithConfig(title, body, barkConfigForIntensity(barkStatus.Config, cfg.WalletIntensity)); err != nil {
+							if err := notify.SendBarkWithConfig(title, body, barkConfigForIntensity(barkStatus.Config, intensity)); err != nil {
 								log.Printf("[GoldenDog] bark notify failed user=%d pair=%s: %v", cfg.UserID, signal.Key, err)
 								continue
 							}
@@ -360,6 +380,84 @@ func NormalizeBarkIntensity(value string) string {
 	return normalizeBarkIntensity(value)
 }
 
+func normalizeWalletIntensityMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case WalletIntensityModeAmountTiers, "tiered", "amount", "amount_tier":
+		return WalletIntensityModeAmountTiers
+	default:
+		return WalletIntensityModeFixed
+	}
+}
+
+func NormalizeWalletIntensityMode(value string) string {
+	return normalizeWalletIntensityMode(value)
+}
+
+func NormalizeAmountIntensityTiers(tiers []AmountIntensityTier) []AmountIntensityTier {
+	if len(tiers) == 0 {
+		return nil
+	}
+	out := make([]AmountIntensityTier, 0, len(tiers))
+	for _, tier := range tiers {
+		minAmount := clampMoneyThreshold(tier.MinAmountUSD)
+		if minAmount <= 0 {
+			continue
+		}
+		out = append(out, AmountIntensityTier{
+			MinAmountUSD: minAmount,
+			Intensity:    normalizeBarkIntensity(tier.Intensity),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MinAmountUSD == out[j].MinAmountUSD {
+			return out[i].Intensity < out[j].Intensity
+		}
+		return out[i].MinAmountUSD < out[j].MinAmountUSD
+	})
+	if len(out) > 10 {
+		out = out[len(out)-10:]
+	}
+	return out
+}
+
+func EncodeAmountIntensityTiers(tiers []AmountIntensityTier) string {
+	normalized := NormalizeAmountIntensityTiers(tiers)
+	if len(normalized) == 0 {
+		return ""
+	}
+	buf, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(buf)
+}
+
+func DecodeAmountIntensityTiers(raw string) []AmountIntensityTier {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var tiers []AmountIntensityTier
+	if err := json.Unmarshal([]byte(raw), &tiers); err != nil {
+		return nil
+	}
+	return NormalizeAmountIntensityTiers(tiers)
+}
+
+func ResolveWalletBarkIntensity(cfg models.SmartMoneyGoldenDogConfig, totalAmountUSD float64) string {
+	fallback := normalizeBarkIntensity(cfg.WalletIntensity)
+	if normalizeWalletIntensityMode(cfg.WalletIntensityMode) != WalletIntensityModeAmountTiers {
+		return fallback
+	}
+	selected := fallback
+	for _, tier := range DecodeAmountIntensityTiers(cfg.WalletAmountIntensityTiers) {
+		if totalAmountUSD+0.0000001 >= tier.MinAmountUSD {
+			selected = normalizeBarkIntensity(tier.Intensity)
+		}
+	}
+	return selected
+}
+
 func barkConfigForIntensity(base notify.BarkConfig, intensity string) notify.BarkConfig {
 	cfg := base
 	cfg.Call = ""
@@ -443,6 +541,16 @@ func clampPoolMetricThreshold(value float64) float64 {
 	return value
 }
 
+func clampMoneyThreshold(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1_000_000_000_000 {
+		return 1_000_000_000_000
+	}
+	return value
+}
+
 func clampPoolMetricCount(value int) int {
 	if value < 0 {
 		return 0
@@ -475,18 +583,19 @@ func buildPairBuckets(events []models.SmartMoneyLPEvent) map[string]*pairBucket 
 		bucket := out[pairKey]
 		if bucket == nil {
 			bucket = &pairBucket{
-				Key:        pairKey,
-				Label:      pairLabel,
-				WalletSeen: make(map[string]time.Time),
+				Key:   pairKey,
+				Label: pairLabel,
 			}
 			out[pairKey] = bucket
 		}
 		if bucket.Label == "" && pairLabel != "" {
 			bucket.Label = pairLabel
 		}
-		if seenAt, ok := bucket.WalletSeen[wallet]; !ok || event.TxTimestamp.After(seenAt) {
-			bucket.WalletSeen[wallet] = event.TxTimestamp
-		}
+		bucket.Events = append(bucket.Events, pairBucketEvent{
+			Wallet:    wallet,
+			SeenAt:    event.TxTimestamp,
+			AmountUSD: eventAmountUSD(event),
+		})
 	}
 	return out
 }
@@ -498,37 +607,78 @@ func pairSignalsForConfig(buckets map[string]*pairBucket, now time.Time, cfg mod
 
 	cutoff := now.Add(-time.Duration(clampWindowMinutes(cfg.WindowMinutes)) * time.Minute)
 	minWallets := clampMinWallets(cfg.MinWallets)
+	minTotalAmountUSD := clampMoneyThreshold(cfg.WalletMinTotalAmountUSD)
 
 	signals := make([]*pairSignal, 0, len(buckets))
 	for _, bucket := range buckets {
-		count := 0
+		walletSeen := make(map[string]time.Time)
 		latestAt := time.Time{}
-		for _, seenAt := range bucket.WalletSeen {
-			if seenAt.Before(cutoff) {
+		totalAmountUSD := 0.0
+		for _, event := range bucket.Events {
+			if event.SeenAt.Before(cutoff) {
 				continue
 			}
-			count++
-			if seenAt.After(latestAt) {
-				latestAt = seenAt
+			totalAmountUSD += event.AmountUSD
+			if event.SeenAt.After(latestAt) {
+				latestAt = event.SeenAt
+			}
+			if seenAt, ok := walletSeen[event.Wallet]; !ok || event.SeenAt.After(seenAt) {
+				walletSeen[event.Wallet] = event.SeenAt
 			}
 		}
+		count := len(walletSeen)
 		if count < minWallets {
 			continue
 		}
+		if minTotalAmountUSD > 0 && totalAmountUSD < minTotalAmountUSD {
+			continue
+		}
 		signals = append(signals, &pairSignal{
-			Key:         bucket.Key,
-			Label:       bucket.Label,
-			WalletCount: count,
-			LatestAt:    latestAt,
+			Key:            bucket.Key,
+			Label:          bucket.Label,
+			WalletCount:    count,
+			LatestAt:       latestAt,
+			TotalAmountUSD: totalAmountUSD,
 		})
 	}
 	sort.Slice(signals, func(i, j int) bool {
 		if signals[i].WalletCount != signals[j].WalletCount {
 			return signals[i].WalletCount > signals[j].WalletCount
 		}
+		if signals[i].TotalAmountUSD != signals[j].TotalAmountUSD {
+			return signals[i].TotalAmountUSD > signals[j].TotalAmountUSD
+		}
 		return signals[i].LatestAt.After(signals[j].LatestAt)
 	})
 	return signals
+}
+
+func eventAmountUSD(event models.SmartMoneyLPEvent) float64 {
+	if event.TotalUSD != nil {
+		if value := parseDecimalString(*event.TotalUSD); value > 0 {
+			return value
+		}
+	}
+	return parseDecimalStringPtr(event.Token0AmountUSD) + parseDecimalStringPtr(event.Token1AmountUSD)
+}
+
+func parseDecimalStringPtr(value *string) float64 {
+	if value == nil {
+		return 0
+	}
+	return parseDecimalString(*value)
+}
+
+func parseDecimalString(value string) float64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	out, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(out) || math.IsInf(out, 0) || out < 0 {
+		return 0
+	}
+	return out
 }
 
 func canonicalPair(token0Address string, token1Address string, token0Symbol string, token1Symbol string) (string, string) {
@@ -569,7 +719,7 @@ func shortenAddress(value string) string {
 func buildBarkMessage(signal *pairSignal, cfg models.SmartMoneyGoldenDogConfig) (string, string) {
 	label := firstNonEmpty(signal.Label, "未知交易对")
 	title := "金狗通知"
-	body := fmt.Sprintf("%s 在 %d 分钟内出现 %d 个聪明钱钱包加 LP，建议立即关注", label, clampWindowMinutes(cfg.WindowMinutes), signal.WalletCount)
+	body := fmt.Sprintf("%s 在 %d 分钟内出现 %d 个聪明钱钱包加 LP，合计 %s，建议立即关注", label, clampWindowMinutes(cfg.WindowMinutes), signal.WalletCount, formatMetricCompact(signal.TotalAmountUSD, "$"))
 	return title, body
 }
 
@@ -697,7 +847,7 @@ func poolLabel(pool models.Pool) string {
 func buildWalletBarkMessage(signal *pairSignal, cfg models.SmartMoneyGoldenDogConfig) (string, string) {
 	label := firstNonEmpty(signal.Label, "未知交易对")
 	title := "金狗通知"
-	body := fmt.Sprintf("%s 在 %d 分钟内出现 %d 个聪明钱钱包加 LP，建议立即关注", label, clampWindowMinutes(cfg.WindowMinutes), signal.WalletCount)
+	body := fmt.Sprintf("%s 在 %d 分钟内出现 %d 个聪明钱钱包加 LP，合计 %s，建议立即关注", label, clampWindowMinutes(cfg.WindowMinutes), signal.WalletCount, formatMetricCompact(signal.TotalAmountUSD, "$"))
 	return title, body
 }
 
@@ -770,11 +920,18 @@ func isFinitePositive(value float64) bool {
 }
 
 func SortedWallets(bucket *pairBucket) []string {
-	if bucket == nil || len(bucket.WalletSeen) == 0 {
+	if bucket == nil || len(bucket.Events) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(bucket.WalletSeen))
-	for wallet := range bucket.WalletSeen {
+	seen := make(map[string]struct{}, len(bucket.Events))
+	for _, event := range bucket.Events {
+		if event.Wallet == "" {
+			continue
+		}
+		seen[event.Wallet] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for wallet := range seen {
 		out = append(out, wallet)
 	}
 	sort.Strings(out)
