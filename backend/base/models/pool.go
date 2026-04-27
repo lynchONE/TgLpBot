@@ -98,6 +98,10 @@ type Pool struct {
 	LiquidityTicksJSON          string     `gorm:"column:liquidity_ticks_json;type:json" json:"liquidity_ticks_json"`
 	BadgesJSON                  string     `gorm:"column:badges_json;type:json" json:"badges_json"`
 	SourcePayloadJSON           string     `gorm:"column:source_payload_json;type:json" json:"source_payload_json"`
+	PoolDataSourceID            *uint      `gorm:"column:pool_data_source_id;type:int unsigned;index" json:"pool_data_source_id,omitempty"`
+	PoolDataSourceName          string     `gorm:"column:pool_data_source_name;type:varchar(80);not null;default:''" json:"pool_data_source_name"`
+	PoolDataSourceType          string     `gorm:"column:pool_data_source_type;type:varchar(32);not null;default:''" json:"pool_data_source_type"`
+	PoolDataSourceURL           string     `gorm:"column:pool_data_source_url;type:varchar(512);not null;default:''" json:"pool_data_source_url"`
 
 	UpdatedAt time.Time `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime:milli;index:idx_pools_updated_at;index:idx_pools_chain_updated_at,priority:2;index:idx_pools_source_chain_updated_at,priority:2" json:"updated_at"`
 }

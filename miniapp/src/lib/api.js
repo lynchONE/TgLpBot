@@ -1018,6 +1018,109 @@ export async function checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, 
     });
 }
 
+// Pool data sources (Admin)
+
+async function adminPoolDataSourcesRequest({ apiBaseUrl, payload, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=pool_data_sources`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function fetchAdminPoolDataSources({ apiBaseUrl, initData, signal }) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'list' },
+        signal,
+    });
+}
+
+export async function addAdminPoolDataSource({
+    apiBaseUrl,
+    initData,
+    name,
+    sourceType,
+    chain,
+    timeframeMinutes,
+    limit,
+    baseUrl,
+    pathTemplate,
+    queryTemplate,
+    protocols,
+    dexes,
+    setCurrent,
+    signal,
+}) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: {
+            initData,
+            action: 'add',
+            name,
+            source_type: sourceType,
+            chain,
+            timeframe_minutes: Number(timeframeMinutes),
+            limit: Number(limit),
+            base_url: baseUrl,
+            path_template: pathTemplate,
+            query_template: queryTemplate || {},
+            protocols: Array.isArray(protocols) ? protocols : [],
+            dexes: Array.isArray(dexes) ? dexes : [],
+            set_current: Boolean(setCurrent),
+        },
+        signal,
+    });
+}
+
+export async function switchAdminPoolDataSource({ apiBaseUrl, initData, sourceId, signal }) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'switch', source_id: Number(sourceId) },
+        signal,
+    });
+}
+
+export async function enableAdminPoolDataSource({ apiBaseUrl, initData, sourceId, signal }) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'enable', source_id: Number(sourceId) },
+        signal,
+    });
+}
+
+export async function disableAdminPoolDataSource({ apiBaseUrl, initData, sourceId, signal }) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'disable', source_id: Number(sourceId) },
+        signal,
+    });
+}
+
+export async function deleteAdminPoolDataSource({ apiBaseUrl, initData, sourceId, signal }) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'delete', source_id: Number(sourceId) },
+        signal,
+    });
+}
+
+export async function checkAdminPoolDataSource({ apiBaseUrl, initData, sourceId, signal }) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'check', source_id: Number(sourceId) },
+        signal,
+    });
+}
+
 async function adminPrivateZapRequest({ apiBaseUrl, payload, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=private_zap`;

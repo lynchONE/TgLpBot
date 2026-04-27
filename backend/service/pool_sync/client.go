@@ -68,6 +68,11 @@ type PoolMTopFeesResponse struct {
 	LiquidityTicksIndex json.RawMessage `json:"liquidityTicksIndex"`
 	Data                []PoolMFeePool  `json:"data"`
 	Error               string          `json:"error"`
+
+	PoolDataSourceID   *uint  `json:"-"`
+	PoolDataSourceName string `json:"-"`
+	PoolDataSourceType string `json:"-"`
+	PoolDataSourceURL  string `json:"-"`
 }
 
 type PoolMFeePool struct {
@@ -75,8 +80,10 @@ type PoolMFeePool struct {
 	ProtocolVersion string `json:"protocol_version"`
 	Dex             string `json:"dex"`
 	PoolAddress     string `json:"pool_address"`
+	PoolID          string `json:"pool_id"`
 	FactoryName     string `json:"factory_name"`
 	FactoryAddress  string `json:"factory_address"`
+	PoolManager     string `json:"pool_manager"`
 	TradingPair     string `json:"trading_pair"`
 	Token0Symbol    string `json:"token0_symbol"`
 	Token1Symbol    string `json:"token1_symbol"`

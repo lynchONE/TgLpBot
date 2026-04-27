@@ -31,6 +31,7 @@ export default async function handler(req, res) {
         'active_tasks',
         'user_access',
         'rpc_pool',
+        'pool_data_sources',
         'private_zap',
         'assets_smart_money_overview',
         'assets_smart_money_wallet',

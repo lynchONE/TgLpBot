@@ -21,7 +21,7 @@ const (
 )
 
 type Service struct {
-	poolm *PoolMClient
+	sources *PoolDataSourceManager
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -29,13 +29,9 @@ type Service struct {
 }
 
 func NewService() *Service {
-	baseURL := ""
-	if config.AppConfig != nil {
-		baseURL = config.AppConfig.PoolsSyncPoolMBaseURL
-	}
 	return &Service{
-		poolm:  NewPoolMClient(baseURL),
-		stopCh: make(chan struct{}),
+		sources: DefaultPoolDataSourceManager(),
+		stopCh:  make(chan struct{}),
 	}
 }
 
@@ -122,16 +118,70 @@ func (s *Service) runOnce() {
 
 func (s *Service) fetchSnapshot(ctx context.Context) (*PoolMTopFeesResponse, error) {
 	chain := "bsc"
-	dexes := []string{"pcsv3", "univ3", "univ4"}
 	if config.AppConfig != nil {
 		if v := strings.ToLower(strings.TrimSpace(config.AppConfig.PoolsSyncChain)); v != "" {
 			chain = v
 		}
+	}
+	dexes := poolSyncConfiguredDexes()
+
+	sourceManager := s.sources
+	if sourceManager == nil {
+		sourceManager = DefaultPoolDataSourceManager()
+	}
+	candidates := sourceManager.CandidateSources(ctx, chain, 5)
+	var lastErr error
+	for _, source := range candidates {
+		start := time.Now()
+		snapshot, err := fetchSnapshotFromPoolDataSource(ctx, source, chain, dexes)
+		latency := time.Since(start)
+		if err != nil {
+			lastErr = err
+			sourceManager.RecordFailure(ctx, source, latency, err)
+			log.Printf("[PoolSync] data source failed name=%s type=%s env=%v err=%v", source.Name, source.SourceType, source.IsEnvFallback, err)
+			continue
+		}
+		if snapshot == nil || len(snapshot.Data) == 0 {
+			err = fmt.Errorf("pool data source returned no pools")
+			lastErr = err
+			sourceManager.RecordFailure(ctx, source, latency, err)
+			continue
+		}
+		annotateSnapshotSource(snapshot, source)
+		sourceManager.RecordSuccess(ctx, source, latency, poolDataSourceFieldCoverage(snapshot))
+		return snapshot, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("no pool data source available")
+}
+
+func poolSyncConfiguredDexes() []string {
+	if config.AppConfig != nil {
 		if v := poolSyncDexList(config.AppConfig.PoolsSyncDexes); len(v) > 0 {
-			dexes = v
+			return v
 		}
 	}
-	return s.poolm.TopFees(ctx, 5, chain, strings.Join(dexes, ","))
+	return []string{"pcsv3", "univ3", "univ4"}
+}
+
+func fetchSnapshotFromPoolDataSource(ctx context.Context, source PoolDataSourceConfig, chain string, dexes []string) (*PoolMTopFeesResponse, error) {
+	switch NormalizePoolDataSourceType(source.SourceType) {
+	case PoolDataSourceTypePoolMTopFees:
+		return NewPoolMClient(source.BaseURL).TopFees(ctx, positiveOrDefault(source.TimeframeMinutes, 5), chain, strings.Join(poolMSourceDexes(source, dexes), ","))
+	case PoolDataSourceTypeMarketPools:
+		return NewMarketPoolsClient(source.BaseURL).Pools(ctx, source, chain, dexes)
+	default:
+		return nil, fmt.Errorf("unsupported pool data source type=%s", source.SourceType)
+	}
+}
+
+func poolMSourceDexes(source PoolDataSourceConfig, fallback []string) []string {
+	if len(source.Dexes) > 0 {
+		return source.Dexes
+	}
+	return fallback
 }
 
 func (s *Service) buildRows(snapshot *PoolMTopFeesResponse, updatedAt time.Time) ([]models.Pool, error) {
@@ -161,6 +211,9 @@ func (s *Service) buildRows(snapshot *PoolMTopFeesResponse, updatedAt time.Time)
 
 func (s *Service) buildRow(snapshot *PoolMTopFeesResponse, item PoolMFeePool, updatedAt time.Time) (*models.Pool, error) {
 	addr := normalizePairAddress(item.PoolAddress)
+	if addr == "" && strings.EqualFold(normalizePoolMProtocolVersion(item, item.PoolID), "v4") {
+		addr = normalizePairAddress(item.PoolID)
+	}
 	if addr == "" {
 		return nil, fmt.Errorf("empty pool address")
 	}
@@ -253,6 +306,10 @@ func (s *Service) buildRow(snapshot *PoolMTopFeesResponse, item PoolMFeePool, up
 		LiquidityTicksJSON:          jsonText(item.LiquidityTicks, "[]"),
 		BadgesJSON:                  jsonText(item.Badges, "[]"),
 		SourcePayloadJSON:           marshalJSONString(item, "{}"),
+		PoolDataSourceID:            snapshot.PoolDataSourceID,
+		PoolDataSourceName:          strings.TrimSpace(snapshot.PoolDataSourceName),
+		PoolDataSourceType:          strings.TrimSpace(snapshot.PoolDataSourceType),
+		PoolDataSourceURL:           strings.TrimSpace(snapshot.PoolDataSourceURL),
 	}
 
 	return &row, nil

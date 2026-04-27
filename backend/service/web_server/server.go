@@ -91,6 +91,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/admin/active_tasks", s.handleAdminActiveTasks)
 	mux.HandleFunc("/api/admin/user_access", s.handleAdminUserAccess)
 	mux.HandleFunc("/api/admin/rpc_pool", s.handleAdminRPCPool)
+	mux.HandleFunc("/api/admin/pool_data_sources", s.handleAdminPoolDataSources)
 	mux.HandleFunc("/api/admin/private_zap", s.handleAdminPrivateZap)
 	mux.HandleFunc("/api/web_login", s.handleWebLogin)
 

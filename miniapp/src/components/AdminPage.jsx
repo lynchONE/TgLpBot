@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminOnlineUsers from './AdminOnlineUsers.jsx';
 import AdminActiveTasks from './AdminActiveTasks.jsx';
 import AdminRPCPool from './AdminRPCPool.jsx';
+import AdminPoolDataSources from './AdminPoolDataSources.jsx';
 import AdminPrivateZapCard from './AdminPrivateZapCard.jsx';
 import SystemConfigCard from './SystemConfigCard.jsx';
 import PositionCard from './PositionCard.jsx';
@@ -31,6 +32,7 @@ const ADMIN_TABS = [
     { key: 'user_detail', label: '用户详情' },
     { key: 'system_config', label: '系统配置' },
     { key: 'rpc_pool', label: 'RPC' },
+    { key: 'pool_data_sources', label: '池子源' },
 ];
 
 export default function AdminPage({
@@ -294,6 +296,10 @@ export default function AdminPage({
 
             {activeTab === 'rpc_pool' && (
                 <AdminRPCPool apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} accentTheme={accentTheme} onNotice={onNotice} />
+            )}
+
+            {activeTab === 'pool_data_sources' && (
+                <AdminPoolDataSources apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} accentTheme={accentTheme} onNotice={onNotice} />
             )}
         </div>
     );

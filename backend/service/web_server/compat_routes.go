@@ -98,6 +98,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminActiveTasks(w, r)
 	case "rpc_pool":
 		s.handleAdminRPCPool(w, r)
+	case "pool_data_sources":
+		s.handleAdminPoolDataSources(w, r)
 	case "private_zap":
 		s.handleAdminPrivateZap(w, r)
 	case "assets_smart_money_overview":
