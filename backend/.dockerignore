@@ -1,0 +1,10 @@
+.env
+*.log
+*.out
+*.test
+tmp/
+logs/
+data/
+tglpbot
+TgLpBot
+.air.toml
