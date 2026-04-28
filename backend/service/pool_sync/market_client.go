@@ -31,6 +31,47 @@ type marketPoolsResponse struct {
 	Error               string            `json:"error"`
 }
 
+func (r *marketPoolsResponse) UnmarshalJSON(data []byte) error {
+	type responseAlias marketPoolsResponse
+	var aux struct {
+		responseAlias
+		RequestedLimitSnake      *int            `json:"requested_limit"`
+		RequestedProtocolSnake   PoolMStringList `json:"requested_protocol"`
+		RequestedDexSnake        PoolMStringList `json:"requested_dex"`
+		RequestedChainSnake      *string         `json:"requested_chain"`
+		TotalPoolsSnake          *int            `json:"total_pools"`
+		MetricTrendsIndexSnake   json.RawMessage `json:"metric_trends_index"`
+		LiquidityTicksIndexSnake json.RawMessage `json:"liquidity_ticks_index"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	out := marketPoolsResponse(aux.responseAlias)
+	if aux.RequestedLimitSnake != nil {
+		out.RequestedLimit = *aux.RequestedLimitSnake
+	}
+	if len(aux.RequestedProtocolSnake) > 0 {
+		out.RequestedProtocol = aux.RequestedProtocolSnake
+	}
+	if len(aux.RequestedDexSnake) > 0 {
+		out.RequestedDex = aux.RequestedDexSnake
+	}
+	if aux.RequestedChainSnake != nil {
+		out.RequestedChain = *aux.RequestedChainSnake
+	}
+	if aux.TotalPoolsSnake != nil {
+		out.TotalPools = *aux.TotalPoolsSnake
+	}
+	if len(strings.TrimSpace(string(aux.MetricTrendsIndexSnake))) > 0 {
+		out.MetricTrendsIndex = aux.MetricTrendsIndexSnake
+	}
+	if len(strings.TrimSpace(string(aux.LiquidityTicksIndexSnake))) > 0 {
+		out.LiquidityTicksIndex = aux.LiquidityTicksIndexSnake
+	}
+	*r = out
+	return nil
+}
+
 type marketPoolsItem struct {
 	Chain           string `json:"chain"`
 	ProtocolVersion string `json:"protocolVersion"`
@@ -83,6 +124,148 @@ type marketPoolsItem struct {
 	LiquidityCurrentTick    int             `json:"liquidityCurrentTick"`
 	LiquidityTickSpacing    int             `json:"liquidityTickSpacing"`
 	Badges                  json.RawMessage `json:"badges"`
+}
+
+func (item *marketPoolsItem) UnmarshalJSON(data []byte) error {
+	type itemAlias marketPoolsItem
+	var aux struct {
+		itemAlias
+		ProtocolVersionSnake         *string         `json:"protocol_version"`
+		PoolAddressSnake             *string         `json:"pool_address"`
+		PoolIDSnake                  *string         `json:"pool_id"`
+		FactoryNameSnake             *string         `json:"factory_name"`
+		FactoryAddressSnake          *string         `json:"factory_address"`
+		PoolManagerSnake             *string         `json:"pool_manager"`
+		TradingPairSnake             *string         `json:"trading_pair"`
+		Token0SymbolSnake            *string         `json:"token0_symbol"`
+		Token1SymbolSnake            *string         `json:"token1_symbol"`
+		Token0NameSnake              *string         `json:"token0_name"`
+		Token1NameSnake              *string         `json:"token1_name"`
+		Token0AddressSnake           *string         `json:"token0_address"`
+		Token1AddressSnake           *string         `json:"token1_address"`
+		Token0DecimalsSnake          *int            `json:"token0_decimals"`
+		Token1DecimalsSnake          *int            `json:"token1_decimals"`
+		StableCoinSymbolSnake        *string         `json:"stable_coin_symbol"`
+		FeeRateSnake                 *int            `json:"fee_rate"`
+		FeePercentageSnake           *float64        `json:"fee_percentage"`
+		HookAddressSnake             *string         `json:"hook_address"`
+		TransactionCountSnake        *int            `json:"transaction_count"`
+		TotalFeesSnake               *float64        `json:"total_fees"`
+		TotalVolumeSnake             *float64        `json:"total_volume"`
+		CurrentPoolValueSnake        *float64        `json:"current_pool_value"`
+		CurrentToken0BalanceSnake    *float64        `json:"current_token0_balance"`
+		CurrentToken1BalanceSnake    *float64        `json:"current_token1_balance"`
+		CurrentTokenPriceSnake       *float64        `json:"current_token_price"`
+		PricedTokenAddressSnake      *string         `json:"priced_token_address"`
+		CurrentTokenTotalSupplySnake *float64        `json:"current_token_total_supply"`
+		CurrentTokenFDVUSDSnake      *float64        `json:"current_token_fdv_usd"`
+		TokenSupplyUpdatedAtSnake    *string         `json:"token_supply_updated_at"`
+		PriceDisplaySnake            *string         `json:"price_display"`
+		LastSwapAtSnake              *string         `json:"last_swap_at"`
+		TickSpacingSnake             *int            `json:"tick_spacing"`
+		CurrentTickSnake             *int            `json:"current_tick"`
+		CurrentSqrtPriceX96Snake     *string         `json:"current_sqrt_price_x96"`
+		CurrentLiquiditySnake        *string         `json:"current_liquidity"`
+		StableCoinPositionSnake      *string         `json:"stable_coin_position"`
+		MetricTrendsSnake            json.RawMessage `json:"metric_trends"`
+		UniqueWalletsSnake           *int            `json:"unique_wallets"`
+		TopWalletVolPctSnake         *float64        `json:"top_wallet_vol_pct"`
+		ActiveTickCountSnake         *int            `json:"active_tick_count"`
+		ActiveLiquidityUSDSnake      *float64        `json:"active_liquidity_usd"`
+		ActiveLiquidityRatioSnake    *float64        `json:"active_liquidity_ratio"`
+		LiquidityTicksSnake          json.RawMessage `json:"liquidity_ticks"`
+		LiquidityCurrentTickSnake    *int            `json:"liquidity_current_tick"`
+		LiquidityTickSpacingSnake    *int            `json:"liquidity_tick_spacing"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	out := marketPoolsItem(aux.itemAlias)
+	setStringFromPtr(&out.ProtocolVersion, aux.ProtocolVersionSnake)
+	setStringFromPtr(&out.PoolAddress, aux.PoolAddressSnake)
+	setStringFromPtr(&out.PoolID, aux.PoolIDSnake)
+	setStringFromPtr(&out.FactoryName, aux.FactoryNameSnake)
+	setStringFromPtr(&out.FactoryAddress, aux.FactoryAddressSnake)
+	setStringFromPtr(&out.PoolManager, aux.PoolManagerSnake)
+	setStringFromPtr(&out.TradingPair, aux.TradingPairSnake)
+	setStringFromPtr(&out.Token0Symbol, aux.Token0SymbolSnake)
+	setStringFromPtr(&out.Token1Symbol, aux.Token1SymbolSnake)
+	setStringFromPtr(&out.Token0Name, aux.Token0NameSnake)
+	setStringFromPtr(&out.Token1Name, aux.Token1NameSnake)
+	setStringFromPtr(&out.Token0Address, aux.Token0AddressSnake)
+	setStringFromPtr(&out.Token1Address, aux.Token1AddressSnake)
+	setIntFromPtr(&out.Token0Decimals, aux.Token0DecimalsSnake)
+	setIntFromPtr(&out.Token1Decimals, aux.Token1DecimalsSnake)
+	setStringFromPtr(&out.StableCoinSymbol, aux.StableCoinSymbolSnake)
+	setIntFromPtr(&out.FeeRate, aux.FeeRateSnake)
+	setFloatFromPtr(&out.FeePercentage, aux.FeePercentageSnake)
+	setStringFromPtr(&out.HookAddress, aux.HookAddressSnake)
+	setIntFromPtr(&out.TransactionCount, aux.TransactionCountSnake)
+	setFloatFromPtr(&out.TotalFees, aux.TotalFeesSnake)
+	setFloatFromPtr(&out.TotalVolume, aux.TotalVolumeSnake)
+	setFloatFromPtr(&out.CurrentPoolValue, aux.CurrentPoolValueSnake)
+	setFloatFromPtr(&out.CurrentToken0Balance, aux.CurrentToken0BalanceSnake)
+	setFloatFromPtr(&out.CurrentToken1Balance, aux.CurrentToken1BalanceSnake)
+	setFloatFromPtr(&out.CurrentTokenPrice, aux.CurrentTokenPriceSnake)
+	setStringFromPtr(&out.PricedTokenAddress, aux.PricedTokenAddressSnake)
+	setFloatFromPtr(&out.CurrentTokenTotalSupply, aux.CurrentTokenTotalSupplySnake)
+	setFloatFromPtr(&out.CurrentTokenFDVUSD, aux.CurrentTokenFDVUSDSnake)
+	setStringFromPtr(&out.TokenSupplyUpdatedAt, aux.TokenSupplyUpdatedAtSnake)
+	setStringFromPtr(&out.PriceDisplay, aux.PriceDisplaySnake)
+	setStringFromPtr(&out.LastSwapAt, aux.LastSwapAtSnake)
+	setIntPtrFromPtr(&out.TickSpacing, aux.TickSpacingSnake)
+	setIntFromPtr(&out.CurrentTick, aux.CurrentTickSnake)
+	setStringFromPtr(&out.CurrentSqrtPriceX96, aux.CurrentSqrtPriceX96Snake)
+	setStringFromPtr(&out.CurrentLiquidity, aux.CurrentLiquiditySnake)
+	setStringFromPtr(&out.StableCoinPosition, aux.StableCoinPositionSnake)
+	setRawMessage(&out.MetricTrends, aux.MetricTrendsSnake)
+	setIntFromPtr(&out.UniqueWallets, aux.UniqueWalletsSnake)
+	setFloatFromPtr(&out.TopWalletVolPct, aux.TopWalletVolPctSnake)
+	setIntFromPtr(&out.ActiveTickCount, aux.ActiveTickCountSnake)
+	setFloatFromPtr(&out.ActiveLiquidityUSD, aux.ActiveLiquidityUSDSnake)
+	setFloatFromPtr(&out.ActiveLiquidityRatio, aux.ActiveLiquidityRatioSnake)
+	setRawMessage(&out.LiquidityTicks, aux.LiquidityTicksSnake)
+	setIntFromPtr(&out.LiquidityCurrentTick, aux.LiquidityCurrentTickSnake)
+	setIntFromPtr(&out.LiquidityTickSpacing, aux.LiquidityTickSpacingSnake)
+	*item = out
+	return nil
+}
+
+func setStringFromPtr(dst *string, value *string) {
+	if dst == nil || value == nil {
+		return
+	}
+	*dst = *value
+}
+
+func setIntFromPtr(dst *int, value *int) {
+	if dst == nil || value == nil {
+		return
+	}
+	*dst = *value
+}
+
+func setFloatFromPtr(dst *float64, value *float64) {
+	if dst == nil || value == nil {
+		return
+	}
+	*dst = *value
+}
+
+func setIntPtrFromPtr(dst **int, value *int) {
+	if dst == nil || value == nil {
+		return
+	}
+	v := *value
+	*dst = &v
+}
+
+func setRawMessage(dst *json.RawMessage, value json.RawMessage) {
+	if dst == nil || len(strings.TrimSpace(string(value))) == 0 {
+		return
+	}
+	*dst = append((*dst)[:0], value...)
 }
 
 func NewMarketPoolsClient(baseURL string) *MarketPoolsClient {

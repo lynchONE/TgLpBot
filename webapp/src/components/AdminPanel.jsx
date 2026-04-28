@@ -32,6 +32,13 @@ import {
 import { formatUsd, shortAddress } from '../utils';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
 
+const ADMIN_SYSTEM_SECTIONS = [
+  { key: 'config', label: '基础配置' },
+  { key: 'rpc', label: 'RPC 节点' },
+  { key: 'pool_sources', label: '池子数据源' },
+  { key: 'private_zap', label: 'Private Zap' },
+];
+
 function errorText(err) {
   return String(err?.message || err || '').trim();
 }
@@ -325,6 +332,7 @@ export default function AdminPanel({
   refreshInterval = 10,
 }) {
   const [activeTab, setActiveTab] = useState('operations');
+  const [systemSection, setSystemSection] = useState('config');
   const [notice, setNotice] = useState('');
 
   const [onlineUsers, setOnlineUsers] = useState([]);
@@ -929,6 +937,22 @@ export default function AdminPanel({
                 <MetricCard label="当前时间" value={formatDateTime(new Date())} />
               </div>
 
+              <div className="am-system-tabs" role="tablist" aria-label="系统配置分类">
+                {ADMIN_SYSTEM_SECTIONS.map((section) => (
+                  <button
+                    key={section.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={systemSection === section.key}
+                    className={`am-tab-btn ${systemSection === section.key ? 'active' : ''}`}
+                    onClick={() => setSystemSection(section.key)}
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+
+              {systemSection === 'config' ? (
               <div className="am-card">
                 <div className="am-card-header">
                   <div className="am-card-title">系统配置</div>
@@ -1018,7 +1042,9 @@ export default function AdminPanel({
                   </>
                 ) : null}
               </div>
+              ) : null}
 
+              {systemSection === 'rpc' ? (
               <div className="am-card">
                 <div className="am-card-header">
                   <div className="am-card-title">RPC 节点池</div>
@@ -1133,7 +1159,9 @@ export default function AdminPanel({
                   ))}
                 </div>
               </div>
+              ) : null}
 
+              {systemSection === 'pool_sources' ? (
               <div className="am-card">
                 <div className="am-card-header">
                   <div className="am-card-title">池子数据源</div>
@@ -1285,7 +1313,9 @@ export default function AdminPanel({
                   ))}
                 </div>
               </div>
+              ) : null}
 
+              {systemSection === 'private_zap' ? (
               <div className="am-card">
                 <div className="am-card-header">
                   <div className="am-card-title">Private Zap</div>
@@ -1324,6 +1354,7 @@ export default function AdminPanel({
                   ))}
                 </div>
               </div>
+              ) : null}
             </>
           ) : null}
         </div>

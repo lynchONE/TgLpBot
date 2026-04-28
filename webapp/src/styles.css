@@ -7643,6 +7643,13 @@ body {
   color: var(--accent-text);
 }
 
+.am-system-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .am-stack {
   display: flex;
   flex-direction: column;
