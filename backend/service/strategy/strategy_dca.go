@@ -248,10 +248,11 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 
 	now := time.Now()
 	newExecuted := batchIdx + 1
+	nextTaskAmountUSDT := nextDCARecordedAmountUSDT(&task, spent)
 	updates := map[string]interface{}{
 		"dca_executed_count": newExecuted,
 		"dca_retry_count":    0,
-		"amount_usdt":        task.AmountUSDT + spent,
+		"amount_usdt":        nextTaskAmountUSDT,
 	}
 	if res != nil && res.CurrentLiquidity != "" {
 		updates["current_liquidity"] = res.CurrentLiquidity
@@ -265,6 +266,7 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	if err := database.DB.Model(&task).Updates(updates).Error; err != nil {
 		log.Printf("[Strategy] DCA task #%d batch %d DB update failed after on-chain success: %v", task.ID, batchNum, err)
 	}
+	task.AmountUSDT = nextTaskAmountUSDT
 
 	var deltaWei *big.Int
 	if res != nil && res.ActualStableSpentWei != nil && res.ActualStableSpentWei.Sign() > 0 {
@@ -303,10 +305,24 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	}
 
 	if newExecuted >= total {
-		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓完成：共 %d/%d 批，累计投入约 $%.2f", newExecuted, total, task.AmountUSDT+spent))
+		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓完成：共 %d/%d 批，累计投入约 $%.2f", newExecuted, total, nextTaskAmountUSDT))
 	} else {
 		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓 %d/%d 完成（本批 $%.2f），下一批 %s 后执行", newExecuted, total, spent, formatDCAInterval(task.DCAIntervalSeconds)))
 	}
+}
+
+func nextDCARecordedAmountUSDT(task *models.StrategyTask, spent float64) float64 {
+	if task == nil {
+		return spent
+	}
+	next := task.AmountUSDT + spent
+	if task.DCAEnabled && task.DCATotalAmountUSDT > 0 && next > task.DCATotalAmountUSDT {
+		next = task.DCATotalAmountUSDT
+	}
+	if next < 0 {
+		return 0
+	}
+	return next
 }
 
 // formatDCAInterval renders an interval like "30s" or "300ms" depending on magnitude.

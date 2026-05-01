@@ -1046,6 +1046,10 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 	dust0 := pickRecordedOpenDust(walletDust0, res.Dust0)
 	dust1 := pickRecordedOpenDust(walletDust1, res.Dust1)
+	var stableDeltaSpentForDust *big.Int
+	if actualSpent.Sign() > 0 && actualSpent.Cmp(usdtAmount) <= 0 {
+		stableDeltaSpentForDust = new(big.Int).Set(actualSpent)
+	}
 
 	// If RPC returns stale balances, actualSpent can be 0 (or otherwise invalid) even when the tx succeeded.
 	// We can recover a best-effort "actual spent" from the input amount and refunded USDT dust (when applicable).
@@ -1083,7 +1087,18 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if serr != nil || openStableBeforeWei == nil {
 		openStableBeforeWei = new(big.Int).Set(usdtBefore)
 	}
-	_ = trade.NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpentWei, gasSpent, openStableBeforeWei, dust0, dust1)
+	recordedStableDust := make([]*big.Int, 0, 2)
+	if token0Addr == usdtAddr {
+		recordedStableDust = append(recordedStableDust, dust0)
+	}
+	if token1Addr == usdtAddr {
+		recordedStableDust = append(recordedStableDust, dust1)
+	}
+	var extraDust []models.TradeRecordDustAsset
+	if stableDeltaSpentForDust != nil {
+		extraDust = appendStableBudgetDustAsset(nil, cc, usdtAddr, usdtAmount, stableDeltaSpentForDust, recordedStableDust...)
+	}
+	_ = trade.NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpentWei, gasSpent, openStableBeforeWei, dust0, dust1, extraDust)
 
 	return res, nil
 }

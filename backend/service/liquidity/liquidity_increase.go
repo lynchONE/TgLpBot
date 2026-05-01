@@ -154,6 +154,70 @@ func finalizeIncreaseLiquidityAccounting(
 	}
 }
 
+func appendStableBudgetDustAsset(
+	extra []models.TradeRecordDustAsset,
+	cc config.ChainConfig,
+	stableToken common.Address,
+	requestedStable *big.Int,
+	spentStable *big.Int,
+	recordedStableDust ...*big.Int,
+) []models.TradeRecordDustAsset {
+	if stableToken == (common.Address{}) || requestedStable == nil || requestedStable.Sign() <= 0 {
+		return extra
+	}
+	if spentStable == nil {
+		spentStable = big.NewInt(0)
+	}
+	dust := new(big.Int).Sub(requestedStable, spentStable)
+	if dust.Sign() <= 0 {
+		return extra
+	}
+	for _, recorded := range recordedStableDust {
+		if recorded != nil && recorded.Sign() > 0 {
+			dust.Sub(dust, recorded)
+			if dust.Sign() <= 0 {
+				return extra
+			}
+		}
+	}
+	symbol := strings.ToUpper(strings.TrimSpace(cc.StableSymbol))
+	if symbol == "" {
+		symbol = "USDT"
+	}
+	return append(extra, models.TradeRecordDustAsset{
+		Symbol:  symbol,
+		Address: stableToken.Hex(),
+		Amount:  dust.String(),
+	})
+}
+
+func appendStableBudgetDustToIncreaseResult(
+	cc config.ChainConfig,
+	stableToken common.Address,
+	requestedStable *big.Int,
+	res *IncreaseLiquidityResult,
+) {
+	if res == nil {
+		return
+	}
+	recorded := make([]*big.Int, 0, 4)
+	if res.Token0 != (common.Address{}) && res.Token0 == stableToken {
+		recorded = append(recorded, res.Dust0Wei)
+	}
+	if res.Token1 != (common.Address{}) && res.Token1 == stableToken {
+		recorded = append(recorded, res.Dust1Wei)
+	}
+	for _, asset := range res.ExtraDust {
+		if !common.IsHexAddress(asset.Address) || !strings.EqualFold(asset.Address, stableToken.Hex()) {
+			continue
+		}
+		if amount, err := convert.ParseBigInt(asset.Amount); err == nil && amount != nil && amount.Sign() > 0 {
+			recorded = append(recorded, amount)
+		}
+	}
+	res.ExtraDust = appendStableBudgetDustAsset(res.ExtraDust, cc, stableToken, requestedStable, res.ActualStableSpentWei, recorded...)
+}
+
 // IncreaseLiquidityForTask adds liquidity to an existing V3/V4 position.
 // Unlike EnterTaskFromUSDT (which mints a new position), this calls
 // NonfungiblePositionManager.increaseLiquidity (V3) or modifyLiquidities with
@@ -233,6 +297,7 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 			res.ActualStableSpentWei = new(big.Int).Set(usdtAmount)
 			res.ActualStableSpent = amountToFloat(usdtAmount, cc.StableDecimals)
 		}
+		appendStableBudgetDustToIncreaseResult(cc, usdtAddr, usdtAmount, res)
 		return res, nil
 	}
 
@@ -270,6 +335,7 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 		res.ActualStableSpentWei = new(big.Int).Set(usdtAmount)
 		res.ActualStableSpent = amountToFloat(usdtAmount, cc.StableDecimals)
 	}
+	appendStableBudgetDustToIncreaseResult(cc, usdtAddr, usdtAmount, res)
 	return res, nil
 }
 

@@ -151,7 +151,7 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 			openSpentWei = v
 		}
 	}
-	expectedWei, _ := convert.FloatUSDTToWei(task.AmountUSDT)
+	expectedWei, _ := convert.FloatUSDTToWei(expectedOpenBudgetUSDT(task))
 	if expectedWei == nil {
 		expectedWei = big.NewInt(0)
 	}
@@ -267,6 +267,37 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		ExtraDust:         extraDust,
 		DustValueUSDT:     dustValueUSDT,
 	}, nil
+}
+
+func expectedOpenBudgetUSDT(task *models.StrategyTask) float64 {
+	if task == nil {
+		return 0
+	}
+	expected := task.AmountUSDT
+	if task.DCAEnabled && task.DCATotalAmountUSDT > 0 {
+		if pcts, ok := ParseDCAPercentages(task.DCAPercentagesJSON); ok {
+			executed := task.DCAExecutedCount
+			if executed < 0 {
+				executed = 0
+			}
+			if executed > len(pcts) {
+				executed = len(pcts)
+			}
+			sum := 0.0
+			for i := 0; i < executed; i++ {
+				sum += pcts[i]
+			}
+			if sum > 0 {
+				expected = task.DCATotalAmountUSDT * sum / 100.0
+			}
+		} else if task.DCATotalAmountUSDT > expected {
+			expected = task.DCATotalAmountUSDT
+		}
+	}
+	if expected < 0 {
+		return 0
+	}
+	return expected
 }
 
 func (s *PnLService) getInitialCost(task *models.StrategyTask) (float64, *models.TradeRecord, error) {
