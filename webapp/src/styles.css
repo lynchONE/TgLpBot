@@ -11311,6 +11311,40 @@ img.swap-token-glyph {
 .opm-section {
   margin: 0;
 }
+.opm-liquidity-risk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--text-color);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.opm-liquidity-risk.is-ack {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.09);
+}
+.opm-liquidity-risk svg {
+  flex: 0 0 auto;
+  color: #f87171;
+}
+.opm-liquidity-risk.is-ack svg {
+  color: #f59e0b;
+}
+.opm-liquidity-risk span {
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+}
+.opm-liquidity-risk strong {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  color: var(--text-color);
+}
 .opm-compact-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

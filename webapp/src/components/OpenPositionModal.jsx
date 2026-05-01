@@ -508,7 +508,12 @@ export default function OpenPositionModal({
   const warnChecks = checks.filter(c => c.status === 'warn');
   const failChecks = checks.filter(c => c.status === 'fail');
   const blockingFailChecks = failChecks;
-  const hasBlockingSafetyFailure = blockingFailChecks.length > 0 || Boolean(submitRisk?.message);
+  const submitRiskMessage = String(submitRisk?.message || '').trim();
+  const submitRiskCode = String(submitRisk?.code || '').trim();
+  const submitRiskBlocksSubmit = Boolean(submitRiskMessage)
+    && submitRiskCode !== 'pool_liquidity_warning'
+    && !Boolean(submitRisk?.risk_ack_required);
+  const hasBlockingSafetyFailure = blockingFailChecks.length > 0 || submitRiskBlocksSubmit;
   const blockingSafetyMessage = blockingFailChecks.length > 0
     ? blockingFailChecks.map(c => c.detail || c.label).filter(Boolean).join('; ')
     : '';
@@ -587,8 +592,24 @@ export default function OpenPositionModal({
   const rangeUpperValue = Number(rangeUpper);
   const tickLowerValue = Number(String(tickLowerInput || '').trim());
   const tickUpperValue = Number(String(tickUpperInput || '').trim());
-  const submitRiskMessage = String(submitRisk?.message || '').trim();
   const visibleError = error || entrySwapPreviewError || blockingSafetyMessage || submitRiskMessage || String(submitError || '').trim();
+  const submitDisabled = busy || previewPending || previewSuspended || hasBlockingSafetyFailure;
+  const submitDisabledReason = busy
+    ? '正在提交'
+    : previewPending
+      ? '开仓预览刷新中'
+      : previewSuspended
+        ? '区间刚调整，等待预览刷新'
+        : hasBlockingSafetyFailure
+          ? (blockingSafetyMessage || submitRiskMessage || '安全检查未通过')
+          : '';
+  const submitButtonLabel = busy
+    ? '提交中...'
+    : previewPending
+      ? '预览刷新中...'
+      : previewSuspended
+        ? '等待预览刷新'
+        : '确认开仓';
   const showPrivateZapProtectionHint = Boolean(privateZapInfo?.show_protection_hint || preparePrivateZapInfo?.show_protection_hint);
   const rangeEditor = previewRangeEditor || prepareRangeEditor;
   const gridBins = useMemo(() => buildGridBins(rangeEditor), [rangeEditor]);
@@ -2428,39 +2449,13 @@ export default function OpenPositionModal({
 
             {riskMessage ? (
               <div
-                className="opm-section"
-                style={{
-                  padding: 16,
-                  borderRadius: 16,
-                  border: '1px solid',
-                  borderColor: riskRequiresAck ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)',
-                  background: riskRequiresAck ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05))' : 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
-                  color: 'var(--text-color)',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                  display: 'flex',
-                  gap: 12,
-                  alignItems: 'flex-start',
-                }}
+                className={`opm-section opm-liquidity-risk ${riskRequiresAck ? 'is-ack' : 'is-soft'}`}
               >
-                <AlertTriangle size={20} style={{ color: riskRequiresAck ? '#f59e0b' : '#ef4444', flexShrink: 0, marginTop: 2 }} />
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 13, lineHeight: 1.5, fontWeight: 600, color: riskRequiresAck ? '#d97706' : '#dc2626' }}>{riskMessage}</div>
-                  {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
-                    <div style={{ backgroundColor: 'var(--bg-card-hover, rgba(255,255,255,0.08))', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                          <span style={{ opacity: 0.8 }}>当前流动性</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskLiquidityUsd)}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {warnChecks.length > 0 ? (
-                    <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.85 }}>
-                      已提示风险，可直接继续；若要开仓，请留意滑点、成交波动和单次限额。
-                    </div>
-                  ) : null}
-                </div>
+                <AlertTriangle size={14} />
+                <span>{riskMessage}</span>
+                {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 ? (
+                  <strong>{formatUsdCompact(riskLiquidityUsd)}</strong>
+                ) : null}
               </div>
             ) : null}
 
@@ -2922,8 +2917,14 @@ export default function OpenPositionModal({
 
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
-          <button type="button" className={`accent-btn ${hasBlockingSafetyFailure ? 'is-blocked' : ''}`} onClick={handleSubmit} disabled={busy || previewPending || previewSuspended || hasBlockingSafetyFailure}>
-            {busy ? '提交中...' : '确认开仓'}
+          <button
+            type="button"
+            className={`accent-btn ${hasBlockingSafetyFailure ? 'is-blocked' : ''}`}
+            onClick={handleSubmit}
+            disabled={submitDisabled}
+            title={submitDisabledReason || undefined}
+          >
+            {submitButtonLabel}
           </button>
         </div>
       </div>
