@@ -236,6 +236,10 @@ func (s *LiquidityService) ensurePrivateAtomicIncreaseZap(
 	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
 		v4pm = common.HexToAddress(cc.UniswapV4PositionManagerAddress)
 	}
+	wrappedNative := common.Address{}
+	if common.IsHexAddress(cc.WrappedNativeAddress) {
+		wrappedNative = common.HexToAddress(cc.WrappedNativeAddress)
+	}
 
 	if zapAddr == (common.Address{}) {
 		nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
@@ -283,6 +287,28 @@ func (s *LiquidityService) ensurePrivateAtomicIncreaseZap(
 	cfgHash := cfgTx.Hash().Hex()
 	if _, werr := s.waitMined(client, chainID, cfgTx); werr != nil {
 		return common.Address{}, fmt.Errorf("setTrustedAddresses tx failed: %w", werr)
+	}
+
+	if wrappedNative != (common.Address{}) {
+		nonceWrapped, nerr := blockchain.GetNonceWithClient(client, walletAddr)
+		if nerr != nil {
+			return common.Address{}, nerr
+		}
+		wrappedAuth, aerr := s.buildAuth(client, chainID, privateKey, nonceWrapped, big.NewInt(0), opts)
+		if aerr != nil {
+			return common.Address{}, aerr
+		}
+		tuneZapTxGasLimit("PrivateZap setWrappedNative (atomic)", wrappedAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return blockchain.AtomicIncreaseZapSetWrappedNative(o, client, zapAddr, wrappedNative)
+		})
+		wrappedTx, werr := blockchain.AtomicIncreaseZapSetWrappedNative(wrappedAuth, client, zapAddr, wrappedNative)
+		if werr != nil {
+			return common.Address{}, fmt.Errorf("setWrappedNative failed: %w", werr)
+		}
+		cfgHash = wrappedTx.Hash().Hex()
+		if _, werr := s.waitMined(client, chainID, wrappedTx); werr != nil {
+			return common.Address{}, fmt.Errorf("setWrappedNative tx failed: %w", werr)
+		}
 	}
 
 	var extras []common.Address

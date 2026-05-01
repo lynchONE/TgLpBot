@@ -340,15 +340,20 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 		return common.Address{}, common.Address{}, fmt.Errorf("task is nil")
 	}
 
+	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	token0Addr := common.Address{}
 	token1Addr := common.Address{}
+	token0Set := false
+	token1Set := false
 	if common.IsHexAddress(task.Token0Address) {
 		token0Addr = common.HexToAddress(task.Token0Address)
+		token0Set = true
 	}
 	if common.IsHexAddress(task.Token1Address) {
 		token1Addr = common.HexToAddress(task.Token1Address)
+		token1Set = true
 	}
-	if token0Addr != (common.Address{}) && token1Addr != (common.Address{}) {
+	if taskTokenAddressesReady(version, token0Addr, token1Addr, token0Set, token1Set) {
 		return token0Addr, token1Addr, nil
 	}
 
@@ -363,7 +368,6 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 		return common.Address{}, common.Address{}, fmt.Errorf("blockchain client not initialized for chain=%s", exec.Chain())
 	}
 
-	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	switch version {
 	case "v4":
 		pmAddrStr := strings.TrimSpace(cc.UniswapV4PositionManagerAddress)
@@ -380,11 +384,13 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 				}
 				if common.IsHexAddress(poolMgrStr) {
 					if pos, err := blockchain.GetV4PositionInfo(v4pmAddr, common.HexToAddress(poolMgrStr), task.PoolId, tokenId); err == nil && pos != nil {
-						if token0Addr == (common.Address{}) {
+						if !token0Set {
 							token0Addr = pos.Token0
+							token0Set = true
 						}
-						if token1Addr == (common.Address{}) {
+						if !token1Set {
 							token1Addr = pos.Token1
+							token1Set = true
 						}
 					}
 				}
@@ -394,16 +400,18 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 		if common.IsHexAddress(task.PoolId) {
 			poolAddr := common.HexToAddress(task.PoolId)
 			if c0, c1, err := blockchain.GetV3PoolTokensWithClient(client, poolAddr); err == nil {
-				if token0Addr == (common.Address{}) {
+				if !token0Set {
 					token0Addr = c0
+					token0Set = true
 				}
-				if token1Addr == (common.Address{}) {
+				if !token1Set {
 					token1Addr = c1
+					token1Set = true
 				}
 			}
 		}
 
-		if token0Addr == (common.Address{}) || token1Addr == (common.Address{}) {
+		if !taskTokenAddressesReady(version, token0Addr, token1Addr, token0Set, token1Set) {
 			tokenId, _ := convert.ParseBigInt(task.V3TokenID)
 			if tokenId.Sign() > 0 {
 				pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
@@ -414,11 +422,13 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 					pmAddr := common.HexToAddress(pmAddrStr)
 					if v3pm, err := blockchain.NewV3PositionManager(pmAddr, client); err == nil {
 						if pos, err := v3pm.Positions(nil, tokenId); err == nil && pos != nil {
-							if token0Addr == (common.Address{}) {
+							if !token0Set {
 								token0Addr = pos.Token0
+								token0Set = true
 							}
-							if token1Addr == (common.Address{}) {
+							if !token1Set {
 								token1Addr = pos.Token1
+								token1Set = true
 							}
 						}
 					}
@@ -427,8 +437,21 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 		}
 	}
 
-	if token0Addr == (common.Address{}) || token1Addr == (common.Address{}) {
+	if !taskTokenAddressesReady(version, token0Addr, token1Addr, token0Set, token1Set) {
 		return common.Address{}, common.Address{}, fmt.Errorf("token address missing (pool_version=%s pool_id=%s)", version, strings.TrimSpace(task.PoolId))
 	}
 	return token0Addr, token1Addr, nil
+}
+
+func taskTokenAddressesReady(version string, token0Addr, token1Addr common.Address, token0Set, token1Set bool) bool {
+	if !token0Set || !token1Set {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(version), "v4") {
+		if token0Addr == token1Addr {
+			return false
+		}
+		return token0Addr != (common.Address{}) || token1Addr != (common.Address{})
+	}
+	return token0Addr != (common.Address{}) && token1Addr != (common.Address{})
 }

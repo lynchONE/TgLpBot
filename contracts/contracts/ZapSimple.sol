@@ -93,6 +93,12 @@ interface INonfungiblePositionManager {
     function ownerOf(uint256 tokenId) external view returns (address);
     function isApprovedForAll(address owner, address operator) external view returns (bool);
 }
+
+interface IWrappedNative is IERC20 {
+    function deposit() external payable;
+    function withdraw(uint256 amount) external;
+}
+
 contract ZapSimple is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
@@ -129,6 +135,9 @@ contract ZapSimple is ReentrancyGuard, Ownable {
     /// @notice Trusted V4 PositionManager
     address public v4PositionManager;
 
+    /// @notice Wrapped native token used as the ERC20 funding token for V4 native currency pools.
+    address public wrappedNative;
+
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
@@ -141,6 +150,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
     );
 
     event TrustedV3PositionManagerUpdated(address indexed positionManager, bool trusted);
+
+    event WrappedNativeUpdated(address indexed wrappedNative);
 
     event ZapInV3(
         address indexed user,
@@ -287,6 +298,13 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             trustedV3PositionManagers[pm] = trusted;
             emit TrustedV3PositionManagerUpdated(pm, trusted);
         }
+    }
+
+    /// @notice Sets wrapped native token (WBNB/WETH) used for V4 pools whose PoolKey contains address(0).
+    function setWrappedNative(address _wrappedNative) external onlyOwner {
+        require(_wrappedNative != address(0), "Invalid wrapped native");
+        wrappedNative = _wrappedNative;
+        emit WrappedNativeUpdated(_wrappedNative);
     }
 
     /**
@@ -508,6 +526,48 @@ contract ZapSimple is ReentrancyGuard, Ownable {
                           INTERNAL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
+    function _requireWrappedNative() internal view returns (address) {
+        address token = wrappedNative;
+        require(token != address(0), "Wrapped native not set");
+        return token;
+    }
+
+    function _fundingTokenForCurrency(address currency) internal view returns (address) {
+        return currency == address(0) ? _requireWrappedNative() : currency;
+    }
+
+    function _fundingBalanceForCurrency(address currency) internal view returns (uint256) {
+        return IERC20(_fundingTokenForCurrency(currency)).balanceOf(address(this));
+    }
+
+    function _balanceForCurrency(address currency) internal view returns (uint256) {
+        return currency == address(0) ? address(this).balance : IERC20(currency).balanceOf(address(this));
+    }
+
+    function _recipientBalanceForCurrency(address currency, address account) internal view returns (uint256) {
+        return currency == address(0) ? account.balance : IERC20(currency).balanceOf(account);
+    }
+
+    function _transferFundingForCurrency(address currency, address from, uint256 amount) internal {
+        if (amount == 0) {
+            return;
+        }
+        IERC20(_fundingTokenForCurrency(currency)).safeTransferFrom(from, address(this), amount);
+    }
+
+    function _unwrapForNativeCurrency(address currency, uint256 amount) internal {
+        if (currency == address(0) && amount > 0) {
+            IWrappedNative(_requireWrappedNative()).withdraw(amount);
+        }
+    }
+
+    function _matchesPoolCurrency(address token, address currency) internal view returns (bool) {
+        if (currency == address(0)) {
+            return token == _requireWrappedNative();
+        }
+        return token == currency;
+    }
+
     /**
      * @notice 执行 OKX swap
      */
@@ -617,10 +677,15 @@ contract ZapSimple is ReentrancyGuard, Ownable {
      * @notice 返还剩余代币
      */
     function _refundDelta(address token, address to, uint256 balanceBefore) internal {
-        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 balanceAfter = _balanceForCurrency(token);
         uint256 delta = balanceAfter - balanceBefore;
         if (delta > 0) {
-            IERC20(token).safeTransfer(to, delta);
+            if (token == address(0)) {
+                (bool ok, ) = payable(to).call{value: delta}("");
+                require(ok, "Native refund failed");
+            } else {
+                IERC20(token).safeTransfer(to, delta);
+            }
         }
     }
 
@@ -637,11 +702,11 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         } else {
             require(swap.approveTarget == address(0), "Approve target not allowed");
         }
-        require(swap.tokenIn == token0 || swap.tokenIn == token1, "Invalid swap tokenIn");
-        require(swap.tokenOut == token0 || swap.tokenOut == token1, "Invalid swap tokenOut");
+        require(_matchesPoolCurrency(swap.tokenIn, token0) || _matchesPoolCurrency(swap.tokenIn, token1), "Invalid swap tokenIn");
+        require(_matchesPoolCurrency(swap.tokenOut, token0) || _matchesPoolCurrency(swap.tokenOut, token1), "Invalid swap tokenOut");
         require(swap.tokenIn != swap.tokenOut, "Swap tokens same");
 
-        uint256 maxIn = swap.tokenIn == token0 ? token0Available : token1Available;
+        uint256 maxIn = _matchesPoolCurrency(swap.tokenIn, token0) ? token0Available : token1Available;
         require(swap.amountIn <= maxIn, "Swap amount exceeds input");
     }
 
@@ -735,29 +800,31 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(params.recipient != address(0), "Invalid recipient");
 
         // Track pre-existing balances to avoid mixing/refunding other users' funds.
-        uint256 token0BalBefore = IERC20(poolKey.currency0).balanceOf(address(this));
-        uint256 token1BalBefore = IERC20(poolKey.currency1).balanceOf(address(this));
+        uint256 token0FundingBefore = _fundingBalanceForCurrency(poolKey.currency0);
+        uint256 token1FundingBefore = _fundingBalanceForCurrency(poolKey.currency1);
+        uint256 token0BalBefore = _balanceForCurrency(poolKey.currency0);
+        uint256 token1BalBefore = _balanceForCurrency(poolKey.currency1);
 
         // 1. 拉取代币 + 2. 执行 OKX swap
         {
             if (params.amount0In > 0) {
-                IERC20(poolKey.currency0).safeTransferFrom(msg.sender, address(this), params.amount0In);
+                _transferFundingForCurrency(poolKey.currency0, msg.sender, params.amount0In);
             }
             if (params.amount1In > 0) {
-                IERC20(poolKey.currency1).safeTransferFrom(msg.sender, address(this), params.amount1In);
+                _transferFundingForCurrency(poolKey.currency1, msg.sender, params.amount1In);
             }
 
             if (params.swap.amountIn > 0 && params.swap.callData.length > 0) {
-                uint256 d0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-                uint256 d1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+                uint256 d0 = _fundingBalanceForCurrency(poolKey.currency0) - token0FundingBefore;
+                uint256 d1 = _fundingBalanceForCurrency(poolKey.currency1) - token1FundingBefore;
                 _validateSwapParams(poolKey.currency0, poolKey.currency1, params.swap, d0, d1);
                 _executeSwap(params.swap);
             }
         }
 
         // 3. 获取 swap 后的余额
-        uint256 bal0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-        uint256 bal1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+        uint256 bal0 = _fundingBalanceForCurrency(poolKey.currency0) - token0FundingBefore;
+        uint256 bal1 = _fundingBalanceForCurrency(poolKey.currency1) - token1FundingBefore;
         require(bal0 > 0 || bal1 > 0, "No tokens after swap");
 
         // 4. 构建 V4 PoolKey + 5. 获取实时价格 + 价格校验
@@ -783,6 +850,9 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             }
         }
 
+        _unwrapForNativeCurrency(poolKey.currency0, bal0);
+        _unwrapForNativeCurrency(poolKey.currency1, bal1);
+
         // 6. Mint V4 position
         {
             (uint256 tokenId, uint128 liquidity) = _mintV4Position(
@@ -802,12 +872,12 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 
         // 7. 获取 dust 并设置结果
         {
-            uint256 dust0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-            uint256 dust1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+            uint256 dust0 = _balanceForCurrency(poolKey.currency0) - token0BalBefore;
+            uint256 dust1 = _balanceForCurrency(poolKey.currency1) - token1BalBefore;
             result.dust0 = dust0;
             result.dust1 = dust1;
-            result.amount0Used = bal0 - dust0;
-            result.amount1Used = bal1 - dust1;
+            result.amount0Used = bal0 > dust0 ? bal0 - dust0 : 0;
+            result.amount1Used = bal1 > dust1 ? bal1 - dust1 : 0;
         }
 
         // 8. 退还 dust
@@ -832,7 +902,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(recipient != address(0), "Invalid recipient");
         address currency0 = Currency.unwrap(poolKey.currency0);
         address currency1 = Currency.unwrap(poolKey.currency1);
-        require(currency0 != address(0) && currency1 != address(0), "Native currency not supported");
         require(currency0 < currency1, "Tokens not sorted");
         // V4 撤仓逻辑
         // 需要通过 modifyLiquidities 执行 DECREASE_LIQUIDITY + TAKE_PAIR
@@ -845,8 +914,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             "NFT not approved"
         );
 
-        uint256 bal0Before = IERC20(currency0).balanceOf(recipient);
-        uint256 bal1Before = IERC20(currency1).balanceOf(recipient);
+        uint256 bal0Before = _recipientBalanceForCurrency(currency0, recipient);
+        uint256 bal1Before = _recipientBalanceForCurrency(currency1, recipient);
 
         // 获取当前流动性 - 优先读取 PositionManager.positions，失败则回退到 sentinel
         uint128 liquidity = type(uint128).max;
@@ -888,8 +957,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         // Execute
         IPositionManager(positionManager).modifyLiquidities(unlockData, block.timestamp);
 
-        uint256 bal0After = IERC20(currency0).balanceOf(recipient);
-        uint256 bal1After = IERC20(currency1).balanceOf(recipient);
+        uint256 bal0After = _recipientBalanceForCurrency(currency0, recipient);
+        uint256 bal1After = _recipientBalanceForCurrency(currency1, recipient);
         amount0 = bal0After > bal0Before ? bal0After - bal0Before : 0;
         amount1 = bal1After > bal1Before ? bal1After - bal1Before : 0;
 
@@ -925,11 +994,11 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(amount1 <= type(uint128).max, "amount1 too large");
 
         // Setup Permit2 allowances for V4 PositionManager
-        if (amount0 > 0) {
+        if (amount0 > 0 && token0 != address(0)) {
             _forceApprovePermit2Infinity(token0);
             _permit2ApproveInfinity(token0, positionManager);
         }
-        if (amount1 > 0) {
+        if (amount1 > 0 && token1 != address(0)) {
             _forceApprovePermit2Infinity(token1);
             _permit2ApproveInfinity(token1, positionManager);
         }
@@ -946,10 +1015,28 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         // PoolKey is passed in directly
         // PoolKey memory v4PoolKey = poolKey;
 
-        // Build actions: MINT_POSITION (0x02) + SETTLE_PAIR (0x0d)
-        bytes memory actions = new bytes(2);
+        uint256 nativeValue = 0;
+        bool sweepNative = false;
+        Currency nativeCurrency;
+        if (token0 == address(0) && amount0 > 0) {
+            nativeValue += amount0;
+            nativeCurrency = poolKey.currency0;
+            sweepNative = true;
+        }
+        if (token1 == address(0) && amount1 > 0) {
+            nativeValue += amount1;
+            nativeCurrency = poolKey.currency1;
+            sweepNative = true;
+        }
+
+        // Build actions: MINT_POSITION (0x02) + SETTLE_PAIR (0x0d), optionally SWEEP native refund.
+        uint256 actionCount = sweepNative ? 3 : 2;
+        bytes memory actions = new bytes(actionCount);
         actions[0] = bytes1(Actions.MINT_POSITION);
         actions[1] = bytes1(Actions.SETTLE_PAIR);
+        if (sweepNative) {
+            actions[2] = bytes1(Actions.SWEEP);
+        }
 
         // MINT_POSITION params
         bytes memory mintParams = abi.encode(
@@ -961,14 +1048,17 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         bytes memory settlePairParams = abi.encode(poolKey.currency0, poolKey.currency1);
 
         // Combine params
-        bytes[] memory params = new bytes[](2);
+        bytes[] memory params = new bytes[](actionCount);
         params[0] = mintParams;
         params[1] = settlePairParams;
+        if (sweepNative) {
+            params[2] = abi.encode(nativeCurrency, address(this));
+        }
 
         bytes memory unlockData = abi.encode(actions, params);
 
         // Execute mint via modifyLiquidities (deadline = block.timestamp + 300)
-        IPositionManager(positionManager).modifyLiquidities(unlockData, block.timestamp + 300);
+        IPositionManager(positionManager).modifyLiquidities{value: nativeValue}(unlockData, block.timestamp + 300);
 
         // Get tokenId
         tokenId = IPositionManager(positionManager).nextTokenId() - 1;

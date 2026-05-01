@@ -158,6 +158,19 @@
                        {
                            "indexed":  true,
                            "internalType":  "address",
+                           "name":  "wrappedNative",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "WrappedNativeUpdated",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
                            "name":  "user",
                            "type":  "address"
                        },
@@ -348,6 +361,21 @@
         "inputs":  [
                        {
                            "internalType":  "address",
+                           "name":  "_wrappedNative",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "setWrappedNative",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
                            "name":  "newOwner",
                            "type":  "address"
                        }
@@ -398,6 +426,21 @@
 
                    ],
         "name":  "v4PositionManager",
+        "outputs":  [
+                        {
+                            "internalType":  "address",
+                            "name":  "",
+                            "type":  "address"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "wrappedNative",
         "outputs":  [
                         {
                             "internalType":  "address",
@@ -797,5 +840,9 @@
                     ],
         "stateMutability":  "nonpayable",
         "type":  "function"
+    },
+    {
+        "stateMutability":  "payable",
+        "type":  "receive"
     }
 ]

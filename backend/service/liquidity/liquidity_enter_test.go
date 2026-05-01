@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"TgLpBot/base/blockchain"
+	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -75,6 +77,50 @@ func TestEvmRevertHintMaximumAmountExceeded(t *testing.T) {
 	hint := evmRevertHint(errors.New("execution reverted: 0x31e30ad0"))
 	if !strings.Contains(hint, "MaximumAmountExceeded") {
 		t.Fatalf("expected MaximumAmountExceeded hint, got %q", hint)
+	}
+}
+
+func TestResolveTaskTokenAddressesAllowsNativeV4Currency(t *testing.T) {
+	t.Parallel()
+
+	token0, token1, err := (&LiquidityService{}).resolveTaskTokenAddresses(&models.StrategyTask{
+		PoolVersion:   "v4",
+		PoolId:        "0x3f10176b927a75129c8c4feadc6d88afa71486046eb04f857bc0d4087ffcff4f",
+		Token0Address: "0x0000000000000000000000000000000000000000",
+		Token1Address: "0x0000000000000000000000000000000000000001",
+	})
+	if err != nil {
+		t.Fatalf("expected native V4 pool to resolve, got %v", err)
+	}
+	if token0 != (common.Address{}) {
+		t.Fatalf("token0 = %s, want native zero address", token0.Hex())
+	}
+	if token1 != common.HexToAddress("0x0000000000000000000000000000000000000001") {
+		t.Fatalf("token1 = %s", token1.Hex())
+	}
+}
+
+func TestV4NativeCurrencyUsesWrappedNativeFundingToken(t *testing.T) {
+	t.Parallel()
+
+	wbnb := common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+	cc := config.ChainConfig{
+		Chain:                "bsc",
+		WrappedNativeAddress: wbnb.Hex(),
+	}
+
+	got, err := v4CurrencyFundingToken(cc, common.Address{})
+	if err != nil {
+		t.Fatalf("v4CurrencyFundingToken() error = %v", err)
+	}
+	if got != wbnb {
+		t.Fatalf("funding token = %s, want %s", got.Hex(), wbnb.Hex())
+	}
+	if !poolContainsEntryCandidate("v4", common.Address{}, common.HexToAddress("0x0000000000000000000000000000000000000001"), wbnb, cc) {
+		t.Fatal("expected WBNB candidate to match native V4 pool currency")
+	}
+	if poolContainsEntryCandidate("v3", common.Address{}, common.HexToAddress("0x0000000000000000000000000000000000000001"), wbnb, cc) {
+		t.Fatal("did not expect WBNB candidate to match zero address for V3")
 	}
 }
 

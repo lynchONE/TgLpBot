@@ -92,12 +92,12 @@ func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 	}
 
 	// Token symbols
-	token0Symbol, err := blockchain.GetTokenSymbol(c0)
+	token0Symbol, err := v4CurrencySymbol(c0)
 	if err != nil {
 		log.Printf("[PoolService] Warning: could not get token0 symbol: %v", err)
 		token0Symbol = "UNKNOWN"
 	}
-	token1Symbol, err := blockchain.GetTokenSymbol(c1)
+	token1Symbol, err := v4CurrencySymbol(c1)
 	if err != nil {
 		log.Printf("[PoolService] Warning: could not get token1 symbol: %v", err)
 		token1Symbol = "UNKNOWN"
@@ -117,6 +117,28 @@ func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 		CurrentTick:  0,
 		HooksAddress: hooks.Hex(),
 	}, nil
+}
+
+func v4CurrencySymbol(currency common.Address) (string, error) {
+	if currency != (common.Address{}) {
+		return blockchain.GetTokenSymbol(currency)
+	}
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig("bsc"); ok {
+			wrapped := strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+			switch wrapped {
+			case "WBNB":
+				return "BNB", nil
+			case "WETH":
+				return "ETH", nil
+			default:
+				if strings.HasPrefix(wrapped, "W") && len(wrapped) > 1 {
+					return wrapped[1:], nil
+				}
+			}
+		}
+	}
+	return "BNB", nil
 }
 
 // calculateTickSpacing calculates tick spacing based on fee tier.

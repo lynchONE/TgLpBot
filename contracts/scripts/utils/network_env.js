@@ -212,6 +212,25 @@ function getNativeSymbolForNetwork(networkName) {
   }
 }
 
+function getWrappedNativeForNetwork(networkName) {
+  const explicit = readFirstEnvForNetwork(networkName, [
+    "WRAPPED_NATIVE_ADDRESS",
+    "WBNB_ADDRESS",
+    "WETH_ADDRESS",
+  ]);
+  if (explicit) {
+    return explicit;
+  }
+  switch (networkName) {
+    case "bsc":
+      return "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
+    case "bscTestnet":
+      return "0xae13d989dac2f0debff460ac112a837c89baa7cd";
+    default:
+      return undefined;
+  }
+}
+
 module.exports = {
   getNetworkPrefixes,
   usesGlobalFallback,
@@ -223,4 +242,5 @@ module.exports = {
   getExplorerApiKeyForNetwork,
   isTruthyEnv,
   getNativeSymbolForNetwork,
+  getWrappedNativeForNetwork,
 };

@@ -28,11 +28,11 @@ import (
 const walletChainContractKindZapSimple = "zap_simple"
 const walletChainContractStatusDeployed = "deployed"
 const walletChainContractStatusReady = "ready"
-const privateZapSimpleBindingVersion = 2
-const privateAtomicIncreaseZapBindingVersion = 2
+const privateZapSimpleBindingVersion = 3
+const privateAtomicIncreaseZapBindingVersion = 3
 const privateZapCacheTTL = time.Hour
-const privateZapSimpleCachePrefix = "private_zap:binding:v2"
-const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v2"
+const privateZapSimpleCachePrefix = "private_zap:binding:v3"
+const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v3"
 
 var privateZapMuByKey sync.Map // key=chain|walletID -> *sync.Mutex
 
@@ -439,6 +439,10 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
 		v4pm = common.HexToAddress(cc.UniswapV4PositionManagerAddress)
 	}
+	wrappedNative := common.Address{}
+	if common.IsHexAddress(cc.WrappedNativeAddress) {
+		wrappedNative = common.HexToAddress(cc.WrappedNativeAddress)
+	}
 
 	if zapAddr == (common.Address{}) {
 		log.Printf("[PrivateZap] deploying zap_simple chain=%s wallet_id=%d wallet=%s", chain, wallet.ID, walletAddr.Hex())
@@ -493,6 +497,28 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 	cfgHash := cfgTx.Hash().Hex()
 	if _, werr := s.waitMined(client, chainID, cfgTx); werr != nil {
 		return common.Address{}, fmt.Errorf("setTrustedAddresses tx failed: %w", werr)
+	}
+
+	if wrappedNative != (common.Address{}) {
+		nonceWrapped, nerr := blockchain.GetNonceWithClient(client, walletAddr)
+		if nerr != nil {
+			return common.Address{}, nerr
+		}
+		wrappedAuth, aerr := s.buildAuth(client, chainID, privateKey, nonceWrapped, big.NewInt(0), opts)
+		if aerr != nil {
+			return common.Address{}, aerr
+		}
+		tuneZapTxGasLimit("PrivateZap setWrappedNative", wrappedAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return blockchain.ZapSimpleSetWrappedNative(o, client, zapAddr, wrappedNative)
+		})
+		wrappedTx, werr := blockchain.ZapSimpleSetWrappedNative(wrappedAuth, client, zapAddr, wrappedNative)
+		if werr != nil {
+			return common.Address{}, fmt.Errorf("setWrappedNative failed: %w", werr)
+		}
+		cfgHash = wrappedTx.Hash().Hex()
+		if _, werr := s.waitMined(client, chainID, wrappedTx); werr != nil {
+			return common.Address{}, fmt.Errorf("setWrappedNative tx failed: %w", werr)
+		}
 	}
 
 	// 3) Allowlist additional V3 position managers (optional).

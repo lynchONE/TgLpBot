@@ -5,6 +5,7 @@ const {
   getExplorerApiKeyForNetwork,
   isTruthyEnv,
   getNativeSymbolForNetwork,
+  getWrappedNativeForNetwork,
 } = require("./utils/network_env");
 
 async function main() {
@@ -83,6 +84,7 @@ async function main() {
   const okxApprove = trusted.okxApprove;
   const v3pm = trusted.v3Primary;
   const v4pm = trusted.v4pm;
+  const wrappedNative = getWrappedNativeForNetwork(networkName);
 
   if (okxRouter && okxApprove && v3pm) {
     console.log("Setting trusted addresses...");
@@ -95,6 +97,15 @@ async function main() {
     console.log("OKX TokenApprove:", okxApprove);
     console.log("V3 PositionManager:", v3pm);
     console.log("V4 PositionManager:", v4pm || ethers.ZeroAddress);
+
+    if (wrappedNative) {
+      console.log("Setting wrapped native:", wrappedNative);
+      const wrappedTx = await zapSimple.setWrappedNative(wrappedNative);
+      console.log("setWrappedNative tx:", wrappedTx.hash);
+      await wrappedTx.wait();
+    } else {
+      console.log("Skipped setWrappedNative because wrapped native env is missing.");
+    }
 
     // If multiple V3 position managers are configured for this chain family, allowlist additional ones.
     const uniqueExtras = trusted.v3Extras

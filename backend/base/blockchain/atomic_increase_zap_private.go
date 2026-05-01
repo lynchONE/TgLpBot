@@ -37,6 +37,15 @@ const atomicIncreaseZapAdminABI = `[
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "_wrappedNative", "type": "address" }
+    ],
+    "name": "setWrappedNative",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
   }
 ]`
 
@@ -127,4 +136,23 @@ func AtomicIncreaseZapSetTrustedV3PositionManagers(
 		return nil, err
 	}
 	return c.Transact(auth, "setTrustedV3PositionManagers", positionManagers, trusted)
+}
+
+func AtomicIncreaseZapSetWrappedNative(
+	auth *bind.TransactOpts,
+	client *ethclient.Client,
+	zapAddr common.Address,
+	wrappedNative common.Address,
+) (*types.Transaction, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("auth is nil")
+	}
+	if wrappedNative == (common.Address{}) {
+		return nil, fmt.Errorf("wrapped native is zero")
+	}
+	c, err := atomicIncreaseZapAdminContract(zapAddr, client)
+	if err != nil {
+		return nil, err
+	}
+	return c.Transact(auth, "setWrappedNative", wrappedNative)
 }

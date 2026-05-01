@@ -604,9 +604,9 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 		entryAmount = out
 	}
 
-	if entryToken == c0 {
+	if v4CurrencyMatchesFundingToken(cc, c0, entryToken) {
 		amount0Preview = cloneBig(entryAmount)
-	} else if entryToken == c1 {
+	} else if v4CurrencyMatchesFundingToken(cc, c1, entryToken) {
 		amount1Preview = cloneBig(entryAmount)
 	} else {
 		return nil, fmt.Errorf("entry token is not in V4 pool")
@@ -620,7 +620,15 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 		} else {
 			swapFrom, swapTo = c1, c0
 		}
-		swapParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapFrom, swapTo, swapAmount, task.SlippageTolerance)
+		swapFromFunding, err := v4CurrencyFundingToken(cc, swapFrom)
+		if err != nil {
+			return nil, err
+		}
+		swapToFunding, err := v4CurrencyFundingToken(cc, swapTo)
+		if err != nil {
+			return nil, err
+		}
+		swapParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapFromFunding, swapToFunding, swapAmount, task.SlippageTolerance)
 		if err != nil {
 			return nil, fmt.Errorf("prepare rebalance swap failed: %w", err)
 		}

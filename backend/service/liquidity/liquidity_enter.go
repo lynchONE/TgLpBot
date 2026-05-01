@@ -178,6 +178,7 @@ func (s *LiquidityService) planEntryToken(task *models.StrategyTask) (*entryToke
 	if err != nil {
 		return nil, err
 	}
+	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	candidates := entryTokenCandidates(cc)
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no entry token configured")
@@ -188,7 +189,7 @@ func (s *LiquidityService) planEntryToken(task *models.StrategyTask) (*entryToke
 		if cand.Symbol != stableSym {
 			continue
 		}
-		if token0 == cand.Address || token1 == cand.Address {
+		if poolContainsEntryCandidate(version, token0, token1, cand.Address, cc) {
 			return &entryTokenPlan{
 				Token0:       token0,
 				Token1:       token1,
@@ -203,7 +204,7 @@ func (s *LiquidityService) planEntryToken(task *models.StrategyTask) (*entryToke
 		if cand.Symbol == stableSym {
 			continue
 		}
-		if token0 == cand.Address || token1 == cand.Address {
+		if poolContainsEntryCandidate(version, token0, token1, cand.Address, cc) {
 			return &entryTokenPlan{
 				Token0:       token0,
 				Token1:       token1,
@@ -1814,7 +1815,7 @@ func (s *LiquidityService) checkZapSafety(
 		okxOut := new(big.Float).SetInt(okxToTokenAmount)
 		var okxPriceF float64
 
-		if swapTokenIn == token0 {
+		if poolCurrencyMatchesSwapToken(chain, token0, swapTokenIn) {
 			// swap token0 -> token1: OKX rate = toTokenAmount / amountIn (token1 per token0)
 			okxPriceF, _ = new(big.Float).Quo(okxOut, okxIn).Float64()
 		} else {
@@ -2189,11 +2190,11 @@ func (s *LiquidityService) enterV4FromToken(
 	var amount0In, amount1In *big.Int
 	var tokenOut common.Address
 
-	if c0 == tokenIn {
+	if v4CurrencyMatchesFundingToken(cc, c0, tokenIn) {
 		amount0In = amountIn
 		amount1In = big.NewInt(0)
 		tokenOut = c1
-	} else if c1 == tokenIn {
+	} else if v4CurrencyMatchesFundingToken(cc, c1, tokenIn) {
 		amount0In = big.NewInt(0)
 		amount1In = amountIn
 		tokenOut = c0
@@ -2238,7 +2239,15 @@ func (s *LiquidityService) enterV4FromToken(
 	var okxExpectedOut *big.Int
 
 	if swapAmount.Sign() > 0 {
-		sParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
+		swapTokenIn, err := v4CurrencyFundingToken(cc, tokenIn)
+		if err != nil {
+			return nil, err
+		}
+		swapTokenOut, err := v4CurrencyFundingToken(cc, tokenOut)
+		if err != nil {
+			return nil, err
+		}
+		sParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
 			estimatedLiquidity, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, tickLower, tickUpper, amount0In, amount1In)
 			if liqErr != nil {
@@ -2253,7 +2262,7 @@ func (s *LiquidityService) enterV4FromToken(
 			swapParams = *sParams
 
 			// Zap 安全检查：价格偏差（V4 已有 sqrtPriceX96，流动性检查传零地址跳过）
-			if safeErr := s.checkZapSafety(client, sqrtPriceX96, tokenIn, tokenOut, swapAmount, okxExpectedOut,
+			if safeErr := s.checkZapSafety(client, sqrtPriceX96, swapTokenIn, swapTokenOut, swapAmount, okxExpectedOut,
 				c0, c1, tokenIn, entryDecimals, common.Address{}, task.Chain); safeErr != nil {
 				return nil, safeErr
 			}
@@ -2270,8 +2279,8 @@ func (s *LiquidityService) enterV4FromToken(
 				tickLower,
 				tickUpper,
 				slippageBps,
-				tokenIn,
-				tokenOut,
+				swapTokenIn,
+				swapTokenOut,
 				swapAmount,
 				swapParams,
 				okxExpectedOut,
@@ -2434,13 +2443,13 @@ func (s *LiquidityService) enterV4FromToken(
 	avail1 := new(big.Int).Set(amount1In)
 	if tin, tout, ain, aout, ok := parseZapSwapExecutedEvent(receipt, zapAddr); ok && ain != nil && ain.Sign() > 0 && aout != nil {
 		switch {
-		case tin == c0 && tout == c1:
+		case v4CurrencyMatchesFundingToken(cc, c0, tin) && v4CurrencyMatchesFundingToken(cc, c1, tout):
 			avail0.Sub(avail0, ain)
 			if avail0.Sign() < 0 {
 				avail0 = big.NewInt(0)
 			}
 			avail1.Add(avail1, aout)
-		case tin == c1 && tout == c0:
+		case v4CurrencyMatchesFundingToken(cc, c1, tin) && v4CurrencyMatchesFundingToken(cc, c0, tout):
 			avail1.Sub(avail1, ain)
 			if avail1.Sign() < 0 {
 				avail1 = big.NewInt(0)

@@ -4,6 +4,7 @@ const {
   usesGlobalFallback,
   readZapAddressForNetwork,
   resolveTrustedConfigForNetwork,
+  getWrappedNativeForNetwork,
 } = require("./utils/network_env");
 
 async function main() {
@@ -31,6 +32,7 @@ async function main() {
   const okxApprove = trusted.okxApprove;
   const v3pm = trusted.v3Primary;
   const v4pm = trusted.v4pm;
+  const wrappedNative = getWrappedNativeForNetwork(networkName);
 
   if (!okxRouter || !okxApprove || !v3pm) {
     console.error("Missing required env keys:");
@@ -52,23 +54,45 @@ async function main() {
   const currentApprove = await zap.okxTokenApprove();
   const currentV3PM = await zap.v3PositionManager();
   const currentV4PM = await zap.v4PositionManager();
+  let currentWrappedNative = ethers.ZeroAddress;
+  try {
+    currentWrappedNative = await zap.wrappedNative();
+  } catch (error) {
+    console.log("Current contract does not expose wrappedNative(); redeploy ZapSimple before using native V4 pools.");
+  }
 
   console.log("Current on-chain state:");
   console.log("- OKX Router:", currentRouter);
   console.log("- OKX TokenApprove:", currentApprove);
   console.log("- V3 PositionManager:", currentV3PM);
   console.log("- V4 PositionManager:", currentV4PM);
+  console.log("- Wrapped Native:", currentWrappedNative);
 
   console.log("Applying new trusted config:");
   console.log("- OKX Router:", okxRouter);
   console.log("- OKX TokenApprove:", okxApprove);
   console.log("- V3 PositionManager:", v3pm);
   console.log("- V4 PositionManager:", v4pm || ethers.ZeroAddress);
+  console.log("- Wrapped Native:", wrappedNative || ethers.ZeroAddress);
 
   const tx = await zap.setTrustedAddresses(okxRouter, okxApprove, v3pm, v4pm || ethers.ZeroAddress);
   console.log("setTrustedAddresses tx:", tx.hash);
   await tx.wait();
   console.log("Trusted addresses updated successfully.");
+
+  if (wrappedNative) {
+    try {
+      const txWrapped = await zap.setWrappedNative(wrappedNative);
+      console.log("setWrappedNative tx:", txWrapped.hash);
+      await txWrapped.wait();
+      console.log("Wrapped native updated successfully.");
+    } catch (error) {
+      console.log("setWrappedNative failed; redeploy ZapSimple with the latest contract before using native V4 pools.");
+      throw error;
+    }
+  } else {
+    console.log("Skipped setWrappedNative because wrapped native env is missing.");
+  }
 
   // If multiple V3 position managers are configured for this chain family, allowlist additional ones.
   const uniqueExtras = trusted.v3Extras

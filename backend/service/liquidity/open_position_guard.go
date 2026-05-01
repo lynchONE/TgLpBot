@@ -319,7 +319,15 @@ func isStableEntryToken(symbol string, token common.Address, cc config.ChainConf
 
 func tokenPriceUSD(chain string, token common.Address, symbol string, cc config.ChainConfig) (float64, error) {
 	if token == (common.Address{}) {
-		return 0, fmt.Errorf("token address is empty")
+		price := pricing.GetNativePriceUSD(chain)
+		if price > 0 {
+			return price, nil
+		}
+		if wrapped, ok := wrappedNativeAddress(cc); ok {
+			token = wrapped
+		} else {
+			return 0, fmt.Errorf("native token price unavailable")
+		}
 	}
 	if isStableEntryToken(symbol, token, cc) {
 		return 1.0, nil

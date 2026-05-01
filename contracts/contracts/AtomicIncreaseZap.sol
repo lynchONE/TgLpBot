@@ -64,6 +64,11 @@ interface IERC721Like {
     function isApprovedForAll(address owner, address operator) external view returns (bool);
 }
 
+interface IWrappedNativeAtomic is IERC20 {
+    function deposit() external payable;
+    function withdraw(uint256 amount) external;
+}
+
 contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
@@ -76,6 +81,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     address public v3PositionManager;
     mapping(address => bool) public trustedV3PositionManagers;
     address public v4PositionManager;
+    address public wrappedNative;
 
     event TrustedAddressesUpdated(
         address okxSwapRouter,
@@ -85,6 +91,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     );
 
     event TrustedV3PositionManagerUpdated(address indexed positionManager, bool trusted);
+    event WrappedNativeUpdated(address indexed wrappedNative);
 
     event ZapIncreaseV3(
         address indexed user,
@@ -189,6 +196,12 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
             trustedV3PositionManagers[pm] = trusted;
             emit TrustedV3PositionManagerUpdated(pm, trusted);
         }
+    }
+
+    function setWrappedNative(address _wrappedNative) external onlyOwner {
+        require(_wrappedNative != address(0), "bad wrapped");
+        wrappedNative = _wrappedNative;
+        emit WrappedNativeUpdated(_wrappedNative);
     }
 
     function zapIncreaseV3(ZapIncreaseV3Params calldata params)
@@ -296,7 +309,6 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         returns (ZapResult memory result)
     {
         PoolKeySimple memory poolKey = params.poolKey;
-        require(poolKey.currency0 != address(0) && poolKey.currency1 != address(0), "bad pool");
         require(poolKey.currency0 < poolKey.currency1, "bad tokens");
         require(params.positionManager != address(0), "bad pm");
         require(v4PositionManager != address(0), "v4 pm unset");
@@ -316,8 +328,10 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         );
 
         uint256 fundingBalBefore = IERC20(params.funding.token).balanceOf(address(this));
-        uint256 token0BalBefore = IERC20(poolKey.currency0).balanceOf(address(this));
-        uint256 token1BalBefore = IERC20(poolKey.currency1).balanceOf(address(this));
+        uint256 token0FundingBefore = _fundingBalanceForCurrency(poolKey.currency0);
+        uint256 token1FundingBefore = _fundingBalanceForCurrency(poolKey.currency1);
+        uint256 token0BalBefore = _balanceForCurrency(poolKey.currency0);
+        uint256 token1BalBefore = _balanceForCurrency(poolKey.currency1);
 
         IERC20(params.funding.token).safeTransferFrom(msg.sender, address(this), params.funding.amount);
         uint256 fundingAvailable = IERC20(params.funding.token).balanceOf(address(this)) - fundingBalBefore;
@@ -326,31 +340,38 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
             _validateTrustedSwap(params.entrySwap);
             require(params.entrySwap.tokenIn == params.funding.token, "entry tokenIn");
             require(
-                params.entrySwap.tokenOut == poolKey.currency0 || params.entrySwap.tokenOut == poolKey.currency1,
+                _matchesPoolCurrency(params.entrySwap.tokenOut, poolKey.currency0)
+                    || _matchesPoolCurrency(params.entrySwap.tokenOut, poolKey.currency1),
                 "entry tokenOut"
             );
             require(params.entrySwap.amountIn <= fundingAvailable, "entry amount");
             _executeSwap(params.entrySwap);
         }
 
-        uint256 rebalanceAvail0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-        uint256 rebalanceAvail1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+        uint256 rebalanceAvail0 = _fundingBalanceForCurrency(poolKey.currency0) - token0FundingBefore;
+        uint256 rebalanceAvail1 = _fundingBalanceForCurrency(poolKey.currency1) - token1FundingBefore;
         if (params.rebalanceSwap.amountIn > 0 && params.rebalanceSwap.callData.length > 0) {
             _validateTrustedSwap(params.rebalanceSwap);
             require(
-                (params.rebalanceSwap.tokenIn == poolKey.currency0 && params.rebalanceSwap.tokenOut == poolKey.currency1)
-                    || (params.rebalanceSwap.tokenIn == poolKey.currency1
-                        && params.rebalanceSwap.tokenOut == poolKey.currency0),
+                (_matchesPoolCurrency(params.rebalanceSwap.tokenIn, poolKey.currency0)
+                    && _matchesPoolCurrency(params.rebalanceSwap.tokenOut, poolKey.currency1))
+                    || (_matchesPoolCurrency(params.rebalanceSwap.tokenIn, poolKey.currency1)
+                        && _matchesPoolCurrency(params.rebalanceSwap.tokenOut, poolKey.currency0)),
                 "rebalance pair"
             );
-            uint256 maxIn = params.rebalanceSwap.tokenIn == poolKey.currency0 ? rebalanceAvail0 : rebalanceAvail1;
+            uint256 maxIn = _matchesPoolCurrency(params.rebalanceSwap.tokenIn, poolKey.currency0)
+                ? rebalanceAvail0
+                : rebalanceAvail1;
             require(params.rebalanceSwap.amountIn <= maxIn, "rebalance amount");
             _executeSwap(params.rebalanceSwap);
         }
 
-        uint256 amount0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-        uint256 amount1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+        uint256 amount0 = _fundingBalanceForCurrency(poolKey.currency0) - token0FundingBefore;
+        uint256 amount1 = _fundingBalanceForCurrency(poolKey.currency1) - token1FundingBefore;
         require(amount0 > 0 || amount1 > 0, "no tokens");
+
+        _unwrapForNativeCurrency(poolKey.currency0, amount0);
+        _unwrapForNativeCurrency(poolKey.currency1, amount1);
 
         PoolKey memory v4PoolKey = PoolKey({
             currency0: Currency.wrap(poolKey.currency0),
@@ -380,10 +401,10 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
             amount1,
             sqrtPriceX96
         );
-        result.dust0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-        result.dust1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
-        result.amount0Used = amount0 - result.dust0;
-        result.amount1Used = amount1 - result.dust1;
+        result.dust0 = _balanceForCurrency(poolKey.currency0) - token0BalBefore;
+        result.dust1 = _balanceForCurrency(poolKey.currency1) - token1BalBefore;
+        result.amount0Used = amount0 > result.dust0 ? amount0 - result.dust0 : 0;
+        result.amount1Used = amount1 > result.dust1 ? amount1 - result.dust1 : 0;
 
         _refundDelta(params.funding.token, msg.sender, fundingBalBefore);
         if (poolKey.currency0 != params.funding.token) {
@@ -453,11 +474,11 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         require(amount0 <= type(uint128).max, "amount0 size");
         require(amount1 <= type(uint128).max, "amount1 size");
 
-        if (amount0 > 0) {
+        if (amount0 > 0 && token0 != address(0)) {
             _forceApprovePermit2Infinity(token0);
             _permit2ApproveInfinity(token0, positionManager);
         }
-        if (amount1 > 0) {
+        if (amount1 > 0 && token1 != address(0)) {
             _forceApprovePermit2Infinity(token1);
             _permit2ApproveInfinity(token1, positionManager);
         }
@@ -465,8 +486,16 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         uint128 liquidity = _estimateV4Liquidity(sqrtPriceX96, tickLower, tickUpper, amount0, amount1);
         require(liquidity > 0, "zero liquidity");
 
+        uint256 nativeValue = 0;
+        if (token0 == address(0) && amount0 > 0) {
+            nativeValue += amount0;
+        }
+        if (token1 == address(0) && amount1 > 0) {
+            nativeValue += amount1;
+        }
+
         bytes memory unlockData = _buildV4IncreaseUnlockData(poolKey, tokenId, amount0, amount1);
-        IPositionManager(positionManager).modifyLiquidities(unlockData, block.timestamp + 300);
+        IPositionManager(positionManager).modifyLiquidities{value: nativeValue}(unlockData, block.timestamp + 300);
 
         result.tokenId = tokenId;
         result.liquidity = liquidity;
@@ -528,6 +557,37 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         return abi.encode(actions, params);
     }
 
+    function _requireWrappedNative() internal view returns (address) {
+        address token = wrappedNative;
+        require(token != address(0), "wrapped unset");
+        return token;
+    }
+
+    function _fundingTokenForCurrency(address currency) internal view returns (address) {
+        return currency == address(0) ? _requireWrappedNative() : currency;
+    }
+
+    function _fundingBalanceForCurrency(address currency) internal view returns (uint256) {
+        return IERC20(_fundingTokenForCurrency(currency)).balanceOf(address(this));
+    }
+
+    function _balanceForCurrency(address currency) internal view returns (uint256) {
+        return currency == address(0) ? address(this).balance : IERC20(currency).balanceOf(address(this));
+    }
+
+    function _unwrapForNativeCurrency(address currency, uint256 amount) internal {
+        if (currency == address(0) && amount > 0) {
+            IWrappedNativeAtomic(_requireWrappedNative()).withdraw(amount);
+        }
+    }
+
+    function _matchesPoolCurrency(address token, address currency) internal view returns (bool) {
+        if (currency == address(0)) {
+            return token == _requireWrappedNative();
+        }
+        return token == currency;
+    }
+
     function _validateTrustedSwap(SwapParams calldata swap) internal view {
         require(swap.target == okxSwapRouter, "swap target");
         if (okxTokenApprove != address(0)) {
@@ -574,12 +634,19 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     }
 
     function _refundDelta(address token, address to, uint256 balanceBefore) internal {
-        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 balanceAfter = _balanceForCurrency(token);
         uint256 delta = balanceAfter - balanceBefore;
         if (delta > 0) {
-            IERC20(token).safeTransfer(to, delta);
+            if (token == address(0)) {
+                (bool ok, ) = payable(to).call{value: delta}("");
+                require(ok, "native refund");
+            } else {
+                IERC20(token).safeTransfer(to, delta);
+            }
         }
     }
+
+    receive() external payable {}
 
     function _permit2ApproveInfinity(address token, address spender) internal {
         (uint160 allowedAmount, uint48 allowedExpiration, ) = IPermit2(PERMIT2).allowance(address(this), token, spender);
