@@ -62,7 +62,7 @@ func NewStrategyService() *StrategyService {
 		configService:      user.NewGlobalConfigService(),
 		accessService:      user.NewAccessService(),
 		stopChan:           make(chan struct{}),
-		ticker:             time.NewTicker(5 * time.Second), // Check every 5 seconds
+		ticker:             time.NewTicker(2 * time.Second), // Check every 2 seconds
 		lastLiquidityCheck: make(map[uint]time.Time),
 		monitorLimiter:     concurrency.NewKeyedLimiter(maxUsers),
 		inflightTasks:      make(map[uint]time.Time),

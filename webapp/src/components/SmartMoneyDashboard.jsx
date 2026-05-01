@@ -403,7 +403,7 @@ function PoolCardRangeSummary({ pool }) {
 function getRefreshIntervalMs(refreshInterval) {
     const seconds = Number(refreshInterval);
     if (!Number.isFinite(seconds) || seconds <= 0) return 10000;
-    return Math.max(Math.round(seconds), 10) * 1000;
+    return Math.max(Math.round(seconds), 2) * 1000;
 }
 
 function relativeTime(dateStr) {

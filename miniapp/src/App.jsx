@@ -152,6 +152,7 @@ const storage = {
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_ACCENT_THEME = 'tglp_accent_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
+const MIN_POLL_INTERVAL_SEC = 2;
 const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
 const STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES = 'tglp_open_position_hide_wallet_balances';
@@ -1332,7 +1333,7 @@ export default function App() {
     );
     const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage;
     const hotPoolsDefaultPollSec = 10;
-    const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
+    const hotPoolsPollIntervalSec = Math.max(MIN_POLL_INTERVAL_SEC, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
     const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
 
@@ -1711,7 +1712,7 @@ export default function App() {
         }
 
         const savedPoll = Number(storage.get(STORAGE_POLL_SEC));
-        if (Number.isFinite(savedPoll) && savedPoll >= 5) {
+        if (Number.isFinite(savedPoll) && savedPoll >= MIN_POLL_INTERVAL_SEC) {
             setPollOverrideSec(Math.floor(savedPoll));
         }
         setAccentTheme(normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
@@ -2007,7 +2008,7 @@ export default function App() {
         if (!m) return;
         const n = Number(m[0]);
         if (!Number.isFinite(n)) return;
-        const v = Math.max(5, Math.min(300, Math.floor(n)));
+        const v = Math.max(MIN_POLL_INTERVAL_SEC, Math.min(300, Math.floor(n)));
         setPollOverrideSec(v);
         storage.set(STORAGE_POLL_SEC, String(v));
         setSettingsOpen(false);
@@ -2021,7 +2022,7 @@ export default function App() {
     };
 
     const setQuickPoll = (sec) => {
-        const v = Math.max(5, Math.min(300, Math.floor(Number(sec) || 5)));
+        const v = Math.max(MIN_POLL_INTERVAL_SEC, Math.min(300, Math.floor(Number(sec) || MIN_POLL_INTERVAL_SEC)));
         setPollOverrideSec(v);
         storage.set(STORAGE_POLL_SEC, String(v));
         setPollDraftSec(String(v));
@@ -4556,7 +4557,7 @@ export default function App() {
                                             : <>，默认跟随后端设置 <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s。</>}
                                     </div>
                                     <div className="mt-3 flex flex-wrap gap-2">
-                                        {[5, 10, 15, 30, 60].map((sec) => (
+                                        {[2, 5, 10, 15, 30, 60].map((sec) => (
                                             <button
                                                 key={sec}
                                                 type="button"
@@ -4590,7 +4591,7 @@ export default function App() {
                                             }}
                                             inputMode="numeric"
                                             className={`w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="1-300"
+                                            placeholder="2-300"
                                         />
                                         <button
                                             type="button"

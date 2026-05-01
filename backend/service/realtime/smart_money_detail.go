@@ -121,24 +121,19 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 					var (
 						sqrtP       *big.Int
 						currentTick int
-						usedStale   bool
-						age         time.Duration
 						err         error
 					)
 					if snapshotBlock > 0 {
 						sqrtP, currentTick, err = blockchain.GetV3PoolSlot0AtBlockWithClient(client, poolAddr, snapshotBlock)
 					}
 					if err != nil || sqrtP == nil {
-						sqrtP, currentTick, usedStale, age, err = s.getV3Slot0(chain, poolAddr)
+						sqrtP, currentTick, _, _, err = s.getV3Slot0(chain, poolAddr)
 					}
 					if err != nil && sqrtP == nil {
 						warnings = appendWarning(warnings, fmt.Sprintf("read v3 slot0 failed: %v", err))
 						return s.buildStaticSmartMoneyPosition(active, chain, "v3", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
 					}
 
-					if usedStale && err != nil {
-						warnings = appendWarning(warnings, fmt.Sprintf("v3 slot0 cache fallback (%ds)", int(age.Seconds())))
-					}
 					if snapshotBlock > 0 {
 						if fee0, fee1, feeErr := pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, info, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
 							owed0 = fee0
@@ -146,12 +141,10 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 						} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
 							warnings = appendWarning(warnings, fmt.Sprintf("v3 snapshot fee calculation failed: %v", feeErr))
 						}
-					} else if fee0, fee1, feeStale, feeAge, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
+					} else if fee0, fee1, _, _, feeErr := s.calcV3UnclaimedFeesLive(chain, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
 						owed0 = fee0
 						owed1 = fee1
-						if feeStale && feeErr != nil {
-							warnings = appendWarning(warnings, fmt.Sprintf("v3 fee cache fallback (%ds)", int(feeAge.Seconds())))
-						} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
+						if feeErr != nil && !isTransientFeeCalcError(feeErr) {
 							warnings = appendWarning(warnings, fmt.Sprintf("v3 fee calculation failed: %v", feeErr))
 						}
 					} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
@@ -211,22 +204,17 @@ func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.Smar
 		return s.buildStaticSmartMoneyPosition(active, chain, "v4", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
 	}
 
-	sqrtP, currentTick, usedStale, age, err := s.getV4Slot0(stateView, poolManager, poolID)
+	sqrtP, currentTick, _, _, err := s.getV4Slot0(stateView, poolManager, poolID)
 	if err != nil && sqrtP == nil {
 		warnings = appendWarning(warnings, fmt.Sprintf("read v4 slot0 failed: %v", err))
 		return s.buildStaticSmartMoneyPosition(active, chain, "v4", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
 	}
-	if usedStale && err != nil {
-		warnings = appendWarning(warnings, fmt.Sprintf("v4 slot0 cache fallback (%ds)", int(age.Seconds())))
-	}
 
 	if v4pos != nil {
-		if fee0, fee1, feeStale, feeAge, feeErr := s.calcV4UnclaimedFeesCachedUnified(stateView, poolManager, poolID, currentTick, v4pos); fee0 != nil && fee1 != nil {
+		if fee0, fee1, _, _, feeErr := s.calcV4UnclaimedFeesLiveUnified(stateView, poolManager, poolID, currentTick, v4pos); fee0 != nil && fee1 != nil {
 			owed0 = fee0
 			owed1 = fee1
-			if feeStale && feeErr != nil {
-				warnings = appendWarning(warnings, fmt.Sprintf("v4 fee cache fallback (%ds)", int(feeAge.Seconds())))
-			} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
+			if feeErr != nil && !isTransientFeeCalcError(feeErr) {
 				warnings = appendWarning(warnings, fmt.Sprintf("v4 fee calculation failed: %v", feeErr))
 			}
 		} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
@@ -393,8 +381,8 @@ func buildSmartMoneyRealtimePosition(
 	}
 }
 
-func (s *RealtimePositionsService) smartMoneyTokenMeta(chain string, token common.Address, symbol string, decimals int) cachedTokenMeta {
-	meta := cachedTokenMeta{
+func (s *RealtimePositionsService) smartMoneyTokenMeta(chain string, token common.Address, symbol string, decimals int) realtimeTokenMeta {
+	meta := realtimeTokenMeta{
 		symbol:   strings.TrimSpace(symbol),
 		decimals: decimals,
 	}

@@ -534,7 +534,7 @@ export default function AdminPanel({
       loadOnlineUsers();
       loadActiveTasks();
       if (selectedUser?.user_id) loadUserPositions(selectedUser.user_id);
-    }, Math.max(10, Number(refreshInterval || 10)) * 1000);
+    }, Math.max(2, Number(refreshInterval || 10)) * 1000);
     return () => clearInterval(timer);
   }, [activeTab, isReady, loadActiveTasks, loadOnlineUsers, loadUserPositions, refreshInterval, selectedUser?.user_id]);
 

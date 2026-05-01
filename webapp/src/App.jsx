@@ -321,6 +321,8 @@ const STORAGE = {
   smartMoneyWatchWallets: 'tglp_web_sm_watch_wallets',
 };
 
+const MIN_REFRESH_INTERVAL_SEC = 2;
+
 function storageGet(key) {
   try {
     return window.localStorage.getItem(key);
@@ -641,7 +643,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(() => {
     const saved = Number(storageGet(STORAGE.refreshInterval));
-    return saved >= 10 ? saved : 10;
+    return saved >= MIN_REFRESH_INTERVAL_SEC ? saved : 10;
   });
   const [accentTheme, setAccentTheme] = useState(() =>
     normalizeAccentTheme(storageGet(STORAGE.accentTheme) || 'green')
@@ -3217,10 +3219,10 @@ export default function App() {
                         <input
                           type="number"
                           className="settings-input"
-                          min={10}
+                          min={MIN_REFRESH_INTERVAL_SEC}
                           value={refreshInterval}
                           onChange={(e) => setRefreshInterval(e.target.value === '' ? '' : Number(e.target.value))}
-                          onBlur={() => setRefreshInterval((v) => Math.max(10, Math.round(Number(v) || 10)))}
+                          onBlur={() => setRefreshInterval((v) => Math.max(MIN_REFRESH_INTERVAL_SEC, Math.round(Number(v) || 10)))}
                         />
                         <span className="settings-unit">秒</span>
                       </div>
@@ -3242,7 +3244,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
-                    <div className="settings-hint">最低 10 秒，当前每 {refreshInterval} 秒刷新</div>
+                    <div className="settings-hint">最低 2 秒，当前每 {refreshInterval} 秒刷新</div>
                     <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
                   </div>
                 )}

@@ -16,7 +16,6 @@ import (
 	"math"
 	"math/big"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/singleflight"
 )
 
 type RealtimePositionsService struct {
@@ -36,140 +34,23 @@ type RealtimePositionsService struct {
 	taskService   *strategy.StrategyTaskService
 	priceService  *pricing.TokenPriceService
 	pnlService    *strategy.PnLService
-
-	computeGroup singleflight.Group
-
-	cacheMu sync.RWMutex
-	cache   map[uint]cachedRealtimePositions
-
-	tokenMetaMu sync.RWMutex
-	tokenMeta   map[string]cachedTokenMeta
-
-	balanceMu sync.RWMutex
-	balance   map[string]cachedTokenBalance
-
-	v3Slot0Mu sync.RWMutex
-	v3Slot0   map[string]cachedV3Slot0
-
-	v3PoolMu sync.RWMutex
-	v3Pool   map[string]cachedV3PoolAddress
-
-	v4Slot0Mu sync.RWMutex
-	v4Slot0   map[string]cachedV4Slot0
-
-	v4ScanMu    sync.RWMutex
-	v4ScanCache map[string]cachedV4TokenIDs
-
-	v4FeeMu    sync.RWMutex
-	v4FeeCache map[string]cachedV4FeeGrowthGlobals
-
-	v4TickFeeMu    sync.RWMutex
-	v4TickFeeCache map[string]cachedV4TickFeeGrowthOutside
-
-	v3FeeMu    sync.RWMutex
-	v3FeeCache map[string]cachedV3FeeGrowthGlobals
-
-	v3TickFeeMu    sync.RWMutex
-	v3TickFeeCache map[string]cachedV3TickFeeGrowthOutside
 }
 
-type cachedRealtimePositions struct {
-	resp    *RealtimePositionsResponse
-	expires time.Time
-}
-
-type cachedTokenMeta struct {
+type realtimeTokenMeta struct {
 	symbol   string
 	decimals int
-	expires  time.Time
-}
-
-type cachedTokenBalance struct {
-	value     *big.Int
-	updatedAt time.Time
-	expires   time.Time
-}
-
-type cachedV4TokenIDs struct {
-	ids     []string
-	expires time.Time
-}
-
-type cachedV3Slot0 struct {
-	sqrtPriceX96 *big.Int
-	tick         int
-	updatedAt    time.Time
-	expires      time.Time
-}
-
-type cachedV3PoolAddress struct {
-	addr    common.Address
-	expires time.Time
-}
-
-type cachedV4Slot0 struct {
-	sqrtPriceX96 *big.Int
-	tick         int
-	updatedAt    time.Time
-	expires      time.Time
-}
-
-type cachedV3FeeGrowthGlobals struct {
-	global0   *big.Int
-	global1   *big.Int
-	updatedAt time.Time
-	expires   time.Time
-}
-
-type cachedV3TickFeeGrowthOutside struct {
-	fee0        *big.Int
-	fee1        *big.Int
-	initialized bool
-	updatedAt   time.Time
-	expires     time.Time
-}
-
-type cachedV4FeeGrowthGlobals struct {
-	global0   *big.Int
-	global1   *big.Int
-	updatedAt time.Time
-	expires   time.Time
-}
-
-type cachedV4TickFeeGrowthOutside struct {
-	fee0      *big.Int
-	fee1      *big.Int
-	updatedAt time.Time
-	expires   time.Time
 }
 
 func NewRealtimePositionsService() *RealtimePositionsService {
 	return &RealtimePositionsService{
-		walletService:  wallet.NewWalletService(),
-		taskService:    strategy.NewStrategyTaskService(),
-		priceService:   pricing.NewTokenPriceService(),
-		pnlService:     strategy.NewPnLService(),
-		cache:          make(map[uint]cachedRealtimePositions),
-		tokenMeta:      make(map[string]cachedTokenMeta),
-		balance:        make(map[string]cachedTokenBalance),
-		v3Slot0:        make(map[string]cachedV3Slot0),
-		v3Pool:         make(map[string]cachedV3PoolAddress),
-		v4Slot0:        make(map[string]cachedV4Slot0),
-		v4ScanCache:    make(map[string]cachedV4TokenIDs),
-		v4FeeCache:     make(map[string]cachedV4FeeGrowthGlobals),
-		v4TickFeeCache: make(map[string]cachedV4TickFeeGrowthOutside),
-		v3FeeCache:     make(map[string]cachedV3FeeGrowthGlobals),
-		v3TickFeeCache: make(map[string]cachedV3TickFeeGrowthOutside),
+		walletService: wallet.NewWalletService(),
+		taskService:   strategy.NewStrategyTaskService(),
+		priceService:  pricing.NewTokenPriceService(),
+		pnlService:    strategy.NewPnLService(),
 	}
 }
 
 func (s *RealtimePositionsService) InvalidateUser(userID uint) {
-	if s == nil || userID == 0 {
-		return
-	}
-	s.cacheMu.Lock()
-	delete(s.cache, userID)
-	s.cacheMu.Unlock()
 }
 
 type RealtimePositionsResponse struct {
@@ -278,60 +159,7 @@ type RealtimeTotals struct {
 }
 
 func (s *RealtimePositionsService) GetForUser(userID uint) (*RealtimePositionsResponse, error) {
-	if !realtimePositionsUseResponseCache() {
-		v, err, _ := s.computeGroup.Do(strconv.FormatUint(uint64(userID), 10), func() (interface{}, error) {
-			return s.compute(userID)
-		})
-		if err != nil {
-			return nil, err
-		}
-		if resp, ok := v.(*RealtimePositionsResponse); ok && resp != nil {
-			out := *resp
-			return &out, nil
-		}
-		return nil, fmt.Errorf("unexpected realtime response type: %T", v)
-	}
-
-	now := time.Now()
-
-	s.cacheMu.RLock()
-	if c, ok := s.cache[userID]; ok && c.resp != nil && c.expires.After(now) {
-		resp := *c.resp
-		s.cacheMu.RUnlock()
-		return &resp, nil
-	}
-	s.cacheMu.RUnlock()
-
-	// De-duplicate concurrent refreshes for the same user (miniapp polls every 1s).
-	v, err, _ := s.computeGroup.Do(strconv.FormatUint(uint64(userID), 10), func() (interface{}, error) {
-		nowInner := time.Now()
-
-		s.cacheMu.RLock()
-		if c, ok := s.cache[userID]; ok && c.resp != nil && c.expires.After(nowInner) {
-			resp := *c.resp
-			s.cacheMu.RUnlock()
-			return &resp, nil
-		}
-		s.cacheMu.RUnlock()
-
-		resp, err := s.compute(userID)
-		if err != nil {
-			return nil, err
-		}
-
-		s.cacheMu.Lock()
-		s.cache[userID] = cachedRealtimePositions{resp: resp, expires: nowInner.Add(3 * time.Second)}
-		s.cacheMu.Unlock()
-		return resp, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if resp, ok := v.(*RealtimePositionsResponse); ok && resp != nil {
-		out := *resp
-		return &out, nil
-	}
-	return nil, fmt.Errorf("unexpected realtime response type: %T", v)
+	return s.compute(userID)
 }
 
 func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsResponse, error) {
@@ -708,22 +536,14 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	// 2) V4 positions (best-effort): prefer DB tasks because on-chain tokenId->range mapping is not always enumerable.
 	ownedV4 := make(map[string]struct{})
 	if len(taskByV4Token) > 0 && config.AppConfig.V4NFTScanFromBlock > 0 && common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-		// Avoid blocking the initial load: use cache if present, otherwise warm it in the background.
-		if ids, ok := s.getV4OwnedTokenIDsCached(walletAddr); ok && len(ids) > 0 {
+		ids, err := s.getV4OwnedTokenIDs(walletAddr)
+		if err != nil {
+			log.Printf("[Realtime] V4 NFT scan failed: wallet=%s err=%v", walletAddr.Hex(), err)
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("V4 NFT scan failed: %v", err))
+		} else {
 			for _, id := range ids {
 				ownedV4[id] = struct{}{}
 			}
-		} else {
-			go func(addr common.Address) {
-				key := "v4scan:" + strings.ToLower(addr.Hex())
-				_, _, _ = s.computeGroup.Do(key, func() (interface{}, error) {
-					_, err := s.getV4OwnedTokenIDs(addr)
-					if err != nil {
-						log.Printf("[Realtime] V4 NFT scan failed: wallet=%s err=%v", addr.Hex(), err)
-					}
-					return nil, nil
-				})
-			}(walletAddr)
 		}
 	}
 	for tokenId, task := range taskByV4Token {
@@ -871,28 +691,6 @@ func normalizeDecimalString(s string) (string, bool) {
 	return s, true
 }
 
-func (s *RealtimePositionsService) getV4OwnedTokenIDsCached(wallet common.Address) ([]string, bool) {
-	if config.AppConfig == nil || config.AppConfig.V4NFTScanFromBlock == 0 {
-		return nil, false
-	}
-	if !common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-		return nil, false
-	}
-
-	key := strings.ToLower(wallet.Hex())
-	now := time.Now()
-
-	s.v4ScanMu.RLock()
-	if c, ok := s.v4ScanCache[key]; ok && c.expires.After(now) {
-		ids := make([]string, len(c.ids))
-		copy(ids, c.ids)
-		s.v4ScanMu.RUnlock()
-		return ids, true
-	}
-	s.v4ScanMu.RUnlock()
-	return nil, false
-}
-
 func (s *RealtimePositionsService) getV4OwnedTokenIDs(wallet common.Address) ([]string, error) {
 	if config.AppConfig == nil || config.AppConfig.V4NFTScanFromBlock == 0 {
 		return nil, nil
@@ -901,28 +699,8 @@ func (s *RealtimePositionsService) getV4OwnedTokenIDs(wallet common.Address) ([]
 		return nil, nil
 	}
 
-	key := strings.ToLower(wallet.Hex())
-	now := time.Now()
-
-	s.v4ScanMu.RLock()
-	if c, ok := s.v4ScanCache[key]; ok && c.expires.After(now) {
-		ids := make([]string, len(c.ids))
-		copy(ids, c.ids)
-		s.v4ScanMu.RUnlock()
-		return ids, nil
-	}
-	s.v4ScanMu.RUnlock()
-
 	contract := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-	ids, err := scanERC721OwnedTokenIDs(contract, wallet, config.AppConfig.V4NFTScanFromBlock)
-	if err != nil {
-		return nil, err
-	}
-
-	s.v4ScanMu.Lock()
-	s.v4ScanCache[key] = cachedV4TokenIDs{ids: ids, expires: now.Add(90 * time.Second)}
-	s.v4ScanMu.Unlock()
-	return ids, nil
+	return scanERC721OwnedTokenIDs(contract, wallet, config.AppConfig.V4NFTScanFromBlock)
 }
 
 func scanERC721OwnedTokenIDs(contract common.Address, wallet common.Address, fromBlock uint64) ([]string, error) {
@@ -1141,16 +919,13 @@ func (s *RealtimePositionsService) buildV3Position(
 			}
 		}
 		if !hasSlot0 {
-			sp, t, usedStale, age, err := s.getV3Slot0(chain, poolAddr)
+			sp, t, _, _, err := s.getV3Slot0(chain, poolAddr)
 			if err != nil && sp == nil {
 				warn = fmt.Sprintf("read V3 pool slot0 failed: pool=%s tokenId=%s err=%v", poolAddr.Hex(), tokenId.String(), err)
 			} else {
 				sqrtP = sp
 				currentTick = t
 				hasSlot0 = true
-				if usedStale && err != nil {
-					warn = fmt.Sprintf("V3 slot0 cache fallback (%ds) tokenId=%s", int(age.Seconds()), tokenId.String())
-				}
 			}
 		}
 	} else {
@@ -1184,18 +959,14 @@ func (s *RealtimePositionsService) buildV3Position(
 				warn = appendRealtimeWarning(warn, fmt.Sprintf("V3 snapshot fee calculation failed: tokenId=%s err=%v", tokenId.String(), feeErr))
 			}
 		} else {
-			fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, info)
+			fee0, fee1, _, _, feeErr := s.calcV3UnclaimedFeesLive(chain, poolAddr, currentTick, info)
 			if feeErr != nil && (fee0 == nil || fee1 == nil) {
-				logRealtimeFeeIssue("V3", "cached", tokenId.String(), feeErr)
+				logRealtimeFeeIssue("V3", "live", tokenId.String(), feeErr)
 				warn = appendRealtimeWarning(warn, fmt.Sprintf("V3 fee calculation failed: tokenId=%s err=%v", tokenId.String(), feeErr))
 			}
 			if fee0 != nil && fee1 != nil {
 				owed0 = fee0
 				owed1 = fee1
-				if usedStale && feeErr != nil {
-					logRealtimeFeeIssue("V3", "cache-fallback", tokenId.String(), feeErr)
-					warn = appendRealtimeWarning(warn, fmt.Sprintf("V3 fee cache fallback (%ds) tokenId=%s", int(age.Seconds()), tokenId.String()))
-				}
 			}
 		}
 	}
@@ -1508,14 +1279,12 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	var (
 		sqrtP       *big.Int
 		currentTick int
-		usedStale   bool
-		age         time.Duration
 		err         error
 	)
 	if snapshotBlock > 0 {
 		sqrtP, currentTick, err = blockchain.GetUniswapV4PoolSlot0ViaStateViewAtBlock(stateView, poolManager, task.PoolId, snapshotBlock)
 	} else {
-		sqrtP, currentTick, usedStale, age, err = s.getV4Slot0(stateView, poolManager, task.PoolId)
+		sqrtP, currentTick, _, _, err = s.getV4Slot0(stateView, poolManager, task.PoolId)
 	}
 	if err != nil && sqrtP == nil {
 		errMsg := strings.ToLower(err.Error())
@@ -1524,10 +1293,6 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		}
 		return nil, fmt.Sprintf("读取 V4 slot0 失败: tokenId=%s err=%v", tokenId, err)
 	}
-	if snapshotBlock == 0 && usedStale && err != nil {
-		warn = fmt.Sprintf("V4 slot0 RPC fallback (%ds) tokenId=%s", int(age.Seconds()), tokenId)
-	}
-
 	owed0 := big.NewInt(0)
 	owed1 := big.NewInt(0)
 	if v4pos != nil {
@@ -1540,20 +1305,15 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 				logRealtimeFeeIssue("V4", "snapshot", tokenId, feeErr)
 				warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 snapshot fee calculation failed: tokenId=%s err=%v", tokenId, feeErr))
 			}
-		} else if fee0, fee1, usedStaleFees, feeAge, feeErr := s.calcV4UnclaimedFeesCachedUnified(stateView, poolManager, task.PoolId, currentTick, v4pos); fee0 != nil && fee1 != nil {
+		} else if fee0, fee1, _, _, feeErr := s.calcV4UnclaimedFeesLiveUnified(stateView, poolManager, task.PoolId, currentTick, v4pos); fee0 != nil && fee1 != nil {
 			owed0 = fee0
 			owed1 = fee1
 			if feeErr != nil {
-				if usedStaleFees {
-					logRealtimeFeeIssue("V4", "cache-fallback", tokenId, feeErr)
-					warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 fee cache fallback (%ds) tokenId=%s", int(feeAge.Seconds()), tokenId))
-				} else {
-					logRealtimeFeeIssue("V4", "cached", tokenId, feeErr)
-					warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 fee calculation failed: tokenId=%s err=%v", tokenId, feeErr))
-				}
+				logRealtimeFeeIssue("V4", "live", tokenId, feeErr)
+				warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 fee calculation failed: tokenId=%s err=%v", tokenId, feeErr))
 			}
 		} else if feeErr != nil {
-			logRealtimeFeeIssue("V4", "cached", tokenId, feeErr)
+			logRealtimeFeeIssue("V4", "live", tokenId, feeErr)
 			warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 fee calculation failed: tokenId=%s err=%v", tokenId, feeErr))
 		}
 	}
@@ -1779,8 +1539,8 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		}
 	}
 
-	meta0 := cachedTokenMeta{symbol: strings.TrimSpace(task.Token0Symbol), decimals: pricing.DefaultTokenDecimals}
-	meta1 := cachedTokenMeta{symbol: strings.TrimSpace(task.Token1Symbol), decimals: pricing.DefaultTokenDecimals}
+	meta0 := realtimeTokenMeta{symbol: strings.TrimSpace(task.Token0Symbol), decimals: pricing.DefaultTokenDecimals}
+	meta1 := realtimeTokenMeta{symbol: strings.TrimSpace(task.Token1Symbol), decimals: pricing.DefaultTokenDecimals}
 	if token0 != (common.Address{}) {
 		meta0 = s.getTokenMeta(chain, token0)
 	}
@@ -1919,49 +1679,32 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	}, ""
 }
 
-func (s *RealtimePositionsService) getTokenMeta(chain string, addr common.Address) cachedTokenMeta {
+func (s *RealtimePositionsService) getTokenMeta(chain string, addr common.Address) realtimeTokenMeta {
 	chain = config.NormalizeChain(chain)
 	if chain == "" {
 		chain = "bsc"
 	}
 
-	key := chain + "|" + strings.ToLower(addr.Hex())
-	now := time.Now()
-	s.tokenMetaMu.RLock()
-	if m, ok := s.tokenMeta[key]; ok && m.expires.After(now) {
-		s.tokenMetaMu.RUnlock()
-		return m
-	}
-	s.tokenMetaMu.RUnlock()
-
 	symbol := ""
 	decimals := pricing.DefaultTokenDecimals
-	ttl := 24 * time.Hour
 
 	client, _, err := blockchain.GetEVMClient(chain)
 	if err != nil || client == nil {
 		symbol = addr.Hex()
-		ttl = 5 * time.Minute
 	} else {
 		if sym, err := blockchain.GetTokenSymbolWithClient(client, addr); err == nil && strings.TrimSpace(sym) != "" {
 			symbol = strings.TrimSpace(sym)
 		} else {
 			symbol = addr.Hex()
-			ttl = 5 * time.Minute
 		}
 		if dec, err := blockchain.GetTokenDecimalsWithClient(client, addr); err == nil && dec > 0 {
 			decimals = int(dec)
 		} else {
 			decimals = pricing.DefaultTokenDecimals
-			ttl = 5 * time.Minute
 		}
 	}
 
-	m := cachedTokenMeta{symbol: symbol, decimals: decimals, expires: now.Add(ttl)}
-	s.tokenMetaMu.Lock()
-	s.tokenMeta[key] = m
-	s.tokenMetaMu.Unlock()
-	return m
+	return realtimeTokenMeta{symbol: symbol, decimals: decimals}
 }
 
 func (s *RealtimePositionsService) getWalletTokenBalance(chain string, tokenAddress, walletAddress common.Address) *big.Int {
@@ -1974,49 +1717,14 @@ func (s *RealtimePositionsService) getWalletTokenBalance(chain string, tokenAddr
 		chain = "bsc"
 	}
 
-	now := time.Now()
-	key := chain + "|" + strings.ToLower(walletAddress.Hex()) + "|" + strings.ToLower(tokenAddress.Hex())
-
-	s.balanceMu.RLock()
-	if c, ok := s.balance[key]; ok && c.value != nil && c.expires.After(now) {
-		v := new(big.Int).Set(c.value)
-		s.balanceMu.RUnlock()
-		return v
-	}
-	var staleVal *big.Int
-	var staleAt time.Time
-	if c, ok := s.balance[key]; ok && c.value != nil {
-		staleVal = new(big.Int).Set(c.value)
-		staleAt = c.updatedAt
-	}
-	s.balanceMu.RUnlock()
-
 	client, _, errClient := blockchain.GetEVMClient(chain)
-	var (
-		bal *big.Int
-		err error
-	)
-	if errClient == nil && client != nil {
-		bal, err = blockchain.GetTokenBalanceWithClient(client, tokenAddress, walletAddress)
-	} else {
-		err = errClient
+	if errClient != nil || client == nil {
+		return big.NewInt(0)
 	}
+	bal, err := blockchain.GetTokenBalanceWithClient(client, tokenAddress, walletAddress)
 	if err == nil && bal != nil {
-		s.balanceMu.Lock()
-		s.balance[key] = cachedTokenBalance{
-			value:     new(big.Int).Set(bal),
-			updatedAt: now,
-			expires:   now.Add(8 * time.Second),
-		}
-		s.balanceMu.Unlock()
 		return bal
 	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if staleVal != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 60*time.Second {
-		return staleVal
-	}
-
 	return big.NewInt(0)
 }
 
@@ -2030,33 +1738,7 @@ func (s *RealtimePositionsService) getV3PoolAddress(chain string, npmAddr common
 		chain = "bsc"
 	}
 
-	now := time.Now()
-	key := chain + "|" + strings.ToLower(npmAddr.Hex()) + "|" + strings.ToLower(token0.Hex()) + "|" + strings.ToLower(token1.Hex()) + "|" + strconv.FormatUint(fee, 10)
-
-	s.v3PoolMu.RLock()
-	if c, ok := s.v3Pool[key]; ok && c.expires.After(now) {
-		addr := c.addr
-		s.v3PoolMu.RUnlock()
-		if addr == (common.Address{}) {
-			return common.Address{}, true, fmt.Errorf("v3 pool not found")
-		}
-		return addr, true, nil
-	}
-	s.v3PoolMu.RUnlock()
-
 	addr, err := resolveV3PoolAddress(chain, nil, 10*time.Second, npmAddr, token0, token1, fee)
-	ttl := 24 * time.Hour
-	if err != nil || addr == (common.Address{}) {
-		ttl = 30 * time.Second
-	}
-
-	s.v3PoolMu.Lock()
-	s.v3Pool[key] = cachedV3PoolAddress{
-		addr:    addr,
-		expires: now.Add(ttl),
-	}
-	s.v3PoolMu.Unlock()
-
 	if err != nil {
 		return common.Address{}, false, err
 	}
@@ -2075,66 +1757,16 @@ func (s *RealtimePositionsService) getV3Slot0(chain string, poolAddress common.A
 	if chain == "" {
 		chain = "bsc"
 	}
-	if !realtimePositionsUseRPCReadCache() {
-		client, _, errClient := blockchain.GetEVMClient(chain)
-		if errClient != nil {
-			return nil, 0, false, 0, errClient
-		}
-		if client == nil {
-			return nil, 0, false, 0, fmt.Errorf("evm client not initialized")
-		}
-		sqrt, tick, err := blockchain.GetV3PoolSlot0WithClient(client, poolAddress)
-		return sqrt, tick, false, 0, err
-	}
-
-	now := time.Now()
-	key := chain + "|" + strings.ToLower(poolAddress.Hex())
-
-	s.v3Slot0Mu.RLock()
-	if c, ok := s.v3Slot0[key]; ok && c.sqrtPriceX96 != nil && c.expires.After(now) {
-		sqrt := new(big.Int).Set(c.sqrtPriceX96)
-		tick := c.tick
-		s.v3Slot0Mu.RUnlock()
-		return sqrt, tick, false, 0, nil
-	}
-	var staleSqrt *big.Int
-	var staleTick int
-	var staleAt time.Time
-	if c, ok := s.v3Slot0[key]; ok && c.sqrtPriceX96 != nil {
-		staleSqrt = new(big.Int).Set(c.sqrtPriceX96)
-		staleTick = c.tick
-		staleAt = c.updatedAt
-	}
-	s.v3Slot0Mu.RUnlock()
 
 	client, _, errClient := blockchain.GetEVMClient(chain)
-	var (
-		sqrt *big.Int
-		tick int
-		err  error
-	)
-	if errClient == nil && client != nil {
-		sqrt, tick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddress)
-	} else {
-		err = errClient
+	if errClient != nil {
+		return nil, 0, false, 0, errClient
 	}
-	if err == nil && sqrt != nil {
-		s.v3Slot0Mu.Lock()
-		s.v3Slot0[key] = cachedV3Slot0{
-			sqrtPriceX96: new(big.Int).Set(sqrt),
-			tick:         tick,
-			updatedAt:    now,
-			expires:      now.Add(5 * time.Second),
-		}
-		s.v3Slot0Mu.Unlock()
-		return sqrt, tick, false, 0, nil
+	if client == nil {
+		return nil, 0, false, 0, fmt.Errorf("evm client not initialized")
 	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if staleSqrt != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
-		return staleSqrt, staleTick, true, now.Sub(staleAt), err
-	}
-	return nil, 0, false, 0, err
+	sqrt, tick, err := blockchain.GetV3PoolSlot0WithClient(client, poolAddress)
+	return sqrt, tick, false, 0, err
 }
 
 func (s *RealtimePositionsService) getV3FeeGrowthGlobals(chain string, poolAddress common.Address) (*big.Int, *big.Int, bool, time.Duration, error) {
@@ -2146,68 +1778,16 @@ func (s *RealtimePositionsService) getV3FeeGrowthGlobals(chain string, poolAddre
 	if chain == "" {
 		chain = "bsc"
 	}
-	if !realtimePositionsUseRPCReadCache() {
-		client, _, errClient := blockchain.GetEVMClient(chain)
-		if errClient != nil {
-			return nil, nil, false, 0, errClient
-		}
-		if client == nil {
-			return nil, nil, false, 0, fmt.Errorf("evm client not initialized")
-		}
-		g0, g1, err := blockchain.GetV3PoolFeeGrowthGlobalsWithClient(client, poolAddress)
-		return g0, g1, false, 0, err
-	}
-
-	now := time.Now()
-	key := chain + "|" + strings.ToLower(poolAddress.Hex())
-
-	s.v3FeeMu.RLock()
-	if c, ok := s.v3FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
-		g0 := new(big.Int).Set(c.global0)
-		g1 := new(big.Int).Set(c.global1)
-		s.v3FeeMu.RUnlock()
-		return g0, g1, false, 0, nil
-	}
-
-	var stale0 *big.Int
-	var stale1 *big.Int
-	var staleAt time.Time
-	if c, ok := s.v3FeeCache[key]; ok && c.global0 != nil && c.global1 != nil {
-		stale0 = new(big.Int).Set(c.global0)
-		stale1 = new(big.Int).Set(c.global1)
-		staleAt = c.updatedAt
-	}
-	s.v3FeeMu.RUnlock()
 
 	client, _, errClient := blockchain.GetEVMClient(chain)
-	var (
-		g0  *big.Int
-		g1  *big.Int
-		err error
-	)
-	if errClient == nil && client != nil {
-		g0, g1, err = blockchain.GetV3PoolFeeGrowthGlobalsWithClient(client, poolAddress)
-	} else {
-		err = errClient
+	if errClient != nil {
+		return nil, nil, false, 0, errClient
 	}
-	if err == nil && g0 != nil && g1 != nil {
-		s.v3FeeMu.Lock()
-		s.v3FeeCache[key] = cachedV3FeeGrowthGlobals{
-			global0:   new(big.Int).Set(g0),
-			global1:   new(big.Int).Set(g1),
-			updatedAt: now,
-			expires:   now.Add(2 * time.Second),
-		}
-		s.v3FeeMu.Unlock()
-		return g0, g1, false, 0, nil
+	if client == nil {
+		return nil, nil, false, 0, fmt.Errorf("evm client not initialized")
 	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
-		return stale0, stale1, true, now.Sub(staleAt), err
-	}
-
-	return nil, nil, false, 0, err
+	g0, g1, err := blockchain.GetV3PoolFeeGrowthGlobalsWithClient(client, poolAddress)
+	return g0, g1, false, 0, err
 }
 
 func (s *RealtimePositionsService) getV3TickFeeGrowthOutside(chain string, poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, bool, time.Duration, error) {
@@ -2219,76 +1799,19 @@ func (s *RealtimePositionsService) getV3TickFeeGrowthOutside(chain string, poolA
 	if chain == "" {
 		chain = "bsc"
 	}
-	if !realtimePositionsUseRPCReadCache() {
-		client, _, errClient := blockchain.GetEVMClient(chain)
-		if errClient != nil {
-			return nil, nil, false, false, 0, errClient
-		}
-		if client == nil {
-			return nil, nil, false, false, 0, fmt.Errorf("evm client not initialized")
-		}
-		f0, f1, initialized, err := blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddress, tick)
-		return f0, f1, initialized, false, 0, err
-	}
-
-	now := time.Now()
-	key := chain + "|" + strings.ToLower(poolAddress.Hex()) + "|" + strconv.Itoa(tick)
-
-	s.v3TickFeeMu.RLock()
-	if c, ok := s.v3TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
-		f0 := new(big.Int).Set(c.fee0)
-		f1 := new(big.Int).Set(c.fee1)
-		initialized := c.initialized
-		s.v3TickFeeMu.RUnlock()
-		return f0, f1, initialized, false, 0, nil
-	}
-
-	var stale0 *big.Int
-	var stale1 *big.Int
-	var staleInit bool
-	var staleAt time.Time
-	if c, ok := s.v3TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil {
-		stale0 = new(big.Int).Set(c.fee0)
-		stale1 = new(big.Int).Set(c.fee1)
-		staleInit = c.initialized
-		staleAt = c.updatedAt
-	}
-	s.v3TickFeeMu.RUnlock()
 
 	client, _, errClient := blockchain.GetEVMClient(chain)
-	var (
-		f0          *big.Int
-		f1          *big.Int
-		initialized bool
-		err         error
-	)
-	if errClient == nil && client != nil {
-		f0, f1, initialized, err = blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddress, tick)
-	} else {
-		err = errClient
+	if errClient != nil {
+		return nil, nil, false, false, 0, errClient
 	}
-	if err == nil && f0 != nil && f1 != nil {
-		s.v3TickFeeMu.Lock()
-		s.v3TickFeeCache[key] = cachedV3TickFeeGrowthOutside{
-			fee0:        new(big.Int).Set(f0),
-			fee1:        new(big.Int).Set(f1),
-			initialized: initialized,
-			updatedAt:   now,
-			expires:     now.Add(20 * time.Second),
-		}
-		s.v3TickFeeMu.Unlock()
-		return f0, f1, initialized, false, 0, nil
+	if client == nil {
+		return nil, nil, false, false, 0, fmt.Errorf("evm client not initialized")
 	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 2*time.Minute {
-		return stale0, stale1, staleInit, true, now.Sub(staleAt), err
-	}
-
-	return nil, nil, false, false, 0, err
+	f0, f1, initialized, err := blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddress, tick)
+	return f0, f1, initialized, false, 0, err
 }
 
-func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *RealtimePositionsService) calcV3UnclaimedFeesLive(chain string, poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if pos == nil {
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
@@ -2334,7 +1857,6 @@ func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(chain string, poolA
 		return nil, nil, usedStale, age, calcErr
 	}
 
-	// When using cache fallback, bubble up the last RPC error for optional UI warnings.
 	var errOut error
 	if usedStale {
 		if errG != nil {
@@ -2361,105 +1883,19 @@ func (s *RealtimePositionsService) getV4FeeGrowthGlobals(stateView common.Addres
 	if (stateView == common.Address{}) || (poolManager == common.Address{}) {
 		return nil, nil, false, 0, fmt.Errorf("V4 stateView/poolManager missing")
 	}
-	if !realtimePositionsUseRPCReadCache() {
-		g0, g1, err := blockchain.GetV4PoolFeeGrowthGlobals(stateView, poolManager, poolID)
-		return g0, g1, false, 0, err
-	}
-
-	now := time.Now()
-	poolIDKey := normalizeV4PoolIDKey(poolID)
-	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey
-
-	s.v4FeeMu.RLock()
-	if c, ok := s.v4FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
-		g0 := new(big.Int).Set(c.global0)
-		g1 := new(big.Int).Set(c.global1)
-		s.v4FeeMu.RUnlock()
-		return g0, g1, false, 0, nil
-	}
-
-	var stale0 *big.Int
-	var stale1 *big.Int
-	var staleAt time.Time
-	if c, ok := s.v4FeeCache[key]; ok && c.global0 != nil && c.global1 != nil {
-		stale0 = new(big.Int).Set(c.global0)
-		stale1 = new(big.Int).Set(c.global1)
-		staleAt = c.updatedAt
-	}
-	s.v4FeeMu.RUnlock()
-
 	g0, g1, err := blockchain.GetV4PoolFeeGrowthGlobals(stateView, poolManager, poolID)
-	if err == nil && g0 != nil && g1 != nil {
-		s.v4FeeMu.Lock()
-		s.v4FeeCache[key] = cachedV4FeeGrowthGlobals{
-			global0:   new(big.Int).Set(g0),
-			global1:   new(big.Int).Set(g1),
-			updatedAt: now,
-			expires:   now.Add(2 * time.Second),
-		}
-		s.v4FeeMu.Unlock()
-		return g0, g1, false, 0, nil
-	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
-		return stale0, stale1, true, now.Sub(staleAt), err
-	}
-	return nil, nil, false, 0, err
+	return g0, g1, false, 0, err
 }
 
 func (s *RealtimePositionsService) getV4TickFeeGrowthOutside(stateView common.Address, poolManager common.Address, poolID string, tick int) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if (stateView == common.Address{}) || (poolManager == common.Address{}) {
 		return nil, nil, false, 0, fmt.Errorf("V4 stateView/poolManager missing")
 	}
-	if !realtimePositionsUseRPCReadCache() {
-		f0, f1, err := blockchain.GetV4TickFeeGrowthOutside(stateView, poolManager, poolID, tick)
-		return f0, f1, false, 0, err
-	}
-
-	now := time.Now()
-	poolIDKey := normalizeV4PoolIDKey(poolID)
-	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey + "|" + strconv.Itoa(tick)
-
-	s.v4TickFeeMu.RLock()
-	if c, ok := s.v4TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
-		f0 := new(big.Int).Set(c.fee0)
-		f1 := new(big.Int).Set(c.fee1)
-		s.v4TickFeeMu.RUnlock()
-		return f0, f1, false, 0, nil
-	}
-
-	var stale0 *big.Int
-	var stale1 *big.Int
-	var staleAt time.Time
-	if c, ok := s.v4TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil {
-		stale0 = new(big.Int).Set(c.fee0)
-		stale1 = new(big.Int).Set(c.fee1)
-		staleAt = c.updatedAt
-	}
-	s.v4TickFeeMu.RUnlock()
-
 	f0, f1, err := blockchain.GetV4TickFeeGrowthOutside(stateView, poolManager, poolID, tick)
-	if err == nil && f0 != nil && f1 != nil {
-		s.v4TickFeeMu.Lock()
-		s.v4TickFeeCache[key] = cachedV4TickFeeGrowthOutside{
-			fee0:      new(big.Int).Set(f0),
-			fee1:      new(big.Int).Set(f1),
-			updatedAt: now,
-			expires:   now.Add(20 * time.Second),
-		}
-		s.v4TickFeeMu.Unlock()
-		return f0, f1, false, 0, nil
-	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 2*time.Minute {
-		return stale0, stale1, true, now.Sub(staleAt), err
-	}
-	return nil, nil, false, 0, err
+	return f0, f1, false, 0, err
 }
 
-func (s *RealtimePositionsService) calcV4UnclaimedFeesCached(stateView common.Address, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *RealtimePositionsService) calcV4UnclaimedFeesLive(stateView common.Address, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if pos == nil {
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
@@ -2532,7 +1968,7 @@ func (s *RealtimePositionsService) calcV4UnclaimedFeesCached(stateView common.Ad
 	return owed0, owed1, usedStale, age, err
 }
 
-func (s *RealtimePositionsService) calcV4UnclaimedFeesCachedUnified(stateView common.Address, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *RealtimePositionsService) calcV4UnclaimedFeesLiveUnified(stateView common.Address, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if pos == nil {
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
@@ -2591,50 +2027,8 @@ func (s *RealtimePositionsService) calcV4UnclaimedFeesCachedUnified(stateView co
 }
 
 func (s *RealtimePositionsService) getV4Slot0(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, bool, time.Duration, error) {
-	if !realtimePositionsUseRPCReadCache() {
-		sqrt, tick, err := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, poolID)
-		return sqrt, tick, false, 0, err
-	}
-
-	now := time.Now()
-	poolIDKey := normalizeV4PoolIDKey(poolID)
-	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey
-
-	s.v4Slot0Mu.RLock()
-	if c, ok := s.v4Slot0[key]; ok && c.sqrtPriceX96 != nil && c.expires.After(now) {
-		sqrt := new(big.Int).Set(c.sqrtPriceX96)
-		tick := c.tick
-		s.v4Slot0Mu.RUnlock()
-		return sqrt, tick, false, 0, nil
-	}
-	var staleSqrt *big.Int
-	var staleTick int
-	var staleAt time.Time
-	if c, ok := s.v4Slot0[key]; ok && c.sqrtPriceX96 != nil {
-		staleSqrt = new(big.Int).Set(c.sqrtPriceX96)
-		staleTick = c.tick
-		staleAt = c.updatedAt
-	}
-	s.v4Slot0Mu.RUnlock()
-
 	sqrt, tick, err := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, poolID)
-	if err == nil && sqrt != nil {
-		s.v4Slot0Mu.Lock()
-		s.v4Slot0[key] = cachedV4Slot0{
-			sqrtPriceX96: new(big.Int).Set(sqrt),
-			tick:         tick,
-			updatedAt:    now,
-			expires:      now.Add(5 * time.Second),
-		}
-		s.v4Slot0Mu.Unlock()
-		return sqrt, tick, false, 0, nil
-	}
-
-	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
-	if staleSqrt != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
-		return staleSqrt, staleTick, true, now.Sub(staleAt), err
-	}
-	return nil, 0, false, 0, err
+	return sqrt, tick, false, 0, err
 }
 
 func snapshotBlockNumber(client *ethclient.Client) (uint64, error) {
@@ -2644,14 +2038,6 @@ func snapshotBlockNumber(client *ethclient.Client) (uint64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	return client.BlockNumber(ctx)
-}
-
-func realtimePositionsUseResponseCache() bool {
-	return false
-}
-
-func realtimePositionsUseRPCReadCache() bool {
-	return false
 }
 
 func isTransientFeeCalcError(err error) bool {
@@ -2682,7 +2068,7 @@ func logRealtimeFeeIssue(version, stage, tokenID string, err error) {
 	log.Printf("[Realtime] %s fee issue: stage=%s tokenId=%s transient=%t err=%v", version, stage, tokenID, isTransientFeeCalcError(err), err)
 }
 
-func buildTokenRow(token common.Address, meta cachedTokenMeta, priceUSD float64, walletAmt, posAmt, feeAmt *big.Int) RealtimeTokenRow {
+func buildTokenRow(token common.Address, meta realtimeTokenMeta, priceUSD float64, walletAmt, posAmt, feeAmt *big.Int) RealtimeTokenRow {
 	w := toFloat(walletAmt, meta.decimals)
 	p := toFloat(posAmt, meta.decimals)
 	f := toFloat(feeAmt, meta.decimals)
