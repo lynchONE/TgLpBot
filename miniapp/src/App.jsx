@@ -159,6 +159,9 @@ const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
 const STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES = 'tglp_open_position_hide_wallet_balances';
 const STORAGE_WEB_WORKBENCH_WIDGETS = 'tglp_web_workbench_widgets_v1';
+const POSITIONS_ACTIVE_POLL_KEY = 'positions_active';
+const POSITIONS_IDLE_POLL_KEY = 'positions_idle';
+const LEGACY_POSITIONS_POLL_KEY = 'positions';
 
 const WEB_WORKBENCH_WIDGETS = [
     { key: 'hot_pools', label: '热门池' },
@@ -167,7 +170,8 @@ const WEB_WORKBENCH_WIDGETS = [
 ];
 const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
 const MODULE_POLL_CONFIG = [
-    { key: 'positions', label: '仓位', defaultSec: 10, minSec: 2 },
+    { key: POSITIONS_ACTIVE_POLL_KEY, label: '仓位(有仓位)', defaultSec: 10, minSec: 2 },
+    { key: POSITIONS_IDLE_POLL_KEY, label: '仓位(无仓位)', defaultSec: 30, minSec: 5 },
     { key: 'hot_pools', label: '热门池', defaultSec: 10, minSec: 2 },
     { key: 'assets', label: '我的资产', defaultSec: 60, minSec: 60 },
     { key: 'smart_money', label: '聪明钱', defaultSec: 15, minSec: 2 },
@@ -204,9 +208,14 @@ function normalizeModulePollOverrides(raw, legacyValue) {
         }
     }
     const out = {};
+    const legacyPositionsValue = parsed && Object.prototype.hasOwnProperty.call(parsed, LEGACY_POSITIONS_POLL_KEY)
+        ? parsed[LEGACY_POSITIONS_POLL_KEY]
+        : null;
     MODULE_POLL_CONFIG.forEach((item) => {
         if (parsed && Object.prototype.hasOwnProperty.call(parsed, item.key)) {
             out[item.key] = clampModulePollSec(parsed[item.key], item);
+        } else if (item.key === POSITIONS_ACTIVE_POLL_KEY && legacyPositionsValue !== null) {
+            out[item.key] = clampModulePollSec(legacyPositionsValue, item);
         }
     });
     if (Object.keys(out).length > 0) return out;
@@ -214,6 +223,9 @@ function normalizeModulePollOverrides(raw, legacyValue) {
     const legacy = Number(legacyValue);
     if (Number.isFinite(legacy) && legacy >= MIN_POLL_INTERVAL_SEC) {
         MODULE_POLL_CONFIG.forEach((item) => {
+            if (item.key === POSITIONS_IDLE_POLL_KEY) {
+                return;
+            }
             out[item.key] = clampModulePollSec(legacy, item);
         });
     }
@@ -1381,14 +1393,21 @@ export default function App() {
     const [positionSmartMoneyRanges, setPositionSmartMoneyRanges] = useState({});
     const positionSmartMoneyRangesRef = useRef(positionSmartMoneyRanges);
 
-    const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
-    const pollIntervalSec = getModulePollSec('positions', serverPollIntervalSec, modulePollOverrides);
+    const userServerPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || 1));
+    const adminServerPollIntervalSec = Math.max(1, Number(adminPositions?.poll_interval_sec || userServerPollIntervalSec));
+    const userHasPositions = Array.isArray(data?.positions) && data.positions.length > 0;
+    const positionsPollKey = userHasPositions ? POSITIONS_ACTIVE_POLL_KEY : POSITIONS_IDLE_POLL_KEY;
+    const pollIntervalSec = getModulePollSec(
+        positionsPollKey,
+        positionsPollKey === POSITIONS_ACTIVE_POLL_KEY ? userServerPollIntervalSec : getModulePollConfig(POSITIONS_IDLE_POLL_KEY).defaultSec,
+        modulePollOverrides,
+    );
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = getModulePollSec('hot_pools', hotPoolsDefaultPollSec, modulePollOverrides);
     const assetsPollIntervalSec = getModulePollSec('assets', 60, modulePollOverrides);
     const smartMoneyPollIntervalSec = getModulePollSec('smart_money', 15, modulePollOverrides);
     const adminPagePollIntervalSec = getModulePollSec('admin_page', 15, modulePollOverrides);
-    const adminPollIntervalSec = getModulePollSec('admin', serverPollIntervalSec, modulePollOverrides);
+    const adminPollIntervalSec = getModulePollSec('admin', adminServerPollIntervalSec, modulePollOverrides);
     const adminListPollSec = Math.max(3, adminPollIntervalSec);
     const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
@@ -4622,11 +4641,16 @@ export default function App() {
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
                                         当前模块 <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s；各模块独立保存到当前设备。
                                     </div>
+                                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
+                                        仓位会按当前是否有仓位自动切换，当前是{userHasPositions ? '有仓位' : '无仓位'}档；无仓位档默认 30 秒。
+                                    </div>
                                     <div className="mt-3 space-y-2">
                                         {MODULE_POLL_CONFIG.filter((item) => item.key !== 'admin' || isAdmin).map((item) => {
-                                            const moduleDefaultSec = item.key === 'positions' || item.key === 'admin'
-                                                ? serverPollIntervalSec
-                                                : item.defaultSec;
+                                            const moduleDefaultSec = item.key === POSITIONS_ACTIVE_POLL_KEY
+                                                ? userServerPollIntervalSec
+                                                : item.key === 'admin'
+                                                    ? adminServerPollIntervalSec
+                                                    : item.defaultSec;
                                             const effectiveSec = getModulePollSec(item.key, moduleDefaultSec, modulePollOverrides);
                                             const overridden = Object.prototype.hasOwnProperty.call(modulePollOverrides, item.key);
                                             return (

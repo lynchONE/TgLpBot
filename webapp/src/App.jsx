@@ -324,9 +324,13 @@ const STORAGE = {
 
 const MIN_REFRESH_INTERVAL_SEC = 2;
 const MAX_REFRESH_INTERVAL_SEC = 300;
+const POSITIONS_ACTIVE_REFRESH_KEY = 'positions_active';
+const POSITIONS_IDLE_REFRESH_KEY = 'positions_idle';
+const LEGACY_POSITIONS_REFRESH_KEY = 'positions';
 const REFRESH_MODULE_CONFIG = [
   { key: 'hot_pools', label: '热门池子', defaultSec: 10, minSec: 2 },
-  { key: 'positions', label: '仓位', defaultSec: 10, minSec: 2 },
+  { key: POSITIONS_ACTIVE_REFRESH_KEY, label: '仓位(有仓位)', defaultSec: 10, minSec: 2 },
+  { key: POSITIONS_IDLE_REFRESH_KEY, label: '仓位(无仓位)', defaultSec: 30, minSec: 5 },
   { key: 'gmgn_kline', label: 'K线', defaultSec: 20, minSec: 5 },
   { key: 'assets', label: '我的资产', defaultSec: 60, minSec: 60 },
   { key: 'smart_money', label: '聪明钱', defaultSec: 10, minSec: 2 },
@@ -393,11 +397,19 @@ function normalizeRefreshIntervals(raw, legacyValue) {
   }
   const legacy = Number(legacyValue);
   const hasLegacy = Number.isFinite(legacy) && legacy >= MIN_REFRESH_INTERVAL_SEC;
+  const legacyPositionsValue = parsed && Object.prototype.hasOwnProperty.call(parsed, LEGACY_POSITIONS_REFRESH_KEY)
+    ? parsed[LEGACY_POSITIONS_REFRESH_KEY]
+    : null;
   const out = {};
   REFRESH_MODULE_CONFIG.forEach((item) => {
-    const value = parsed && Object.prototype.hasOwnProperty.call(parsed, item.key)
-      ? parsed[item.key]
-      : (hasLegacy ? legacy : item.defaultSec);
+    let value = item.defaultSec;
+    if (parsed && Object.prototype.hasOwnProperty.call(parsed, item.key)) {
+      value = parsed[item.key];
+    } else if (item.key === POSITIONS_ACTIVE_REFRESH_KEY && legacyPositionsValue !== null) {
+      value = legacyPositionsValue;
+    } else if (item.key !== POSITIONS_IDLE_REFRESH_KEY && hasLegacy) {
+      value = legacy;
+    }
     out[item.key] = clampRefreshInterval(value, item);
   });
   return out;
@@ -721,8 +733,11 @@ export default function App() {
   }, [availableWidgets, widgets]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
   const workLayoutClass = workMode ? `work-mode layout-work-${Math.min(activeWidgets.length, 4)}` : layoutClass;
+  const hasTrackedPositions = Array.isArray(positions?.positions) && positions.positions.length > 0;
   const hotPoolsRefreshInterval = refreshIntervals.hot_pools;
-  const positionsRefreshInterval = refreshIntervals.positions;
+  const positionsRefreshInterval = hasTrackedPositions
+    ? refreshIntervals[POSITIONS_ACTIVE_REFRESH_KEY]
+    : refreshIntervals[POSITIONS_IDLE_REFRESH_KEY];
   const klineRefreshInterval = refreshIntervals.gmgn_kline;
   const assetsRefreshInterval = refreshIntervals.assets;
   const smartMoneyRefreshInterval = refreshIntervals.smart_money;
@@ -1186,7 +1201,7 @@ export default function App() {
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
     storageSet(STORAGE.refreshIntervals, JSON.stringify(refreshIntervals));
-    storageSet(STORAGE.refreshInterval, String(refreshIntervals.positions));
+    storageSet(STORAGE.refreshInterval, String(refreshIntervals[POSITIONS_ACTIVE_REFRESH_KEY]));
     storageSet(STORAGE.accentTheme, accentTheme);
     storageSet(STORAGE.klineHeight, String(klineChartHeight));
     storageSet(STORAGE.hotPoolsHeight, String(hotPoolsPanelHeight));
@@ -3326,7 +3341,8 @@ export default function App() {
                       </div>
                     </div>
                     <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
-                    <div className="settings-hint">各模块独立保存到当前浏览器；我的资产最低 60 秒，K 线最低 5 秒。</div>
+                    <div className="settings-hint">各模块独立保存到当前浏览器；仓位会按当前是否有仓位自动切换，当前是{hasTrackedPositions ? '有仓位' : '无仓位'}档。</div>
+                    <div className="settings-hint">我的资产最低 60 秒，K 线最低 5 秒，无仓位档默认 30 秒。</div>
                     <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
                   </div>
                 )}
