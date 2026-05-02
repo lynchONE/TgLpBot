@@ -111,12 +111,21 @@ func (s *StrategyService) runLoop() {
 // checkTasks iterates through active tasks and checks their status
 func (s *StrategyService) checkTasks() {
 	var tasks []models.StrategyTask
-	// Find all running or waiting tasks
-	if err := database.DB.Where("status IN ? AND paused = ?", []models.StrategyStatus{
+	activeStatuses := []models.StrategyStatus{
 		models.StrategyStatusRunning,
 		models.StrategyStatusWaiting,
 		models.StrategyStatusStopping,
-	}, false).Find(&tasks).Error; err != nil {
+	}
+	// Paused tasks normally skip strategy automation, but queued DCA batches still
+	// need monitoring so default-paused opens can finish their configured split entry.
+	if err := database.DB.Where(
+		"status IN ? AND (paused = ? OR (status = ? AND paused = ? AND dca_enabled = ? AND dca_next_batch_at IS NOT NULL))",
+		activeStatuses,
+		false,
+		models.StrategyStatusRunning,
+		true,
+		true,
+	).Find(&tasks).Error; err != nil {
 		log.Printf("[Strategy] 閼惧嘲褰囨禒璇插婢惰精瑙? %v", err)
 		return
 	}
@@ -201,6 +210,13 @@ func (s *StrategyService) processTask(task *models.StrategyTask, tickCache map[s
 	// Update last check time
 	database.DB.Model(task).Update("last_check_time", time.Now())
 
+	if task.Paused {
+		if shouldMonitorPausedDCA(task) {
+			s.handleRunningTask(task, tickCache)
+		}
+		return
+	}
+
 	// If an exit is pending (e.g. previous exit failed), retry it first and skip other logic.
 	if s.processExitRetry(task) {
 		return
@@ -247,10 +263,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	log.Printf("[Strategy] 娴犺濮?#%d 閻╂垶甯舵稉? Tick %d (閼煎啫娲?%d - %d)", task.ID, currentTick, task.TickLower, task.TickUpper)
 
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
-	alertLines := pricing.FormatRangeAlertLines(task, task.TickLower, task.TickUpper, currentTick)
 
 	// DCA batching: advance or cancel remaining batches based on current inRange state.
 	s.processDCABatch(task, inRange)
+	if task.Paused {
+		return
+	}
+
+	alertLines := pricing.FormatRangeAlertLines(task, task.TickLower, task.TickUpper, currentTick)
 
 	if inRange {
 		updates := map[string]interface{}{}
@@ -366,6 +386,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 func ShouldDelayOutOfRangeHandling(task *models.StrategyTask) bool {
 	return task != nil && task.RangeActivationPending
+}
+
+func shouldMonitorPausedDCA(task *models.StrategyTask) bool {
+	return task != nil &&
+		task.Paused &&
+		task.Status == models.StrategyStatusRunning &&
+		task.DCAEnabled &&
+		task.DCANextBatchAt != nil
 }
 
 func ShouldStopOutOfRange(task *models.StrategyTask) bool {

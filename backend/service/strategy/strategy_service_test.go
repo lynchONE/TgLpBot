@@ -3,6 +3,7 @@ package strategy
 import (
 	"TgLpBot/base/models"
 	"testing"
+	"time"
 )
 
 func TestShouldDelayOutOfRangeHandling(t *testing.T) {
@@ -18,6 +19,50 @@ func TestShouldDelayOutOfRangeHandling(t *testing.T) {
 
 	if ShouldDelayOutOfRangeHandling(&models.StrategyTask{RangeActivationPending: false}) {
 		t.Fatal("activated task should not delay out-of-range handling")
+	}
+}
+
+func TestShouldMonitorPausedDCA(t *testing.T) {
+	t.Parallel()
+
+	nextBatchAt := time.Now()
+	baseTask := models.StrategyTask{
+		Paused:         true,
+		Status:         models.StrategyStatusRunning,
+		DCAEnabled:     true,
+		DCANextBatchAt: &nextBatchAt,
+	}
+
+	if shouldMonitorPausedDCA(nil) {
+		t.Fatal("nil task should not monitor paused DCA")
+	}
+
+	if !shouldMonitorPausedDCA(&baseTask) {
+		t.Fatal("paused running task with queued DCA should be monitored")
+	}
+
+	notPaused := baseTask
+	notPaused.Paused = false
+	if shouldMonitorPausedDCA(&notPaused) {
+		t.Fatal("non-paused task should not use paused DCA monitor path")
+	}
+
+	waiting := baseTask
+	waiting.Status = models.StrategyStatusWaiting
+	if shouldMonitorPausedDCA(&waiting) {
+		t.Fatal("paused waiting task should not monitor DCA")
+	}
+
+	disabled := baseTask
+	disabled.DCAEnabled = false
+	if shouldMonitorPausedDCA(&disabled) {
+		t.Fatal("paused task with disabled DCA should not be monitored")
+	}
+
+	noNextBatch := baseTask
+	noNextBatch.DCANextBatchAt = nil
+	if shouldMonitorPausedDCA(&noNextBatch) {
+		t.Fatal("paused DCA task without queued next batch should not be monitored")
 	}
 }
 
