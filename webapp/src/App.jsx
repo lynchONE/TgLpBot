@@ -712,6 +712,9 @@ export default function App() {
   const [refreshIntervals, setRefreshIntervals] = useState(() =>
     normalizeRefreshIntervals(storageGet(STORAGE.refreshIntervals), storageGet(STORAGE.refreshInterval))
   );
+  const [refreshIntervalDrafts, setRefreshIntervalDrafts] = useState(() =>
+    Object.fromEntries(Object.entries(refreshIntervals).map(([key, value]) => [key, String(value)]))
+  );
   const [accentTheme, setAccentTheme] = useState(() =>
     normalizeAccentTheme(storageGet(STORAGE.accentTheme) || 'green')
   );
@@ -744,13 +747,37 @@ export default function App() {
   const adminRefreshInterval = refreshIntervals.admin_panel;
   const updateRefreshInterval = useCallback((key, value) => {
     const config = getRefreshModuleConfig(key);
+    const nextValue = clampRefreshInterval(value, config);
     setRefreshIntervals((prev) => ({
       ...prev,
-      [key]: clampRefreshInterval(value, config),
+      [key]: nextValue,
+    }));
+    setRefreshIntervalDrafts((prev) => ({
+      ...prev,
+      [key]: String(nextValue),
     }));
   }, []);
+  const updateRefreshIntervalDraft = useCallback((key, value) => {
+    setRefreshIntervalDrafts((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }, []);
+  const commitRefreshIntervalDraft = useCallback((key) => {
+    const raw = String(refreshIntervalDrafts[key] ?? '').trim();
+    if (!raw) {
+      setRefreshIntervalDrafts((prev) => ({
+        ...prev,
+        [key]: String(refreshIntervals[key]),
+      }));
+      return;
+    }
+    updateRefreshInterval(key, raw);
+  }, [refreshIntervalDrafts, refreshIntervals, updateRefreshInterval]);
   const resetRefreshIntervals = useCallback(() => {
-    setRefreshIntervals(buildDefaultRefreshIntervals());
+    const next = buildDefaultRefreshIntervals();
+    setRefreshIntervals(next);
+    setRefreshIntervalDrafts(Object.fromEntries(Object.entries(next).map(([key, value]) => [key, String(value)])));
   }, []);
 
   const selectedPoolAddress = useMemo(
@@ -1256,12 +1283,13 @@ export default function App() {
 
   useEffect(() => {
     if (!showSettings) return;
+    setRefreshIntervalDrafts(Object.fromEntries(Object.entries(refreshIntervals).map(([key, value]) => [key, String(value)])));
     const handler = (e) => {
       if (!e.target.closest('.settings-wrap')) setShowSettings(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showSettings]);
+  }, [refreshIntervals, showSettings]);
 
   const selectPool = useCallback(
     (pool, fallbackChain) => {
@@ -3311,9 +3339,16 @@ export default function App() {
                                 className="settings-input"
                                 min={item.minSec}
                                 max={MAX_REFRESH_INTERVAL_SEC}
-                                value={refreshIntervals[item.key]}
-                                onChange={(e) => updateRefreshInterval(item.key, e.target.value)}
-                                onBlur={(e) => updateRefreshInterval(item.key, e.target.value)}
+                                value={refreshIntervalDrafts[item.key] ?? String(refreshIntervals[item.key])}
+                                onChange={(e) => updateRefreshIntervalDraft(item.key, e.target.value)}
+                                onBlur={() => commitRefreshIntervalDraft(item.key)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    commitRefreshIntervalDraft(item.key);
+                                    e.currentTarget.blur();
+                                  }
+                                }}
                               />
                               <span className="settings-unit">秒</span>
                             </div>

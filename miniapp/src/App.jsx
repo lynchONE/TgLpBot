@@ -1117,6 +1117,7 @@ export default function App() {
     const [modulePollOverrides, setModulePollOverrides] = useState(() =>
         normalizeModulePollOverrides(storage.get(STORAGE_MODULE_POLL_SECS), storage.get(STORAGE_POLL_SEC))
     );
+    const [modulePollDrafts, setModulePollDrafts] = useState({});
     const [confirmState, setConfirmState] = useState(null);
     const [notice, setNotice] = useState(null);
     const [globalConfigOpen, setGlobalConfigOpen] = useState(false);
@@ -1433,6 +1434,20 @@ export default function App() {
                         ? adminPagePollIntervalSec
                         : pollIntervalSec;
     const settingsPollIntervalSec = activePollIntervalSec;
+
+    useEffect(() => {
+        if (!settingsOpen) return;
+        const nextDrafts = {};
+        MODULE_POLL_CONFIG.forEach((item) => {
+            const moduleDefaultSec = item.key === POSITIONS_ACTIVE_POLL_KEY
+                ? userServerPollIntervalSec
+                : item.key === 'admin'
+                    ? adminServerPollIntervalSec
+                    : item.defaultSec;
+            nextDrafts[item.key] = String(getModulePollSec(item.key, moduleDefaultSec, modulePollOverrides));
+        });
+        setModulePollDrafts(nextDrafts);
+    }, [adminServerPollIntervalSec, modulePollOverrides, settingsOpen, userServerPollIntervalSec]);
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -2101,7 +2116,21 @@ export default function App() {
             persistModulePollOverrides(next);
             return next;
         });
+        setModulePollDrafts((prev) => ({ ...prev, [key]: String(nextValue) }));
     }, [persistModulePollOverrides]);
+
+    const setModulePollDraft = useCallback((key, value) => {
+        setModulePollDrafts((prev) => ({ ...prev, [key]: value }));
+    }, []);
+
+    const commitModulePollDraft = useCallback((key, effectiveSec) => {
+        const raw = String(modulePollDrafts[key] ?? '').trim();
+        if (!raw) {
+            setModulePollDrafts((prev) => ({ ...prev, [key]: String(effectiveSec) }));
+            return;
+        }
+        setModulePollOverride(key, raw);
+    }, [modulePollDrafts, setModulePollOverride]);
 
     const clearModulePollOverride = useCallback((key) => {
         setModulePollOverrides((prev) => {
@@ -2110,10 +2139,16 @@ export default function App() {
             persistModulePollOverrides(next);
             return next;
         });
+        setModulePollDrafts((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
     }, [persistModulePollOverrides]);
 
     const clearAllModulePollOverrides = useCallback(() => {
         setModulePollOverrides({});
+        setModulePollDrafts({});
         persistModulePollOverrides({});
     }, [persistModulePollOverrides]);
 
@@ -4653,6 +4688,9 @@ export default function App() {
                                                     : item.defaultSec;
                                             const effectiveSec = getModulePollSec(item.key, moduleDefaultSec, modulePollOverrides);
                                             const overridden = Object.prototype.hasOwnProperty.call(modulePollOverrides, item.key);
+                                            const draftValue = Object.prototype.hasOwnProperty.call(modulePollDrafts, item.key)
+                                                ? modulePollDrafts[item.key]
+                                                : String(effectiveSec);
                                             return (
                                                 <label key={item.key} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/5">
                                                     <span className="min-w-0 text-xs font-semibold text-zinc-700 dark:text-white/75">
@@ -4666,8 +4704,16 @@ export default function App() {
                                                             type="number"
                                                             min={item.minSec}
                                                             max={MAX_POLL_INTERVAL_SEC}
-                                                            value={effectiveSec}
-                                                            onChange={(e) => setModulePollOverride(item.key, e.target.value)}
+                                                            value={draftValue}
+                                                            onChange={(e) => setModulePollDraft(item.key, e.target.value)}
+                                                            onBlur={() => commitModulePollDraft(item.key, effectiveSec)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    commitModulePollDraft(item.key, effectiveSec);
+                                                                    e.currentTarget.blur();
+                                                                }
+                                                            }}
                                                             className={`w-20 rounded-xl border border-zinc-200 bg-white/80 px-2 py-1.5 text-right text-sm font-semibold tabular-nums text-zinc-900 outline-none ${brand.inputFocusClass} dark:border-white/10 dark:bg-black/20 dark:text-white/90`}
                                                         />
                                                         <span className="text-[11px] text-zinc-500 dark:text-white/40">s</span>
