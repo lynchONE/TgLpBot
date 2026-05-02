@@ -313,6 +313,7 @@ const STORAGE = {
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
   refreshInterval: 'tglp_web_refresh_interval',
+  refreshIntervals: 'tglp_web_refresh_intervals_v1',
   accentTheme: 'tglp_web_accent_theme',
   walletId: 'tglp_web_wallet_id',
   klineHeight: 'tglp_web_kline_height',
@@ -322,6 +323,15 @@ const STORAGE = {
 };
 
 const MIN_REFRESH_INTERVAL_SEC = 2;
+const MAX_REFRESH_INTERVAL_SEC = 300;
+const REFRESH_MODULE_CONFIG = [
+  { key: 'hot_pools', label: '热门池子', defaultSec: 10, minSec: 2 },
+  { key: 'positions', label: '仓位', defaultSec: 10, minSec: 2 },
+  { key: 'gmgn_kline', label: 'K线', defaultSec: 20, minSec: 5 },
+  { key: 'assets', label: '我的资产', defaultSec: 60, minSec: 60 },
+  { key: 'smart_money', label: '聪明钱', defaultSec: 10, minSec: 2 },
+  { key: 'admin_panel', label: '管理面板', defaultSec: 10, minSec: 2 },
+];
 
 function storageGet(key) {
   try {
@@ -345,6 +355,52 @@ function storageRemove(key) {
   } catch {
     // ignore
   }
+}
+
+function getRefreshModuleConfig(key) {
+  const config = REFRESH_MODULE_CONFIG.find((item) => item.key === key);
+  if (!config) {
+    throw new Error(`Unknown refresh module: ${key}`);
+  }
+  return config;
+}
+
+function clampRefreshInterval(value, config) {
+  if (!config || !Number.isFinite(Number(config.minSec)) || !Number.isFinite(Number(config.defaultSec))) {
+    throw new Error('Invalid refresh module config');
+  }
+  const n = Number(value);
+  const minSec = Math.max(MIN_REFRESH_INTERVAL_SEC, Number(config.minSec));
+  const defaultSec = Math.max(minSec, Number(config.defaultSec));
+  if (!Number.isFinite(n)) return defaultSec;
+  return Math.max(minSec, Math.min(MAX_REFRESH_INTERVAL_SEC, Math.round(n)));
+}
+
+function buildDefaultRefreshIntervals() {
+  return Object.fromEntries(
+    REFRESH_MODULE_CONFIG.map((item) => [item.key, clampRefreshInterval(item.defaultSec, item)])
+  );
+}
+
+function normalizeRefreshIntervals(raw, legacyValue) {
+  let parsed = null;
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+  }
+  const legacy = Number(legacyValue);
+  const hasLegacy = Number.isFinite(legacy) && legacy >= MIN_REFRESH_INTERVAL_SEC;
+  const out = {};
+  REFRESH_MODULE_CONFIG.forEach((item) => {
+    const value = parsed && Object.prototype.hasOwnProperty.call(parsed, item.key)
+      ? parsed[item.key]
+      : (hasLegacy ? legacy : item.defaultSec);
+    out[item.key] = clampRefreshInterval(value, item);
+  });
+  return out;
 }
 
 function normalizeChain(value) {
@@ -641,10 +697,9 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [workMode, setWorkMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState(() => {
-    const saved = Number(storageGet(STORAGE.refreshInterval));
-    return saved >= MIN_REFRESH_INTERVAL_SEC ? saved : 10;
-  });
+  const [refreshIntervals, setRefreshIntervals] = useState(() =>
+    normalizeRefreshIntervals(storageGet(STORAGE.refreshIntervals), storageGet(STORAGE.refreshInterval))
+  );
   const [accentTheme, setAccentTheme] = useState(() =>
     normalizeAccentTheme(storageGet(STORAGE.accentTheme) || 'green')
   );
@@ -666,6 +721,22 @@ export default function App() {
   }, [availableWidgets, widgets]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
   const workLayoutClass = workMode ? `work-mode layout-work-${Math.min(activeWidgets.length, 4)}` : layoutClass;
+  const hotPoolsRefreshInterval = refreshIntervals.hot_pools;
+  const positionsRefreshInterval = refreshIntervals.positions;
+  const klineRefreshInterval = refreshIntervals.gmgn_kline;
+  const assetsRefreshInterval = refreshIntervals.assets;
+  const smartMoneyRefreshInterval = refreshIntervals.smart_money;
+  const adminRefreshInterval = refreshIntervals.admin_panel;
+  const updateRefreshInterval = useCallback((key, value) => {
+    const config = getRefreshModuleConfig(key);
+    setRefreshIntervals((prev) => ({
+      ...prev,
+      [key]: clampRefreshInterval(value, config),
+    }));
+  }, []);
+  const resetRefreshIntervals = useCallback(() => {
+    setRefreshIntervals(buildDefaultRefreshIntervals());
+  }, []);
 
   const selectedPoolAddress = useMemo(
     () => normalizePoolAddress(selectedPool?.pool_address || selectedPool?.pool_id),
@@ -1114,7 +1185,8 @@ export default function App() {
     storageSet(STORAGE.chain, chain);
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
-    storageSet(STORAGE.refreshInterval, String(refreshInterval));
+    storageSet(STORAGE.refreshIntervals, JSON.stringify(refreshIntervals));
+    storageSet(STORAGE.refreshInterval, String(refreshIntervals.positions));
     storageSet(STORAGE.accentTheme, accentTheme);
     storageSet(STORAGE.klineHeight, String(klineChartHeight));
     storageSet(STORAGE.hotPoolsHeight, String(hotPoolsPanelHeight));
@@ -1130,7 +1202,7 @@ export default function App() {
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [accentTheme, chain, hotPoolsPanelHeight, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshInterval, widgets]);
+  }, [accentTheme, chain, hotPoolsPanelHeight, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshIntervals, widgets]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -1426,28 +1498,27 @@ export default function App() {
 
   useEffect(() => {
     if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadHotPools(), refreshInterval * 1000);
+    const timer = window.setInterval(() => loadHotPools(), hotPoolsRefreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [hasInitData, loadHotPools, refreshInterval]);
+  }, [hasInitData, hotPoolsRefreshInterval, loadHotPools]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadPositions(), refreshInterval * 1000);
+    const timer = window.setInterval(() => loadPositions(), positionsRefreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [hasInitData, loadPositions, refreshInterval]);
+  }, [hasInitData, loadPositions, positionsRefreshInterval]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadWalletBalances(), Math.max(refreshInterval * 1000, 30_000));
+    const timer = window.setInterval(() => loadWalletBalances(), Math.max(positionsRefreshInterval * 1000, 30_000));
     return () => window.clearInterval(timer);
-  }, [hasInitData, loadWalletBalances, refreshInterval]);
+  }, [hasInitData, loadWalletBalances, positionsRefreshInterval]);
 
   useEffect(() => {
     if (!hasInitData || !klineTokenAddress) return undefined;
-    const interval = 20_000;
-    const timer = window.setInterval(() => setKlineRefreshNonce((n) => n + 1), interval);
+    const timer = window.setInterval(() => setKlineRefreshNonce((n) => n + 1), klineRefreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [hasInitData, klineTokenAddress]);
+  }, [hasInitData, klineRefreshInterval, klineTokenAddress]);
 
   useEffect(() => {
     if (!hotPools.length) return;
@@ -3095,7 +3166,7 @@ export default function App() {
           initData={initData}
           hasInitData={hasInitData}
           isAdmin={isAdminUser}
-          refreshInterval={refreshInterval}
+          refreshInterval={assetsRefreshInterval}
         />
       </Suspense>
     ),
@@ -3110,7 +3181,7 @@ export default function App() {
         onToggleWatchWallet={handleToggleKlineWatch}
         onSelectPool={selectPool}
         activePoolAddress={selectedPoolAddress}
-        refreshInterval={refreshInterval}
+        refreshInterval={smartMoneyRefreshInterval}
         onOpenPosition={(pool) => openPositionModal({
           ...pool,
           chain: String(pool?.chain || (Number(pool?.chain_id) === 8453 ? 'base' : chain)).toLowerCase(),
@@ -3166,7 +3237,7 @@ export default function App() {
           initData={initData}
           hasInitData={hasInitData}
           isAdmin={isAdminUser}
-          refreshInterval={refreshInterval}
+          refreshInterval={adminRefreshInterval}
         />
       </Suspense>
     ),
@@ -3213,19 +3284,30 @@ export default function App() {
                 </button>
                 {showSettings && (
                   <div className="settings-popover">
-                    <div className="settings-row">
-                      <span className="settings-label">数据刷新间隔</span>
-                      <div className="settings-input-wrap">
-                        <input
-                          type="number"
-                          className="settings-input"
-                          min={MIN_REFRESH_INTERVAL_SEC}
-                          value={refreshInterval}
-                          onChange={(e) => setRefreshInterval(e.target.value === '' ? '' : Number(e.target.value))}
-                          onBlur={() => setRefreshInterval((v) => Math.max(MIN_REFRESH_INTERVAL_SEC, Math.round(Number(v) || 10)))}
-                        />
-                        <span className="settings-unit">秒</span>
+                    <div className="settings-row settings-row-stack">
+                      <span className="settings-label">接口刷新间隔</span>
+                      <div className="settings-refresh-list">
+                        {REFRESH_MODULE_CONFIG.map((item) => (
+                          <label key={item.key} className="settings-refresh-row">
+                            <span>{item.label}</span>
+                            <div className="settings-input-wrap">
+                              <input
+                                type="number"
+                                className="settings-input"
+                                min={item.minSec}
+                                max={MAX_REFRESH_INTERVAL_SEC}
+                                value={refreshIntervals[item.key]}
+                                onChange={(e) => updateRefreshInterval(item.key, e.target.value)}
+                                onBlur={(e) => updateRefreshInterval(item.key, e.target.value)}
+                              />
+                              <span className="settings-unit">秒</span>
+                            </div>
+                          </label>
+                        ))}
                       </div>
+                      <button type="button" className="settings-reset-btn" onClick={resetRefreshIntervals}>
+                        恢复默认刷新
+                      </button>
                     </div>
                     <div className="settings-row settings-row-stack">
                       <span className="settings-label">主题色</span>
@@ -3244,7 +3326,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
-                    <div className="settings-hint">最低 2 秒，当前每 {refreshInterval} 秒刷新</div>
+                    <div className="settings-hint">各模块独立保存到当前浏览器；我的资产最低 60 秒，K 线最低 5 秒。</div>
                     <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
                   </div>
                 )}

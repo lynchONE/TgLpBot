@@ -152,7 +152,9 @@ const storage = {
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_ACCENT_THEME = 'tglp_accent_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
+const STORAGE_MODULE_POLL_SECS = 'tglp_module_poll_interval_secs_v1';
 const MIN_POLL_INTERVAL_SEC = 2;
+const MAX_POLL_INTERVAL_SEC = 300;
 const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
 const STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES = 'tglp_open_position_hide_wallet_balances';
@@ -164,6 +166,67 @@ const WEB_WORKBENCH_WIDGETS = [
     { key: 'positions', label: '仓位' },
 ];
 const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
+const MODULE_POLL_CONFIG = [
+    { key: 'positions', label: '仓位', defaultSec: 10, minSec: 2 },
+    { key: 'hot_pools', label: '热门池', defaultSec: 10, minSec: 2 },
+    { key: 'assets', label: '我的资产', defaultSec: 60, minSec: 60 },
+    { key: 'smart_money', label: '聪明钱', defaultSec: 15, minSec: 2 },
+    { key: 'admin_page', label: '管理页', defaultSec: 15, minSec: 5 },
+    { key: 'admin', label: '管理工作台', defaultSec: 10, minSec: 3 },
+];
+
+function getModulePollConfig(key) {
+    const config = MODULE_POLL_CONFIG.find((item) => item.key === key);
+    if (!config) {
+        throw new Error(`Unknown poll module: ${key}`);
+    }
+    return config;
+}
+
+function clampModulePollSec(value, config) {
+    if (!config || !Number.isFinite(Number(config.minSec)) || !Number.isFinite(Number(config.defaultSec))) {
+        throw new Error('Invalid poll module config');
+    }
+    const n = Number(value);
+    const minSec = Math.max(MIN_POLL_INTERVAL_SEC, Number(config.minSec));
+    const defaultSec = Math.max(minSec, Number(config.defaultSec));
+    if (!Number.isFinite(n)) return defaultSec;
+    return Math.max(minSec, Math.min(MAX_POLL_INTERVAL_SEC, Math.floor(n)));
+}
+
+function normalizeModulePollOverrides(raw, legacyValue) {
+    let parsed = null;
+    if (raw) {
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            parsed = null;
+        }
+    }
+    const out = {};
+    MODULE_POLL_CONFIG.forEach((item) => {
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, item.key)) {
+            out[item.key] = clampModulePollSec(parsed[item.key], item);
+        }
+    });
+    if (Object.keys(out).length > 0) return out;
+
+    const legacy = Number(legacyValue);
+    if (Number.isFinite(legacy) && legacy >= MIN_POLL_INTERVAL_SEC) {
+        MODULE_POLL_CONFIG.forEach((item) => {
+            out[item.key] = clampModulePollSec(legacy, item);
+        });
+    }
+    return out;
+}
+
+function getModulePollSec(key, defaultSec, overrides) {
+    const config = getModulePollConfig(key);
+    if (overrides && Object.prototype.hasOwnProperty.call(overrides, key)) {
+        return clampModulePollSec(overrides[key], config);
+    }
+    return clampModulePollSec(defaultSec, config);
+}
 const OPEN_POSITION_RANGE_OPTIONS_UNUSED = [
     { key: 'percentage', label: '百分比' },
 ];
@@ -997,7 +1060,7 @@ export default function App() {
     const [openPositionDCAPercentages, setOpenPositionDCAPercentages] = useState([50, 50]);
     const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
     const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
-    const [openPositionTaskMode, setOpenPositionTaskMode] = useState('exit_all');
+    const [openPositionTaskMode, setOpenPositionTaskMode] = useState('pause');
     const [openPositionWalletBalancesHidden, setOpenPositionWalletBalancesHidden] = useState(() => storage.get(STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES) === '1');
     const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
     const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
@@ -1039,8 +1102,9 @@ export default function App() {
     const [theme, setTheme] = useState('dark');
     const [accentTheme, setAccentTheme] = useState(() => normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
     const [settingsOpen, setSettingsOpen] = useState(false);
-    const [pollOverrideSec, setPollOverrideSec] = useState(null);
-    const [pollDraftSec, setPollDraftSec] = useState('');
+    const [modulePollOverrides, setModulePollOverrides] = useState(() =>
+        normalizeModulePollOverrides(storage.get(STORAGE_MODULE_POLL_SECS), storage.get(STORAGE_POLL_SEC))
+    );
     const [confirmState, setConfirmState] = useState(null);
     const [notice, setNotice] = useState(null);
     const [globalConfigOpen, setGlobalConfigOpen] = useState(false);
@@ -1318,8 +1382,14 @@ export default function App() {
     const positionSmartMoneyRangesRef = useRef(positionSmartMoneyRanges);
 
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
-    const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
-    const adminListPollSec = Math.max(3, pollIntervalSec);
+    const pollIntervalSec = getModulePollSec('positions', serverPollIntervalSec, modulePollOverrides);
+    const hotPoolsDefaultPollSec = 10;
+    const hotPoolsPollIntervalSec = getModulePollSec('hot_pools', hotPoolsDefaultPollSec, modulePollOverrides);
+    const assetsPollIntervalSec = getModulePollSec('assets', 60, modulePollOverrides);
+    const smartMoneyPollIntervalSec = getModulePollSec('smart_money', 15, modulePollOverrides);
+    const adminPagePollIntervalSec = getModulePollSec('admin_page', 15, modulePollOverrides);
+    const adminPollIntervalSec = getModulePollSec('admin', serverPollIntervalSec, modulePollOverrides);
+    const adminListPollSec = Math.max(3, adminPollIntervalSec);
     const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
@@ -1332,10 +1402,18 @@ export default function App() {
         [isAdmin],
     );
     const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage;
-    const hotPoolsDefaultPollSec = 10;
-    const hotPoolsPollIntervalSec = Math.max(MIN_POLL_INTERVAL_SEC, Number(pollOverrideSec || hotPoolsDefaultPollSec));
-    const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
-    const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
+    const activePollIntervalSec = showAdmin
+        ? adminPollIntervalSec
+        : isHotPools
+            ? hotPoolsPollIntervalSec
+            : isAssets
+                ? assetsPollIntervalSec
+                : isSmartMoney
+                    ? smartMoneyPollIntervalSec
+                    : isAdminPage
+                        ? adminPagePollIntervalSec
+                        : pollIntervalSec;
+    const settingsPollIntervalSec = activePollIntervalSec;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -1711,10 +1789,6 @@ export default function App() {
             setTheme('dark');
         }
 
-        const savedPoll = Number(storage.get(STORAGE_POLL_SEC));
-        if (Number.isFinite(savedPoll) && savedPoll >= MIN_POLL_INTERVAL_SEC) {
-            setPollOverrideSec(Math.floor(savedPoll));
-        }
         setAccentTheme(normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
     }, []);
 
@@ -1740,11 +1814,9 @@ export default function App() {
     }, []);
 
     useEffect(() => {
-        const currentPollSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
-
         const updateProgress = () => {
             const elapsed = Date.now() - lastPollTimeRef.current;
-            const progress = Math.min(100, (elapsed / (currentPollSec * 1000)) * 100);
+            const progress = Math.min(100, (elapsed / (activePollIntervalSec * 1000)) * 100);
             setPollProgress(progress);
         };
 
@@ -1755,7 +1827,7 @@ export default function App() {
         return () => {
             if (pollProgressRef.current) clearInterval(pollProgressRef.current);
         };
-    }, [isHotPools, hotPoolsPollIntervalSec, pollIntervalSec]);
+    }, [activePollIntervalSec]);
 
     const lastUpdatedAtRef = useRef(null);
     useEffect(() => {
@@ -1766,11 +1838,6 @@ export default function App() {
             lastUpdatedAtRef.current = currentUpdatedAt;
         }
     }, [data?.updated_at, hotPoolsData?.updated_at]);
-
-    useEffect(() => {
-        if (!settingsOpen) return;
-        setPollDraftSec(pollOverrideSec ? String(pollOverrideSec) : '');
-    }, [settingsOpen, pollOverrideSec]);
 
     useEffect(() => {
         if (!hotPoolsFilterOpen) return;
@@ -1931,14 +1998,14 @@ export default function App() {
         run();
 
         if (adminPositionsPollRef.current) clearInterval(adminPositionsPollRef.current);
-        adminPositionsPollRef.current = setInterval(run, pollIntervalSec * 1000);
+        adminPositionsPollRef.current = setInterval(run, adminPollIntervalSec * 1000);
 
         return () => {
             aborted = true;
             controller.abort();
             if (adminPositionsPollRef.current) clearInterval(adminPositionsPollRef.current);
         };
-    }, [apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId, pollIntervalSec]);
+    }, [adminPollIntervalSec, apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId]);
 
     useEffect(() => {
         let aborted = false;
@@ -2002,32 +2069,34 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(','), multiChainEnabled, userDefaultChain]);
 
-    const applyPollDraft = () => {
-        const raw = String(pollDraftSec || '').trim();
-        const m = raw.match(/\d+/);
-        if (!m) return;
-        const n = Number(m[0]);
-        if (!Number.isFinite(n)) return;
-        const v = Math.max(MIN_POLL_INTERVAL_SEC, Math.min(300, Math.floor(n)));
-        setPollOverrideSec(v);
-        storage.set(STORAGE_POLL_SEC, String(v));
-        setSettingsOpen(false);
-    };
-
-    const clearPollOverride = () => {
-        setPollOverrideSec(null);
-        setPollDraftSec('');
+    const persistModulePollOverrides = useCallback((next) => {
+        storage.set(STORAGE_MODULE_POLL_SECS, JSON.stringify(next));
         storage.remove(STORAGE_POLL_SEC);
-        setSettingsOpen(false);
-    };
+    }, []);
 
-    const setQuickPoll = (sec) => {
-        const v = Math.max(MIN_POLL_INTERVAL_SEC, Math.min(300, Math.floor(Number(sec) || MIN_POLL_INTERVAL_SEC)));
-        setPollOverrideSec(v);
-        storage.set(STORAGE_POLL_SEC, String(v));
-        setPollDraftSec(String(v));
-        setSettingsOpen(false);
-    };
+    const setModulePollOverride = useCallback((key, value) => {
+        const config = getModulePollConfig(key);
+        const nextValue = clampModulePollSec(value, config);
+        setModulePollOverrides((prev) => {
+            const next = { ...prev, [key]: nextValue };
+            persistModulePollOverrides(next);
+            return next;
+        });
+    }, [persistModulePollOverrides]);
+
+    const clearModulePollOverride = useCallback((key) => {
+        setModulePollOverrides((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            persistModulePollOverrides(next);
+            return next;
+        });
+    }, [persistModulePollOverrides]);
+
+    const clearAllModulePollOverrides = useCallback(() => {
+        setModulePollOverrides({});
+        persistModulePollOverrides({});
+    }, [persistModulePollOverrides]);
 
     const applyHotPoolsFilter = () => {
         const keyword = String(hotPoolsFilterDraft.keyword || '').trim();
@@ -2497,7 +2566,7 @@ export default function App() {
         setOpenPositionEntrySwapSlippageDirty(false);
         setOpenPositionEntrySwapConfirm(true);
         setOpenPositionDCAExpanded(false);
-        setOpenPositionTaskMode('exit_all');
+        setOpenPositionTaskMode('pause');
 
         setOpenPositionError('');
         setOpenPositionChecks([]);
@@ -3843,7 +3912,7 @@ export default function App() {
                             <div className="text-right">
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">轮询间隔</div>
                                 <div className="text-sm font-semibold tabular-nums">
-                                    <NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
+                                    <NumberFlowValue value={adminPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
                                 </div>
                             </div>
                         ) : null}
@@ -3870,7 +3939,7 @@ export default function App() {
                                 hasInitData={hasInitData}
                                 isAdmin={isAdmin}
                                 tick={tick}
-                                pollIntervalSec={pollIntervalSec}
+                                pollIntervalSec={assetsPollIntervalSec}
                                 accentTheme={accentTheme}
                                 onNotice={showNotice}
                             />
@@ -3885,7 +3954,7 @@ export default function App() {
                             isAdmin={isAdmin}
                             accentTheme={accentTheme}
                             tick={tick}
-                            pollIntervalSec={pollIntervalSec}
+                            pollIntervalSec={smartMoneyPollIntervalSec}
                             onOpenPosition={openPositionModal}
                             onNotice={showNotice}
                         />
@@ -3898,7 +3967,7 @@ export default function App() {
                                 initData={initData}
                                 hasInitData={hasInitData}
                                 tick={tick}
-                                pollIntervalSec={pollIntervalSec}
+                                pollIntervalSec={adminPagePollIntervalSec}
                                 accentTheme={accentTheme}
                                 onNotice={showNotice}
                             />
@@ -4057,7 +4126,7 @@ export default function App() {
                             initData={initData}
                             hasInitData={hasInitData}
                             tick={tick}
-                            pollIntervalSec={pollIntervalSec}
+                            pollIntervalSec={adminPollIntervalSec}
                             accentTheme={accentTheme}
                             onNotice={showNotice}
                         />
@@ -4551,56 +4620,53 @@ export default function App() {
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">刷新频率</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                        当前轮询间隔 <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
-                                        {pollOverrideSec
-                                            ? '，已覆盖默认值。'
-                                            : <>，默认跟随后端设置 <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s。</>}
+                                        当前模块 <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s；各模块独立保存到当前设备。
                                     </div>
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        {[2, 5, 10, 15, 30, 60].map((sec) => (
-                                            <button
-                                                key={sec}
-                                                type="button"
-                                                onClick={() => setQuickPoll(sec)}
-                                                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
-                                                    ? brand.softButtonClass
-                                                    : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
-                                                    }`}
-                                            >
-                                                {sec}s
-                                            </button>
-                                        ))}
-                                        <button
-                                            type="button"
-                                            onClick={clearPollOverride}
-                                            className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                        >
-                                            恢复默认
-                                        </button>
+                                    <div className="mt-3 space-y-2">
+                                        {MODULE_POLL_CONFIG.filter((item) => item.key !== 'admin' || isAdmin).map((item) => {
+                                            const moduleDefaultSec = item.key === 'positions' || item.key === 'admin'
+                                                ? serverPollIntervalSec
+                                                : item.defaultSec;
+                                            const effectiveSec = getModulePollSec(item.key, moduleDefaultSec, modulePollOverrides);
+                                            const overridden = Object.prototype.hasOwnProperty.call(modulePollOverrides, item.key);
+                                            return (
+                                                <label key={item.key} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+                                                    <span className="min-w-0 text-xs font-semibold text-zinc-700 dark:text-white/75">
+                                                        {item.label}
+                                                        <span className="ml-1 text-[10px] font-normal text-zinc-400 dark:text-white/35">
+                                                            min {item.minSec}s
+                                                        </span>
+                                                    </span>
+                                                    <span className="flex shrink-0 items-center gap-2">
+                                                        <input
+                                                            type="number"
+                                                            min={item.minSec}
+                                                            max={MAX_POLL_INTERVAL_SEC}
+                                                            value={effectiveSec}
+                                                            onChange={(e) => setModulePollOverride(item.key, e.target.value)}
+                                                            className={`w-20 rounded-xl border border-zinc-200 bg-white/80 px-2 py-1.5 text-right text-sm font-semibold tabular-nums text-zinc-900 outline-none ${brand.inputFocusClass} dark:border-white/10 dark:bg-black/20 dark:text-white/90`}
+                                                        />
+                                                        <span className="text-[11px] text-zinc-500 dark:text-white/40">s</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => clearModulePollOverride(item.key)}
+                                                            disabled={!overridden}
+                                                            className="rounded-lg px-2 py-1 text-[11px] font-semibold text-zinc-500 ring-1 ring-zinc-200 disabled:opacity-35 dark:text-white/45 dark:ring-white/10"
+                                                        >
+                                                            默认
+                                                        </button>
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
                                     </div>
-
-                                    <div className="mt-3 flex items-center gap-2">
-                                        <input
-                                            value={pollDraftSec}
-                                            onChange={(e) => setPollDraftSec(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') {
-                                                    e.preventDefault();
-                                                    applyPollDraft();
-                                                }
-                                            }}
-                                            inputMode="numeric"
-                                            className={`w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="2-300"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={applyPollDraft}
-                                            className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brand.solidButtonClass}`}
-                                        >
-                                            应用设置
-                                        </button>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={clearAllModulePollOverrides}
+                                        className="mt-3 rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                    >
+                                        全部恢复默认
+                                    </button>
                                 </div>
                             </div>
                         </div>

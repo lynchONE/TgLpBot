@@ -322,7 +322,7 @@ body {
   top: calc(100% + 8px);
   right: 0;
   z-index: 100;
-  min-width: 220px;
+  min-width: 280px;
   background: linear-gradient(135deg, rgba(18, 26, 40, 0.98), rgba(11, 17, 27, 0.98));
   border: 1px solid rgba(138, 160, 194, 0.2);
   border-radius: 12px;
@@ -1611,22 +1611,73 @@ body {
 .kline-marker {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  border: 2px solid transparent;
+  border: 1.5px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: auto;
   cursor: pointer;
   box-sizing: border-box;
-  padding: 2px;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+  padding: 1px;
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.32);
   z-index: 5;
   background: radial-gradient(circle at 30% 25%, rgba(35, 46, 67, 0.98), rgba(9, 16, 24, 0.98));
-  overflow: hidden;
-  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  overflow: visible;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.settings-refresh-list {
+  width: 100%;
+  display: grid;
+  gap: 7px;
+}
+
+.settings-refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.settings-reset-btn {
+  align-self: flex-start;
+  border: 1px solid rgba(138, 160, 194, 0.22);
+  background: rgba(18, 26, 40, 0.72);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-reset-btn:hover {
+  color: var(--text);
+  border-color: rgba(138, 160, 194, 0.36);
+}
+
+.kline-marker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 1px;
+  height: var(--pin-height, 0);
+  pointer-events: none;
+  opacity: 0.18;
+  transform: translateX(-50%);
+}
+
+.kline-marker.pin-down::after {
+  top: calc(100% + 3px);
+}
+
+.kline-marker.pin-up::after {
+  bottom: calc(100% + 3px);
 }
 
 .kline-marker-avatar {
@@ -1635,6 +1686,8 @@ body {
   border-radius: 50%;
   object-fit: cover;
   display: block;
+  position: relative;
+  z-index: 1;
 }
 
 .kline-marker-emoji {
@@ -1643,37 +1696,56 @@ body {
 
 .kline-marker-badge {
   position: absolute;
-  top: -2px;
-  right: -2px;
-  min-width: 13px;
-  height: 13px;
+  top: -5px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
   padding: 0 3px;
   border-radius: 999px;
   background: rgba(30, 40, 60, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: #fff;
-  font-size: 8px;
+  font-size: 8.5px;
   font-weight: 700;
-  line-height: 13px;
+  line-height: 14px;
   text-align: center;
+  z-index: 2;
 }
 
 .kline-marker.add {
   border-color: #23d18b;
-  box-shadow: 0 0 0 1px rgba(35, 209, 139, 0.22), 0 0 12px rgba(35, 209, 139, 0.34), 0 8px 18px rgba(0, 0, 0, 0.38);
+  box-shadow: 0 0 0 1px rgba(35, 209, 139, 0.18), 0 0 8px rgba(35, 209, 139, 0.22), 0 5px 12px rgba(0, 0, 0, 0.32);
+}
+
+.kline-marker.add::after {
+  background: linear-gradient(180deg, rgba(35, 209, 139, 0.46), rgba(35, 209, 139, 0.02));
 }
 
 .kline-marker.remove {
   border-color: #ff667d;
-  box-shadow: 0 0 0 1px rgba(255, 102, 125, 0.22), 0 0 12px rgba(255, 102, 125, 0.34), 0 8px 18px rgba(0, 0, 0, 0.38);
+  box-shadow: 0 0 0 1px rgba(255, 102, 125, 0.18), 0 0 8px rgba(255, 102, 125, 0.22), 0 5px 12px rgba(0, 0, 0, 0.32);
+}
+
+.kline-marker.remove::after {
+  background: linear-gradient(0deg, rgba(255, 102, 125, 0.46), rgba(255, 102, 125, 0.02));
+}
+
+.kline-marker.clustered {
+  width: 26px;
+  height: 26px;
 }
 
 .kline-marker:hover {
-  transform: translate(-50%, -50%) scale(1.05);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.kline-marker:hover::after,
+.kline-marker.active::after {
+  opacity: 0.48;
 }
 
 .kline-marker.active {
-  transform: translate(-50%, -50%) scale(1.06);
+  transform: translate(-50%, -50%) scale(1.14);
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.4), 0 0 20px rgba(var(--accent-rgb), 0.24), 0 12px 24px rgba(0, 0, 0, 0.4);
 }
 
@@ -1836,8 +1908,14 @@ body {
   backdrop-filter: blur(8px);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.46);
 }
-.kline-marker-tooltip.add { border-top: 2px solid rgba(22, 199, 132, 0.7); }
-.kline-marker-tooltip.remove { border-top: 2px solid rgba(234, 57, 67, 0.7); }
+.kline-marker-tooltip.add {
+  transform: translate(-50%, 22px);
+  border-top: 2px solid rgba(22, 199, 132, 0.7);
+}
+.kline-marker-tooltip.remove {
+  transform: translate(-50%, calc(-100% - 22px));
+  border-top: 2px solid rgba(234, 57, 67, 0.7);
+}
 
 .kmt-head {
   display: flex;

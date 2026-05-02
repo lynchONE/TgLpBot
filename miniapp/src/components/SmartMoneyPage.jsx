@@ -1790,7 +1790,7 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 // ============ PAGES ============
 
-function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
+function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollIntervalSec = 15 }) {
     const [pools, setPools] = useState([]);
     const [poolsTotal, setPoolsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -1839,9 +1839,9 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
     useEffect(() => {
         const timer = setInterval(() => {
             load(true);
-        }, 10000);
+        }, Math.max(2, Number(pollIntervalSec)) * 1000);
         return () => clearInterval(timer);
-    }, [load]);
+    }, [load, pollIntervalSec]);
     useEffect(() => {
         setPage(1);
     }, [protocolFilter, searchKeyword]);
@@ -2249,7 +2249,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     );
 }
 
-function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refreshKey, watchedWalletSet = new Set(), watchToggleMap = {}, onToggleWatchWallet }) {
+function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refreshKey, watchedWalletSet = new Set(), watchToggleMap = {}, onToggleWatchWallet, pollIntervalSec = 15 }) {
     const [wallets, setWallets] = useState([]);
     const [walletsTotal, setWalletsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -2298,9 +2298,9 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
     useEffect(() => {
         const timer = setInterval(() => {
             load(true);
-        }, 10000);
+        }, Math.max(2, Number(pollIntervalSec)) * 1000);
         return () => clearInterval(timer);
-    }, [load]);
+    }, [load, pollIntervalSec]);
 
     const handleToggle = async (wallet) => {
         setBusyKey(`wallet-toggle:${wallet.address}`);
@@ -2798,8 +2798,8 @@ function SettingsPage({ apiBaseUrl, brand }) {
     );
 }
 
-function ContractSettingsPage({ apiBaseUrl, brand }) {
-    return <ContractSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} />;
+function ContractSettingsPage({ apiBaseUrl, brand, pollIntervalSec = 15 }) {
+    return <ContractSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} pollIntervalSec={pollIntervalSec} />;
 }
 
 function GoldenDogPage({ apiBaseUrl, initData, brand, watchedWallets = [], watchedWalletSet = new Set(), watchToggleMap = {}, onToggleWatchWallet }) {
@@ -3181,7 +3181,7 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
     );
 }
 
-function ContractSettingsTab({ apiBaseUrl, brand }) {
+function ContractSettingsTab({ apiBaseUrl, brand, pollIntervalSec = 15 }) {
     const [contracts, setContracts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showAdd, setShowAdd] = useState(false);
@@ -3211,9 +3211,9 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
     useEffect(() => {
         const timer = setInterval(() => {
             load(true);
-        }, 10000);
+        }, Math.max(2, Number(pollIntervalSec)) * 1000);
         return () => clearInterval(timer);
-    }, [load]);
+    }, [load, pollIntervalSec]);
 
     const handleAdd = async () => {
         setSaving(true);
@@ -3749,9 +3749,9 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         refreshStats();
         const interval = setInterval(() => {
             refreshStats();
-        }, 30000);
+        }, Math.max(2, Number(pollIntervalSec)) * 1000);
         return () => clearInterval(interval);
-    }, [refreshStats]);
+    }, [pollIntervalSec, refreshStats]);
 
     useEffect(() => {
         if (!hasInitData) return undefined;
@@ -3939,6 +3939,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         onSelectPool={handleSelectPool}
                         onOpenPosition={onOpenPosition}
                         brand={brand}
+                        pollIntervalSec={pollIntervalSec}
                     />
                 ) : view === 'wallets' ? (
                     <WalletListPage
@@ -3950,6 +3951,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={handleToggleWatchWallet}
+                        pollIntervalSec={pollIntervalSec}
                     />
                 ) : view === 'golden_dog' ? (
                     <GoldenDogPage
@@ -3975,7 +3977,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         />
                     </Suspense>
                 ) : (
-                    <ContractSettingsPage apiBaseUrl={apiBaseUrl} brand={brand} />
+                    <ContractSettingsPage apiBaseUrl={apiBaseUrl} brand={brand} pollIntervalSec={pollIntervalSec} />
                 )}
             </section>
 

@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-func TestResolveOpenPositionTaskModeDefaultsExitAll(t *testing.T) {
+func TestResolveOpenPositionTaskModeDefaultsPause(t *testing.T) {
 	t.Parallel()
 
 	mode, paused := resolveOpenPositionTaskMode(openPositionRequest{})
 	if mode != models.StrategyOutOfRangeModeExitAll {
 		t.Fatalf("mode = %q, want %q", mode, models.StrategyOutOfRangeModeExitAll)
 	}
-	if paused {
-		t.Fatal("paused = true, want false")
+	if !paused {
+		t.Fatal("paused = false, want true")
 	}
 }
 

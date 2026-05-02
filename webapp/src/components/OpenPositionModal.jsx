@@ -464,7 +464,7 @@ export default function OpenPositionModal({
   const [globalDcaMinSplitAmount, setGlobalDcaMinSplitAmount] = useState(0);
   const [globalSlippageTolerance, setGlobalSlippageTolerance] = useState(NaN);
   const [dcaExpanded, setDcaExpanded] = useState(false);
-  const [taskMode, setTaskMode] = useState('exit_all');
+  const [taskMode, setTaskMode] = useState('pause');
   const [walletBalancesHidden, setWalletBalancesHidden] = useState(false);
   const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
   const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
@@ -1121,7 +1121,7 @@ export default function OpenPositionModal({
 
   useEffect(() => {
     setDcaExpanded(false);
-    setTaskMode('exit_all');
+    setTaskMode('pause');
   }, [addr]);
 
   const protocolKind = useMemo(() => {

@@ -35,13 +35,13 @@ export function normalizeTaskMode(taskMode, paused = false) {
     case 'exit_all':
       return String(taskMode).trim();
     default:
-      return 'exit_all';
+      return 'pause';
   }
 }
 
 export function getTaskModeMeta(taskMode, paused = false) {
   const normalized = normalizeTaskMode(taskMode, paused);
-  return TASK_MODE_OPTIONS.find((item) => item.value === normalized) || TASK_MODE_OPTIONS[1];
+  return TASK_MODE_OPTIONS.find((item) => item.value === normalized) || TASK_MODE_OPTIONS[3];
 }
 
 export function getOutOfRangeActionSummary(taskMode, paused = false) {

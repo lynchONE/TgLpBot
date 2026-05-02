@@ -83,28 +83,103 @@ function formatRangePercent(value) {
   return `\u00B1${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
-function deOverlapMarkers(markers) {
-  const step = 36;
-  const xThreshold = 28;
-  const result = [];
-  for (const m of markers) {
-    let { y } = m;
-    let collision = true;
-    let iter = 0;
-    while (collision && iter < 10) {
-      collision = false;
-      for (const p of result) {
-        if (Math.abs(p.x - m.x) < xThreshold && Math.abs(y - p.y) < step) {
-          y = m.action === 'remove' ? p.y + step : p.y - step;
-          collision = true;
+const CANDLE_SCALE_MARGINS = { top: 0.14, bottom: 0.28 };
+const MARKER_SIZE = 24;
+const MARKER_RAIL_TOP_Y = 24;
+const MARKER_RAIL_BOTTOM_GAP = 72;
+const MARKER_RAIL_ROW_GAP = 26;
+const MARKER_DENSE_THRESHOLD = 28;
+const MARKER_MERGE_X_GAP = 18;
+
+function mergeProjectedMarker(group, marker) {
+  const groupItems = Array.isArray(group.items) ? group.items : [];
+  const markerItems = Array.isArray(marker.items) ? marker.items : [];
+  const nextItems = [...groupItems, ...markerItems];
+  const groupWeight = Math.max(1, groupItems.length);
+  const markerWeight = Math.max(1, markerItems.length);
+  const totalWeight = groupWeight + markerWeight;
+  const markerUsd = Number(marker.estimatedUSD);
+  const groupUsd = Number(group.estimatedUSD);
+  const nextUSD = (Number.isFinite(groupUsd) ? groupUsd : 0) + (Number.isFinite(markerUsd) ? markerUsd : 0);
+  const primary = Math.abs(markerUsd) > Math.abs(groupUsd) ? marker : group;
+  return {
+    ...group,
+    x: ((group.x * groupWeight) + (marker.x * markerWeight)) / totalWeight,
+    anchorY: ((group.anchorY * groupWeight) + (marker.anchorY * markerWeight)) / totalWeight,
+    items: nextItems,
+    estimatedUSD: nextUSD,
+    label: primary.label,
+  };
+}
+
+function mergeDenseProjectedMarkers(markers) {
+  if (markers.length <= MARKER_DENSE_THRESHOLD) return markers;
+  const sorted = [...markers].sort((a, b) => {
+    const railOrder = String(a.rail).localeCompare(String(b.rail));
+    if (railOrder !== 0) return railOrder;
+    const actionOrder = String(a.action).localeCompare(String(b.action));
+    if (actionOrder !== 0) return actionOrder;
+    const typeOrder = Number(a.isMyTrade) - Number(b.isMyTrade);
+    if (typeOrder !== 0) return typeOrder;
+    return a.x - b.x;
+  });
+  const groups = [];
+  sorted.forEach((marker) => {
+    const key = `${marker.rail}:${marker.action}:${marker.isMyTrade ? 'my' : 'sm'}`;
+    const last = groups[groups.length - 1];
+    if (last && last.mergeKey === key && Math.abs(last.x - marker.x) <= MARKER_MERGE_X_GAP) {
+      groups[groups.length - 1] = {
+        ...mergeProjectedMarker(last, marker),
+        mergeKey: key,
+      };
+      return;
+    }
+    groups.push({ ...marker, mergeKey: key });
+  });
+  return groups.map(({ mergeKey, ...marker }) => marker);
+}
+
+function layoutMarkerRails(markers, hostHeight) {
+  const rows = hostHeight >= 440 ? 2 : 1;
+  const topBaseY = MARKER_RAIL_TOP_Y;
+  const bottomBaseY = hostHeight > 0 ? Math.max(topBaseY, hostHeight - MARKER_RAIL_BOTTOM_GAP) : topBaseY;
+  const lanes = {
+    top: new Array(rows).fill(Number.NEGATIVE_INFINITY),
+    bottom: new Array(rows).fill(Number.NEGATIVE_INFINITY),
+  };
+  const merged = mergeDenseProjectedMarkers(markers);
+  return [...merged]
+    .sort((a, b) => a.x - b.x)
+    .map((marker) => {
+      const rail = marker.rail === 'bottom' ? 'bottom' : 'top';
+      const footprint = marker.items.length > 1 ? MARKER_SIZE + 8 : MARKER_SIZE + 4;
+      let lane = 0;
+      let bestGap = Number.NEGATIVE_INFINITY;
+      for (let index = 0; index < rows; index += 1) {
+        const gap = marker.x - lanes[rail][index];
+        if (gap >= footprint) {
+          lane = index;
           break;
         }
+        if (gap > bestGap) {
+          bestGap = gap;
+          lane = index;
+        }
       }
-      iter++;
-    }
-    result.push({ ...m, y });
-  }
-  return result;
+      lanes[rail][lane] = marker.x + footprint;
+      const y = rail === 'bottom'
+        ? bottomBaseY - (lane * MARKER_RAIL_ROW_GAP)
+        : topBaseY + (lane * MARKER_RAIL_ROW_GAP);
+      const anchorY = Number.isFinite(marker.anchorY) ? marker.anchorY : y;
+      const pinHeight = Math.max(0, Math.abs(anchorY - y) - (MARKER_SIZE / 2) - 4);
+      return {
+        ...marker,
+        y,
+        lane,
+        pinHeight,
+        pinDirection: anchorY >= y ? 'down' : 'up',
+      };
+    });
 }
 
 function findNearestCandle(candleData, candleMap, targetTime) {
@@ -238,7 +313,7 @@ function projectDrawing(chart, candleSeries, drawing, hostWidth, hostHeight) {
   };
 }
 
-function projectClusters(chart, candleSeries, candleData, candleMap, candleIndexMap, clusters, hostWidth, hostHeight, userAvatarUrl) {
+function projectClusters(chart, candleSeries, candleData, candleMap, clusters, hostWidth, hostHeight, userAvatarUrl) {
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
   const projected = [];
@@ -282,18 +357,16 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
     }
     if (!Number.isFinite(y)) continue;
 
-    const offset = cluster.action === 'remove' ? 18 : -18;
-    const minY = yPad;
-    const maxY = height > 0 ? Math.max(minY, priceBottom - yPad) : Number.POSITIVE_INFINITY;
-
     projected.push({
       ...cluster,
       x: clamp(x, xPad, Math.max(xPad, width - xPad)),
-      y: clamp(y + offset, minY, maxY),
+      y: clamp(y, yPad, height > 0 ? Math.max(yPad, height - yPad) : Number.POSITIVE_INFINITY),
+      anchorY: clamp(y, yPad, height > 0 ? Math.max(yPad, height - yPad) : Number.POSITIVE_INFINITY),
+      rail: cluster.action === 'remove' ? 'bottom' : 'top',
       label: cluster.isMyTrade && userAvatarUrl ? userAvatarUrl : getClusterAvatarUrl(cluster),
     });
   }
-  return projected;
+  return layoutMarkerRails(projected, height);
 }
 
 function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
@@ -455,12 +528,6 @@ export default function KlineChart({
     return map;
   }, [candleData]);
 
-  const candleIndexMap = useMemo(() => {
-    const map = new Map();
-    candleData.forEach((row, index) => map.set(row.time, index));
-    return map;
-  }, [candleData]);
-
   const markerClusters = useMemo(() => {
     const rows = Array.isArray(markers) ? markers : [];
     return rows
@@ -484,10 +551,7 @@ export default function KlineChart({
       .sort((a, b) => a.time - b.time);
   }, [markers]);
 
-  const displayMarkers = useMemo(
-    () => deOverlapMarkers(projectedMarkers),
-    [projectedMarkers]
-  );
+  const displayMarkers = projectedMarkers;
 
   useEffect(() => {
     setHoveredCluster((prev) => {
@@ -658,7 +722,6 @@ export default function KlineChart({
         candleSeriesRef.current,
         candleData,
         candleMap,
-        candleIndexMap,
         markerClusters,
         hostWidth,
         hostHeight,
@@ -682,7 +745,7 @@ export default function KlineChart({
         hostHeight
       )
     );
-  }, [candleData, candleMap, candleIndexMap, completedDrawing, draftDrawing, markerClusters, rangeOverlays, userAvatarUrl]);
+  }, [candleData, candleMap, completedDrawing, draftDrawing, markerClusters, rangeOverlays, userAvatarUrl]);
 
   updateProjectionRef.current = updateProjection;
 
@@ -751,6 +814,9 @@ export default function KlineChart({
       wickDownColor: '#ea3943',
       priceLineVisible: true,
       lastValueVisible: true,
+    });
+    candleSeries.priceScale().applyOptions({
+      scaleMargins: CANDLE_SCALE_MARGINS,
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
@@ -984,10 +1050,11 @@ export default function KlineChart({
           <button
             key={cluster.id}
             type="button"
-            className={`kline-marker ${cluster.action} ${cluster.isMyTrade ? 'my-trade' : ''} ${activeMarkerId === cluster.id ? 'active' : ''} ${isClusterHighlighted(cluster, highlightWalletAddress) ? 'wallet-highlighted' : ''}`}
+            className={`kline-marker ${cluster.action} rail-${cluster.rail} pin-${cluster.pinDirection} ${cluster.items.length > 1 ? 'clustered' : ''} ${cluster.isMyTrade ? 'my-trade' : ''} ${activeMarkerId === cluster.id ? 'active' : ''} ${isClusterHighlighted(cluster, highlightWalletAddress) ? 'wallet-highlighted' : ''}`}
             style={{
               left: `${cluster.x}px`,
               top: `${cluster.y}px`,
+              '--pin-height': `${cluster.pinHeight}px`,
             }}
             onClick={() => {
               clearTooltipHideTimer();

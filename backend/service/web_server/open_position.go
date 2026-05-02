@@ -237,7 +237,7 @@ func resolveOpenPositionTaskMode(req openPositionRequest) (models.StrategyOutOfR
 		return models.StrategyOutOfRangeModeExitAll, false
 	}
 
-	return models.StrategyOutOfRangeModeExitAll, false
+	return models.StrategyOutOfRangeModeExitAll, true
 }
 
 func isV4PoolId(text string) bool {
