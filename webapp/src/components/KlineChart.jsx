@@ -83,13 +83,14 @@ function formatRangePercent(value) {
   return `\u00B1${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
-const CANDLE_SCALE_MARGINS = { top: 0.14, bottom: 0.28 };
+const CANDLE_SCALE_MARGINS = { top: 0.12, bottom: 0.22 };
 const MARKER_SIZE = 24;
-const MARKER_RAIL_TOP_Y = 24;
-const MARKER_RAIL_BOTTOM_GAP = 72;
-const MARKER_RAIL_ROW_GAP = 26;
+const MARKER_EDGE_PADDING = 10;
+const MARKER_ANCHOR_GAP = 16;
+const MARKER_RAIL_ROW_GAP = 20;
 const MARKER_DENSE_THRESHOLD = 28;
 const MARKER_MERGE_X_GAP = 18;
+const MARKER_RECENT_UNMERGED_SECONDS = 10 * 60;
 
 function mergeProjectedMarker(group, marker) {
   const groupItems = Array.isArray(group.items) ? group.items : [];
@@ -114,7 +115,25 @@ function mergeProjectedMarker(group, marker) {
 
 function mergeDenseProjectedMarkers(markers) {
   if (markers.length <= MARKER_DENSE_THRESHOLD) return markers;
-  const sorted = [...markers].sort((a, b) => {
+  const latestTime = markers.reduce((max, marker) => {
+    const t = Number(marker.time || 0);
+    return Number.isFinite(t) && t > max ? t : max;
+  }, 0);
+  const recentCutoff = latestTime > 0 ? latestTime - MARKER_RECENT_UNMERGED_SECONDS : Number.POSITIVE_INFINITY;
+  const recent = [];
+  const mergeCandidates = [];
+  markers.forEach((marker) => {
+    const markerTime = Number(marker.time || 0);
+    if (Number.isFinite(markerTime) && markerTime >= recentCutoff) {
+      recent.push(marker);
+      return;
+    }
+    mergeCandidates.push(marker);
+  });
+  if (mergeCandidates.length <= MARKER_DENSE_THRESHOLD) {
+    return [...mergeCandidates, ...recent];
+  }
+  const sorted = [...mergeCandidates].sort((a, b) => {
     const railOrder = String(a.rail).localeCompare(String(b.rail));
     if (railOrder !== 0) return railOrder;
     const actionOrder = String(a.action).localeCompare(String(b.action));
@@ -136,13 +155,21 @@ function mergeDenseProjectedMarkers(markers) {
     }
     groups.push({ ...marker, mergeKey: key });
   });
-  return groups.map(({ mergeKey, ...marker }) => marker);
+  return [...groups.map(({ mergeKey, ...marker }) => marker), ...recent];
 }
 
-function layoutMarkerRails(markers, hostHeight) {
+function layoutMarkerRails(markers, hostHeight, priceTop, priceBottom) {
   const rows = hostHeight >= 440 ? 2 : 1;
-  const topBaseY = MARKER_RAIL_TOP_Y;
-  const bottomBaseY = hostHeight > 0 ? Math.max(topBaseY, hostHeight - MARKER_RAIL_BOTTOM_GAP) : topBaseY;
+  const hostMinY = MARKER_EDGE_PADDING + (MARKER_SIZE / 2);
+  const hostMaxY = Math.max(hostMinY, hostHeight - MARKER_EDGE_PADDING - (MARKER_SIZE / 2));
+  const topSafeY = Number.isFinite(priceTop)
+    ? Math.max(hostMinY, priceTop + (MARKER_SIZE / 2) + 6)
+    : hostMinY;
+  const bottomSafeY = Number.isFinite(priceBottom)
+    ? Math.min(hostMaxY, priceBottom - (MARKER_SIZE / 2) - 8)
+    : hostMaxY;
+  const minCenterY = Math.min(topSafeY, bottomSafeY);
+  const maxCenterY = Math.max(topSafeY, bottomSafeY);
   const lanes = {
     top: new Array(rows).fill(Number.NEGATIVE_INFINITY),
     bottom: new Array(rows).fill(Number.NEGATIVE_INFINITY),
@@ -167,10 +194,17 @@ function layoutMarkerRails(markers, hostHeight) {
         }
       }
       lanes[rail][lane] = marker.x + footprint;
-      const y = rail === 'bottom'
-        ? bottomBaseY - (lane * MARKER_RAIL_ROW_GAP)
-        : topBaseY + (lane * MARKER_RAIL_ROW_GAP);
-      const anchorY = Number.isFinite(marker.anchorY) ? marker.anchorY : y;
+      const anchorY = Number.isFinite(marker.anchorY) ? marker.anchorY : minCenterY;
+      const laneOffset = lane * MARKER_RAIL_ROW_GAP;
+      let y;
+      if (rail === 'bottom') {
+        const desiredY = anchorY + MARKER_ANCHOR_GAP + laneOffset;
+        y = desiredY <= maxCenterY ? desiredY : maxCenterY - laneOffset;
+      } else {
+        const desiredY = anchorY - MARKER_ANCHOR_GAP - laneOffset;
+        y = desiredY >= minCenterY ? desiredY : minCenterY + laneOffset;
+      }
+      y = clamp(y, minCenterY, maxCenterY);
       const pinHeight = Math.max(0, Math.abs(anchorY - y) - (MARKER_SIZE / 2) - 4);
       return {
         ...marker,
@@ -366,7 +400,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters, h
       label: cluster.isMyTrade && userAvatarUrl ? userAvatarUrl : getClusterAvatarUrl(cluster),
     });
   }
-  return layoutMarkerRails(projected, height);
+  return layoutMarkerRails(projected, height, priceTop, priceBottom);
 }
 
 function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
