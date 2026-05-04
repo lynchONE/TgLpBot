@@ -238,6 +238,12 @@ func (t *StrategyTask) CreateOverrideUpdates() map[string]interface{} {
 	if !t.RebalanceEnabled {
 		updates["rebalance_enabled"] = false
 	}
+	if t.Paused {
+		updates["paused"] = true
+		if t.PausedAt != nil {
+			updates["paused_at"] = t.PausedAt
+		}
+	}
 
 	if !t.DCAEnabled {
 		updates["dca_enabled"] = false

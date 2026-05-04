@@ -110,10 +110,14 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
 		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
-		RebalanceEnabled:     true,
+		RebalanceEnabled:     false,
+		OutOfRangeMode:       string(models.StrategyOutOfRangeModeExitAll),
+		Paused:               true,
 		Status:               models.StrategyStatusRunning,
 		LastCheckTime:        time.Now(),
 	}
+	now := time.Now()
+	task.PausedAt = &now
 
 	if err := b.strategyService.CreateTask(task); err != nil {
 		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("创建任务失败: %v", err))

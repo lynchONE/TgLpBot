@@ -91,10 +91,18 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 	exec := txexec.Default()
 	ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 		liqSvc := liquidity.NewLiquidityService()
-		txHashes, exitErr := liqSvc.ExitTaskToUSDT(userID, task, false)
+		txHashes, exitErr := liqSvc.WithdrawTaskLiquidityOnly(userID, task)
 
 		if exitErr != nil {
 			log.Printf("[WebAPI] withdraw_liquidity failed: task_id=%d err=%v txHashes=%v", taskID, exitErr, txHashes)
+			_ = taskService.Update(userID, taskID, map[string]interface{}{
+				"status":        models.StrategyStatusError,
+				"error_message": "撤出流动性失败: " + exitErr.Error(),
+			})
+			if s != nil && s.Realtime != nil {
+				s.Realtime.InvalidateUser(userID)
+			}
+			return
 		}
 
 		// Mark task as stopped after withdrawal
@@ -124,13 +132,13 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 		OK:      true,
 		TaskID:  req.TaskID,
 		Pending: true,
-		Message: "取回流动性已提交，正在处理中",
+		Message: "取回流动性已提交，正在撤出流动性",
 	})
 }
 
 func formatWithdrawMessage(err error) string {
 	if err == nil {
-		return "流动性已撤出并兑换为 USDT"
+		return "流动性已撤出，未自动兑换为稳定币"
 	}
 	return "撤出流动性时发生错误: " + err.Error()
 }

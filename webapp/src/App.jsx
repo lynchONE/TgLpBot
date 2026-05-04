@@ -1952,7 +1952,7 @@ export default function App() {
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleWithdrawLiquidity = useCallback(async (taskId) => {
-    if (!window.confirm('确认要取回流动性并兑换为 USDT？\n该操作会撤出仓位并停止任务。')) return;
+    if (!window.confirm('确认要取回流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。')) return;
     await withdrawLiquidity({ apiBaseUrl, initData, taskId });
     loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);

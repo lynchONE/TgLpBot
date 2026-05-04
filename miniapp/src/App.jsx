@@ -3582,15 +3582,15 @@ export default function App() {
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
         const ok = await requestConfirm({
-            title: '闁告瑦鐗曞ú鏍规担绋啃楅柟?',
-            message: '缁绢収鍠涢鑽ゆ啺娴ｇ绲块柛銉у仦缁侊箓宕濋妸锔瑰亾瑜嶉懟鐔煎礂閹寸偛搴婂☉?USDT闁挎稓鍓爊閻犲洢鍎查幖閿嬫媴濠娾偓缁变即骞橀妶鍛瘔濞寸姵鎸风紞鍛寸嵁鐠鸿桨绮绘慨婵愭線閹广垽宕濇幊閳?',
-            confirmText: '缁绢収鍠涢濠氬矗閺嵮勭',
+            title: '取回流动性？',
+            message: '确认要取回流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。',
+            confirmText: '取回',
             tone: 'danger',
         });
         if (!ok) return;
         try {
             const resp = await withdrawLiquidity({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '婵炵繝绀佹慨鈺呭箑瑜嶉崙锟犲矗閺嵮勭', 'success');
+            showNotice(resp?.message || '取回流动性请求已提交。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }

@@ -109,6 +109,116 @@ func shouldRetryExitError(err error) bool {
 	return true
 }
 
+func pauseBlocksExitAction(action string) bool {
+	switch strings.TrimSpace(action) {
+	case "", ExitActionManualStop, ExitActionSwitch:
+		return false
+	default:
+		return true
+	}
+}
+
+func taskPausedForAutomaticExit(task *models.StrategyTask) (bool, error) {
+	if task == nil {
+		return false, fmt.Errorf("task is nil")
+	}
+	if task.Paused {
+		return true, nil
+	}
+	if database.DB == nil {
+		return false, fmt.Errorf("database not initialized")
+	}
+	if task.ID == 0 || task.UserID == 0 {
+		return false, fmt.Errorf("task identity missing")
+	}
+
+	var row struct {
+		Paused bool `gorm:"column:paused"`
+	}
+	if err := database.DB.
+		Model(&models.StrategyTask{}).
+		Select("paused").
+		Where("id = ? AND user_id = ?", task.ID, task.UserID).
+		Take(&row).Error; err != nil {
+		return false, fmt.Errorf("reload task pause state failed: %w", err)
+	}
+	return row.Paused, nil
+}
+
+func cancelAutomaticExitBecausePaused(task *models.StrategyTask, action string) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+
+	updates := map[string]interface{}{
+		"exit_pending_action":     "",
+		"exit_pending_reason":     "",
+		"exit_gas_multiplier":     1.0,
+		"exit_retry_count":        0,
+		"exit_next_retry_at":      nil,
+		"exit_last_error":         "",
+		"exit_give_up_at":         nil,
+		"out_of_range_since":      nil,
+		"rebalance_pending":       false,
+		"rebalance_retry_count":   0,
+		"rebalance_next_retry_at": nil,
+		"rebalance_last_error":    "",
+		"error_message":           "",
+	}
+
+	task.ExitPendingAction = ""
+	task.ExitPendingReason = ""
+	task.ExitGasMultiplier = 1.0
+	task.ExitRetryCount = 0
+	task.ExitNextRetryAt = nil
+	task.ExitLastError = ""
+	task.ExitGiveUpAt = nil
+	task.OutOfRangeSince = nil
+	task.RebalancePending = false
+	task.RebalanceRetryCount = 0
+	task.RebalanceNextRetryAt = nil
+	task.RebalanceLastError = ""
+	task.ErrorMessage = ""
+
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if task.ID == 0 || task.UserID == 0 {
+		return fmt.Errorf("task identity missing")
+	}
+
+	return database.DB.
+		Model(&models.StrategyTask{}).
+		Where("id = ? AND user_id = ?", task.ID, task.UserID).
+		Updates(updates).Error
+}
+
+func (s *StrategyService) stopAutomaticExitIfPaused(task *models.StrategyTask, action string) bool {
+	if !pauseBlocksExitAction(action) {
+		return false
+	}
+
+	paused, err := taskPausedForAutomaticExit(task)
+	if err != nil {
+		if task != nil {
+			log.Printf("[Strategy] task #%d skip automatic exit action=%s: %v", task.ID, strings.TrimSpace(action), err)
+		} else {
+			log.Printf("[Strategy] skip automatic exit action=%s: %v", strings.TrimSpace(action), err)
+		}
+		return true
+	}
+	if !paused {
+		return false
+	}
+
+	if err := cancelAutomaticExitBecausePaused(task, action); err != nil {
+		log.Printf("[Strategy] task #%d cancel automatic exit action=%s because task is paused, but DB update failed: %v", task.ID, strings.TrimSpace(action), err)
+		return true
+	}
+	log.Printf("[Strategy] task #%d cancel automatic exit action=%s because task is paused", task.ID, strings.TrimSpace(action))
+	return true
+}
+
 func (s *StrategyService) scheduleExitRetryWake(taskID uint, userID uint, delay time.Duration) {
 	if taskID == 0 || userID == 0 {
 		return
@@ -159,6 +269,10 @@ func (s *StrategyService) requestExitToUSDT(task *models.StrategyTask, action st
 		return
 	}
 
+	if s.stopAutomaticExitIfPaused(task, action) {
+		return
+	}
+
 	// After we give up, only a manual stop can reset and retry again.
 	if task.ExitGiveUpAt != nil && action != ExitActionManualStop {
 		return
@@ -181,6 +295,36 @@ func (s *StrategyService) requestExitToUSDT(task *models.StrategyTask, action st
 		"rebalance_next_retry_at": nil,
 		"rebalance_last_error":    "",
 		"error_message":           "",
+	}
+	if pauseBlocksExitAction(action) {
+		res := database.DB.
+			Model(&models.StrategyTask{}).
+			Where("id = ? AND user_id = ? AND paused = ?", task.ID, task.UserID, false).
+			Updates(updates)
+		if res.Error != nil {
+			log.Printf("[Strategy] task #%d queue automatic exit action=%s failed: %v", task.ID, action, res.Error)
+			return
+		}
+		if res.RowsAffected == 0 {
+			if err := cancelAutomaticExitBecausePaused(task, action); err != nil {
+				log.Printf("[Strategy] task #%d automatic exit action=%s was not queued; cancel cleanup failed: %v", task.ID, action, err)
+			}
+			return
+		}
+
+		task.ExitPendingAction = action
+		task.ExitPendingReason = strings.TrimSpace(reason)
+		task.ExitRetryCount = 0
+		task.ExitNextRetryAt = nil
+		task.ExitLastError = ""
+		task.ExitGiveUpAt = nil
+		task.RebalancePending = false
+		task.RebalanceRetryCount = 0
+		task.RebalanceNextRetryAt = nil
+		task.RebalanceLastError = ""
+
+		_ = s.processExitRetry(task)
+		return
 	}
 	if err := database.DB.Model(task).Updates(updates).Error; err != nil {
 		log.Printf("[Strategy] 任务 #%d 设置撤出重试状态失败: %v", task.ID, err)
@@ -212,6 +356,10 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 	action := strings.TrimSpace(task.ExitPendingAction)
 	if action == "" {
 		return false
+	}
+
+	if s.stopAutomaticExitIfPaused(task, action) {
+		return true
 	}
 
 	now := time.Now()
@@ -295,6 +443,10 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 
 	action := strings.TrimSpace(task.ExitPendingAction)
 	if action == "" {
+		return
+	}
+
+	if s.stopAutomaticExitIfPaused(&task, action) {
 		return
 	}
 

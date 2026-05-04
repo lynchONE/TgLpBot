@@ -3,6 +3,7 @@ package bot
 import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/strategy"
 	"fmt"
 	"log"
 	"strconv"
@@ -385,6 +386,20 @@ func (b *Bot) handleTaskTogglePause(query *tgbotapi.CallbackQuery, user *models.
 	}
 	if newValue {
 		updates["paused_at"] = &now
+		switch strings.TrimSpace(task.ExitPendingAction) {
+		case strategy.ExitActionRebalance, strategy.ExitActionStopLoss, strategy.ExitActionOutOfRangeStop:
+			updates["exit_pending_action"] = ""
+			updates["exit_pending_reason"] = ""
+			updates["exit_retry_count"] = 0
+			updates["exit_next_retry_at"] = nil
+			updates["exit_last_error"] = ""
+			updates["exit_give_up_at"] = nil
+			updates["rebalance_pending"] = false
+			updates["rebalance_retry_count"] = 0
+			updates["rebalance_next_retry_at"] = nil
+			updates["rebalance_last_error"] = ""
+			updates["error_message"] = ""
+		}
 	} else {
 		updates["paused_at"] = nil
 	}
@@ -402,6 +417,22 @@ func (b *Bot) handleTaskTogglePause(query *tgbotapi.CallbackQuery, user *models.
 		task.PausedAt = nil
 	}
 	task.OutOfRangeSince = nil
+	if newValue {
+		switch strings.TrimSpace(task.ExitPendingAction) {
+		case strategy.ExitActionRebalance, strategy.ExitActionStopLoss, strategy.ExitActionOutOfRangeStop:
+			task.ExitPendingAction = ""
+			task.ExitPendingReason = ""
+			task.ExitRetryCount = 0
+			task.ExitNextRetryAt = nil
+			task.ExitLastError = ""
+			task.ExitGiveUpAt = nil
+			task.RebalancePending = false
+			task.RebalanceRetryCount = 0
+			task.RebalanceNextRetryAt = nil
+			task.RebalanceLastError = ""
+			task.ErrorMessage = ""
+		}
+	}
 
 	cbText := "✅ 已恢复"
 	if newValue {

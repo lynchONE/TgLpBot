@@ -418,6 +418,53 @@ func (s *LiquidityService) ExitTaskToUSDT(userID uint, task *models.StrategyTask
 	return s.ExitTaskToUSDTWithOptions(userID, task, sweepWallet, TxOptions{})
 }
 
+func (s *LiquidityService) WithdrawTaskLiquidityOnly(userID uint, task *models.StrategyTask) ([]string, error) {
+	return s.WithdrawTaskLiquidityOnlyWithOptions(userID, task, TxOptions{})
+}
+
+func (s *LiquidityService) WithdrawTaskLiquidityOnlyWithOptions(userID uint, task *models.StrategyTask, opts TxOptions) ([]string, error) {
+	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
+	if config.AppConfig == nil {
+		return nil, fmt.Errorf("config not loaded")
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
+	task.Chain = config.NormalizeChain(task.Chain)
+	exec, err := chainexec.GetEVM(task.Chain)
+	if err != nil {
+		return nil, err
+	}
+	cc := exec.Config()
+
+	wallet, err := s.walletService.ResolveTaskWallet(userID, task.WalletID, task.WalletAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet: %w", err)
+	}
+
+	privateKeyHex, err := s.walletService.GetPrivateKey(wallet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get private key: %w", err)
+	}
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	walletAddr := s.walletService.GetWalletAddress(wallet)
+	if !common.IsHexAddress(cc.StableAddress) {
+		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
+	}
+	usdtAddr := common.HexToAddress(cc.StableAddress)
+
+	switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
+	case "v4":
+		return s.exitV4ToUSDT(exec, privateKey, walletAddr, usdtAddr, task, false, opts)
+	default:
+		return s.exitV3ToUSDT(exec, privateKey, walletAddr, usdtAddr, task, false, opts)
+	}
+}
+
 func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.StrategyTask, sweepWallet bool, opts TxOptions) ([]string, error) {
 	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
 	if config.AppConfig == nil {
@@ -1551,6 +1598,10 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		if len(swapErrs) > 0 {
 			swapErr = errors.Join(swapErrs...)
 		}
+	}
+
+	if !swapDeltas {
+		return txHashes, nil
 	}
 
 	// Record Transaction

@@ -127,3 +127,30 @@ func TestResolveOutOfRangeAction(t *testing.T) {
 		})
 	}
 }
+
+func TestPauseBlocksExitAction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		action string
+		want   bool
+	}{
+		{action: "", want: false},
+		{action: ExitActionManualStop, want: false},
+		{action: ExitActionSwitch, want: false},
+		{action: ExitActionRebalance, want: true},
+		{action: ExitActionStopLoss, want: true},
+		{action: ExitActionOutOfRangeStop, want: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.action, func(t *testing.T) {
+			t.Parallel()
+
+			if got := pauseBlocksExitAction(tt.action); got != tt.want {
+				t.Fatalf("pauseBlocksExitAction(%q) = %v, want %v", tt.action, got, tt.want)
+			}
+		})
+	}
+}

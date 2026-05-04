@@ -1,16 +1,22 @@
 package models
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestStrategyTaskCreateOverrideUpdates(t *testing.T) {
 	t.Parallel()
 
+	pausedAt := time.Now()
 	task := &StrategyTask{
 		ReopenDelaySeconds: 0,
 		SlippageTolerance:  0,
 		ResidualTolerance:  0,
 		ZapLossTolerance:   0,
 		RebalanceEnabled:   false,
+		Paused:             true,
+		PausedAt:           &pausedAt,
 	}
 
 	updates := task.CreateOverrideUpdates()
@@ -28,6 +34,12 @@ func TestStrategyTaskCreateOverrideUpdates(t *testing.T) {
 	}
 	if got := updates["rebalance_enabled"]; got != false {
 		t.Fatalf("rebalance_enabled = %#v, want false", got)
+	}
+	if got := updates["paused"]; got != true {
+		t.Fatalf("paused = %#v, want true", got)
+	}
+	if got := updates["paused_at"]; got != &pausedAt {
+		t.Fatalf("paused_at = %#v, want original pointer", got)
 	}
 }
 

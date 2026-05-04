@@ -132,6 +132,23 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 		updates := map[string]interface{}{
 			"amount_usdt": task.AmountUSDT + actualSpent,
 		}
+		if task.Paused {
+			updates["out_of_range_since"] = nil
+			switch strings.TrimSpace(task.ExitPendingAction) {
+			case strategy.ExitActionRebalance, strategy.ExitActionStopLoss, strategy.ExitActionOutOfRangeStop:
+				updates["exit_pending_action"] = ""
+				updates["exit_pending_reason"] = ""
+				updates["exit_retry_count"] = 0
+				updates["exit_next_retry_at"] = nil
+				updates["exit_last_error"] = ""
+				updates["exit_give_up_at"] = nil
+				updates["rebalance_pending"] = false
+				updates["rebalance_retry_count"] = 0
+				updates["rebalance_next_retry_at"] = nil
+				updates["rebalance_last_error"] = ""
+				updates["error_message"] = ""
+			}
+		}
 		if increaseRes != nil && increaseRes.CurrentLiquidity != "" {
 			updates["current_liquidity"] = increaseRes.CurrentLiquidity
 		}

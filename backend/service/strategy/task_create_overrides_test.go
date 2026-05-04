@@ -3,17 +3,21 @@ package strategy
 import (
 	"TgLpBot/base/models"
 	"testing"
+	"time"
 )
 
 func TestBuildTaskCreateOverrides(t *testing.T) {
 	t.Parallel()
 
+	pausedAt := time.Now()
 	task := &models.StrategyTask{
 		ReopenDelaySeconds: 0,
 		SlippageTolerance:  0,
 		ResidualTolerance:  0,
 		ZapLossTolerance:   0,
 		RebalanceEnabled:   false,
+		Paused:             true,
+		PausedAt:           &pausedAt,
 	}
 
 	updates := BuildTaskCreateOverrides(task)
@@ -31,6 +35,12 @@ func TestBuildTaskCreateOverrides(t *testing.T) {
 	}
 	if got := updates["rebalance_enabled"]; got != false {
 		t.Fatalf("rebalance_enabled = %#v, want false", got)
+	}
+	if got := updates["paused"]; got != true {
+		t.Fatalf("paused = %#v, want true", got)
+	}
+	if got := updates["paused_at"]; got != &pausedAt {
+		t.Fatalf("paused_at = %#v, want original pointer", got)
 	}
 }
 
