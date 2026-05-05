@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getBrandTheme } from '../lib/brand';
 
 function StatusIcon({ tone, brand }) {
@@ -96,6 +96,18 @@ function resolveOpenPositionView(tone, error, progress) {
     const totalSteps = Number(progress?.totalSteps || 0);
 
     if (tone === 'done') {
+        if (isDCA && totalSteps > 1) {
+            const doneStep = Math.max(1, Math.min(totalSteps, currentStep > 0 ? Math.trunc(currentStep) : totalSteps));
+            const allDone = Boolean(progress?.dcaCompleted) || doneStep >= totalSteps;
+            return {
+                tone,
+                panelTitle: '开仓状态',
+                badge: allDone ? '已完成' : `批次 ${doneStep} / ${totalSteps}`,
+                headline: allDone ? '分批加仓完成' : '分批加仓已结束',
+                summary: pair ? `${pair} 已执行 ${doneStep}/${totalSteps} 批。` : `已执行 ${doneStep}/${totalSteps} 批。`,
+                detail: allDone ? '全部批次已完成，持仓列表会显示最新结果。' : '后续批次已结束，持仓列表会显示最新结果。',
+            };
+        }
         return {
             tone,
             panelTitle: '开仓状态',
@@ -119,12 +131,16 @@ function resolveOpenPositionView(tone, error, progress) {
 
     // active_dca = first batch done, later batches run in the background ticker
     if (progress?.status === 'active_dca' && isDCA && totalSteps > 1) {
+        const doneStep = Math.max(1, Math.min(totalSteps, currentStep > 0 ? Math.trunc(currentStep) : 1));
+        const remaining = Math.max(0, totalSteps - doneStep);
         return {
             tone: 'active_dca',
             panelTitle: '开仓状态',
-            badge: `批次 1 / ${totalSteps}`,
-            headline: '首批开仓完成',
-            summary: pair ? `${pair} 首批已成交，剩余 ${totalSteps - 1} 批将按间隔后台执行。` : `剩余 ${totalSteps - 1} 批将按间隔后台执行。`,
+            badge: `批次 ${doneStep} / ${totalSteps}`,
+            headline: doneStep > 1 ? `分批加仓 ${doneStep}/${totalSteps} 已完成` : '首批开仓完成',
+            summary: remaining > 0
+                ? (pair ? `${pair} 已成交 ${doneStep} 批，剩余 ${remaining} 批将按间隔后台执行。` : `已成交 ${doneStep} 批，剩余 ${remaining} 批将按间隔后台执行。`)
+                : (pair ? `${pair} 全部批次已执行，正在刷新状态。` : '全部批次已执行，正在刷新状态。'),
             detail: '你可以关闭此提示，继续其他操作。',
         };
     }
@@ -215,6 +231,11 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
     const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
     const isCompact = operation === 'close_position' || operation === 'open_position';
     const canRetry = view.tone === 'error' && typeof onRetry === 'function';
+    const onCloseRef = useRef(onClose);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
 
     useEffect(() => {
         if (view.tone !== 'error') setRetrying(false);
@@ -241,17 +262,17 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
     }, [isCompact]);
 
     // Auto-dismiss compact toast once the user has had time to read the result.
-    // Open-position: first-batch done (active_dca) → 8s; full done → 5s.
     useEffect(() => {
-        if (!onClose) return undefined;
+        if (!onCloseRef.current) return undefined;
         if (!isCompact) return undefined;
+        const trackedDCA = operation === 'open_position' && progress?.dca && progress?.taskId;
         let delay = 0;
         if (view.tone === 'done') delay = 5000;
-        else if (view.tone === 'active_dca') delay = 8000;
+        else if (view.tone === 'active_dca' && !trackedDCA) delay = 8000;
         if (!delay) return undefined;
-        const timer = setTimeout(() => onClose(), delay);
+        const timer = setTimeout(() => onCloseRef.current?.(), delay);
         return () => clearTimeout(timer);
-    }, [isCompact, view.tone, onClose]);
+    }, [isCompact, operation, progress?.dca, progress?.taskId, view.tone]);
 
     const isActive = view.tone === 'active' || view.tone === 'active_dca';
     const canClose = isCompact ? true : !isActive || allowClose;
@@ -294,7 +315,7 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
             : '后台继续撤仓中，你可以继续操作页面。';
         const doneHint = isOpen
             ? (Number(progress?.totalSteps || 0) > 1 && progress?.status === 'done'
-                ? '分批加仓全部完成。'
+                ? (progress?.dcaCompleted === false ? '分批加仓已结束。' : '分批加仓全部完成。')
                 : '开仓已完成。')
             : '撤仓已完成，不会再阻塞当前界面。';
         const errorHint = isOpen

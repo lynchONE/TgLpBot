@@ -1846,15 +1846,28 @@ export default function App() {
       error: '',
     });
     try {
-      await apiOpenPosition({ apiBaseUrl, initData, ...params });
+      const resp = await apiOpenPosition({ apiBaseUrl, initData, ...params });
+      const taskId = Number(resp?.task_id);
       setOperationProgress(prev => prev?.operation === 'open_position'
-        ? { ...prev, currentStep: 4, status: 'done' } : prev);
+        ? {
+          ...prev,
+          taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : prev.taskId,
+          currentStep: 3,
+          status: 'active',
+        } : prev);
       setOpenPosSubmitError('');
       setOpenPosRisk(null);
       setOpenPosSmartRanges([]);
       setOpenPosSmartRangesLoading(false);
+      await loadPositions();
+      setOperationProgress(prev => prev?.operation === 'open_position'
+        ? {
+          ...prev,
+          taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : prev.taskId,
+          currentStep: 4,
+          status: 'done',
+        } : prev);
       setOpenPosPool(null);
-      loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);
       const errorCode = String(e?.code || '').trim();

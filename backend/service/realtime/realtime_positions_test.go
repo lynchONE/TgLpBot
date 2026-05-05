@@ -3,6 +3,7 @@ package realtime
 import (
 	"TgLpBot/base/models"
 	"testing"
+	"time"
 )
 
 func TestFinalizeTaskPnLViewMetricsRestoresInitialCostWhenCurrentValueExists(t *testing.T) {
@@ -69,5 +70,98 @@ func TestDisplayTaskAmountUSDT(t *testing.T) {
 				t.Fatalf("displayTaskAmountUSDT() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildRealtimeDCAStatusPending(t *testing.T) {
+	t.Parallel()
+
+	next := time.Now().Add(time.Minute)
+	task := &models.StrategyTask{
+		DCAEnabled:         true,
+		DCAPercentagesJSON: "[40,60]",
+		DCAExecutedCount:   1,
+		DCARetryCount:      2,
+		DCANextBatchAt:     &next,
+	}
+
+	got := buildRealtimeDCAStatus(task)
+	if got == nil {
+		t.Fatal("buildRealtimeDCAStatus() = nil, want status")
+	}
+	if !got.Enabled || !got.PlanValid {
+		t.Fatalf("status enabled/plan_valid = %v/%v, want true/true", got.Enabled, got.PlanValid)
+	}
+	if got.ExecutedCount != 1 || got.TotalCount != 2 || got.RetryCount != 2 {
+		t.Fatalf("counts = executed:%d total:%d retry:%d, want 1/2/2", got.ExecutedCount, got.TotalCount, got.RetryCount)
+	}
+	if got.NextBatchAt != &next {
+		t.Fatalf("NextBatchAt pointer mismatch")
+	}
+	if !got.Pending || got.Finished || got.Completed || got.Canceled {
+		t.Fatalf("pending/finished/completed/canceled = %v/%v/%v/%v, want true/false/false/false", got.Pending, got.Finished, got.Completed, got.Canceled)
+	}
+}
+
+func TestBuildRealtimeDCAStatusCompleted(t *testing.T) {
+	t.Parallel()
+
+	task := &models.StrategyTask{
+		DCAEnabled:         true,
+		DCAPercentagesJSON: "[40,60]",
+		DCAExecutedCount:   2,
+	}
+
+	got := buildRealtimeDCAStatus(task)
+	if got == nil {
+		t.Fatal("buildRealtimeDCAStatus() = nil, want status")
+	}
+	if !got.PlanValid || got.TotalCount != 2 {
+		t.Fatalf("plan = valid:%v total:%d, want true/2", got.PlanValid, got.TotalCount)
+	}
+	if got.Pending || !got.Finished || !got.Completed || got.Canceled {
+		t.Fatalf("pending/finished/completed/canceled = %v/%v/%v/%v, want false/true/true/false", got.Pending, got.Finished, got.Completed, got.Canceled)
+	}
+}
+
+func TestBuildRealtimeDCAStatusCanceled(t *testing.T) {
+	t.Parallel()
+
+	task := &models.StrategyTask{
+		DCAEnabled:         true,
+		DCAPercentagesJSON: "[40,30,30]",
+		DCAExecutedCount:   1,
+	}
+
+	got := buildRealtimeDCAStatus(task)
+	if got == nil {
+		t.Fatal("buildRealtimeDCAStatus() = nil, want status")
+	}
+	if got.Pending || !got.Finished || got.Completed || !got.Canceled {
+		t.Fatalf("pending/finished/completed/canceled = %v/%v/%v/%v, want false/true/false/true", got.Pending, got.Finished, got.Completed, got.Canceled)
+	}
+}
+
+func TestBuildRealtimeDCAStatusInvalidPlan(t *testing.T) {
+	t.Parallel()
+
+	task := &models.StrategyTask{
+		DCAEnabled:         true,
+		DCAPercentagesJSON: "bad",
+		DCAExecutedCount:   1,
+	}
+
+	got := buildRealtimeDCAStatus(task)
+	if got == nil {
+		t.Fatal("buildRealtimeDCAStatus() = nil, want status")
+	}
+	if got.PlanValid {
+		t.Fatal("PlanValid = true, want false")
+	}
+	if got.TotalCount != 0 {
+		t.Fatalf("TotalCount = %d, want 0", got.TotalCount)
+	}
+	if got.ExecutedCount != 1 {
+		t.Fatalf("ExecutedCount = %d, want 1", got.ExecutedCount)
 	}
 }

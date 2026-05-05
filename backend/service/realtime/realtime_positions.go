@@ -79,37 +79,38 @@ type RealtimeSummary struct {
 }
 
 type RealtimePosition struct {
-	Chain                string     `json:"chain"`
-	Version              string     `json:"version"`
-	Exchange             string     `json:"exchange"`
-	Title                string     `json:"title"`
-	FeeTier              uint64     `json:"fee_tier,omitempty"`
-	PoolID               string     `json:"pool_id"`
-	PositionID           string     `json:"position_id"`
-	WalletID             uint       `json:"wallet_id,omitempty"`
-	WalletAddress        string     `json:"wallet_address,omitempty"`
-	TaskID               uint       `json:"task_id,omitempty"`
-	TaskPaused           bool       `json:"task_paused"`
-	TaskRebalanceEnabled bool       `json:"task_rebalance_enabled"`
-	TaskMode             string     `json:"task_mode,omitempty"`
-	TaskAmountUSDT       float64    `json:"task_amount_usdt,omitempty"`
-	StatusLabel          string     `json:"status_label"`
-	InRange              bool       `json:"in_range"`
-	CurrentTick          int        `json:"current_tick"`
-	TickLower            int        `json:"tick_lower"`
-	TickUpper            int        `json:"tick_upper"`
-	TickSpacing          int        `json:"tick_spacing,omitempty"`
-	RangePercent         float64    `json:"range_percent"`
-	TaskRangeLowerPct    float64    `json:"task_range_lower_pct,omitempty"`
-	TaskRangeUpperPct    float64    `json:"task_range_upper_pct,omitempty"`
-	OutOfRange           string     `json:"out_of_range"`
-	RunningSince         *time.Time `json:"running_since,omitempty"`
-	HasLiquidity         bool       `json:"has_liquidity"`
-	InitialCostUSD       float64    `json:"initial_cost_usd,omitempty"`
-	NetInvestedUSD       float64    `json:"net_invested_usd,omitempty"`
-	CurrentValueUSD      float64    `json:"current_value_usd,omitempty"`
-	AbsolutePnLUSD       float64    `json:"absolute_pnl_usd,omitempty"`
-	HasPnL               bool       `json:"has_pnl,omitempty"`
+	Chain                string             `json:"chain"`
+	Version              string             `json:"version"`
+	Exchange             string             `json:"exchange"`
+	Title                string             `json:"title"`
+	FeeTier              uint64             `json:"fee_tier,omitempty"`
+	PoolID               string             `json:"pool_id"`
+	PositionID           string             `json:"position_id"`
+	WalletID             uint               `json:"wallet_id,omitempty"`
+	WalletAddress        string             `json:"wallet_address,omitempty"`
+	TaskID               uint               `json:"task_id,omitempty"`
+	TaskPaused           bool               `json:"task_paused"`
+	TaskRebalanceEnabled bool               `json:"task_rebalance_enabled"`
+	TaskMode             string             `json:"task_mode,omitempty"`
+	TaskAmountUSDT       float64            `json:"task_amount_usdt,omitempty"`
+	StatusLabel          string             `json:"status_label"`
+	InRange              bool               `json:"in_range"`
+	CurrentTick          int                `json:"current_tick"`
+	TickLower            int                `json:"tick_lower"`
+	TickUpper            int                `json:"tick_upper"`
+	TickSpacing          int                `json:"tick_spacing,omitempty"`
+	RangePercent         float64            `json:"range_percent"`
+	TaskRangeLowerPct    float64            `json:"task_range_lower_pct,omitempty"`
+	TaskRangeUpperPct    float64            `json:"task_range_upper_pct,omitempty"`
+	OutOfRange           string             `json:"out_of_range"`
+	RunningSince         *time.Time         `json:"running_since,omitempty"`
+	HasLiquidity         bool               `json:"has_liquidity"`
+	InitialCostUSD       float64            `json:"initial_cost_usd,omitempty"`
+	NetInvestedUSD       float64            `json:"net_invested_usd,omitempty"`
+	CurrentValueUSD      float64            `json:"current_value_usd,omitempty"`
+	AbsolutePnLUSD       float64            `json:"absolute_pnl_usd,omitempty"`
+	HasPnL               bool               `json:"has_pnl,omitempty"`
+	DCA                  *RealtimeDCAStatus `json:"dca,omitempty"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -156,6 +157,19 @@ type RealtimeTotals struct {
 	PositionUSD float64 `json:"position_usd"`
 	FeeUSD      float64 `json:"fee_usd"`
 	TotalUSD    float64 `json:"total_usd"`
+}
+
+type RealtimeDCAStatus struct {
+	Enabled       bool       `json:"enabled"`
+	PlanValid     bool       `json:"plan_valid"`
+	ExecutedCount int        `json:"executed_count"`
+	TotalCount    int        `json:"total_count"`
+	RetryCount    int        `json:"retry_count,omitempty"`
+	NextBatchAt   *time.Time `json:"next_batch_at,omitempty"`
+	Pending       bool       `json:"pending"`
+	Finished      bool       `json:"finished"`
+	Completed     bool       `json:"completed"`
+	Canceled      bool       `json:"canceled"`
 }
 
 func (s *RealtimePositionsService) GetForUser(userID uint) (*RealtimePositionsResponse, error) {
@@ -1092,6 +1106,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		CurrentValueUSD:   currentValueUSD,
 		AbsolutePnLUSD:    absolutePnLUSD,
 		HasPnL:            hasPnL,
+		DCA:               buildRealtimeDCAStatus(task),
 		TokenRows:         []RealtimeTokenRow{row0, row1},
 		Totals:            totals,
 	}, warn
@@ -1135,6 +1150,32 @@ func displayTaskAmountUSDT(task *models.StrategyTask) float64 {
 		return task.AmountUSDT
 	}
 	return 0
+}
+
+func buildRealtimeDCAStatus(task *models.StrategyTask) *RealtimeDCAStatus {
+	if task == nil || !task.DCAEnabled {
+		return nil
+	}
+
+	status := &RealtimeDCAStatus{
+		Enabled:       true,
+		ExecutedCount: task.DCAExecutedCount,
+		RetryCount:    task.DCARetryCount,
+		NextBatchAt:   task.DCANextBatchAt,
+	}
+
+	pcts, ok := strategy.ParseDCAPercentages(task.DCAPercentagesJSON)
+	if !ok {
+		return status
+	}
+
+	status.PlanValid = true
+	status.TotalCount = len(pcts)
+	status.Pending = task.DCAExecutedCount < status.TotalCount && task.DCANextBatchAt != nil
+	status.Completed = task.DCAExecutedCount >= status.TotalCount && task.DCANextBatchAt == nil
+	status.Canceled = task.DCAExecutedCount > 0 && task.DCAExecutedCount < status.TotalCount && task.DCANextBatchAt == nil
+	status.Finished = status.Completed || status.Canceled
+	return status
 }
 
 type taskPnLViewMetrics struct {
@@ -1430,6 +1471,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		CurrentValueUSD:      currentValueUSD,
 		AbsolutePnLUSD:       absolutePnLUSD,
 		HasPnL:               hasPnL,
+		DCA:                  buildRealtimeDCAStatus(task),
 		TokenRows:            []RealtimeTokenRow{row0, row1},
 		Totals:               totals,
 	}, warn
@@ -1674,6 +1716,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		CurrentValueUSD:      currentValueUSD,
 		AbsolutePnLUSD:       absolutePnLUSD,
 		HasPnL:               hasPnL,
+		DCA:                  buildRealtimeDCAStatus(task),
 		TokenRows:            []RealtimeTokenRow{row0, row1},
 		Totals:               totals,
 	}, ""

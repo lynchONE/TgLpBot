@@ -1702,6 +1702,24 @@ export default function App() {
     const allowEmptyInitData = useMemo(() => resolveAllowEmptyInitData(), []);
     const hasInitData = Boolean(initData) || allowEmptyInitData;
 
+    const refreshRealtimePositionsNow = useCallback(async ({ signal, setBusy = false, updateError = false } = {}) => {
+        if (!hasInitData) return null;
+        if (setBusy) setLoading(true);
+        if (updateError) setError('');
+        try {
+            const resp = await fetchRealtimePositions({ apiBaseUrl, initData, signal });
+            if (signal?.aborted) return null;
+            setData(resp);
+            return resp;
+        } catch (e) {
+            if (signal?.aborted) return null;
+            if (updateError) setError(String(e?.message || e));
+            throw e;
+        } finally {
+            if (setBusy && !signal?.aborted) setLoading(false);
+        }
+    }, [apiBaseUrl, initData, hasInitData]);
+
     useEffect(() => {
         positionSmartMoneyRangesRef.current = positionSmartMoneyRanges;
     }, [positionSmartMoneyRanges]);
@@ -1889,25 +1907,20 @@ export default function App() {
 
     useEffect(() => {
         if (!hasInitData) return;
-        let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
 
         const run = async () => {
             if (inFlight) return;
             inFlight = true;
-            setLoading(true);
-            setError('');
             try {
-                const resp = await fetchRealtimePositions({ apiBaseUrl, initData, signal: controller.signal });
-                if (aborted) return;
-                setData(resp);
+                await refreshRealtimePositionsNow({ signal: controller.signal, setBusy: true, updateError: true });
             } catch (e) {
-                if (aborted) return;
-                setError(String(e?.message || e));
+                if (!controller.signal.aborted) {
+                    console.error('[RealtimePositions] Load failed:', e);
+                }
             } finally {
                 inFlight = false;
-                if (!aborted) setLoading(false);
             }
         };
 
@@ -1917,11 +1930,10 @@ export default function App() {
         pollRef.current = setInterval(run, pollIntervalSec * 1000);
 
         return () => {
-            aborted = true;
             controller.abort();
             if (pollRef.current) clearInterval(pollRef.current);
         };
-    }, [apiBaseUrl, initData, hasInitData, pollIntervalSec]);
+    }, [hasInitData, pollIntervalSec, refreshRealtimePositionsNow]);
 
     // Fetch per-wallet balances for multi-wallet display
     useEffect(() => {
@@ -3238,7 +3250,8 @@ export default function App() {
             resetOpenPositionDraft();
         }
         try {
-            await openPosition(submitPayload);
+            const resp = await openPosition(submitPayload);
+            const taskId = Number(resp?.task_id);
             lastOpenPositionRequestRef.current = null;
             setOpenPositionError('');
             setOpenPositionChecks([]);
@@ -3246,8 +3259,19 @@ export default function App() {
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionEntrySwapConfirm(true);
             setOperationProgress((prev) => (prev?.operation === 'open_position'
-                ? { ...prev, currentStep: dcaEnabled ? 1 : totalBatches, status: dcaEnabled ? 'active_dca' : 'done', error: '' }
+                ? {
+                    ...prev,
+                    taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : prev.taskId,
+                    currentStep: dcaEnabled ? 1 : totalBatches,
+                    status: dcaEnabled ? 'active_dca' : 'done',
+                    error: '',
+                }
                 : prev));
+            try {
+                await refreshRealtimePositionsNow({ setBusy: false, updateError: false });
+            } catch (refreshErr) {
+                console.error('[OpenPosition] Immediate position refresh failed:', refreshErr);
+            }
             return true;
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
@@ -3554,6 +3578,51 @@ export default function App() {
                 return { ...prev, currentStep: 3, status: 'done' };
             });
         }
+    }, [data, operationProgress]);
+
+    useEffect(() => {
+        if (!operationProgress) return;
+        if (operationProgress.operation !== 'open_position') return;
+        if (!operationProgress.dca) return;
+        if (operationProgress.status !== 'active_dca' && operationProgress.status !== 'active') return;
+
+        const taskId = Number(operationProgress.taskId);
+        if (!Number.isFinite(taskId) || taskId <= 0) return;
+
+        const rows = Array.isArray(data?.positions) ? data.positions : [];
+        const matched = rows.find((p) => Number(p?.task_id) === taskId);
+        const dca = matched?.dca;
+        if (!dca?.enabled || !dca?.plan_valid) return;
+
+        const executed = Number(dca.executed_count);
+        const total = Number(dca.total_count);
+        if (!Number.isFinite(executed) || !Number.isFinite(total) || total <= 1) return;
+
+        const currentStep = Math.max(1, Math.min(total, Math.trunc(executed)));
+        const finished = Boolean(dca.finished) || Boolean(dca.completed) || Boolean(dca.canceled);
+
+        setOperationProgress((prev) => {
+            if (!prev || prev.operation !== 'open_position' || !prev.dca) return prev;
+            if (Number(prev.taskId) !== taskId) return prev;
+
+            const nextStatus = finished ? 'done' : 'active_dca';
+            const nextStep = finished && Boolean(dca.completed) ? total : currentStep;
+            if (
+                prev.status === nextStatus &&
+                Number(prev.currentStep) === nextStep &&
+                Number(prev.totalSteps) === total
+            ) {
+                return prev;
+            }
+            return {
+                ...prev,
+                status: nextStatus,
+                currentStep: nextStep,
+                totalSteps: total,
+                dcaCompleted: Boolean(dca.completed),
+                dcaCanceled: Boolean(dca.canceled),
+            };
+        });
     }, [data, operationProgress]);
 
     const handleDeleteTask = async (taskId) => {
