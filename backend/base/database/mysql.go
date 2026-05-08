@@ -78,6 +78,7 @@ func autoMigrate() error {
 		&models.WalletBalanceSnapshot{},
 		&models.UserAssetDailySnapshot{},
 		&models.UserLPDailyStat{},
+		&models.UserLPDailyPnLAdjustment{},
 		&models.UserWalletTransferEvent{},
 		&models.StrategyTask{},
 		&models.TokenMetadata{},

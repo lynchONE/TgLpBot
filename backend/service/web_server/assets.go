@@ -22,6 +22,15 @@ type userAssetHistoryRequest struct {
 	ForceRefresh bool   `json:"force_refresh,omitempty"`
 }
 
+type userLPAdjustmentRequest struct {
+	InitData            string  `json:"initData"`
+	Day                 string  `json:"day"`
+	ManualAdjustmentUSD float64 `json:"manual_adjustment_usd"`
+	Note                string  `json:"note,omitempty"`
+	Action              string  `json:"action,omitempty"`
+	Clear               bool    `json:"clear,omitempty"`
+}
+
 type adminSmartMoneyOverviewRequest struct {
 	InitData     string `json:"initData"`
 	Days         int    `json:"days"`
@@ -178,6 +187,13 @@ func writeCachedAssetResponse(key string, payload []byte) {
 	_ = database.SetCache(key, string(payload), assetResponseCacheTTL)
 }
 
+func invalidateCachedAssetResponse(key string) {
+	if database.RedisClient == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	_ = database.DeleteCache(key)
+}
+
 func respondWithAssetCache(w http.ResponseWriter, key string, forceRefresh bool, load func() (interface{}, error)) error {
 	if !forceRefresh {
 		if cached, ok := readCachedAssetResponse(key); ok {
@@ -263,6 +279,47 @@ func (s *Server) handleAssetLPStats(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s *Server) handleAssetLPAdjustment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req userLPAdjustmentRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	userID, status, msg := authenticateAssetUser(req.InitData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if req.Clear || action == "clear" || action == "delete" {
+		if err := s.Assets.ClearUserLPDailyPnLAdjustment(r.Context(), userID, req.Day); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		invalidateCachedAssetResponse(assetResponseCacheKey("user", fmt.Sprintf("%d", userID), "lp"))
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":  true,
+			"day": strings.TrimSpace(req.Day),
+		})
+		return
+	}
+
+	adjustment, err := s.Assets.SaveUserLPDailyPnLAdjustment(r.Context(), userID, req.Day, req.ManualAdjustmentUSD, req.Note)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	invalidateCachedAssetResponse(assetResponseCacheKey("user", fmt.Sprintf("%d", userID), "lp"))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":         true,
+		"adjustment": adjustment,
+	})
 }
 
 func (s *Server) handleAdminSmartMoneyOverview(w http.ResponseWriter, r *http.Request) {

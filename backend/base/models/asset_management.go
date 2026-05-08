@@ -51,6 +51,27 @@ func (UserLPDailyStat) TableName() string {
 	return "user_lp_daily_stats"
 }
 
+// UserLPDailyPnLAdjustment stores a user-authored correction for one LP PnL calendar day.
+// wallet_id=0 and chain="" represent the aggregated user view.
+type UserLPDailyPnLAdjustment struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	UserID   uint   `gorm:"not null;index;uniqueIndex:idx_user_lp_pnl_adjustment_day" json:"user_id"`
+	WalletID uint   `gorm:"not null;default:0;uniqueIndex:idx_user_lp_pnl_adjustment_day" json:"wallet_id"`
+	Chain    string `gorm:"size:16;not null;default:'';uniqueIndex:idx_user_lp_pnl_adjustment_day" json:"chain"`
+	StatDay  string `gorm:"size:10;not null;uniqueIndex:idx_user_lp_pnl_adjustment_day" json:"stat_day"`
+
+	ManualAdjustmentUSD float64 `gorm:"column:manual_adjustment_usd;type:decimal(20,4);not null;default:0" json:"manual_adjustment_usd"`
+	Note                string  `gorm:"type:varchar(500)" json:"note,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (UserLPDailyPnLAdjustment) TableName() string {
+	return "user_lp_daily_pnl_adjustments"
+}
+
 const (
 	SmartMoneyTransferDirectionIn  = "in"
 	SmartMoneyTransferDirectionOut = "out"

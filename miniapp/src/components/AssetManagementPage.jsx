@@ -1,10 +1,12 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRightLeft, ChevronLeft, ChevronRight, Crown, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, ChevronRight, Crown, Eraser, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
     fetchAssetHistory,
     fetchAssetLPStats,
     fetchAssetOverview,
+    clearAssetLPPnLAdjustment,
+    saveAssetLPPnLAdjustment,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
 import GlobalConfigPage from './GlobalConfigPage.jsx';
@@ -357,7 +359,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false, note = '' }) {
+function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay }) {
     const [viewDate, setViewDate] = useState(() => new Date());
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -391,9 +393,12 @@ function PnLCalendar({ data, loading = false, note = '' }) {
     for (let day = 1; day <= daysInMonth; day++) {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const entry = pnlMap[dateStr];
-        const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+        const pnl = entry ? Number(entry.final_pnl_usd ?? entry.realized_pnl_usd ?? 0) : null;
         const isToday = dateStr === todayStr;
         const isFuture = dateStr > todayStr;
+        const isSelected = dateStr === selectedDay;
+        const hasTransfer = Boolean(entry?.transfer_total_count || entry?.has_transfer_in || entry?.has_transfer_out);
+        const hasManualAdjustment = Math.abs(Number(entry?.manual_adjustment_usd || 0)) > 0.000001 || Boolean(String(entry?.adjustment_note || '').trim());
         const dayToneClass = isToday
             ? 'text-emerald-700 dark:text-emerald-300'
             : isFuture
@@ -405,20 +410,31 @@ function PnLCalendar({ data, loading = false, note = '' }) {
                 : 'text-red-500 dark:text-red-400'
             : 'text-transparent';
         cells.push(
-            <div
+            <button
+                type="button"
                 key={day}
-                className={`rounded-md px-1 py-1 ${
+                disabled={!entry || isFuture}
+                onClick={() => {
+                    if (entry && !isFuture) onSelectDay?.(entry);
+                }}
+                className={`relative rounded-md px-1 py-1 text-left transition active:scale-[0.98] ${
                     isToday ? 'bg-emerald-500/15 ring-1 ring-emerald-500/30'
                     : isFuture ? 'bg-zinc-100/30 dark:bg-white/[0.015]'
                     : 'bg-zinc-100/50 dark:bg-white/[0.03]'
-                }`}
+                } ${isSelected ? 'ring-1 ring-cyan-400/50 shadow-sm shadow-cyan-400/10' : ''} ${entry && !isFuture ? 'cursor-pointer hover:bg-zinc-100 dark:hover:bg-white/[0.06]' : 'cursor-default'}`}
                 style={{ minHeight: 38 }}
             >
                 <div className={`text-[9px] leading-none ${dayToneClass}`}>{day}</div>
                 <div className={`flex min-h-[20px] items-center justify-center px-0.5 text-center text-[10px] font-semibold leading-tight tabular-nums ${valueToneClass}`}>
                     {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
                 </div>
-            </div>
+                {(hasTransfer || hasManualAdjustment) ? (
+                    <div className="absolute bottom-0.5 right-1 flex gap-0.5">
+                        {hasTransfer ? <span className="h-1 w-1 rounded-full bg-sky-400" /> : null}
+                        {hasManualAdjustment ? <span className="h-1 w-1 rounded-full bg-amber-400" /> : null}
+                    </div>
+                ) : null}
+            </button>
         );
     }
     const remainder = (startOffset + daysInMonth) % 7;
@@ -522,6 +538,7 @@ function TodayPoolContributionRow({ row, maxAbsPnl }) {
     const pnl = Number(row?.profit_usd || 0);
     const positive = pnl >= 0;
     const ratio = Math.max(Math.abs(pnl) / Math.max(maxAbsPnl, 1), 0.08);
+    const widthPct = Math.min(ratio * 100, 100);
 
     return (
         <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 dark:border-white/[0.04] dark:bg-[#0d0f12]">
@@ -541,10 +558,11 @@ function TodayPoolContributionRow({ row, maxAbsPnl }) {
                 <span>{String(row?.chain || 'BSC').toUpperCase()}</span>
                 <span>{Number(row?.closed_count || 0)} 笔</span>
             </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/[0.04]">
+            <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-gradient-to-r from-red-500/[0.08] via-zinc-200 to-emerald-500/[0.08] dark:from-red-500/[0.08] dark:via-white/[0.04] dark:to-emerald-500/[0.08]">
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-zinc-300 dark:bg-white/20" />
                 <div
-                    className={positive ? 'h-full rounded-full bg-emerald-400/90' : 'h-full rounded-full bg-red-400/90'}
-                    style={{ width: `${ratio * 100}%` }}
+                    className={`absolute inset-y-0 ${positive ? 'left-1/2 rounded-r-full bg-emerald-400/90' : 'right-1/2 rounded-l-full bg-red-400/90'}`}
+                    style={{ width: `${widthPct / 2}%` }}
                 />
             </div>
         </div>
@@ -630,6 +648,104 @@ function TodayPoolPnL({ pools, brand }) {
                     ))}
                 </div>
             )}
+        </div>
+    );
+}
+
+function PnLBreakdownEditor({ entry, brand, saving = false, error = '', onSave, onClear }) {
+    const [manualValue, setManualValue] = useState('');
+    const [note, setNote] = useState('');
+
+    useEffect(() => {
+        setManualValue(entry ? String(Number(entry.manual_adjustment_usd || 0)) : '');
+        setNote(entry ? String(entry.adjustment_note || '') : '');
+    }, [entry]);
+
+    if (!entry) {
+        return <Empty text="点击日历中的日期查看盈亏拆解" />;
+    }
+
+    const finalPnl = Number(entry.final_pnl_usd ?? entry.realized_pnl_usd ?? 0);
+    const stats = [
+        { label: '资产变化', value: entry.raw_pnl_usd, cls: Number(entry.raw_pnl_usd || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300' },
+        { label: '净转账', value: entry.transfer_net_usd, cls: Number(entry.transfer_net_usd || 0) >= 0 ? 'text-sky-600 dark:text-sky-300' : 'text-amber-600 dark:text-amber-300' },
+        { label: '自动修正', value: entry.auto_adjusted_pnl_usd, cls: Number(entry.auto_adjusted_pnl_usd || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300' },
+        { label: '手动修正', value: entry.manual_adjustment_usd, cls: Number(entry.manual_adjustment_usd || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300' },
+    ];
+
+    return (
+        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 dark:border-white/[0.05] dark:bg-[#0d0f12]">
+            <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <div className="text-[11px] font-bold text-zinc-900 dark:text-white/90">{entry.day} 盈亏拆解</div>
+                    <div className="mt-0.5 text-[9px] leading-snug text-zinc-400 dark:text-white/30">最终盈亏 = 自动扣除净转账后，再叠加手动修正</div>
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ring-1 ${
+                    finalPnl >= 0
+                        ? 'bg-emerald-500/[0.08] text-emerald-600 ring-emerald-500/20 dark:text-emerald-300'
+                        : 'bg-red-500/[0.08] text-red-600 ring-red-500/20 dark:text-red-300'
+                }`}>
+                    {finalPnl >= 0 ? '+' : ''}{formatUsdCompact(finalPnl)}
+                </span>
+            </div>
+
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+                {stats.map((item) => (
+                    <div key={item.label} className="rounded-lg bg-white px-2 py-1.5 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+                        <div className="text-[9px] text-zinc-400 dark:text-white/30">{item.label}</div>
+                        <div className={`mt-0.5 text-[11px] font-bold tabular-nums ${item.cls}`}>
+                            {Number(item.value || 0) >= 0 ? '+' : ''}{formatUsdCompact(item.value)}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="mt-2 grid grid-cols-1 gap-1.5">
+                <label className="flex flex-col gap-1">
+                    <span className="text-[9px] text-zinc-400 dark:text-white/30">手动修正 USD</span>
+                    <input
+                        type="number"
+                        step="0.01"
+                        value={manualValue}
+                        onChange={(e) => setManualValue(e.target.value)}
+                        className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-[12px] text-zinc-800 outline-none focus:border-zinc-300 focus:ring-1 focus:ring-zinc-300 dark:border-white/[0.07] dark:bg-white/[0.04] dark:text-white/85 dark:focus:border-white/15 dark:focus:ring-white/15"
+                    />
+                </label>
+                <label className="flex flex-col gap-1">
+                    <span className="text-[9px] text-zinc-400 dark:text-white/30">备注</span>
+                    <input
+                        type="text"
+                        value={note}
+                        maxLength={500}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="例如：补扣未识别转出"
+                        className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-[12px] text-zinc-800 outline-none focus:border-zinc-300 focus:ring-1 focus:ring-zinc-300 dark:border-white/[0.07] dark:bg-white/[0.04] dark:text-white/85 dark:placeholder-white/25 dark:focus:border-white/15 dark:focus:ring-white/15"
+                    />
+                </label>
+            </div>
+
+            {error ? <div className="mt-2 rounded-lg bg-red-500/[0.06] px-2 py-1.5 text-[10px] font-medium text-red-600 dark:text-red-300">{error}</div> : null}
+
+            <div className="mt-2 flex justify-end gap-1.5">
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onSave?.(entry.day, Number(manualValue || 0), note)}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold transition active:scale-95 disabled:opacity-50 ${brand.softButtonClass}`}
+                >
+                    <CheckCircle2 className="h-3 w-3" />
+                    保存
+                </button>
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onClear?.(entry.day)}
+                    className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold text-zinc-500 ring-1 ring-zinc-200 transition active:scale-95 disabled:opacity-50 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/[0.06]"
+                >
+                    <Eraser className="h-3 w-3" />
+                    清除
+                </button>
+            </div>
         </div>
     );
 }
@@ -822,6 +938,9 @@ export default function AssetManagementPage({
     const [assetsLoading, setAssetsLoading] = useState(false);
     const [assetsRefreshing, setAssetsRefreshing] = useState(false);
     const [assetsError, setAssetsError] = useState('');
+    const [selectedPnLDay, setSelectedPnLDay] = useState('');
+    const [pnlAdjustmentSaving, setPnlAdjustmentSaving] = useState(false);
+    const [pnlAdjustmentError, setPnlAdjustmentError] = useState('');
 
     const hasAssetData = Boolean(assetsData.overview || assetsData.history || assetsData.lp);
     const hasAssetDataRef = useRef(false);
@@ -898,6 +1017,64 @@ export default function AssetManagementPage({
     const isLoading = assetsLoading || assetsRefreshing;
     const canManualRefresh = hasInitData;
     const openPanelTab = activeTab !== 'my_assets' ? activeTab : null;
+    const selectedPnLEntry = useMemo(() => {
+        const rows = Array.isArray(assetsData.lp?.daily_history) ? assetsData.lp.daily_history : [];
+        if (!rows.length) return assetsData.lp?.today_point || null;
+        if (selectedPnLDay) {
+            const matched = rows.find((item) => item?.day === selectedPnLDay);
+            if (matched) return matched;
+            if (assetsData.lp?.today_point?.day === selectedPnLDay) return assetsData.lp.today_point;
+        }
+        return assetsData.lp?.today_point || rows[rows.length - 1] || null;
+    }, [assetsData.lp, selectedPnLDay]);
+
+    useEffect(() => {
+        if (!selectedPnLDay && assetsData.lp?.today_point?.day) {
+            setSelectedPnLDay(assetsData.lp.today_point.day);
+            return;
+        }
+        if (selectedPnLDay && !selectedPnLEntry) {
+            setSelectedPnLDay(assetsData.lp?.today_point?.day || '');
+        }
+    }, [assetsData.lp, selectedPnLEntry, selectedPnLDay]);
+
+    const handleSavePnLAdjustment = useCallback(async (day, manualAdjustmentUsd, note) => {
+        setPnlAdjustmentSaving(true);
+        setPnlAdjustmentError('');
+        try {
+            await saveAssetLPPnLAdjustment({
+                apiBaseUrl,
+                initData,
+                day,
+                manualAdjustmentUsd,
+                note,
+            });
+            await loadAssets({ forceRefresh: true });
+            setSelectedPnLDay(day);
+        } catch (err) {
+            setPnlAdjustmentError(errorText(err) || '保存失败');
+        } finally {
+            setPnlAdjustmentSaving(false);
+        }
+    }, [apiBaseUrl, initData, loadAssets]);
+
+    const handleClearPnLAdjustment = useCallback(async (day) => {
+        setPnlAdjustmentSaving(true);
+        setPnlAdjustmentError('');
+        try {
+            await clearAssetLPPnLAdjustment({
+                apiBaseUrl,
+                initData,
+                day,
+            });
+            await loadAssets({ forceRefresh: true });
+            setSelectedPnLDay(day);
+        } catch (err) {
+            setPnlAdjustmentError(errorText(err) || '清除失败');
+        } finally {
+            setPnlAdjustmentSaving(false);
+        }
+    }, [apiBaseUrl, initData, loadAssets]);
 
     return (
         <div className="flex flex-col gap-3">
@@ -1043,9 +1220,22 @@ export default function AssetManagementPage({
                     {/* LP daily PnL calendar */}
                     <Card>
                         <PnLCalendar
-                            data={assetsData.lp?.daily_history}
+                            data={[...(Array.isArray(assetsData.lp?.daily_history) ? assetsData.lp.daily_history : []), ...(assetsData.lp?.today_point ? [assetsData.lp.today_point] : [])]}
                             loading={assetsLoading}
-                            note="收益额按当日总资产相对前一日快照的变化计算；今日盈亏按实时总资产对比前一日快照计算；转入转出仅展示，不参与盈亏。"
+                            note="日历展示最终盈亏：资产变化先自动扣除净转账，再叠加手动修正。蓝点代表有转账，金点代表有手动修正。"
+                            selectedDay={selectedPnLEntry?.day || ''}
+                            onSelectDay={(entry) => {
+                                setSelectedPnLDay(entry?.day || '');
+                                setPnlAdjustmentError('');
+                            }}
+                        />
+                        <PnLBreakdownEditor
+                            entry={selectedPnLEntry}
+                            brand={brand}
+                            saving={pnlAdjustmentSaving}
+                            error={pnlAdjustmentError}
+                            onSave={handleSavePnLAdjustment}
+                            onClear={handleClearPnLAdjustment}
                         />
                         {/* summary stats below chart */}
                         {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (

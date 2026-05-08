@@ -230,27 +230,40 @@ type UserLPPoolPnL struct {
 }
 
 type UserLPDailyPoint struct {
-	Day                string  `json:"day"`
-	RealizedPnLUSD     float64 `json:"realized_pnl_usd"`
-	ClosedCount        int     `json:"closed_count"`
-	WinCount           int     `json:"win_count"`
-	LossCount          int     `json:"loss_count"`
-	HasTransferIn      bool    `json:"has_transfer_in,omitempty"`
-	HasTransferOut     bool    `json:"has_transfer_out,omitempty"`
-	TransferInCount    int     `json:"transfer_in_count,omitempty"`
-	TransferOutCount   int     `json:"transfer_out_count,omitempty"`
-	TransferTotalCount int     `json:"transfer_total_count,omitempty"`
-	TransferInUSD      float64 `json:"transfer_in_usd,omitempty"`
-	TransferOutUSD     float64 `json:"transfer_out_usd,omitempty"`
-	TransferNetUSD     float64 `json:"transfer_net_usd,omitempty"`
+	Day                 string  `json:"day"`
+	RealizedPnLUSD      float64 `json:"realized_pnl_usd"`
+	RawPnLUSD           float64 `json:"raw_pnl_usd"`
+	AutoAdjustedPnLUSD  float64 `json:"auto_adjusted_pnl_usd"`
+	ManualAdjustmentUSD float64 `json:"manual_adjustment_usd"`
+	FinalPnLUSD         float64 `json:"final_pnl_usd"`
+	AdjustmentNote      string  `json:"adjustment_note,omitempty"`
+	ClosedCount         int     `json:"closed_count"`
+	WinCount            int     `json:"win_count"`
+	LossCount           int     `json:"loss_count"`
+	HasTransferIn       bool    `json:"has_transfer_in,omitempty"`
+	HasTransferOut      bool    `json:"has_transfer_out,omitempty"`
+	TransferInCount     int     `json:"transfer_in_count,omitempty"`
+	TransferOutCount    int     `json:"transfer_out_count,omitempty"`
+	TransferTotalCount  int     `json:"transfer_total_count,omitempty"`
+	TransferInUSD       float64 `json:"transfer_in_usd,omitempty"`
+	TransferOutUSD      float64 `json:"transfer_out_usd,omitempty"`
+	TransferNetUSD      float64 `json:"transfer_net_usd,omitempty"`
 }
 
 type UserLPStatsResponse struct {
 	Windows      []UserLPWindowStats `json:"windows"`
 	Today        UserLPWindowStats   `json:"today"`
+	TodayPoint   *UserLPDailyPoint   `json:"today_point,omitempty"`
 	TodayPools   []UserLPPoolPnL     `json:"today_pools,omitempty"`
 	DailyHistory []UserLPDailyPoint  `json:"daily_history,omitempty"`
 	Timezone     string              `json:"timezone"`
+}
+
+type UserLPDailyPnLAdjustmentResponse struct {
+	Day                 string    `json:"day"`
+	ManualAdjustmentUSD float64   `json:"manual_adjustment_usd"`
+	Note                string    `json:"note,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type smartMoneyAssetBreakdown struct {

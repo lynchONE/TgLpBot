@@ -7916,12 +7916,27 @@ body {
 .pnl-cal-cell {
   min-height: 38px;
   border-radius: 6px;
+  border: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   justify-content: space-between;
   padding: 4px 4px 3px;
   background: rgba(136, 157, 191, 0.06);
+  position: relative;
+  font: inherit;
+  cursor: default;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.pnl-cal-clickable {
+  cursor: pointer;
+}
+.pnl-cal-clickable:hover {
+  background: rgba(136, 157, 191, 0.1);
+  transform: translateY(-1px);
+}
+.pnl-cal-cell:disabled {
+  cursor: default;
 }
 .pnl-cal-cell.pnl-cal-empty {
   background: rgba(136, 157, 191, 0.02);
@@ -7932,6 +7947,9 @@ body {
 .pnl-cal-cell.pnl-cal-today {
   background: rgba(34, 211, 138, 0.12);
   box-shadow: inset 0 0 0 1px rgba(34, 211, 138, 0.25);
+}
+.pnl-cal-cell.pnl-cal-selected {
+  box-shadow: inset 0 0 0 1px rgba(82, 209, 255, 0.55), 0 0 0 2px rgba(82, 209, 255, 0.08);
 }
 .pnl-cal-day {
   align-self: flex-start;
@@ -7963,6 +7981,106 @@ body {
 }
 .pnl-cal-cell.pnl-cal-pos .pnl-cal-value { color: var(--positive, #22d38a); }
 .pnl-cal-cell.pnl-cal-neg .pnl-cal-value { color: var(--negative, #ff5e76); }
+.pnl-cal-flags {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  display: flex;
+  gap: 3px;
+}
+.pnl-cal-flag {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+}
+.pnl-cal-flag.transfer { background: #52d1ff; }
+.pnl-cal-flag.manual { background: #ffae42; }
+
+.pnl-editor {
+  border: 1px solid rgba(136, 157, 191, 0.1);
+  border-radius: var(--radius-md);
+  background: rgba(7, 11, 17, 0.45);
+  padding: 10px;
+}
+.pnl-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pnl-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+.pnl-editor-stat {
+  border: 1px solid rgba(136, 157, 191, 0.08);
+  border-radius: 8px;
+  background: rgba(136, 157, 191, 0.05);
+  padding: 7px 8px;
+}
+.pnl-editor-label {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.pnl-editor-value {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.pnl-editor-value.positive { color: var(--positive, #22d38a); }
+.pnl-editor-value.negative { color: var(--negative, #ff5e76); }
+.pnl-editor-value.transfer-in { color: #52d1ff; }
+.pnl-editor-value.transfer-out { color: #ffae42; }
+.pnl-editor-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.pnl-editor-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.pnl-editor-form span {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.pnl-editor-form input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(136, 157, 191, 0.14);
+  border-radius: 8px;
+  background: rgba(18, 26, 40, 0.72);
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: none;
+  padding: 7px 9px;
+}
+.pnl-editor-form input:focus {
+  border-color: rgba(82, 209, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(82, 209, 255, 0.08);
+}
+.pnl-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+.pnl-editor-actions .am-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pnl-editor-error {
+  margin-top: 8px;
+  color: var(--negative, #ff5e76);
+  font-size: 10px;
+}
 
 /* badges */
 .am-badge {
@@ -8241,28 +8359,41 @@ body {
   font-size: 9px;
 }
 
-.am-pool-bar-track {
-  height: 6px;
+.am-pool-balance-track {
+  position: relative;
+  height: 8px;
   border-radius: 999px;
-  background: rgba(136, 157, 191, 0.08);
+  background: linear-gradient(90deg, rgba(255, 94, 118, 0.08), rgba(136, 157, 191, 0.05) 48%, rgba(136, 157, 191, 0.05) 52%, rgba(34, 211, 138, 0.08));
   overflow: hidden;
 }
 
-.am-pool-card-compact .am-pool-bar-track {
-  height: 4px;
+.am-pool-card-compact .am-pool-balance-track {
+  height: 6px;
 }
 
-.am-pool-bar {
-  height: 100%;
+.am-pool-balance-axis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(226, 236, 255, 0.28);
+}
+
+.am-pool-balance-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 4px;
   border-radius: 999px;
 }
 
-.am-pool-bar.positive {
-  background: linear-gradient(90deg, rgba(89, 240, 157, 0.45), rgba(89, 240, 157, 1));
+.am-pool-balance-bar.positive {
+  background: linear-gradient(90deg, rgba(34, 211, 138, 0.45), rgba(34, 211, 138, 1));
 }
 
-.am-pool-bar.negative {
-  background: linear-gradient(90deg, rgba(255, 107, 107, 0.45), rgba(255, 107, 107, 1));
+.am-pool-balance-bar.negative {
+  background: linear-gradient(90deg, rgba(255, 94, 118, 1), rgba(255, 94, 118, 0.45));
 }
 
 .am-pool-empty {

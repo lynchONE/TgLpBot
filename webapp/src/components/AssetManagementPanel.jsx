@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ClipboardList,
   Crown,
+  Eraser,
   Medal,
   Plus,
   RefreshCw,
@@ -44,6 +45,8 @@ import {
   fetchSystemConfig,
   invalidateAdminPrivateZap,
   renameAdminRPCEndpoint,
+  clearAssetLPPnLAdjustment,
+  saveAssetLPPnLAdjustment,
   switchAdminRPCEndpoint,
   updateSystemConfig,
 } from '../api';
@@ -301,7 +304,7 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false, note = '' }) {
+function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay }) {
   const [viewDate, setViewDate] = useState(() => new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -335,20 +338,39 @@ function PnLCalendar({ data, loading = false, note = '' }) {
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const entry = pnlMap[dateStr];
-    const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+    const pnl = entry ? Number(entry.final_pnl_usd ?? entry.realized_pnl_usd ?? 0) : null;
     const isToday = dateStr === todayStr;
     const isFuture = dateStr > todayStr;
+    const isSelected = dateStr === selectedDay;
+    const hasTransfer = Boolean(entry?.transfer_total_count || entry?.has_transfer_in || entry?.has_transfer_out);
+    const hasManualAdjustment = Math.abs(Number(entry?.manual_adjustment_usd || 0)) > 0.000001 || Boolean(String(entry?.adjustment_note || '').trim());
     const cls = ['pnl-cal-cell'];
     if (isToday) cls.push('pnl-cal-today');
     else if (isFuture) cls.push('pnl-cal-future');
+    if (isSelected) cls.push('pnl-cal-selected');
+    if (entry && onSelectDay) cls.push('pnl-cal-clickable');
     if (pnl !== null) cls.push(pnl >= 0 ? 'pnl-cal-pos' : 'pnl-cal-neg');
     cells.push(
-      <div key={day} className={cls.join(' ')}>
+      <button
+        key={day}
+        type="button"
+        className={cls.join(' ')}
+        disabled={!entry || isFuture}
+        onClick={() => {
+          if (entry && !isFuture) onSelectDay?.(entry);
+        }}
+      >
         <div className="pnl-cal-day">{day}</div>
         <div className="pnl-cal-value">
           {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
         </div>
-      </div>
+        {(hasTransfer || hasManualAdjustment) && (
+          <div className="pnl-cal-flags" aria-hidden="true">
+            {hasTransfer ? <span className="pnl-cal-flag transfer" /> : null}
+            {hasManualAdjustment ? <span className="pnl-cal-flag manual" /> : null}
+          </div>
+        )}
+      </button>
     );
   }
   const remainder = (startOffset + daysInMonth) % 7;
@@ -452,6 +474,7 @@ function PoolContributionRow({ row, maxAbsPnl }) {
   const pnl = Number(row?.profit_usd || 0);
   const ratio = Math.max(Math.abs(pnl) / Math.max(maxAbsPnl, 1), 0.08);
   const positive = pnl >= 0;
+  const widthPct = Math.min(ratio * 100, 100);
 
   return (
     <div className="am-pool-row">
@@ -465,8 +488,12 @@ function PoolContributionRow({ row, maxAbsPnl }) {
         <span>{String(row?.chain || 'BSC').toUpperCase()}</span>
         <span>{Number(row?.closed_count || 0)} 笔</span>
       </div>
-      <div className="am-pool-bar-track">
-        <div className={`am-pool-bar ${positive ? 'positive' : 'negative'}`} style={{ width: `${ratio * 100}%` }} />
+      <div className="am-pool-balance-track">
+        <div className="am-pool-balance-axis" />
+        <div
+          className={`am-pool-balance-bar ${positive ? 'positive' : 'negative'}`}
+          style={positive ? { left: '50%', width: `${widthPct / 2}%` } : { right: '50%', width: `${widthPct / 2}%` }}
+        />
       </div>
     </div>
   );
@@ -562,6 +589,93 @@ function TodayPoolPnL({ pools }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function PnLBreakdownEditor({ entry, saving = false, error = '', onSave, onClear }) {
+  const [manualValue, setManualValue] = useState('');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    setManualValue(entry ? String(Number(entry.manual_adjustment_usd || 0)) : '');
+    setNote(entry ? String(entry.adjustment_note || '') : '');
+  }, [entry]);
+
+  if (!entry) {
+    return <EmptyState text="点击日历中的日期查看盈亏拆解" />;
+  }
+
+  const finalPnl = Number(entry.final_pnl_usd ?? entry.realized_pnl_usd ?? 0);
+  const breakdown = [
+    { label: '资产变化', value: entry.raw_pnl_usd, tone: Number(entry.raw_pnl_usd || 0) >= 0 ? 'positive' : 'negative' },
+    { label: '净转账', value: entry.transfer_net_usd, tone: Number(entry.transfer_net_usd || 0) >= 0 ? 'transfer-in' : 'transfer-out' },
+    { label: '自动修正', value: entry.auto_adjusted_pnl_usd, tone: Number(entry.auto_adjusted_pnl_usd || 0) >= 0 ? 'positive' : 'negative' },
+    { label: '手动修正', value: entry.manual_adjustment_usd, tone: Number(entry.manual_adjustment_usd || 0) >= 0 ? 'positive' : 'negative' },
+  ];
+
+  return (
+    <div className="pnl-editor">
+      <div className="pnl-editor-head">
+        <div>
+          <div className="am-card-title" style={{ fontSize: 12 }}>{entry.day} 盈亏拆解</div>
+          <div className="am-item-sub" style={{ margin: 0 }}>最终盈亏 = 自动扣除净转账后，再叠加手动修正</div>
+        </div>
+        <span className={`am-badge ${finalPnl >= 0 ? 'am-badge-ok' : 'am-badge-warn'}`}>
+          {finalPnl >= 0 ? '+' : ''}{formatUsd(finalPnl)}
+        </span>
+      </div>
+      <div className="pnl-editor-grid">
+        {breakdown.map((item) => (
+          <div key={item.label} className="pnl-editor-stat">
+            <div className="pnl-editor-label">{item.label}</div>
+            <div className={`pnl-editor-value ${item.tone}`}>{Number(item.value || 0) >= 0 ? '+' : ''}{formatUsdCompact(item.value)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="pnl-editor-form">
+        <label>
+          <span>手动修正 USD</span>
+          <input
+            type="number"
+            step="0.01"
+            value={manualValue}
+            onChange={(e) => setManualValue(e.target.value)}
+            placeholder="0.00"
+          />
+        </label>
+        <label>
+          <span>备注</span>
+          <input
+            type="text"
+            value={note}
+            maxLength={500}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="例如：补扣未识别转出"
+          />
+        </label>
+      </div>
+      {error ? <div className="pnl-editor-error">{error}</div> : null}
+      <div className="pnl-editor-actions">
+        <button
+          type="button"
+          className="am-pill active"
+          disabled={saving}
+          onClick={() => onSave?.(entry.day, Number(manualValue || 0), note)}
+        >
+          <CheckCircle2 size={12} />
+          保存修正
+        </button>
+        <button
+          type="button"
+          className="am-pill"
+          disabled={saving}
+          onClick={() => onClear?.(entry.day)}
+        >
+          <Eraser size={12} />
+          清除
+        </button>
+      </div>
     </div>
   );
 }
@@ -734,6 +848,9 @@ export default function AssetManagementPanel({
   const [assetLoading, setAssetLoading] = useState(false);
   const [assetRefreshing, setAssetRefreshing] = useState(false);
   const [assetError, setAssetError] = useState('');
+  const [selectedPnLDay, setSelectedPnLDay] = useState('');
+  const [pnlAdjustmentSaving, setPnlAdjustmentSaving] = useState(false);
+  const [pnlAdjustmentError, setPnlAdjustmentError] = useState('');
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -818,6 +935,64 @@ export default function AssetManagementPanel({
   }, [assetState.history, historyMetric]);
 
   const isRefreshing = assetLoading || assetRefreshing;
+  const selectedPnLEntry = useMemo(() => {
+    const rows = Array.isArray(assetState.lp?.daily_history) ? assetState.lp.daily_history : [];
+    if (!rows.length) return assetState.lp?.today_point || null;
+    if (selectedPnLDay) {
+      const matched = rows.find((item) => item?.day === selectedPnLDay);
+      if (matched) return matched;
+      if (assetState.lp?.today_point?.day === selectedPnLDay) return assetState.lp.today_point;
+    }
+    return assetState.lp?.today_point || rows[rows.length - 1] || null;
+  }, [assetState.lp, selectedPnLDay]);
+
+  useEffect(() => {
+    if (!selectedPnLDay && assetState.lp?.today_point?.day) {
+      setSelectedPnLDay(assetState.lp.today_point.day);
+      return;
+    }
+    if (selectedPnLDay && !selectedPnLEntry) {
+      setSelectedPnLDay(assetState.lp?.today_point?.day || '');
+    }
+  }, [assetState.lp, selectedPnLEntry, selectedPnLDay]);
+
+  const handleSavePnLAdjustment = useCallback(async (day, manualAdjustmentUsd, note) => {
+    setPnlAdjustmentSaving(true);
+    setPnlAdjustmentError('');
+    try {
+      await saveAssetLPPnLAdjustment({
+        apiBaseUrl,
+        initData,
+        day,
+        manualAdjustmentUsd,
+        note,
+      });
+      await loadAssets({ forceRefresh: true });
+      setSelectedPnLDay(day);
+    } catch (err) {
+      setPnlAdjustmentError(errorText(err) || '保存失败');
+    } finally {
+      setPnlAdjustmentSaving(false);
+    }
+  }, [apiBaseUrl, initData, loadAssets]);
+
+  const handleClearPnLAdjustment = useCallback(async (day) => {
+    setPnlAdjustmentSaving(true);
+    setPnlAdjustmentError('');
+    try {
+      await clearAssetLPPnLAdjustment({
+        apiBaseUrl,
+        initData,
+        day,
+      });
+      await loadAssets({ forceRefresh: true });
+      setSelectedPnLDay(day);
+    } catch (err) {
+      setPnlAdjustmentError(errorText(err) || '清除失败');
+    } finally {
+      setPnlAdjustmentSaving(false);
+    }
+  }, [apiBaseUrl, initData, loadAssets]);
 
   const subtitle = activeTab === 'global_config'
     ? '全局配置管理'
@@ -938,10 +1113,24 @@ export default function AssetManagementPanel({
 
             <div className="am-card">
               <PnLCalendar
-                data={assetState.lp?.daily_history}
+                data={[...(Array.isArray(assetState.lp?.daily_history) ? assetState.lp.daily_history : []), ...(assetState.lp?.today_point ? [assetState.lp.today_point] : [])]}
                 loading={assetLoading}
-                note="收益额按当日总资产相对前一日快照的变化计算；今日盈亏按实时总资产对比前一日快照计算；转入转出仅展示，不参与盈亏。"
+                note="日历展示最终盈亏：资产变化先自动扣除净转账，再叠加手动修正。蓝点代表有转账，金点代表有手动修正。"
+                selectedDay={selectedPnLEntry?.day || ''}
+                onSelectDay={(entry) => {
+                  setSelectedPnLDay(entry?.day || '');
+                  setPnlAdjustmentError('');
+                }}
               />
+              <div style={{ marginTop: 10 }}>
+                <PnLBreakdownEditor
+                  entry={selectedPnLEntry}
+                  saving={pnlAdjustmentSaving}
+                  error={pnlAdjustmentError}
+                  onSave={handleSavePnLAdjustment}
+                  onClear={handleClearPnLAdjustment}
+                />
+              </div>
               {Array.isArray(assetState.lp?.windows) && assetState.lp.windows.length > 0 && (
                 <div className="am-stat-grid am-stat-grid-3" style={{ marginTop: 10 }}>
                   {assetState.lp.windows.map((item) => (
