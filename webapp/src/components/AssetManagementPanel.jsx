@@ -132,6 +132,23 @@ function formatChinaTime(value) {
   }).format(date);
 }
 
+function dayStamp(day) {
+  const parts = String(day || '').split('-').map((item) => Number(item));
+  if (parts.length !== 3 || parts.some((item) => !Number.isFinite(item))) return NaN;
+  return Date.UTC(parts[0], parts[1] - 1, parts[2]);
+}
+
+function filterPointsByWindow(points, days) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const end = dayStamp(points[points.length - 1]?.day);
+  if (!Number.isFinite(end) || !Number.isFinite(Number(days)) || Number(days) <= 0) return points;
+  const cutoff = end - (Number(days) - 1) * 24 * 60 * 60 * 1000;
+  return points.filter((item) => {
+    const stamp = dayStamp(item?.day);
+    return Number.isFinite(stamp) && stamp >= cutoff && stamp <= end;
+  });
+}
+
 function formatChain(chainId) {
   return Number(chainId) === 8453 ? 'Base' : 'BSC';
 }
@@ -310,7 +327,7 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay }) {
+function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay, onDismiss }) {
   const [viewDate, setViewDate] = useState(() => new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -362,6 +379,8 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
         type="button"
         className={cls.join(' ')}
         disabled={!entry || isFuture}
+        data-pnl-date-cell="true"
+        data-pnl-selectable={entry && !isFuture ? 'true' : 'false'}
         onClick={() => {
           if (entry && !isFuture) onSelectDay?.(entry);
         }}
@@ -387,7 +406,17 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
   }
 
   return (
-    <div className="pnl-calendar">
+    <div
+      className="pnl-calendar"
+      onPointerDown={(event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest('[data-pnl-calendar-keep="true"]')) return;
+        const dateCell = target.closest('[data-pnl-date-cell="true"]');
+        if (dateCell?.getAttribute('data-pnl-selectable') === 'true') return;
+        onDismiss?.();
+      }}
+    >
       <div className="pnl-cal-header">
         <div className="pnl-cal-month">
           <span>{monthLabel}</span>
@@ -395,7 +424,7 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
             <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
           </svg>
         </div>
-        <div className="pnl-cal-nav">
+        <div className="pnl-cal-nav" data-pnl-calendar-keep="true">
           <button type="button" onClick={prevMonth}><ChevronLeft size={14} /></button>
           <button type="button" onClick={nextMonth}><ChevronRight size={14} /></button>
         </div>
@@ -621,7 +650,7 @@ function PnLBreakdownEditor({ entry, saving = false, error = '', onSave, onClear
   ];
 
   return (
-    <div className="pnl-editor">
+    <div className="pnl-editor" data-pnl-calendar-keep="true">
       <div className="pnl-editor-head">
         <div>
           <div className="am-card-title" style={{ fontSize: 12 }}>{entry.day} 盈亏校准</div>
@@ -926,6 +955,7 @@ export default function AssetManagementPanel({
   const [pnlAdjustmentError, setPnlAdjustmentError] = useState('');
   const [profitBaselineSaving, setProfitBaselineSaving] = useState(false);
   const [profitBaselineError, setProfitBaselineError] = useState('');
+  const [showProfitBaselineEditor, setShowProfitBaselineEditor] = useState(false);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -1012,29 +1042,41 @@ export default function AssetManagementPanel({
     const rows = Array.isArray(assetState?.lp?.profit_curve) ? assetState.lp.profit_curve : [];
     return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0) }));
   }, [assetState.lp]);
-  const activeTrendPoints = trendMode === 'profit' ? profitCurvePoints : chartPoints;
+  const profitTrendPoints = useMemo(() => filterPointsByWindow(profitCurvePoints, historyDays), [profitCurvePoints, historyDays]);
+  const activeTrendPoints = trendMode === 'profit' ? profitTrendPoints : chartPoints;
   const activeTrendValue = activeTrendPoints[activeTrendPoints.length - 1]?.value;
   const latestProfitCurveDay = profitCurvePoints[profitCurvePoints.length - 1]?.day || formatChinaDay();
 
   const isRefreshing = assetLoading || assetRefreshing;
   const selectedPnLEntry = useMemo(() => {
+    if (!selectedPnLDay) return null;
     const rows = Array.isArray(assetState.lp?.daily_history) ? assetState.lp.daily_history : [];
-    if (!rows.length) return assetState.lp?.today_point || null;
-    if (selectedPnLDay) {
-      const matched = rows.find((item) => item?.day === selectedPnLDay);
-      if (matched) return matched;
-      if (assetState.lp?.today_point?.day === selectedPnLDay) return assetState.lp.today_point;
-    }
-    return assetState.lp?.today_point || rows[rows.length - 1] || null;
+    const matched = rows.find((item) => item?.day === selectedPnLDay);
+    if (matched) return matched;
+    if (assetState.lp?.today_point?.day === selectedPnLDay) return assetState.lp.today_point;
+    return null;
   }, [assetState.lp, selectedPnLDay]);
 
   useEffect(() => {
-    if (!selectedPnLDay && assetState.lp?.today_point?.day) {
-      setSelectedPnLDay(assetState.lp.today_point.day);
-      return;
-    }
-    if (selectedPnLDay && !selectedPnLEntry) {
-      setSelectedPnLDay(assetState.lp?.today_point?.day || '');
+    if (!selectedPnLDay) return undefined;
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const dateCell = target.closest('[data-pnl-date-cell="true"]');
+      if (dateCell?.getAttribute('data-pnl-selectable') === 'true') return;
+      if (target.closest('[data-pnl-calendar-keep="true"]')) return;
+      setSelectedPnLDay('');
+      setPnlAdjustmentError('');
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [selectedPnLDay]);
+
+  useEffect(() => {
+    if (selectedPnLDay && assetState.lp && !selectedPnLEntry) {
+      setSelectedPnLDay('');
     }
   }, [assetState.lp, selectedPnLEntry, selectedPnLDay]);
 
@@ -1089,6 +1131,7 @@ export default function AssetManagementPanel({
       });
       await loadAssets({ forceRefresh: true });
       setTrendMode('profit');
+      setShowProfitBaselineEditor(false);
     } catch (err) {
       setProfitBaselineError(errorText(err) || '保存失败');
     } finally {
@@ -1106,12 +1149,19 @@ export default function AssetManagementPanel({
       });
       await loadAssets({ forceRefresh: true });
       setTrendMode('profit');
+      setShowProfitBaselineEditor(false);
     } catch (err) {
       setProfitBaselineError(errorText(err) || '清除失败');
     } finally {
       setProfitBaselineSaving(false);
     }
   }, [apiBaseUrl, initData, loadAssets]);
+
+  useEffect(() => {
+    if (trendMode !== 'profit' && showProfitBaselineEditor) {
+      setShowProfitBaselineEditor(false);
+    }
+  }, [showProfitBaselineEditor, trendMode]);
 
   const subtitle = activeTab === 'global_config'
     ? '全局配置管理'
@@ -1187,15 +1237,13 @@ export default function AssetManagementPanel({
                     总盈利
                   </button>
                 </div>
-                {trendMode === 'assets' ? (
-                  <div className="am-pill-group">
-                    {HISTORY_WINDOWS.map((days) => (
-                      <button key={days} type="button" className={`am-pill ${historyDays === days ? 'active' : ''}`} onClick={() => setHistoryDays(days)}>
-                        {days}D
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                <div className="am-pill-group">
+                  {HISTORY_WINDOWS.map((days) => (
+                    <button key={days} type="button" className={`am-pill ${historyDays === days ? 'active' : ''}`} onClick={() => setHistoryDays(days)}>
+                      {days}D
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="am-chart-header">
@@ -1203,12 +1251,24 @@ export default function AssetManagementPanel({
                 <div className="am-chart-label">{trendMode === 'profit' ? '总盈利' : '总资产'}</div>
                 <div className="am-chart-value">{formatUsd(activeTrendValue)}</div>
               </div>
-              <span className="am-badge">
-                {trendMode === 'profit' && assetState.lp?.profit_baseline ? `起点 ${assetState.lp.profit_baseline.day}` : formatChinaTime(assetState.overview?.updated_at)}
-              </span>
+              <div className="am-chart-meta">
+                <span className="am-badge">
+                  {trendMode === 'profit' && assetState.lp?.profit_baseline ? `起点 ${assetState.lp.profit_baseline.day}` : formatChinaTime(assetState.overview?.updated_at)}
+                </span>
+                {trendMode === 'profit' ? (
+                  <button
+                    type="button"
+                    className={`am-pill ${showProfitBaselineEditor ? 'active' : ''}`}
+                    onClick={() => setShowProfitBaselineEditor((prev) => !prev)}
+                  >
+                    <Settings2 size={12} />
+                    起点设置
+                  </button>
+                ) : null}
+              </div>
             </div>
             <LWAreaChart points={activeTrendPoints} stroke={trendMode === 'profit' ? '#52d1ff' : metricColor} />
-            {trendMode === 'profit' ? (
+            {trendMode === 'profit' && showProfitBaselineEditor ? (
               <ProfitBaselineEditor
                 baseline={assetState.lp?.profit_baseline}
                 latestDay={latestProfitCurveDay}
@@ -1259,12 +1319,17 @@ export default function AssetManagementPanel({
                 data={[...(Array.isArray(assetState.lp?.daily_history) ? assetState.lp.daily_history : []), ...(assetState.lp?.today_point ? [assetState.lp.today_point] : [])]}
                 loading={assetLoading}
                 note="日历默认按每日资产快照差额计算；如当天有充值、提现等外部资金变化，可点选日期手动校准。蓝点代表有转账提示，金点代表有手动校准。"
-                selectedDay={selectedPnLEntry?.day || ''}
+                selectedDay={selectedPnLDay}
                 onSelectDay={(entry) => {
                   setSelectedPnLDay(entry?.day || '');
                   setPnlAdjustmentError('');
                 }}
+                onDismiss={() => {
+                  setSelectedPnLDay('');
+                  setPnlAdjustmentError('');
+                }}
               />
+              {selectedPnLEntry ? (
               <div style={{ marginTop: 10 }}>
                 <PnLBreakdownEditor
                   entry={selectedPnLEntry}
@@ -1274,6 +1339,7 @@ export default function AssetManagementPanel({
                   onClear={handleClearPnLAdjustment}
                 />
               </div>
+              ) : null}
               {Array.isArray(assetState.lp?.windows) && assetState.lp.windows.length > 0 && (
                 <div className="am-stat-grid am-stat-grid-3" style={{ marginTop: 10 }}>
                   {assetState.lp.windows.map((item) => (

@@ -91,6 +91,23 @@ function formatChinaTime(value) {
     }).format(date);
 }
 
+function dayStamp(day) {
+    const parts = String(day || '').split('-').map((item) => Number(item));
+    if (parts.length !== 3 || parts.some((item) => !Number.isFinite(item))) return NaN;
+    return Date.UTC(parts[0], parts[1] - 1, parts[2]);
+}
+
+function filterRowsByWindow(rows, days) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const end = dayStamp(rows[rows.length - 1]?.day);
+    if (!Number.isFinite(end) || !Number.isFinite(Number(days)) || Number(days) <= 0) return rows;
+    const cutoff = end - (Number(days) - 1) * 24 * 60 * 60 * 1000;
+    return rows.filter((item) => {
+        const stamp = dayStamp(item?.day);
+        return Number.isFinite(stamp) && stamp >= cutoff && stamp <= end;
+    });
+}
+
 function formatChain(chainId) {
     return Number(chainId) === 8453 ? 'Base' : 'BSC';
 }
@@ -365,7 +382,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay }) {
+function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay, onDismiss }) {
     const [viewDate, setViewDate] = useState(() => new Date());
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -420,6 +437,8 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
                 type="button"
                 key={day}
                 disabled={!entry || isFuture}
+                data-pnl-date-cell="true"
+                data-pnl-selectable={entry && !isFuture ? 'true' : 'false'}
                 onClick={() => {
                     if (entry && !isFuture) onSelectDay?.(entry);
                 }}
@@ -451,7 +470,16 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
     }
 
     return (
-        <div>
+        <div
+            onPointerDown={(event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) return;
+                if (target.closest('[data-pnl-calendar-keep="true"]')) return;
+                const dateCell = target.closest('[data-pnl-date-cell="true"]');
+                if (dateCell?.getAttribute('data-pnl-selectable') === 'true') return;
+                onDismiss?.();
+            }}
+        >
             <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5">
                     <span className="text-[13px] font-bold text-zinc-900 dark:text-white/90">{monthLabel}</span>
@@ -459,7 +487,7 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
                         <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
                 </div>
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-0.5" data-pnl-calendar-keep="true">
                     <button onClick={prevMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronLeft size={14} /></button>
                     <button onClick={nextMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronRight size={14} /></button>
                 </div>
@@ -680,7 +708,7 @@ function PnLBreakdownEditor({ entry, brand, saving = false, error = '', onSave, 
     ];
 
     return (
-        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 dark:border-white/[0.05] dark:bg-[#0d0f12]">
+        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 dark:border-white/[0.05] dark:bg-[#0d0f12]" data-pnl-calendar-keep="true">
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                     <div className="text-[11px] font-bold text-zinc-900 dark:text-white/90">{entry.day} 盈亏校准</div>
@@ -1041,6 +1069,7 @@ export default function AssetManagementPage({
     const [pnlAdjustmentError, setPnlAdjustmentError] = useState('');
     const [profitBaselineSaving, setProfitBaselineSaving] = useState(false);
     const [profitBaselineError, setProfitBaselineError] = useState('');
+    const [showProfitBaselineEditor, setShowProfitBaselineEditor] = useState(false);
 
     const hasAssetData = Boolean(assetsData.overview || assetsData.history || assetsData.lp);
     const hasAssetDataRef = useRef(false);
@@ -1117,7 +1146,8 @@ export default function AssetManagementPage({
         const rows = Array.isArray(assetsData.lp?.profit_curve) ? assetsData.lp.profit_curve : [];
         return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0), close: Number(item?.value_usd || 0) }));
     }, [assetsData.lp]);
-    const activeTrendRows = trendMode === 'profit' ? profitCurveRows : chartRows;
+    const profitTrendRows = useMemo(() => filterRowsByWindow(profitCurveRows, historyDays), [profitCurveRows, historyDays]);
+    const activeTrendRows = trendMode === 'profit' ? profitTrendRows : chartRows;
     const activeTrendValue = activeTrendRows[activeTrendRows.length - 1]?.value;
     const latestProfitCurveDay = profitCurveRows[profitCurveRows.length - 1]?.day || formatChinaDay();
 
@@ -1125,23 +1155,34 @@ export default function AssetManagementPage({
     const canManualRefresh = hasInitData;
     const openPanelTab = activeTab !== 'my_assets' ? activeTab : null;
     const selectedPnLEntry = useMemo(() => {
+        if (!selectedPnLDay) return null;
         const rows = Array.isArray(assetsData.lp?.daily_history) ? assetsData.lp.daily_history : [];
-        if (!rows.length) return assetsData.lp?.today_point || null;
-        if (selectedPnLDay) {
-            const matched = rows.find((item) => item?.day === selectedPnLDay);
-            if (matched) return matched;
-            if (assetsData.lp?.today_point?.day === selectedPnLDay) return assetsData.lp.today_point;
-        }
-        return assetsData.lp?.today_point || rows[rows.length - 1] || null;
+        const matched = rows.find((item) => item?.day === selectedPnLDay);
+        if (matched) return matched;
+        if (assetsData.lp?.today_point?.day === selectedPnLDay) return assetsData.lp.today_point;
+        return null;
     }, [assetsData.lp, selectedPnLDay]);
 
     useEffect(() => {
-        if (!selectedPnLDay && assetsData.lp?.today_point?.day) {
-            setSelectedPnLDay(assetsData.lp.today_point.day);
-            return;
-        }
-        if (selectedPnLDay && !selectedPnLEntry) {
-            setSelectedPnLDay(assetsData.lp?.today_point?.day || '');
+        if (!selectedPnLDay) return undefined;
+        const handlePointerDown = (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const dateCell = target.closest('[data-pnl-date-cell="true"]');
+            if (dateCell?.getAttribute('data-pnl-selectable') === 'true') return;
+            if (target.closest('[data-pnl-calendar-keep="true"]')) return;
+            setSelectedPnLDay('');
+            setPnlAdjustmentError('');
+        };
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+        };
+    }, [selectedPnLDay]);
+
+    useEffect(() => {
+        if (selectedPnLDay && assetsData.lp && !selectedPnLEntry) {
+            setSelectedPnLDay('');
         }
     }, [assetsData.lp, selectedPnLEntry, selectedPnLDay]);
 
@@ -1196,6 +1237,7 @@ export default function AssetManagementPage({
             });
             await loadAssets({ forceRefresh: true });
             setTrendMode('profit');
+            setShowProfitBaselineEditor(false);
         } catch (err) {
             setProfitBaselineError(errorText(err) || '保存失败');
         } finally {
@@ -1213,12 +1255,19 @@ export default function AssetManagementPage({
             });
             await loadAssets({ forceRefresh: true });
             setTrendMode('profit');
+            setShowProfitBaselineEditor(false);
         } catch (err) {
             setProfitBaselineError(errorText(err) || '清除失败');
         } finally {
             setProfitBaselineSaving(false);
         }
     }, [apiBaseUrl, initData, loadAssets]);
+
+    useEffect(() => {
+        if (trendMode !== 'profit' && showProfitBaselineEditor) {
+            setShowProfitBaselineEditor(false);
+        }
+    }, [showProfitBaselineEditor, trendMode]);
 
     return (
         <div className="flex flex-col gap-3">
@@ -1305,13 +1354,11 @@ export default function AssetManagementPage({
                                     <Pill active={trendMode === 'assets'} brand={brand} onClick={() => setTrendMode('assets')}>总资产</Pill>
                                     <Pill active={trendMode === 'profit'} brand={brand} onClick={() => setTrendMode('profit')}>总盈利</Pill>
                                 </div>
-                                {trendMode === 'assets' ? (
-                                    <div className="flex gap-1.5">
-                                        {HISTORY_WINDOWS.map((d) => (
-                                            <Pill key={d} active={historyDays === d} brand={brand} onClick={() => setHistoryDays(d)}>{d}D</Pill>
-                                        ))}
-                                    </div>
-                                ) : null}
+                                <div className="flex gap-1.5">
+                                    {HISTORY_WINDOWS.map((d) => (
+                                        <Pill key={d} active={historyDays === d} brand={brand} onClick={() => setHistoryDays(d)}>{d}D</Pill>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                         <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-white/[0.04] dark:bg-[#0d0f12]">
@@ -1324,15 +1371,31 @@ export default function AssetManagementPage({
                                         <NumberFlowValue value={activeTrendValue || 0} formatter={(v) => formatUsd(v)} />
                                     </div>
                                 </div>
-                                <span className="text-[10px] text-zinc-400 dark:text-white/30">
-                                    {trendMode === 'profit' && assetsData.lp?.profit_baseline ? `起点 ${assetsData.lp.profit_baseline.day}` : formatChinaTime(assetsData.overview?.updated_at)}
-                                </span>
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                    <span className="text-[10px] text-zinc-400 dark:text-white/30">
+                                        {trendMode === 'profit' && assetsData.lp?.profit_baseline ? `起点 ${assetsData.lp.profit_baseline.day}` : formatChinaTime(assetsData.overview?.updated_at)}
+                                    </span>
+                                    {trendMode === 'profit' ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowProfitBaselineEditor((prev) => !prev)}
+                                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 transition active:scale-95 ${
+                                                showProfitBaselineEditor
+                                                    ? brand.softButtonClass
+                                                    : 'bg-zinc-100 text-zinc-500 ring-zinc-200 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/[0.06]'
+                                            }`}
+                                        >
+                                            <Settings2 className="h-3 w-3" />
+                                            起点
+                                        </button>
+                                    ) : null}
+                                </div>
                             </div>
                             <div className="mt-3">
                                 <LWAreaChart data={activeTrendRows} color={trendMode === 'profit' ? '#0ea5e9' : '#10b981'} loading={assetsLoading} />
                             </div>
                         </div>
-                        {trendMode === 'profit' ? (
+                        {trendMode === 'profit' && showProfitBaselineEditor ? (
                             <ProfitBaselineEditor
                                 baseline={assetsData.lp?.profit_baseline}
                                 latestDay={latestProfitCurveDay}
@@ -1386,12 +1449,17 @@ export default function AssetManagementPage({
                             data={[...(Array.isArray(assetsData.lp?.daily_history) ? assetsData.lp.daily_history : []), ...(assetsData.lp?.today_point ? [assetsData.lp.today_point] : [])]}
                             loading={assetsLoading}
                             note="日历默认按每日资产快照差额计算；如当天有充值、提现等外部资金变化，可点选日期手动校准。蓝点代表有转账提示，金点代表有手动校准。"
-                            selectedDay={selectedPnLEntry?.day || ''}
+                            selectedDay={selectedPnLDay}
                             onSelectDay={(entry) => {
                                 setSelectedPnLDay(entry?.day || '');
                                 setPnlAdjustmentError('');
                             }}
+                            onDismiss={() => {
+                                setSelectedPnLDay('');
+                                setPnlAdjustmentError('');
+                            }}
                         />
+                        {selectedPnLEntry ? (
                         <PnLBreakdownEditor
                             entry={selectedPnLEntry}
                             brand={brand}
@@ -1400,6 +1468,7 @@ export default function AssetManagementPage({
                             onSave={handleSavePnLAdjustment}
                             onClear={handleClearPnLAdjustment}
                         />
+                        ) : null}
                         {/* summary stats below chart */}
                         {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (
                             <div className="mt-2.5 grid grid-cols-3 gap-1.5">
