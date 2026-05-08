@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
 
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['realtime_positions', 'me', 'assets_overview', 'assets_history', 'assets_lp_stats', 'assets_lp_pnl_adjustment', 'trade_history'];
+    const validEndpoints = ['realtime_positions', 'me', 'assets_overview', 'assets_history', 'assets_lp_stats', 'assets_lp_pnl_adjustment', 'assets_lp_pnl_baseline', 'trade_history'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;

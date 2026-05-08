@@ -31,6 +31,15 @@ type userLPAdjustmentRequest struct {
 	Clear               bool    `json:"clear,omitempty"`
 }
 
+type userLPProfitBaselineRequest struct {
+	InitData   string  `json:"initData"`
+	Day        string  `json:"day"`
+	BasePnLUSD float64 `json:"base_pnl_usd"`
+	Note       string  `json:"note,omitempty"`
+	Action     string  `json:"action,omitempty"`
+	Clear      bool    `json:"clear,omitempty"`
+}
+
 type adminSmartMoneyOverviewRequest struct {
 	InitData     string `json:"initData"`
 	Days         int    `json:"days"`
@@ -319,6 +328,46 @@ func (s *Server) handleAssetLPAdjustment(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":         true,
 		"adjustment": adjustment,
+	})
+}
+
+func (s *Server) handleAssetLPProfitBaseline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req userLPProfitBaselineRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	userID, status, msg := authenticateAssetUser(req.InitData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if req.Clear || action == "clear" || action == "delete" {
+		if err := s.Assets.ClearUserLPProfitBaseline(r.Context(), userID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		invalidateCachedAssetResponse(assetResponseCacheKey("user", fmt.Sprintf("%d", userID), "lp"))
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": true,
+		})
+		return
+	}
+
+	baseline, err := s.Assets.SaveUserLPProfitBaseline(r.Context(), userID, req.Day, req.BasePnLUSD, req.Note)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	invalidateCachedAssetResponse(assetResponseCacheKey("user", fmt.Sprintf("%d", userID), "lp"))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":       true,
+		"baseline": baseline,
 	})
 }
 

@@ -266,6 +266,41 @@ export async function clearAssetLPPnLAdjustment({ apiBaseUrl, initData, day, sig
   return payload?.data ?? payload;
 }
 
+export async function saveAssetLPPnLBaseline({ apiBaseUrl, initData, day, basePnlUsd, note = '', signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/positions?endpoint=assets_lp_pnl_baseline`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      initData,
+      day,
+      base_pnl_usd: basePnlUsd,
+      note,
+    }),
+    signal,
+  });
+  assetResponseCache.delete(`asset-lp:${base}:${initData}`);
+  return payload?.data ?? payload;
+}
+
+export async function clearAssetLPPnLBaseline({ apiBaseUrl, initData, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/positions?endpoint=assets_lp_pnl_baseline`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      initData,
+      clear: true,
+      action: 'clear',
+    }),
+    signal,
+  });
+  assetResponseCache.delete(`asset-lp:${base}:${initData}`);
+  return payload?.data ?? payload;
+}
+
 export async function fetchPositionProfitPoster({ apiBaseUrl, initData, taskId, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/position_profit_poster`;

@@ -76,6 +76,13 @@ type userPnLAdjustment struct {
 	UpdatedAt           time.Time
 }
 
+type userProfitBaseline struct {
+	Day        string
+	BasePnLUSD float64
+	Note       string
+	UpdatedAt  time.Time
+}
+
 func (b *userLPBucket) addProfit(profitWei *big.Int) {
 	if b == nil {
 		return
@@ -344,10 +351,10 @@ func finalizeUserLPDailyPoint(point *UserLPDailyPoint, adjustment userPnLAdjustm
 	}
 	if point.RawPnLUSD == 0 && point.AutoAdjustedPnLUSD == 0 && point.FinalPnLUSD == 0 {
 		point.RawPnLUSD = round2(point.RealizedPnLUSD)
-		point.AutoAdjustedPnLUSD = round2(point.RawPnLUSD - point.TransferNetUSD)
+		point.AutoAdjustedPnLUSD = point.RawPnLUSD
 	}
 	point.RawPnLUSD = round2(point.RawPnLUSD)
-	point.AutoAdjustedPnLUSD = round2(point.AutoAdjustedPnLUSD)
+	point.AutoAdjustedPnLUSD = point.RawPnLUSD
 	point.ManualAdjustmentUSD = round2(adjustment.ManualAdjustmentUSD)
 	point.AdjustmentNote = strings.TrimSpace(adjustment.Note)
 	point.FinalPnLUSD = round2(point.AutoAdjustedPnLUSD + point.ManualAdjustmentUSD)
@@ -360,7 +367,7 @@ func buildUserSnapshotPoint(day string, rawPnL float64, activity userTransferAct
 		RawPnLUSD: round2(rawPnL),
 	}
 	applyUserTransferActivity(&point, activity)
-	point.AutoAdjustedPnLUSD = round2(point.RawPnLUSD - point.TransferNetUSD)
+	point.AutoAdjustedPnLUSD = point.RawPnLUSD
 	finalizeUserLPDailyPoint(&point, adjustment)
 	return point
 }
@@ -435,6 +442,113 @@ func sumUserDailyHistoryPnL(history []UserLPDailyPoint, start time.Time, end tim
 		total += item.FinalPnLUSD
 	}
 	return round2(total)
+}
+
+func listUserProfitCurvePoints(history []UserLPDailyPoint, todayPoint *UserLPDailyPoint) []UserLPDailyPoint {
+	total := len(history)
+	if todayPoint != nil && strings.TrimSpace(todayPoint.Day) != "" {
+		total++
+	}
+	if total == 0 {
+		return nil
+	}
+
+	rows := make([]UserLPDailyPoint, 0, total)
+	seen := make(map[string]struct{}, total)
+	for _, item := range history {
+		dayKey := strings.TrimSpace(item.Day)
+		if dayKey == "" {
+			continue
+		}
+		rows = append(rows, item)
+		seen[dayKey] = struct{}{}
+	}
+	if todayPoint != nil {
+		dayKey := strings.TrimSpace(todayPoint.Day)
+		if dayKey != "" {
+			if _, ok := seen[dayKey]; !ok {
+				rows = append(rows, *todayPoint)
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Day < rows[j].Day
+	})
+	return rows
+}
+
+func buildUserProfitCurve(history []UserLPDailyPoint, todayPoint *UserLPDailyPoint, baseline *userProfitBaseline) []UserLPProfitCurvePoint {
+	rows := listUserProfitCurvePoints(history, todayPoint)
+	if len(rows) == 0 && baseline == nil {
+		return nil
+	}
+
+	curve := make([]UserLPProfitCurvePoint, 0, len(rows)+1)
+	running := 0.0
+	startDay := ""
+	if baseline != nil {
+		startDay = strings.TrimSpace(baseline.Day)
+		running = round2(baseline.BasePnLUSD)
+		if startDay != "" {
+			curve = append(curve, UserLPProfitCurvePoint{
+				Day:      startDay,
+				ValueUSD: running,
+				Baseline: true,
+			})
+		}
+	}
+
+	for _, item := range rows {
+		dayKey := strings.TrimSpace(item.Day)
+		if dayKey == "" {
+			continue
+		}
+		if startDay != "" && dayKey <= startDay {
+			continue
+		}
+		dailyPnL := round2(item.FinalPnLUSD)
+		running = round2(running + dailyPnL)
+		curve = append(curve, UserLPProfitCurvePoint{
+			Day:         dayKey,
+			ValueUSD:    running,
+			DailyPnLUSD: dailyPnL,
+		})
+	}
+	return curve
+}
+
+func userProfitCurveRange(now time.Time, baseline *userProfitBaseline) (time.Time, time.Time) {
+	end := dayStart(now)
+	start := end.AddDate(0, 0, -defaultProfitCurveDays-1)
+	if baseline == nil {
+		return start, end
+	}
+	if baselineDay, ok := parseSnapshotDay(baseline.Day); ok {
+		baselineStart := baselineDay.AddDate(0, 0, -1)
+		if baselineStart.Before(start) {
+			start = baselineStart
+		}
+	}
+	return start, end
+}
+
+func (s *Service) buildUserSnapshotProfitHistory(ctx context.Context, userID uint, baseline *userProfitBaseline, now time.Time) ([]UserLPDailyPoint, error) {
+	start, end := userProfitCurveRange(now, baseline)
+	snapshotRows, err := s.loadUserAssetSnapshotRows(ctx, userID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	adjustmentsByDay, err := s.loadUserLPAdjustments(ctx, userID, start, dayStart(now).AddDate(0, 0, 1))
+	if err != nil {
+		return nil, err
+	}
+	return mergeUserDailyHistoryPnL(
+		nil,
+		buildUserSnapshotPnLByDay(snapshotRows, nil),
+		adjustmentsByDay,
+		start.AddDate(0, 0, 1),
+		end,
+	), nil
 }
 
 func snapshotTodayPnL(rows []models.UserAssetDailySnapshot, liveTotalUSD float64, transferByDay map[string]userTransferActivity, adjustmentsByDay map[string]userPnLAdjustment, now time.Time) (UserLPDailyPoint, bool) {
@@ -544,6 +658,34 @@ func (s *Service) loadUserLPAdjustments(ctx context.Context, userID uint, start,
 	return out, nil
 }
 
+func (s *Service) loadUserLPProfitBaseline(ctx context.Context, userID uint) (*userProfitBaseline, error) {
+	if database.DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	if userID == 0 {
+		return nil, fmt.Errorf("invalid user id")
+	}
+
+	var rows []models.UserLPProfitBaseline
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND wallet_id = ? AND chain = ?", userID, aggregateWalletID, "").
+		Limit(1).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	row := rows[0]
+	return &userProfitBaseline{
+		Day:        row.BaseDay,
+		BasePnLUSD: round2(row.BasePnLUSD),
+		Note:       strings.TrimSpace(row.Note),
+		UpdatedAt:  row.UpdatedAt,
+	}, nil
+}
+
 func normalizeUserLPAdjustmentInput(day string, manualAdjustmentUSD float64, note string) (string, float64, string, error) {
 	parsedDay, ok := parseSnapshotDay(day)
 	if !ok {
@@ -560,6 +702,27 @@ func normalizeUserLPAdjustmentInput(day string, manualAdjustmentUSD float64, not
 		return "", 0, "", fmt.Errorf("note too long")
 	}
 	return formatDay(parsedDay), round2(manualAdjustmentUSD), note, nil
+}
+
+func normalizeUserLPProfitBaselineInput(day string, basePnLUSD float64, note string) (string, float64, string, error) {
+	parsedDay, ok := parseSnapshotDay(day)
+	if !ok {
+		return "", 0, "", fmt.Errorf("invalid day")
+	}
+	if parsedDay.After(dayStart(timeutil.Now())) {
+		return "", 0, "", fmt.Errorf("baseline day cannot be in the future")
+	}
+	if math.IsNaN(basePnLUSD) || math.IsInf(basePnLUSD, 0) {
+		return "", 0, "", fmt.Errorf("invalid base pnl")
+	}
+	if math.Abs(basePnLUSD) > 1_000_000_000 {
+		return "", 0, "", fmt.Errorf("base pnl too large")
+	}
+	note = strings.TrimSpace(note)
+	if len(note) > 500 {
+		return "", 0, "", fmt.Errorf("note too long")
+	}
+	return formatDay(parsedDay), round2(basePnLUSD), note, nil
 }
 
 func (s *Service) SaveUserLPDailyPnLAdjustment(ctx context.Context, userID uint, day string, manualAdjustmentUSD float64, note string) (*UserLPDailyPnLAdjustmentResponse, error) {
@@ -620,6 +783,67 @@ func (s *Service) ClearUserLPDailyPnLAdjustment(ctx context.Context, userID uint
 	return database.DB.WithContext(ctx).
 		Where("user_id = ? AND wallet_id = ? AND chain = ? AND stat_day = ?", userID, aggregateWalletID, "", dayKey).
 		Delete(&models.UserLPDailyPnLAdjustment{}).Error
+}
+
+func (s *Service) SaveUserLPProfitBaseline(ctx context.Context, userID uint, day string, basePnLUSD float64, note string) (*UserLPProfitBaselineResponse, error) {
+	if database.DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	if userID == 0 {
+		return nil, fmt.Errorf("invalid user id")
+	}
+	dayKey, amount, normalizedNote, err := normalizeUserLPProfitBaselineInput(day, basePnLUSD, note)
+	if err != nil {
+		return nil, err
+	}
+
+	row := &models.UserLPProfitBaseline{
+		UserID:     userID,
+		WalletID:   aggregateWalletID,
+		Chain:      "",
+		BaseDay:    dayKey,
+		BasePnLUSD: amount,
+		Note:       normalizedNote,
+	}
+	if err := upsertByColumns(ctx, row,
+		[]string{"user_id", "wallet_id", "chain"},
+		map[string]interface{}{
+			"base_day":     row.BaseDay,
+			"base_pnl_usd": row.BasePnLUSD,
+			"note":         row.Note,
+			"updated_at":   timeutil.Now(),
+		}); err != nil {
+		return nil, err
+	}
+
+	var saved []models.UserLPProfitBaseline
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND wallet_id = ? AND chain = ?", userID, aggregateWalletID, "").
+		Limit(1).
+		Find(&saved).Error; err != nil {
+		return nil, err
+	}
+	if len(saved) == 0 {
+		return nil, fmt.Errorf("profit baseline not found after save")
+	}
+	return &UserLPProfitBaselineResponse{
+		Day:        saved[0].BaseDay,
+		BasePnLUSD: round2(saved[0].BasePnLUSD),
+		Note:       strings.TrimSpace(saved[0].Note),
+		UpdatedAt:  saved[0].UpdatedAt,
+	}, nil
+}
+
+func (s *Service) ClearUserLPProfitBaseline(ctx context.Context, userID uint) error {
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if userID == 0 {
+		return fmt.Errorf("invalid user id")
+	}
+	return database.DB.WithContext(ctx).
+		Where("user_id = ? AND wallet_id = ? AND chain = ?", userID, aggregateWalletID, "").
+		Delete(&models.UserLPProfitBaseline{}).Error
 }
 
 func (s *Service) GetUserOverview(ctx context.Context, userID uint) (*UserAssetOverview, error) {
@@ -948,6 +1172,10 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 	if err != nil {
 		return nil, err
 	}
+	profitBaseline, err := s.loadUserLPProfitBaseline(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 
 	var liveTotalUSD *float64
 	overview, err := s.GetUserOverview(ctx, userID)
@@ -959,6 +1187,19 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 	}
 
 	resp = applyUserSnapshotPnL(resp, snapshotRows, transferByDay, adjustmentsByDay, liveTotalUSD, now)
+	profitHistory, err := s.buildUserSnapshotProfitHistory(ctx, userID, profitBaseline, now)
+	if err != nil {
+		return nil, err
+	}
+	resp.ProfitCurve = buildUserProfitCurve(profitHistory, resp.TodayPoint, profitBaseline)
+	if profitBaseline != nil {
+		resp.ProfitBaseline = &UserLPProfitBaselineResponse{
+			Day:        profitBaseline.Day,
+			BasePnLUSD: round2(profitBaseline.BasePnLUSD),
+			Note:       strings.TrimSpace(profitBaseline.Note),
+			UpdatedAt:  profitBaseline.UpdatedAt,
+		}
+	}
 	return &resp, nil
 }
 

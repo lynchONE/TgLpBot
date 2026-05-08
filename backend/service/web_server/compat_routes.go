@@ -24,6 +24,8 @@ func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		s.handleAssetLPStats(w, r)
 	case "assets_lp_pnl_adjustment":
 		s.handleAssetLPAdjustment(w, r)
+	case "assets_lp_pnl_baseline":
+		s.handleAssetLPProfitBaseline(w, r)
 	case "trade_history":
 		s.handleTradeHistory(w, r)
 	default:

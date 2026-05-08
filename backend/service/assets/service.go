@@ -26,6 +26,7 @@ import (
 const (
 	aggregateWalletID             = uint(0)
 	defaultHistoryDays            = 30
+	defaultProfitCurveDays        = 90
 	userAssetSnapshotCaptureDelay = 30 * time.Second
 	dailyAggregationDelay         = 5 * time.Minute
 )
@@ -250,13 +251,22 @@ type UserLPDailyPoint struct {
 	TransferNetUSD      float64 `json:"transfer_net_usd,omitempty"`
 }
 
+type UserLPProfitCurvePoint struct {
+	Day         string  `json:"day"`
+	ValueUSD    float64 `json:"value_usd"`
+	DailyPnLUSD float64 `json:"daily_pnl_usd"`
+	Baseline    bool    `json:"baseline,omitempty"`
+}
+
 type UserLPStatsResponse struct {
-	Windows      []UserLPWindowStats `json:"windows"`
-	Today        UserLPWindowStats   `json:"today"`
-	TodayPoint   *UserLPDailyPoint   `json:"today_point,omitempty"`
-	TodayPools   []UserLPPoolPnL     `json:"today_pools,omitempty"`
-	DailyHistory []UserLPDailyPoint  `json:"daily_history,omitempty"`
-	Timezone     string              `json:"timezone"`
+	Windows        []UserLPWindowStats           `json:"windows"`
+	Today          UserLPWindowStats             `json:"today"`
+	TodayPoint     *UserLPDailyPoint             `json:"today_point,omitempty"`
+	TodayPools     []UserLPPoolPnL               `json:"today_pools,omitempty"`
+	DailyHistory   []UserLPDailyPoint            `json:"daily_history,omitempty"`
+	ProfitCurve    []UserLPProfitCurvePoint      `json:"profit_curve,omitempty"`
+	ProfitBaseline *UserLPProfitBaselineResponse `json:"profit_baseline,omitempty"`
+	Timezone       string                        `json:"timezone"`
 }
 
 type UserLPDailyPnLAdjustmentResponse struct {
@@ -264,6 +274,13 @@ type UserLPDailyPnLAdjustmentResponse struct {
 	ManualAdjustmentUSD float64   `json:"manual_adjustment_usd"`
 	Note                string    `json:"note,omitempty"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type UserLPProfitBaselineResponse struct {
+	Day        string    `json:"day"`
+	BasePnLUSD float64   `json:"base_pnl_usd"`
+	Note       string    `json:"note,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type smartMoneyAssetBreakdown struct {

@@ -564,6 +564,63 @@ export async function clearAssetLPPnLAdjustment({ apiBaseUrl, initData, day, sig
     return payload?.data ?? payload;
 }
 
+export async function saveAssetLPPnLBaseline({ apiBaseUrl, initData, day, basePnlUsd, note = '', signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/positions?endpoint=assets_lp_pnl_baseline`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            initData,
+            day,
+            base_pnl_usd: basePnlUsd,
+            note,
+        }),
+        signal,
+    });
+    if (!resp.ok) {
+        const detail = await readErrorDetails(resp);
+        const err = new Error(detail.message);
+        err.status = resp.status;
+        if (detail.payload && typeof detail.payload === 'object') {
+            err.payload = detail.payload;
+            Object.assign(err, detail.payload);
+        }
+        throw err;
+    }
+    assetResponseCache.delete(`asset-lp:${base}:${initData}`);
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+export async function clearAssetLPPnLBaseline({ apiBaseUrl, initData, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/positions?endpoint=assets_lp_pnl_baseline`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            initData,
+            clear: true,
+            action: 'clear',
+        }),
+        signal,
+    });
+    if (!resp.ok) {
+        const detail = await readErrorDetails(resp);
+        const err = new Error(detail.message);
+        err.status = resp.status;
+        if (detail.payload && typeof detail.payload === 'object') {
+            err.payload = detail.payload;
+            Object.assign(err, detail.payload);
+        }
+        throw err;
+    }
+    assetResponseCache.delete(`asset-lp:${base}:${initData}`);
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
 export async function fetchAdminOnlineUsers({ apiBaseUrl, initData, limit, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=online_users`;

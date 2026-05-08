@@ -72,6 +72,27 @@ func (UserLPDailyPnLAdjustment) TableName() string {
 	return "user_lp_daily_pnl_adjustments"
 }
 
+// UserLPProfitBaseline stores a user-authored starting point for cumulative LP profit.
+// wallet_id=0 and chain="" represent the aggregated user view.
+type UserLPProfitBaseline struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	UserID   uint   `gorm:"not null;index;uniqueIndex:idx_user_lp_profit_baseline" json:"user_id"`
+	WalletID uint   `gorm:"not null;default:0;uniqueIndex:idx_user_lp_profit_baseline" json:"wallet_id"`
+	Chain    string `gorm:"size:16;not null;default:'';uniqueIndex:idx_user_lp_profit_baseline" json:"chain"`
+
+	BaseDay    string  `gorm:"size:10;not null" json:"base_day"`
+	BasePnLUSD float64 `gorm:"column:base_pnl_usd;type:decimal(20,4);not null;default:0" json:"base_pnl_usd"`
+	Note       string  `gorm:"type:varchar(500)" json:"note,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (UserLPProfitBaseline) TableName() string {
+	return "user_lp_profit_baselines"
+}
+
 const (
 	SmartMoneyTransferDirectionIn  = "in"
 	SmartMoneyTransferDirectionOut = "out"

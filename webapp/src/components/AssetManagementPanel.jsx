@@ -46,7 +46,9 @@ import {
   invalidateAdminPrivateZap,
   renameAdminRPCEndpoint,
   clearAssetLPPnLAdjustment,
+  clearAssetLPPnLBaseline,
   saveAssetLPPnLAdjustment,
+  saveAssetLPPnLBaseline,
   switchAdminRPCEndpoint,
   updateSystemConfig,
 } from '../api';
@@ -284,12 +286,16 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
   }, [stroke, height]);
 
   useEffect(() => {
-    if (!seriesRef.current || !points || points.length < 1) return;
+    if (!seriesRef.current) return;
     const mapped = points
+      ? points
       .filter((d) => d.day && Number.isFinite(Number(d.value)))
-      .map((d) => ({ time: d.day, value: Number(d.value) }));
+        .map((d) => ({ time: d.day, value: Number(d.value) }))
+      : [];
     seriesRef.current.setData(mapped);
-    chartRef.current?.timeScale().fitContent();
+    if (mapped.length > 0) {
+      chartRef.current?.timeScale().fitContent();
+    }
   }, [points]);
 
   return (
@@ -607,19 +613,19 @@ function PnLBreakdownEditor({ entry, saving = false, error = '', onSave, onClear
   }
 
   const finalPnl = Number(entry.final_pnl_usd ?? entry.realized_pnl_usd ?? 0);
+  const hasTransfer = Boolean(entry.transfer_total_count || entry.has_transfer_in || entry.has_transfer_out);
   const breakdown = [
-    { label: '资产变化', value: entry.raw_pnl_usd, tone: Number(entry.raw_pnl_usd || 0) >= 0 ? 'positive' : 'negative' },
-    { label: '净转账', value: entry.transfer_net_usd, tone: Number(entry.transfer_net_usd || 0) >= 0 ? 'transfer-in' : 'transfer-out' },
-    { label: '自动修正', value: entry.auto_adjusted_pnl_usd, tone: Number(entry.auto_adjusted_pnl_usd || 0) >= 0 ? 'positive' : 'negative' },
-    { label: '手动修正', value: entry.manual_adjustment_usd, tone: Number(entry.manual_adjustment_usd || 0) >= 0 ? 'positive' : 'negative' },
+    { label: '快照盈亏', value: entry.raw_pnl_usd, tone: Number(entry.raw_pnl_usd || 0) >= 0 ? 'positive' : 'negative' },
+    { label: '手动校准', value: entry.manual_adjustment_usd, tone: Number(entry.manual_adjustment_usd || 0) >= 0 ? 'positive' : 'negative' },
+    { label: '校准后', value: finalPnl, tone: finalPnl >= 0 ? 'positive' : 'negative' },
   ];
 
   return (
     <div className="pnl-editor">
       <div className="pnl-editor-head">
         <div>
-          <div className="am-card-title" style={{ fontSize: 12 }}>{entry.day} 盈亏拆解</div>
-          <div className="am-item-sub" style={{ margin: 0 }}>最终盈亏 = 自动扣除净转账后，再叠加手动修正</div>
+          <div className="am-card-title" style={{ fontSize: 12 }}>{entry.day} 盈亏校准</div>
+          <div className="am-item-sub" style={{ margin: 0 }}>默认按每日资产快照差额计算；充值、提现等偏差在这里手动校准。</div>
         </div>
         <span className={`am-badge ${finalPnl >= 0 ? 'am-badge-ok' : 'am-badge-warn'}`}>
           {finalPnl >= 0 ? '+' : ''}{formatUsd(finalPnl)}
@@ -633,9 +639,14 @@ function PnLBreakdownEditor({ entry, saving = false, error = '', onSave, onClear
           </div>
         ))}
       </div>
+      {hasTransfer ? (
+        <div className="pnl-editor-transfer-hint">
+          检测到该日有转账记录：转入 {formatUsdCompact(entry.transfer_in_usd)}，转出 {formatUsdCompact(entry.transfer_out_usd)}。这些数据只作提示，不自动影响盈亏。
+        </div>
+      ) : null}
       <div className="pnl-editor-form">
         <label>
-          <span>手动修正 USD</span>
+          <span>手动校准 USD</span>
           <input
             type="number"
             step="0.01"
@@ -671,6 +682,67 @@ function PnLBreakdownEditor({ entry, saving = false, error = '', onSave, onClear
           className="am-pill"
           disabled={saving}
           onClick={() => onClear?.(entry.day)}
+        >
+          <Eraser size={12} />
+          清除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfitBaselineEditor({ baseline, latestDay = '', saving = false, error = '', onSave, onClear }) {
+  const [day, setDay] = useState('');
+  const [baseValue, setBaseValue] = useState('');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    setDay(baseline?.day || latestDay || '');
+    setBaseValue(baseline ? String(Number(baseline.base_pnl_usd || 0)) : '0');
+    setNote(baseline ? String(baseline.note || '') : '');
+  }, [baseline, latestDay]);
+
+  return (
+    <div className="profit-baseline-editor">
+      <div className="profit-baseline-head">
+        <div>
+          <div className="am-card-title" style={{ fontSize: 12 }}>总盈利起点</div>
+          <div className="am-item-sub" style={{ margin: 0 }}>
+            {baseline ? `${baseline.day} 起点 ${formatUsd(baseline.base_pnl_usd)}` : '未设置起点，曲线从已返回日盈亏累加'}
+          </div>
+        </div>
+        {baseline ? <span className="am-badge">{formatChinaTime(baseline.updated_at)}</span> : null}
+      </div>
+      <div className="profit-baseline-form">
+        <label>
+          <span>起点日期</span>
+          <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+        </label>
+        <label>
+          <span>起点盈利 USD</span>
+          <input type="number" step="0.01" value={baseValue} onChange={(e) => setBaseValue(e.target.value)} placeholder="0.00" />
+        </label>
+        <label>
+          <span>备注</span>
+          <input type="text" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：从旧钱包迁移后重算" />
+        </label>
+      </div>
+      {error ? <div className="pnl-editor-error">{error}</div> : null}
+      <div className="profit-baseline-actions">
+        <button
+          type="button"
+          className="am-pill active"
+          disabled={saving}
+          onClick={() => onSave?.(day, Number(baseValue || 0), note)}
+        >
+          <CheckCircle2 size={12} />
+          保存起点
+        </button>
+        <button
+          type="button"
+          className="am-pill"
+          disabled={saving}
+          onClick={() => onClear?.()}
         >
           <Eraser size={12} />
           清除
@@ -844,6 +916,7 @@ export default function AssetManagementPanel({
   const [activeTab, setActiveTab] = useState('my_assets');
   const [historyDays, setHistoryDays] = useState(30);
   const historyMetric = 'total_usd';
+  const [trendMode, setTrendMode] = useState('assets');
   const [assetState, setAssetState] = useState({ overview: null, history: null, lp: null });
   const [assetLoading, setAssetLoading] = useState(false);
   const [assetRefreshing, setAssetRefreshing] = useState(false);
@@ -851,6 +924,8 @@ export default function AssetManagementPanel({
   const [selectedPnLDay, setSelectedPnLDay] = useState('');
   const [pnlAdjustmentSaving, setPnlAdjustmentSaving] = useState(false);
   const [pnlAdjustmentError, setPnlAdjustmentError] = useState('');
+  const [profitBaselineSaving, setProfitBaselineSaving] = useState(false);
+  const [profitBaselineError, setProfitBaselineError] = useState('');
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
@@ -933,6 +1008,13 @@ export default function AssetManagementPanel({
     if (assetState?.history?.today?.day) rows.push(assetState.history.today);
     return rows.map((item) => ({ day: item.day, value: Number(item?.[historyMetric] || 0) }));
   }, [assetState.history, historyMetric]);
+  const profitCurvePoints = useMemo(() => {
+    const rows = Array.isArray(assetState?.lp?.profit_curve) ? assetState.lp.profit_curve : [];
+    return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0) }));
+  }, [assetState.lp]);
+  const activeTrendPoints = trendMode === 'profit' ? profitCurvePoints : chartPoints;
+  const activeTrendValue = activeTrendPoints[activeTrendPoints.length - 1]?.value;
+  const latestProfitCurveDay = profitCurvePoints[profitCurvePoints.length - 1]?.day || formatChinaDay();
 
   const isRefreshing = assetLoading || assetRefreshing;
   const selectedPnLEntry = useMemo(() => {
@@ -991,6 +1073,43 @@ export default function AssetManagementPanel({
       setPnlAdjustmentError(errorText(err) || '清除失败');
     } finally {
       setPnlAdjustmentSaving(false);
+    }
+  }, [apiBaseUrl, initData, loadAssets]);
+
+  const handleSaveProfitBaseline = useCallback(async (day, basePnlUsd, note) => {
+    setProfitBaselineSaving(true);
+    setProfitBaselineError('');
+    try {
+      await saveAssetLPPnLBaseline({
+        apiBaseUrl,
+        initData,
+        day,
+        basePnlUsd,
+        note,
+      });
+      await loadAssets({ forceRefresh: true });
+      setTrendMode('profit');
+    } catch (err) {
+      setProfitBaselineError(errorText(err) || '保存失败');
+    } finally {
+      setProfitBaselineSaving(false);
+    }
+  }, [apiBaseUrl, initData, loadAssets]);
+
+  const handleClearProfitBaseline = useCallback(async () => {
+    setProfitBaselineSaving(true);
+    setProfitBaselineError('');
+    try {
+      await clearAssetLPPnLBaseline({
+        apiBaseUrl,
+        initData,
+      });
+      await loadAssets({ forceRefresh: true });
+      setTrendMode('profit');
+    } catch (err) {
+      setProfitBaselineError(errorText(err) || '清除失败');
+    } finally {
+      setProfitBaselineSaving(false);
     }
   }, [apiBaseUrl, initData, loadAssets]);
 
@@ -1058,23 +1177,47 @@ export default function AssetManagementPanel({
 
           <div className="am-card">
             <div className="am-card-header">
-              <div className="am-card-title">总资产趋势</div>
-              <div className="am-pill-group">
-                {HISTORY_WINDOWS.map((days) => (
-                  <button key={days} type="button" className={`am-pill ${historyDays === days ? 'active' : ''}`} onClick={() => setHistoryDays(days)}>
-                    {days}D
+              <div className="am-card-title">{trendMode === 'profit' ? '总盈利趋势' : '总资产趋势'}</div>
+              <div className="am-trend-controls">
+                <div className="am-pill-group">
+                  <button type="button" className={`am-pill ${trendMode === 'assets' ? 'active' : ''}`} onClick={() => setTrendMode('assets')}>
+                    总资产
                   </button>
-                ))}
+                  <button type="button" className={`am-pill ${trendMode === 'profit' ? 'active' : ''}`} onClick={() => setTrendMode('profit')}>
+                    总盈利
+                  </button>
+                </div>
+                {trendMode === 'assets' ? (
+                  <div className="am-pill-group">
+                    {HISTORY_WINDOWS.map((days) => (
+                      <button key={days} type="button" className={`am-pill ${historyDays === days ? 'active' : ''}`} onClick={() => setHistoryDays(days)}>
+                        {days}D
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="am-chart-header">
               <div>
-                <div className="am-chart-label">总资产</div>
-                <div className="am-chart-value">{formatUsd(chartPoints[chartPoints.length - 1]?.value)}</div>
+                <div className="am-chart-label">{trendMode === 'profit' ? '总盈利' : '总资产'}</div>
+                <div className="am-chart-value">{formatUsd(activeTrendValue)}</div>
               </div>
-              <span className="am-badge">{formatChinaTime(assetState.overview?.updated_at)}</span>
+              <span className="am-badge">
+                {trendMode === 'profit' && assetState.lp?.profit_baseline ? `起点 ${assetState.lp.profit_baseline.day}` : formatChinaTime(assetState.overview?.updated_at)}
+              </span>
             </div>
-            <LWAreaChart points={chartPoints} stroke={metricColor} />
+            <LWAreaChart points={activeTrendPoints} stroke={trendMode === 'profit' ? '#52d1ff' : metricColor} />
+            {trendMode === 'profit' ? (
+              <ProfitBaselineEditor
+                baseline={assetState.lp?.profit_baseline}
+                latestDay={latestProfitCurveDay}
+                saving={profitBaselineSaving}
+                error={profitBaselineError}
+                onSave={handleSaveProfitBaseline}
+                onClear={handleClearProfitBaseline}
+              />
+            ) : null}
           </div>
 
           <div className="am-two-col">
@@ -1115,7 +1258,7 @@ export default function AssetManagementPanel({
               <PnLCalendar
                 data={[...(Array.isArray(assetState.lp?.daily_history) ? assetState.lp.daily_history : []), ...(assetState.lp?.today_point ? [assetState.lp.today_point] : [])]}
                 loading={assetLoading}
-                note="日历展示最终盈亏：资产变化先自动扣除净转账，再叠加手动修正。蓝点代表有转账，金点代表有手动修正。"
+                note="日历默认按每日资产快照差额计算；如当天有充值、提现等外部资金变化，可点选日期手动校准。蓝点代表有转账提示，金点代表有手动校准。"
                 selectedDay={selectedPnLEntry?.day || ''}
                 onSelectDay={(entry) => {
                   setSelectedPnLDay(entry?.day || '');

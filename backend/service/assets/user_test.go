@@ -202,10 +202,10 @@ func TestApplyUserSnapshotPnL(t *testing.T) {
 
 	stats := applyUserSnapshotPnL(base, snapshots, transferByDay, map[string]userPnLAdjustment{}, &liveTotalUSD, now)
 
-	if got, want := stats.Today.RealizedPnLUSD, 2.0; got != want {
+	if got, want := stats.Today.RealizedPnLUSD, 3.0; got != want {
 		t.Fatalf("today snapshot pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Today.AvgPnLUSD, 2.0; got != want {
+	if got, want := stats.Today.AvgPnLUSD, 3.0; got != want {
 		t.Fatalf("today avg pnl = %.2f, want %.2f", got, want)
 	}
 	if stats.TodayPoint == nil {
@@ -217,7 +217,7 @@ func TestApplyUserSnapshotPnL(t *testing.T) {
 	if got, want := stats.TodayPoint.TransferNetUSD, 1.0; got != want {
 		t.Fatalf("today transfer net = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.TodayPoint.FinalPnLUSD, 2.0; got != want {
+	if got, want := stats.TodayPoint.FinalPnLUSD, 3.0; got != want {
 		t.Fatalf("today final pnl = %.2f, want %.2f", got, want)
 	}
 
@@ -233,32 +233,103 @@ func TestApplyUserSnapshotPnL(t *testing.T) {
 	if got, want := stats.DailyHistory[0].TransferNetUSD, 5.0; got != want {
 		t.Fatalf("2026-03-18 transfer net = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.DailyHistory[0].RealizedPnLUSD, -3.0; got != want {
+	if got, want := stats.DailyHistory[0].RealizedPnLUSD, 2.0; got != want {
 		t.Fatalf("2026-03-18 pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := stats.DailyHistory[1].RealizedPnLUSD, -3.0; got != want {
 		t.Fatalf("2026-03-19 pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.DailyHistory[2].RealizedPnLUSD, 14.0; got != want {
+	if got, want := stats.DailyHistory[2].RealizedPnLUSD, 10.0; got != want {
 		t.Fatalf("2026-03-20 pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := stats.DailyHistory[2].TransferNetUSD, -4.0; got != want {
 		t.Fatalf("2026-03-20 transfer net = %.2f, want %.2f", got, want)
 	}
 
-	if got, want := stats.Windows[0].RealizedPnLUSD, 14.0; got != want {
+	if got, want := stats.Windows[0].RealizedPnLUSD, 10.0; got != want {
 		t.Fatalf("1d pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[0].AvgPnLUSD, 14.0; got != want {
+	if got, want := stats.Windows[0].AvgPnLUSD, 10.0; got != want {
 		t.Fatalf("1d avg pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[1].RealizedPnLUSD, 8.0; got != want {
+	if got, want := stats.Windows[1].RealizedPnLUSD, 9.0; got != want {
 		t.Fatalf("7d pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[1].AvgPnLUSD, 4.0; got != want {
+	if got, want := stats.Windows[1].AvgPnLUSD, 4.5; got != want {
 		t.Fatalf("7d avg pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[2].RealizedPnLUSD, 8.0; got != want {
+	if got, want := stats.Windows[2].RealizedPnLUSD, 9.0; got != want {
 		t.Fatalf("30d pnl = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildUserProfitCurve(t *testing.T) {
+	history := []UserLPDailyPoint{
+		{Day: "2026-03-18", FinalPnLUSD: 2},
+		{Day: "2026-03-19", FinalPnLUSD: -3},
+		{Day: "2026-03-20", FinalPnLUSD: 10},
+	}
+	todayPoint := &UserLPDailyPoint{Day: "2026-03-21", FinalPnLUSD: 3}
+
+	curve := buildUserProfitCurve(history, todayPoint, nil)
+	if got, want := len(curve), 4; got != want {
+		t.Fatalf("curve len = %d, want %d", got, want)
+	}
+	if got, want := curve[0].ValueUSD, 2.0; got != want {
+		t.Fatalf("2026-03-18 value = %.2f, want %.2f", got, want)
+	}
+	if got, want := curve[1].ValueUSD, -1.0; got != want {
+		t.Fatalf("2026-03-19 value = %.2f, want %.2f", got, want)
+	}
+	if got, want := curve[2].ValueUSD, 9.0; got != want {
+		t.Fatalf("2026-03-20 value = %.2f, want %.2f", got, want)
+	}
+	if got, want := curve[3].ValueUSD, 12.0; got != want {
+		t.Fatalf("2026-03-21 value = %.2f, want %.2f", got, want)
+	}
+
+	baseline := &userProfitBaseline{
+		Day:        "2026-03-19",
+		BasePnLUSD: 100,
+	}
+	curve = buildUserProfitCurve(history, todayPoint, baseline)
+	if got, want := len(curve), 3; got != want {
+		t.Fatalf("baseline curve len = %d, want %d", got, want)
+	}
+	if got, want := curve[0].Day, "2026-03-19"; got != want {
+		t.Fatalf("baseline day = %s, want %s", got, want)
+	}
+	if !curve[0].Baseline {
+		t.Fatalf("baseline point should be marked")
+	}
+	if got, want := curve[0].ValueUSD, 100.0; got != want {
+		t.Fatalf("baseline value = %.2f, want %.2f", got, want)
+	}
+	if got, want := curve[1].ValueUSD, 110.0; got != want {
+		t.Fatalf("2026-03-20 baseline value = %.2f, want %.2f", got, want)
+	}
+	if got, want := curve[2].ValueUSD, 113.0; got != want {
+		t.Fatalf("2026-03-21 baseline value = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestUserProfitCurveRangeUsesBaseline(t *testing.T) {
+	timeutil.Init()
+	now := time.Date(2026, time.March, 21, 16, 20, 0, 0, timeutil.Location())
+
+	start, end := userProfitCurveRange(now, nil)
+	if got, want := formatDay(start), "2025-12-20"; got != want {
+		t.Fatalf("default profit range start = %s, want %s", got, want)
+	}
+	if got, want := formatDay(end), "2026-03-21"; got != want {
+		t.Fatalf("default profit range end = %s, want %s", got, want)
+	}
+
+	start, end = userProfitCurveRange(now, &userProfitBaseline{Day: "2025-10-01", BasePnLUSD: 100})
+	if got, want := formatDay(start), "2025-09-30"; got != want {
+		t.Fatalf("baseline profit range start = %s, want %s", got, want)
+	}
+	if got, want := formatDay(end), "2026-03-21"; got != want {
+		t.Fatalf("baseline profit range end = %s, want %s", got, want)
 	}
 }

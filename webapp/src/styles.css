@@ -7788,6 +7788,13 @@ body {
   gap: 6px;
 }
 
+.am-trend-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .am-pill-group-wrap {
   flex-wrap: wrap;
   margin-top: 8px;
@@ -8010,7 +8017,7 @@ body {
 }
 .pnl-editor-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 10px;
 }
@@ -8034,6 +8041,16 @@ body {
 .pnl-editor-value.negative { color: var(--negative, #ff5e76); }
 .pnl-editor-value.transfer-in { color: #52d1ff; }
 .pnl-editor-value.transfer-out { color: #ffae42; }
+.pnl-editor-transfer-hint {
+  margin-top: 8px;
+  border: 1px solid rgba(82, 209, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(82, 209, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  padding: 7px 8px;
+}
 .pnl-editor-form {
   display: grid;
   grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
@@ -8075,6 +8092,56 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+.profit-baseline-editor {
+  margin-top: 12px;
+  border: 1px solid rgba(136, 157, 191, 0.1);
+  border-radius: var(--radius-md);
+  background: rgba(7, 11, 17, 0.45);
+  padding: 10px;
+}
+.profit-baseline-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.profit-baseline-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(0, 1.4fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.profit-baseline-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.profit-baseline-form span {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.profit-baseline-form input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(136, 157, 191, 0.14);
+  border-radius: 8px;
+  background: rgba(18, 26, 40, 0.72);
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: none;
+  padding: 7px 9px;
+}
+.profit-baseline-form input:focus {
+  border-color: rgba(82, 209, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(82, 209, 255, 0.08);
+}
+.profit-baseline-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
 }
 .pnl-editor-error {
   margin-top: 8px;
