@@ -10,12 +10,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -61,6 +64,8 @@ func stopSmartMoney() {
 // --- Route Registration (called from server.go) ---
 
 func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/sm", s.handleSMCompat)
+	mux.HandleFunc("/api/sm_upload", s.handleSMUploadCompat)
 	mux.HandleFunc("/api/sm/wallets", s.handleSMWallets)
 	mux.HandleFunc("/api/sm/wallet_avatar", s.handleSMWalletAvatar)
 	mux.HandleFunc("/api/sm/contracts", s.handleSMContracts)
@@ -75,6 +80,165 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/smart_money_watch_open_alert_config", s.handleSmartMoneyWatchOpenAlertConfig)
 	mux.HandleFunc("/api/smart_money_watch_open_alert_test", s.handleSmartMoneyWatchOpenAlertTest)
 	mux.HandleFunc("/ws/sm/events", smWSHub.HandleWS)
+}
+
+func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
+	endpoint := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("endpoint")))
+	if endpoint == "avatar_asset" {
+		handleSMAvatarAsset(w, r)
+		return
+	}
+
+	nextPath, ok := smartMoneyCompatEndpointPath(endpoint)
+	if !ok {
+		jsonError(w, "invalid endpoint", http.StatusBadRequest)
+		return
+	}
+	withSmartMoneyCompatPath(r, nextPath, func() {
+		switch endpoint {
+		case "wallets":
+			s.handleSMWallets(w, r)
+		case "contracts":
+			s.handleSMContracts(w, r)
+		case "pools":
+			s.handleSMPools(w, r)
+		case "positions":
+			s.handleSMPositions(w, r)
+		case "position_detail":
+			s.handleSMPositionDetail(w, r)
+		case "events":
+			s.handleSMEvents(w, r)
+		case "stats":
+			s.handleSMStats(w, r)
+		}
+	})
+}
+
+func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
+	endpoint := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("endpoint")))
+	if endpoint != "wallet_avatar" {
+		jsonError(w, "invalid endpoint", http.StatusBadRequest)
+		return
+	}
+	withSmartMoneyCompatPath(r, "/api/sm/wallet_avatar", func() {
+		s.handleSMWalletAvatar(w, r)
+	})
+}
+
+func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
+	switch endpoint {
+	case "wallets", "contracts", "pools", "positions", "position_detail", "events", "stats":
+		return "/api/sm/" + endpoint, true
+	default:
+		return "", false
+	}
+}
+
+func withSmartMoneyCompatPath(r *http.Request, path string, fn func()) {
+	oldURL := *r.URL
+	oldRequestURI := r.RequestURI
+	query := oldURL.Query()
+	query.Del("endpoint")
+	r.URL.Path = path
+	r.URL.RawQuery = query.Encode()
+	r.RequestURI = path
+	if r.URL.RawQuery != "" {
+		r.RequestURI += "?" + r.URL.RawQuery
+	}
+	defer func() {
+		r.URL = &oldURL
+		r.RequestURI = oldRequestURI
+	}()
+	fn()
+}
+
+func handleSMAvatarAsset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	targetURL := strings.TrimSpace(r.URL.Query().Get("url"))
+	parsed, ok := parseAllowedSmartMoneyAvatarURL(targetURL)
+	if !ok {
+		http.Error(w, "invalid avatar url", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, r.Method, parsed.String(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	req.Header.Set("Accept", "image/*,*/*;q=0.8")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	for _, name := range []string{"Content-Type", "Content-Length", "ETag", "Last-Modified"} {
+		if value := resp.Header.Get(name); value != "" {
+			w.Header().Set(name, value)
+		}
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	w.WriteHeader(resp.StatusCode)
+	if r.Method == http.MethodHead || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified {
+		return
+	}
+	_, _ = io.Copy(w, resp.Body)
+}
+
+func parseAllowedSmartMoneyAvatarURL(raw string) (*url.URL, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return nil, false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, false
+	}
+	if !strings.HasPrefix(parsed.EscapedPath(), "/avatar/") && !strings.HasPrefix(parsed.Path, "/avatar/") {
+		return nil, false
+	}
+
+	allowedHosts := make(map[string]struct{})
+	if config.AppConfig != nil {
+		addSmartMoneyAvatarAllowedHost(allowedHosts, config.AppConfig.MinIOPublicBaseURL)
+		addSmartMoneyAvatarAllowedHost(allowedHosts, config.AppConfig.MinIOEndpoint)
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if _, ok := allowedHosts[host]; !ok {
+		return nil, false
+	}
+	return parsed, true
+}
+
+func addSmartMoneyAvatarAllowedHost(allowedHosts map[string]struct{}, raw string) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return
+	}
+	if !strings.HasPrefix(strings.ToLower(value), "http://") && !strings.HasPrefix(strings.ToLower(value), "https://") {
+		value = "http://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" {
+		return
+	}
+	allowedHosts[strings.ToLower(parsed.Hostname())] = struct{}{}
 }
 
 // --- Wallets ---

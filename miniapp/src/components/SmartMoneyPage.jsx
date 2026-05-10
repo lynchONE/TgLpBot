@@ -23,46 +23,15 @@ import PositionCard from './PositionCard.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import gmgnIcon from '../image/gmgn.svg';
-import avatar01 from '../../../webapp/src/icon/avatar_01.png';
-import avatar02 from '../../../webapp/src/icon/avatar_02.png';
-import avatar03 from '../../../webapp/src/icon/avatar_03.png';
-import avatar04 from '../../../webapp/src/icon/avatar_04.png';
-import avatar05 from '../../../webapp/src/icon/avatar_05.png';
-import avatar06 from '../../../webapp/src/icon/avatar_06.png';
-import avatar07 from '../../../webapp/src/icon/avatar_07.png';
-import avatar08 from '../../../webapp/src/icon/avatar_08.png';
-import avatar09 from '../../../webapp/src/icon/avatar_09.png';
-import avatar10 from '../../../webapp/src/icon/avatar_10.png';
-import avatar11 from '../../../webapp/src/icon/avatar_11.png';
-import avatar12 from '../../../webapp/src/icon/avatar_12.png';
-import avatar13 from '../../../webapp/src/icon/avatar_13.png';
-import avatar14 from '../../../webapp/src/icon/avatar_14.png';
-import avatar15 from '../../../webapp/src/icon/avatar_15.png';
-import avatar16 from '../../../webapp/src/icon/avatar_16.png';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeIcon, color: '#d1884f' },
     uniswap_v3: { version: 'V3', icon: uniswapIcon, color: '#ff007a' },
     uniswap_v4: { version: 'V4', icon: uniswapIcon, color: '#ff007a' },
 };
-const WALLET_AVATAR_ICONS = [
-    avatar01,
-    avatar02,
-    avatar03,
-    avatar04,
-    avatar05,
-    avatar06,
-    avatar07,
-    avatar08,
-    avatar09,
-    avatar10,
-    avatar11,
-    avatar12,
-    avatar13,
-    avatar14,
-    avatar15,
-    avatar16,
-];
+const WALLET_AVATAR_ICONS = Object.entries(
+    import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
+).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
 const SMART_MONEY_AVATAR_ACCEPT = 'image/png,image/jpeg,image/webp';
 const SMART_MONEY_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);

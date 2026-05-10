@@ -1,4 +1,4 @@
-name: Build and Push TgLpBot Image
+name: Build and Push TgLpBot Images
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
       - master
     paths:
       - "backend/**"
+      - "webapp/**"
+      - "miniapp/**"
       - ".github/workflows/docker-image.yml"
   workflow_dispatch:
 
@@ -37,7 +39,7 @@ jobs:
         id: image-tags
         run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push Docker image
+      - name: Build and push backend image
         uses: docker/build-push-action@v7
         with:
           context: ./backend
@@ -49,5 +51,44 @@ jobs:
             lynchone/repo:tglpbot-${{ steps.image-tags.outputs.short_sha }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push webapp image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./webapp
+          file: ./webapp/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            lynchone/repo:tglpbot-webapp
+            lynchone/repo:tglpbot-webapp-${{ steps.image-tags.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VITE_API_BASE_URL=${{ vars.WEBAPP_VITE_API_BASE_URL }}
+            VITE_WS_BASE_URL=${{ vars.WEBAPP_VITE_WS_BASE_URL }}
+            VITE_DEFAULT_CHAIN=${{ vars.WEBAPP_VITE_DEFAULT_CHAIN }}
+            VITE_TELEGRAM_BOT_ID=${{ vars.WEBAPP_VITE_TELEGRAM_BOT_ID }}
+            VITE_TELEGRAM_BOT_USERNAME=${{ vars.WEBAPP_VITE_TELEGRAM_BOT_USERNAME }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push miniapp image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./miniapp
+          file: ./miniapp/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            lynchone/repo:tglpbot-miniapp
+            lynchone/repo:tglpbot-miniapp-${{ steps.image-tags.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VITE_API_BASE_URL=${{ vars.MINIAPP_VITE_API_BASE_URL }}
+            VITE_ALLOW_EMPTY_INITDATA=${{ vars.MINIAPP_VITE_ALLOW_EMPTY_INITDATA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -1,0 +1,141 @@
+name: tglpbot
+
+x-backend-compose-env: &backend-compose-env
+  TZ: Asia/Shanghai
+  MYSQL_HOST: mysql
+  MYSQL_PORT: "3306"
+  MYSQL_USER: root
+  MYSQL_PASSWORD: ${COMPOSE_MYSQL_ROOT_PASSWORD:-tglpbot_dev_password}
+  MYSQL_DATABASE: ${COMPOSE_MYSQL_DATABASE:-tglpbot}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ""
+  REDIS_DB: "0"
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ${COMPOSE_MINIO_ROOT_USER:-minioadmin}
+  MINIO_SECRET_KEY: ${COMPOSE_MINIO_ROOT_PASSWORD:-minioadmin123}
+  MINIO_USE_SSL: "0"
+  MINIO_PUBLIC_BASE_URL: ${COMPOSE_MINIO_PUBLIC_BASE_URL:-http://localhost:9000}
+  MINIO_AVATAR_BUCKET: ${COMPOSE_MINIO_AVATAR_BUCKET:-avatar}
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${COMPOSE_MYSQL_ROOT_PASSWORD:-tglpbot_dev_password}
+      MYSQL_DATABASE: ${COMPOSE_MYSQL_DATABASE:-tglpbot}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      TZ: Asia/Shanghai
+      MINIO_ROOT_USER: ${COMPOSE_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${COMPOSE_MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ./data/minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${COMPOSE_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${COMPOSE_MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_AVATAR_BUCKET: ${COMPOSE_MINIO_AVATAR_BUCKET:-avatar}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$${MINIO_AVATAR_BUCKET}"
+        mc anonymous set download "local/$${MINIO_AVATAR_BUCKET}"
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *backend-compose-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  webapp:
+    build:
+      context: ./webapp
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${WEBAPP_VITE_API_BASE_URL:-}
+        VITE_WS_BASE_URL: ${WEBAPP_VITE_WS_BASE_URL:-}
+        VITE_DEFAULT_CHAIN: ${WEBAPP_VITE_DEFAULT_CHAIN:-bsc}
+        VITE_TELEGRAM_BOT_ID: ${WEBAPP_VITE_TELEGRAM_BOT_ID:-}
+        VITE_TELEGRAM_BOT_USERNAME: ${WEBAPP_VITE_TELEGRAM_BOT_USERNAME:-}
+    restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: http://backend:8080
+    depends_on:
+      - backend
+    ports:
+      - "${WEBAPP_PORT:-3000}:80"
+
+  miniapp:
+    build:
+      context: ./miniapp
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${MINIAPP_VITE_API_BASE_URL:-}
+        VITE_ALLOW_EMPTY_INITDATA: ${MINIAPP_VITE_ALLOW_EMPTY_INITDATA:-}
+    restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: http://backend:8080
+    depends_on:
+      - backend
+    ports:
+      - "${MINIAPP_PORT:-3001}:80"
