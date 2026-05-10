@@ -9,7 +9,7 @@ x-backend-compose-env: &backend-compose-env
   MYSQL_DATABASE: ${COMPOSE_MYSQL_DATABASE:-tglpbot}
   REDIS_HOST: redis
   REDIS_PORT: "6379"
-  REDIS_PASSWORD: ""
+  REDIS_PASSWORD: ${COMPOSE_REDIS_PASSWORD:-}
   REDIS_DB: "0"
   MINIO_ENDPOINT: minio:9000
   MINIO_ACCESS_KEY: ${COMPOSE_MINIO_ROOT_USER:-minioadmin}
@@ -25,7 +25,10 @@ services:
     environment:
       TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: ${COMPOSE_MYSQL_ROOT_PASSWORD:-tglpbot_dev_password}
+      MYSQL_ROOT_HOST: "%"
       MYSQL_DATABASE: ${COMPOSE_MYSQL_DATABASE:-tglpbot}
+    ports:
+      - "${MYSQL_BIND_ADDR:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -41,11 +44,22 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -n "$${REDIS_PASSWORD}" ]; then
+          exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+        fi
+        exec redis-server --appendonly yes
+    environment:
+      REDIS_PASSWORD: ${COMPOSE_REDIS_PASSWORD:-}
+    ports:
+      - "${REDIS_BIND_ADDR:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
       interval: 5s
       timeout: 3s
       retries: 20
