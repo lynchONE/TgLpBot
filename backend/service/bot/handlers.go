@@ -562,6 +562,8 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleTaskRebalanceTimeoutInput(message, user)
 	case "awaiting_task_stop_loss_delay":
 		b.handleTaskStopLossDelayInput(message.Chat.ID, user, message.Text)
+	case "awaiting_task_partial_exit":
+		b.handleTaskPartialExitInput(message, user)
 	case "awaiting_task_residual_tolerance":
 		b.handleTaskResidualToleranceInput(message.Chat.ID, user, message.Text)
 	// 授权码和管理员相关输入

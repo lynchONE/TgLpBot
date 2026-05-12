@@ -29,6 +29,9 @@ type LiquidityService struct {
 type TxOptions struct {
 	// GasMultiplier multiplies suggested gasPrice (e.g. 2.0 for emergency). 0 means 1.0.
 	GasMultiplier float64
+	// ExitPercent optionally limits a liquidity exit to a percentage of current position liquidity.
+	// nil means the existing full-exit behavior (100%).
+	ExitPercent *float64
 	// EntrySwapSlippageOverride only applies to the initial wallet-side entry swap before opening.
 	// It must not change the task's persisted slippage tolerance.
 	EntrySwapSlippageOverride *float64

@@ -1935,6 +1935,24 @@ export default function App() {
     }
   }, [apiBaseUrl, initData, loadPositions]);
 
+  const handleTaskPartialExit = useCallback(async (taskId, exitPercent) => {
+    const pct = Number(exitPercent);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return;
+    const message = pct >= 100
+      ? '确认停止该仓位？\n系统会关闭相关任务，并尽量将剩余价值结算为 USDT。'
+      : `确认撤出当前仓位的 ${pct}% 并兑换为 USDT？\n任务会保留剩余仓位继续运行。`;
+    if (!window.confirm(message)) return;
+    if (pct >= 100) {
+      await handleTaskStop(taskId);
+      return;
+    }
+    const resp = await stopTask({ apiBaseUrl, initData, taskId, exitPercent: pct });
+    if (resp?.message) {
+      setPositionsError('');
+    }
+    loadPositions();
+  }, [apiBaseUrl, initData, handleTaskStop, loadPositions]);
+
   // Polling fallback: detect close completion from positions data
   useEffect(() => {
     if (!operationProgress) return;
@@ -1965,7 +1983,7 @@ export default function App() {
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleWithdrawLiquidity = useCallback(async (taskId) => {
-    if (!window.confirm('确认要取回流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。')) return;
+    if (!window.confirm('确认要取回全部流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。')) return;
     await withdrawLiquidity({ apiBaseUrl, initData, taskId });
     loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
@@ -3070,6 +3088,7 @@ export default function App() {
                                   position={taskActionPos}
                                   onPause={handleTaskPause}
                                   onStop={handleTaskStop}
+                                  onPartialExit={handleTaskPartialExit}
                                   onDelete={handleTaskDelete}
                                   onEditRange={handleTaskEditRange}
                                   onWithdrawLiquidity={handleWithdrawLiquidity}

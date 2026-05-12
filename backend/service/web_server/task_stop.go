@@ -2,16 +2,21 @@ package web_server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"TgLpBot/base/models"
+	"TgLpBot/service/liquidity"
 	"TgLpBot/service/strategy"
+	"TgLpBot/service/txexec"
 )
 
 type taskStopRequest struct {
-	InitData string `json:"initData"`
-	TaskID   uint   `json:"taskId"`
+	InitData         string   `json:"initData"`
+	TaskID           uint     `json:"taskId"`
+	ExitPercent      *float64 `json:"exit_percent"`
+	ExitPercentCamel *float64 `json:"exitPercent"`
 }
 
 type taskStopResponse struct {
@@ -20,6 +25,21 @@ type taskStopResponse struct {
 	Status  string `json:"status"`
 	Pending bool   `json:"pending"`
 	Message string `json:"message,omitempty"`
+}
+
+func requestExitPercent(snake *float64, camel *float64) (*float64, error) {
+	if snake != nil && camel != nil && *snake != *camel {
+		return nil, fmt.Errorf("exit_percent and exitPercent conflict")
+	}
+	if snake != nil {
+		value := *snake
+		return &value, nil
+	}
+	if camel != nil {
+		value := *camel
+		return &value, nil
+	}
+	return nil, nil
 }
 
 func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +60,17 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
 		http.Error(w, "缺少 taskId", http.StatusBadRequest)
+		return
+	}
+
+	exitPercent, err := requestExitPercent(req.ExitPercent, req.ExitPercentCamel)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	exitPercentValue, partialExit, err := liquidity.ValidateExitPercent(exitPercent)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -96,6 +127,10 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 
 	pendingAction := strings.TrimSpace(task.ExitPendingAction)
 	if pendingAction != "" {
+		if partialExit {
+			http.Error(w, "任务已有撤仓/再平衡流程处理中，不能提交部分撤仓", http.StatusConflict)
+			return
+		}
 		updates := map[string]interface{}{
 			"exit_pending_action":     strategy.ExitActionManualStop,
 			"exit_pending_reason":     "🛑 手动停止",
@@ -192,6 +227,58 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Error(w, "无法停止：缺少仓位信息", http.StatusBadRequest)
+		return
+	}
+
+	if partialExit {
+		userID := user.ID
+		taskID := req.TaskID
+		exec := txexec.Default()
+		ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
+			liqSvc := liquidity.NewLiquidityService()
+			txHashes, exitErr := liqSvc.ExitTaskToUSDTWithOptions(userID, task, false, liquidity.TxOptions{ExitPercent: exitPercent})
+			if exitErr != nil {
+				_ = taskService.Update(userID, taskID, map[string]interface{}{
+					"status":        models.StrategyStatusRunning,
+					"error_message": "部分撤仓失败: " + exitErr.Error(),
+				})
+				if s != nil && s.Realtime != nil {
+					s.Realtime.InvalidateUser(userID)
+				}
+				return
+			}
+			_ = txHashes
+			_ = taskService.Update(userID, taskID, map[string]interface{}{
+				"status":             models.StrategyStatusRunning,
+				"error_message":      "",
+				"exit_retry_count":   0,
+				"exit_next_retry_at": nil,
+				"exit_last_error":    "",
+				"exit_give_up_at":    nil,
+			})
+			if s != nil && s.Realtime != nil {
+				s.Realtime.InvalidateUser(userID)
+			}
+		})
+		if err != nil {
+			http.Error(w, "提交部分撤仓失败："+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "钱包正在处理其他交易，请稍后再试", http.StatusConflict)
+			return
+		}
+		if s != nil && s.Realtime != nil {
+			s.Realtime.InvalidateUser(user.ID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(taskStopResponse{
+			OK:      true,
+			TaskID:  req.TaskID,
+			Status:  string(task.Status),
+			Pending: true,
+			Message: fmt.Sprintf("已提交 %.4g%% 部分撤仓，撤出的资产会兑换为稳定币，任务会保留剩余仓位", exitPercentValue),
+		})
 		return
 	}
 

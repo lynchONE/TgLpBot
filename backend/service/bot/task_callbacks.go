@@ -176,6 +176,50 @@ func (b *Bot) handleTaskStopRefresh(query *tgbotapi.CallbackQuery, user *models.
 	}
 }
 
+func (b *Bot) handleTaskPartialExit(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	chatID := user.TelegramID
+	messageID := 0
+	if query.Message != nil && query.Message.Chat != nil {
+		chatID = query.Message.Chat.ID
+		messageID = query.Message.MessageID
+	}
+	taskID, err := parseTaskID("task_partial_exit_", query.Data)
+	if err != nil {
+		b.sendMessage(chatID, "无效的任务ID")
+		return
+	}
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil || task == nil {
+		b.sendMessage(chatID, "任务不存在或已删除")
+		return
+	}
+	if task.Status == models.StrategyStatusStopped || task.Status == models.StrategyStatusStopping {
+		b.sendMessage(chatID, "该任务已停止或正在停止中，不能部分撤仓")
+		return
+	}
+	if strings.TrimSpace(task.ExitPendingAction) != "" {
+		b.sendMessage(chatID, "任务已有撤仓/再平衡流程处理中，不能提交部分撤仓")
+		return
+	}
+	currentLiq := strings.TrimSpace(task.CurrentLiquidity)
+	if currentLiq == "" || currentLiq == "0" {
+		b.sendMessage(chatID, "当前没有可撤出的流动性")
+		return
+	}
+
+	database.SetUserSession(user.TelegramID, "task_edit_id", fmt.Sprintf("%d", taskID), 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "state", "awaiting_task_partial_exit", 30*time.Minute)
+	if messageID != 0 {
+		database.SetUserSession(user.TelegramID, "task_card_msg_id", fmt.Sprintf("%d", messageID), 30*time.Minute)
+	}
+
+	promptMsg, _ := b.sendMessage(chatID, "请输入要撤出的仓位百分比（1-100），例如：`25` 表示撤出当前仓位的 25%。输入 `100` 等同于停止任务全撤。")
+	if promptMsg.MessageID != 0 {
+		database.SetUserSession(user.TelegramID, "prompt_msg_id", fmt.Sprintf("%d", promptMsg.MessageID), 30*time.Minute)
+	}
+}
+
 func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, "正在停止任务..."))
 	chatID := user.TelegramID

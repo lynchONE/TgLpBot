@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -13,8 +14,10 @@ import (
 )
 
 type taskWithdrawLiquidityRequest struct {
-	InitData string `json:"initData"`
-	TaskID   uint   `json:"taskId"`
+	InitData         string   `json:"initData"`
+	TaskID           uint     `json:"taskId"`
+	ExitPercent      *float64 `json:"exit_percent"`
+	ExitPercentCamel *float64 `json:"exitPercent"`
 }
 
 type taskWithdrawLiquidityResponse struct {
@@ -43,6 +46,17 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 	initData := strings.TrimSpace(req.InitData)
 	if req.TaskID == 0 {
 		http.Error(w, "缺少 taskId", http.StatusBadRequest)
+		return
+	}
+
+	exitPercent, err := requestExitPercent(req.ExitPercent, req.ExitPercentCamel)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	exitPercentValue, partialExit, err := liquidity.ValidateExitPercent(exitPercent)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -76,6 +90,16 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "任务已停止", http.StatusBadRequest)
 		return
 	}
+	if partialExit {
+		if task.Status == models.StrategyStatusStopping {
+			http.Error(w, "任务正在停止中，不能提交部分撤仓", http.StatusConflict)
+			return
+		}
+		if strings.TrimSpace(task.ExitPendingAction) != "" {
+			http.Error(w, "任务已有撤仓/再平衡流程处理中，不能提交部分撤仓", http.StatusConflict)
+			return
+		}
+	}
 
 	currentLiq := strings.TrimSpace(task.CurrentLiquidity)
 	if currentLiq == "" || currentLiq == "0" {
@@ -91,12 +115,22 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 	exec := txexec.Default()
 	ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 		liqSvc := liquidity.NewLiquidityService()
-		txHashes, exitErr := liqSvc.WithdrawTaskLiquidityOnly(userID, task)
+		var txHashes []string
+		var exitErr error
+		if partialExit {
+			txHashes, exitErr = liqSvc.ExitTaskToUSDTWithOptions(userID, task, false, liquidity.TxOptions{ExitPercent: exitPercent})
+		} else {
+			txHashes, exitErr = liqSvc.WithdrawTaskLiquidityOnlyWithOptions(userID, task, liquidity.TxOptions{ExitPercent: exitPercent})
+		}
 
 		if exitErr != nil {
 			log.Printf("[WebAPI] withdraw_liquidity failed: task_id=%d err=%v txHashes=%v", taskID, exitErr, txHashes)
+			status := models.StrategyStatusError
+			if partialExit {
+				status = models.StrategyStatusRunning
+			}
 			_ = taskService.Update(userID, taskID, map[string]interface{}{
-				"status":        models.StrategyStatusError,
+				"status":        status,
 				"error_message": "撤出流动性失败: " + exitErr.Error(),
 			})
 			if s != nil && s.Realtime != nil {
@@ -105,11 +139,16 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		// Mark task as stopped after withdrawal
+		status := models.StrategyStatusRunning
+		if !partialExit {
+			status = models.StrategyStatusStopped
+		}
 		updates := map[string]interface{}{
-			"status":            models.StrategyStatusStopped,
-			"current_liquidity": "0",
-			"error_message":     "",
+			"status":        status,
+			"error_message": "",
+		}
+		if !partialExit {
+			updates["current_liquidity"] = "0"
 		}
 		_ = taskService.Update(userID, taskID, updates)
 
@@ -127,12 +166,16 @@ func (s *Server) handleTaskWithdrawLiquidity(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	message := "取回流动性请求已提交"
+	if partialExit {
+		message = fmt.Sprintf("已提交 %.4g%% 部分撤仓，撤出的资产会兑换为稳定币，任务会保留剩余仓位", exitPercentValue)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(taskWithdrawLiquidityResponse{
 		OK:      true,
 		TaskID:  req.TaskID,
 		Pending: true,
-		Message: "取回流动性已提交，正在撤出流动性",
+		Message: message,
 	})
 }
 

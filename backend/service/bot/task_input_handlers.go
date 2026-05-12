@@ -3,8 +3,10 @@ package bot
 import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/strategy"
+	"TgLpBot/service/txexec"
 	"fmt"
 	"log"
 	"strconv"
@@ -230,6 +232,132 @@ func (b *Bot) handleTaskStopLossDelayInput(chatID int64, user *models.User, text
 	database.ClearUserSession(user.TelegramID)
 	task, _ := b.taskService.GetByID(user.ID, taskID)
 	b.sendMessageWithKeyboard(chatID, b.formatTaskCard(task), b.taskKeyboard(task))
+}
+
+func (b *Bot) handleTaskPartialExitInput(message *tgbotapi.Message, user *models.User) {
+	chatID := message.Chat.ID
+	taskID, err := b.taskIDFromSession(user)
+	if err != nil {
+		b.sendMessage(chatID, "会话已过期，请重新打开任务卡片。")
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+
+	percent, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(message.Text, "%")), 64)
+	if err != nil {
+		b.sendMessage(chatID, "百分比无效。请输入 1-100 之间的数字，例如：`25`")
+		return
+	}
+	exitPercentValue, partialExit, err := liquidity.ValidateExitPercent(&percent)
+	if err != nil {
+		b.sendMessage(chatID, "百分比无效。请输入大于 0 且不超过 100 的数字。")
+		return
+	}
+
+	if promptMsgIDStr, err := database.GetUserSession(user.TelegramID, "prompt_msg_id"); err == nil && promptMsgIDStr != "" {
+		if promptMsgID, _ := strconv.Atoi(promptMsgIDStr); promptMsgID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(chatID, promptMsgID))
+		}
+	}
+	b.api.Send(tgbotapi.NewDeleteMessage(chatID, message.MessageID))
+
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil || task == nil {
+		b.sendMessage(chatID, "任务不存在或已删除")
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+	if !partialExit {
+		database.ClearUserSession(user.TelegramID)
+		b.sendMessage(chatID, "已按 100% 提交停止任务，全撤逻辑保持不变。")
+		updates := map[string]interface{}{
+			"status":                     models.StrategyStatusStopping,
+			"out_of_range_since":         nil,
+			"error_message":              "",
+			"exit_pending_action":        strategy.ExitActionManualStop,
+			"exit_pending_reason":        "手动停止",
+			"exit_retry_count":           0,
+			"exit_next_retry_at":         nil,
+			"exit_last_error":            "",
+			"exit_give_up_at":            nil,
+			"rebalance_pending":          false,
+			"rebalance_retry_count":      0,
+			"rebalance_next_retry_at":    nil,
+			"rebalance_last_error":       "",
+			"switch_target_pool_id":      "",
+			"switch_target_pool_version": "",
+		}
+		if err := b.taskService.Update(user.ID, taskID, updates); err != nil {
+			b.sendMessage(chatID, fmt.Sprintf("停止任务失败：%v", err))
+		}
+		return
+	}
+
+	if strings.TrimSpace(task.ExitPendingAction) != "" {
+		b.sendMessage(chatID, "任务已有撤仓/再平衡流程处理中，不能提交部分撤仓")
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+
+	loadingMsg, _ := b.sendMessage(chatID, fmt.Sprintf("正在提交 %.4g%% 部分撤仓并兑换为稳定币，请稍候...", exitPercentValue))
+	exec := txexec.Default()
+	ok, runErr := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
+		txHashes, exitErr := b.liquidityService.ExitTaskToUSDTWithOptions(user.ID, task, false, liquidity.TxOptions{ExitPercent: &percent})
+		if loadingMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(loadingMsg.Chat.ID, loadingMsg.MessageID))
+		}
+		if exitErr != nil {
+			_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
+				"status":        models.StrategyStatusRunning,
+				"error_message": "部分撤仓失败: " + exitErr.Error(),
+			})
+			b.sendMessage(chatID, fmt.Sprintf("部分撤仓失败：%v", exitErr))
+			return
+		}
+		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
+			"status":             models.StrategyStatusRunning,
+			"error_message":      "",
+			"exit_retry_count":   0,
+			"exit_next_retry_at": nil,
+			"exit_last_error":    "",
+			"exit_give_up_at":    nil,
+		})
+		msg := fmt.Sprintf("已完成 %.4g%% 部分撤仓，撤出的资产已尝试兑换为稳定币，任务保留剩余仓位。", exitPercentValue)
+		if len(txHashes) > 0 {
+			msg += "\n交易记录：\n"
+			for i, txInfo := range txHashes {
+				parts := strings.Split(txInfo, "|")
+				txHash := strings.TrimSpace(txInfo)
+				desc := "撤仓"
+				if len(parts) == 2 {
+					desc = strings.TrimSpace(parts[0])
+					txHash = strings.TrimSpace(parts[1])
+				}
+				msg += fmt.Sprintf("%d. %s\n%s\n", i+1, desc, explorerTxURL(task.Chain, txHash))
+			}
+		}
+		b.sendMessage(chatID, msg)
+		task, _ := b.taskService.GetByID(user.ID, taskID)
+		b.sendMessageWithKeyboard(chatID, b.formatTaskCard(task), b.taskKeyboard(task))
+	})
+	if runErr != nil {
+		if loadingMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(loadingMsg.Chat.ID, loadingMsg.MessageID))
+		}
+		b.sendMessage(chatID, fmt.Sprintf("提交部分撤仓失败：%v", runErr))
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+	if !ok {
+		if loadingMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(loadingMsg.Chat.ID, loadingMsg.MessageID))
+		}
+		b.sendMessage(chatID, "钱包正在处理其他交易，请稍后再试")
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+
+	database.ClearUserSession(user.TelegramID)
 }
 
 func (b *Bot) handleTaskResidualToleranceInput(chatID int64, user *models.User, text string) {

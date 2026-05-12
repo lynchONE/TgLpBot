@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../taskModes';
 
-export default function TaskActionMenu({ position, onPause, onStop, onDelete, onEditRange, onWithdrawLiquidity, onSwapDust, onTriggerRebalance, onUpdateMode, onAddLiquidity, onClose, anchorRef }) {
+export default function TaskActionMenu({ position, onPause, onStop, onPartialExit, onDelete, onEditRange, onWithdrawLiquidity, onSwapDust, onTriggerRebalance, onUpdateMode, onAddLiquidity, onClose, anchorRef }) {
   const [editMode, setEditMode] = useState(false);
   const [rangeLower, setRangeLower] = useState(String(position?.task_range_lower_pct || '2'));
   const [rangeUpper, setRangeUpper] = useState(String(position?.task_range_upper_pct || '2'));
   const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
   const [amountUsdt, setAmountUsdt] = useState(String(position?.task_amount_usdt || ''));
+  const [exitMode, setExitMode] = useState(false);
+  const [exitPercent, setExitPercent] = useState('25');
   const [pending, setPending] = useState('');
   const menuRef = useRef(null);
 
@@ -60,6 +62,51 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
     const amt = Number(amountUsdt);
     run('range', () => onEditRange(taskId, rl, ru, Number.isFinite(amt) && amt > 0 ? amt : undefined));
   }, [rangeLower, rangeUpper, amountUsdt, taskId, onEditRange, run]);
+
+  const handleExitSubmit = useCallback(() => {
+    const pct = Number(exitPercent);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return;
+    run('partialExit', () => onPartialExit(taskId, pct));
+  }, [exitPercent, taskId, onPartialExit, run]);
+
+  if (exitMode) {
+    const pct = Number(exitPercent);
+    const canSubmit = Number.isFinite(pct) && pct > 0 && pct <= 100;
+    return (
+      <div className="task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+        <div className="task-popover-header">
+          <span>撤出仓位比例</span>
+          <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="task-popover-form">
+          <div className="task-popover-row" style={{ flexWrap: 'wrap' }}>
+            {[25, 50, 75, 100].map((pctOption) => (
+              <button
+                key={pctOption}
+                type="button"
+                className="ghost-chip"
+                style={Number(exitPercent) === pctOption ? { borderColor: 'rgba(56, 189, 248, 0.5)', color: '#38bdf8' } : undefined}
+                onClick={() => setExitPercent(String(pctOption))}
+                disabled={!!pending}
+              >
+                {pctOption}%
+              </button>
+            ))}
+          </div>
+          <label className="task-popover-field">
+            <span>自定义比例 %</span>
+            <input type="number" value={exitPercent} onChange={(e) => setExitPercent(e.target.value)} min="0.01" max="100" step="0.01" />
+          </label>
+        </div>
+        <div className="task-popover-actions">
+          <button type="button" className="ghost-chip" onClick={() => setExitMode(false)} disabled={!!pending}>返回</button>
+          <button type="button" className="accent-btn small" onClick={handleExitSubmit} disabled={!!pending || !canSubmit}>
+            {pending === 'partialExit' ? '提交中...' : pct >= 100 ? '全撤' : '撤仓'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (editMode) {
     return (
@@ -135,6 +182,16 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
         {onAddLiquidity && !isStopped && !isStopping && (
           <button type="button" className="task-action-item" onClick={() => run('addLiq', () => onAddLiquidity(taskId, position))} disabled={!!pending}>
             {pending === 'addLiq' ? '处理中...' : '补充流动性'}
+          </button>
+        )}
+        {onPartialExit && hasLiquidity && !isStopped && !isStopping && (
+          <button type="button" className="task-action-item" onClick={() => setExitMode(true)} disabled={!!pending}>
+            部分撤仓
+          </button>
+        )}
+        {onWithdrawLiquidity && hasLiquidity && !isStopped && !isStopping && (
+          <button type="button" className="task-action-item" onClick={() => run('withdraw', () => onWithdrawLiquidity(taskId))} disabled={!!pending}>
+            {pending === 'withdraw' ? '处理中...' : '取回流动性'}
           </button>
         )}
         {onStop && !isStopped && !isStopping && (

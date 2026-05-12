@@ -55,7 +55,69 @@ const (
 	exitSlippageRetryMultiplier = 2.0
 	exitSlippageMaxPercent      = 10.0
 	exitSwapMinValueUSDT        = 1.0
+	exitPercentScale            = int64(1000000)
 )
+
+// ValidateExitPercent returns the effective exit percent and whether it is a partial exit.
+// A nil percent preserves the legacy full-exit behavior.
+func ValidateExitPercent(percent *float64) (float64, bool, error) {
+	if percent == nil {
+		return 100, false, nil
+	}
+	v := *percent
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false, fmt.Errorf("exit percent must be a finite number")
+	}
+	if v <= 0 || v > 100 {
+		return 0, false, fmt.Errorf("exit percent must be greater than 0 and less than or equal to 100")
+	}
+	return v, v < 100, nil
+}
+
+func exitLiquidityForPercent(current *big.Int, percent float64) (*big.Int, error) {
+	if current == nil || current.Sign() <= 0 {
+		return nil, fmt.Errorf("current liquidity must be positive")
+	}
+	effective, partial, err := ValidateExitPercent(&percent)
+	if err != nil {
+		return nil, err
+	}
+	if !partial {
+		return cloneBig(current), nil
+	}
+
+	scaled := int64(math.Round(effective * float64(exitPercentScale)))
+	if scaled <= 0 {
+		scaled = 1
+	}
+	denom := new(big.Int).Mul(big.NewInt(100), big.NewInt(exitPercentScale))
+	out := new(big.Int).Mul(cloneBig(current), big.NewInt(scaled))
+	out.Div(out, denom)
+	if out.Sign() <= 0 {
+		out = big.NewInt(1)
+	}
+	if out.Cmp(current) > 0 {
+		out = cloneBig(current)
+	}
+	return out, nil
+}
+
+func persistTaskCurrentLiquidity(task *models.StrategyTask, liquidity *big.Int) {
+	if task == nil {
+		return
+	}
+	value := "0"
+	if liquidity != nil && liquidity.Sign() > 0 {
+		value = liquidity.String()
+	}
+	task.CurrentLiquidity = value
+	if database.DB == nil || task.ID == 0 {
+		return
+	}
+	if err := database.DB.Model(task).Update("current_liquidity", value).Error; err != nil {
+		log.Printf("[Liquidity] Warning: update task current_liquidity failed task_id=%d value=%s: %v", task.ID, value, err)
+	}
+}
 
 func effectiveExitSlippagePercent(task *models.StrategyTask) float64 {
 	base := 0.5
@@ -424,6 +486,13 @@ func (s *LiquidityService) WithdrawTaskLiquidityOnly(userID uint, task *models.S
 
 func (s *LiquidityService) WithdrawTaskLiquidityOnlyWithOptions(userID uint, task *models.StrategyTask, opts TxOptions) ([]string, error) {
 	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
+	_, partialExit, err := ValidateExitPercent(opts.ExitPercent)
+	if err != nil {
+		return nil, err
+	}
+	if partialExit {
+		return nil, fmt.Errorf("partial exits must use ExitTaskToUSDTWithOptions so recovered tokens are converted to stablecoin")
+	}
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -467,6 +536,15 @@ func (s *LiquidityService) WithdrawTaskLiquidityOnlyWithOptions(userID uint, tas
 
 func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.StrategyTask, sweepWallet bool, opts TxOptions) ([]string, error) {
 	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
+	_, partialExit, err := ValidateExitPercent(opts.ExitPercent)
+	if err != nil {
+		return nil, err
+	}
+	if partialExit && sweepWallet {
+		// Partial exits must only swap the tokens recovered by this exit.
+		// Sweeping the whole wallet would exceed the requested position percentage.
+		sweepWallet = false
+	}
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -680,7 +758,7 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		}
 	}
 
-	finalizeTradeRecord := exitErr == nil && sweepErr == nil
+	finalizeTradeRecord := exitErr == nil && sweepErr == nil && !partialExit
 	shouldUpdateRecords := finalizeTradeRecord || actualReceived.Sign() > 0 || gasSpent.Sign() > 0 || mainHash != ""
 	if shouldUpdateRecords {
 		taskCopy := *task
@@ -1007,6 +1085,10 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	if exec == nil {
 		return nil, fmt.Errorf("executor is nil")
 	}
+	exitPercent, partialExit, err := ValidateExitPercent(opts.ExitPercent)
+	if err != nil {
+		return nil, err
+	}
 	cc := exec.Config()
 	client := exec.Client()
 	chainID := exec.ChainID()
@@ -1097,6 +1179,16 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		log.Printf("[Liquidity] V3 exit: position already empty, skipping exit tokenId=%s", tokenId.String())
 		return txHashes, nil
 	}
+	if partialExit && liq.Sign() <= 0 {
+		return nil, fmt.Errorf("cannot partially exit V3 position with zero liquidity")
+	}
+	removeLiq := big.NewInt(0)
+	if liq.Sign() > 0 {
+		removeLiq, err = exitLiquidityForPercent(liq, exitPercent)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// V3 撤仓不做滑点校验：amount0Min/amount1Min 置 0，避免因价格波动导致撤仓交易 revert。
 	amount0Min := big.NewInt(0)
@@ -1130,7 +1222,7 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	if liq.Sign() > 0 {
 		decParams := blockchain.V3DecreaseLiquidityParams{
 			TokenId:    tokenId,
-			Liquidity:  liq, // uint128
+			Liquidity:  removeLiq, // uint128
 			Amount0Min: amount0Min,
 			Amount1Min: amount1Min,
 			Deadline:   deadline,
@@ -1152,8 +1244,8 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 				return v3pm.Multicall(o, [][]byte{decData, colData})
 			})
 
-			log.Printf("[Liquidity] V3 exit: Calling NPM.multicall(decreaseLiquidity+collect) tokenId=%s liquidity=%s amount0Min=%s amount1Min=%s",
-				tokenId.String(), liq.String(), amount0Min.String(), amount1Min.String())
+			log.Printf("[Liquidity] V3 exit: Calling NPM.multicall(decreaseLiquidity+collect) tokenId=%s liquidity=%s currentLiquidity=%s exitPercent=%.6f amount0Min=%s amount1Min=%s",
+				tokenId.String(), removeLiq.String(), liq.String(), exitPercent, amount0Min.String(), amount1Min.String())
 
 			tx, err := v3pm.Multicall(auth, [][]byte{decData, colData})
 			if err == nil && tx != nil {
@@ -1191,8 +1283,8 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 				return v3pm.DecreaseLiquidity(o, decParams)
 			})
 
-			log.Printf("[Liquidity] V3 exit: Calling NPM.decreaseLiquidity tokenId=%s liquidity=%s amount0Min=%s amount1Min=%s",
-				tokenId.String(), liq.String(), amount0Min.String(), amount1Min.String())
+			log.Printf("[Liquidity] V3 exit: Calling NPM.decreaseLiquidity tokenId=%s liquidity=%s currentLiquidity=%s exitPercent=%.6f amount0Min=%s amount1Min=%s",
+				tokenId.String(), removeLiq.String(), liq.String(), exitPercent, amount0Min.String(), amount1Min.String())
 
 			decTx, err := v3pm.DecreaseLiquidity(auth, decParams)
 			if err != nil {
@@ -1265,6 +1357,18 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	if exitReceipt == nil {
 		return txHashes, fmt.Errorf("exit receipt is nil")
 	}
+
+	remainingLiq := new(big.Int).Sub(cloneBig(liq), cloneBig(removeLiq))
+	if remainingLiq.Sign() < 0 {
+		remainingLiq = big.NewInt(0)
+	}
+	if posAfter, readErr := v3pm.Positions(nil, tokenId); readErr == nil && posAfter.Liquidity != nil {
+		remainingLiq = cloneBig(posAfter.Liquidity)
+	} else if readErr != nil {
+		log.Printf("[Liquidity] Warning: read V3 position after exit failed, using calculated remaining liquidity task_id=%d tokenId=%s remaining=%s: %v",
+			task.ID, tokenId.String(), remainingLiq.String(), readErr)
+	}
+	persistTaskCurrentLiquidity(task, remainingLiq)
 
 	// sweepWallet mode does the swap at a higher level via swapWalletTokensToUSDT().
 	if !swapDeltas {
@@ -1375,7 +1479,7 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	// 只有当 swapDeltas=true 时才在这里创建 Transaction 记录
 	// 当 swapDeltas=false (sweepWallet 模式) 时，由顶层 ExitTaskToUSDTWithOptions 统一创建
 	// 这样可以避免创建 AmountOut=0 的记录
-	if swapDeltas && mainHash != "" {
+	if swapDeltas && mainHash != "" && !partialExit {
 		txRecord := models.Transaction{
 			UserID:          task.UserID,
 			Chain:           task.Chain,
@@ -1406,6 +1510,10 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 
 	if exec == nil {
 		return nil, fmt.Errorf("executor is nil")
+	}
+	exitPercent, partialExit, err := ValidateExitPercent(opts.ExitPercent)
+	if err != nil {
+		return nil, err
 	}
 	cc := exec.Config()
 	client := exec.Client()
@@ -1461,16 +1569,27 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	liq := big.NewInt(0)
 	if posErr == nil && pos != nil {
 		if pos.Liquidity != nil {
-			liq = pos.Liquidity
+			liq = cloneBig(pos.Liquidity)
 		}
 	}
 
 	// If we couldn't query on-chain position, fall back to task.current_liquidity.
 	if posErr != nil {
+		if partialExit {
+			return nil, fmt.Errorf("read V4 on-chain liquidity failed for partial exit: %w", posErr)
+		}
 		liq, err = convert.ParseBigIntFlexible(task.CurrentLiquidity)
 		if err != nil || liq == nil || liq.Sign() <= 0 {
 			return nil, fmt.Errorf("missing/invalid current_liquidity for V4 remove and failed to query on-chain position: %w", posErr)
 		}
+		liq = cloneBig(liq)
+	}
+	if liq.Sign() <= 0 {
+		return nil, fmt.Errorf("V4 position has no liquidity")
+	}
+	removeLiq, err := exitLiquidityForPercent(liq, exitPercent)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build `unlockData` = abi.encode(actions, params) to call PositionManager.modifyLiquidities.
@@ -1490,7 +1609,7 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		{Type: uint128Ty}, // amount1Min
 		{Type: bytesTy},   // hookData
 	}
-	decreaseParams, err := decreaseArgs.Pack(tokenId, liq, big.NewInt(0), big.NewInt(0), []byte{})
+	decreaseParams, err := decreaseArgs.Pack(tokenId, removeLiq, big.NewInt(0), big.NewInt(0), []byte{})
 	if err != nil {
 		return nil, fmt.Errorf("encode v4 decrease params failed: %w", err)
 	}
@@ -1514,7 +1633,8 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		return nil, fmt.Errorf("encode v4 unlockData failed: %w", err)
 	}
 
-	log.Printf("[Liquidity] Removing V4 liquidity via PositionManager=%s tokenId=%s poolId=%s liq=%s", v4pmAddr.Hex(), tokenId.String(), task.PoolId, liq.String())
+	log.Printf("[Liquidity] Removing V4 liquidity via PositionManager=%s tokenId=%s poolId=%s liq=%s currentLiquidity=%s exitPercent=%.6f",
+		v4pmAddr.Hex(), tokenId.String(), task.PoolId, removeLiq.String(), liq.String(), exitPercent)
 	nonce, err := blockchain.GetNonce(walletAddr)
 	if err != nil {
 		return nil, err
@@ -1535,6 +1655,18 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	if _, err := s.waitMined(client, chainID, tx); err != nil {
 		return txHashes, fmt.Errorf("v4 remove tx failed: %w", err)
 	}
+
+	remainingLiq := new(big.Int).Sub(cloneBig(liq), cloneBig(removeLiq))
+	if remainingLiq.Sign() < 0 {
+		remainingLiq = big.NewInt(0)
+	}
+	if posAfter, readErr := blockchain.GetV4PositionInfo(v4pmAddr, common.HexToAddress(cc.UniswapV4PoolManagerAddress), task.PoolId, tokenId); readErr == nil && posAfter != nil && posAfter.Liquidity != nil {
+		remainingLiq = cloneBig(posAfter.Liquidity)
+	} else if readErr != nil {
+		log.Printf("[Liquidity] Warning: read V4 position after exit failed, using calculated remaining liquidity task_id=%d tokenId=%s remaining=%s: %v",
+			task.ID, tokenId.String(), remainingLiq.String(), readErr)
+	}
+	persistTaskCurrentLiquidity(task, remainingLiq)
 
 	b0After, _ := blockchain.GetTokenBalanceWithClient(client, c0, walletAddr)
 	b1After, _ := blockchain.GetTokenBalanceWithClient(client, c1, walletAddr)
@@ -1616,22 +1748,24 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 
 	mainHash := removeTxHash
 
-	txRecord := models.Transaction{
-		UserID:          task.UserID,
-		Chain:           task.Chain,
-		TaskID:          task.ID,
-		TxHash:          mainHash,
-		Type:            models.TxTypeRemoveLiquidity,
-		Status:          models.TxStatusConfirmed,
-		FromAddress:     walletAddr.Hex(),
-		ToAddress:       v4pmAddr.Hex(),
-		TokenInAddress:  tFromBytes32(task.PoolId).Hex(),
-		TokenOutAddress: usdtAddr.Hex(),
-		AmountIn:        "0",
-		AmountOut:       totalUSDTReceived.String(),
-		CreatedAt:       time.Now(),
+	if !partialExit {
+		txRecord := models.Transaction{
+			UserID:          task.UserID,
+			Chain:           task.Chain,
+			TaskID:          task.ID,
+			TxHash:          mainHash,
+			Type:            models.TxTypeRemoveLiquidity,
+			Status:          models.TxStatusConfirmed,
+			FromAddress:     walletAddr.Hex(),
+			ToAddress:       v4pmAddr.Hex(),
+			TokenInAddress:  tFromBytes32(task.PoolId).Hex(),
+			TokenOutAddress: usdtAddr.Hex(),
+			AmountIn:        "0",
+			AmountOut:       totalUSDTReceived.String(),
+			CreatedAt:       time.Now(),
+		}
+		s.persistTransactionRecordAsync("exit_v4_tx_record", txRecord)
 	}
-	s.persistTransactionRecordAsync("exit_v4_tx_record", txRecord)
 
 	if swapErr != nil {
 		return txHashes, &SwapToUSDTError{Err: swapErr}

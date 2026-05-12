@@ -359,6 +359,7 @@ export default function PositionCard({
     showAbsolutePnl = true,
     onSetTaskPaused,
     onStopTask,
+    onPartialExit,
     onDeleteTask,
     onUpdateTaskRange,
     onWithdrawLiquidity,
@@ -539,13 +540,14 @@ export default function PositionCard({
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤仓中') || statusLabel.includes('处理中');
     const isStoppedState = isStoppedStatus(statusLabel);
     const isBusyState = isBusyStatus(statusLabel);
-    const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function' || typeof onUpdateTaskRange === 'function';
+    const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onPartialExit === 'function' || typeof onDeleteTask === 'function' || typeof onUpdateTaskRange === 'function';
     const canTaskAction = Boolean(allowTaskActions) && hasActions && taskId > 0;
     const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isBusyState;
     const canUpdateRangeAction = canTaskAction && typeof onUpdateTaskRange === 'function' && !isBusyState;
     const canStopAction = canTaskAction && typeof onStopTask === 'function' && !isStoppedState && !isBusyState;
     const canDeleteAction = canTaskAction && typeof onDeleteTask === 'function' && !isBusyState;
     const hasLiquidity = Boolean(position?.has_liquidity);
+    const canPartialExit = canTaskAction && typeof onPartialExit === 'function' && hasLiquidity && !isBusyState;
     const canWithdraw = canTaskAction && typeof onWithdrawLiquidity === 'function' && hasLiquidity && !isBusyState;
     const canSwapDust = canTaskAction && typeof onSwapDust === 'function' && !isBusyState;
     const canTriggerRebalance = canTaskAction && typeof onTriggerRebalance === 'function' && hasLiquidity && !isStoppedState && !isBusyState;
@@ -554,6 +556,8 @@ export default function PositionCard({
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [actionPending, setActionPending] = useState('');
+    const [exitPanelOpen, setExitPanelOpen] = useState(false);
+    const [exitPercent, setExitPercent] = useState('25');
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -580,7 +584,17 @@ export default function PositionCard({
     const editRange = () => runAction('range', () => onUpdateTaskRange?.(taskId, position));
     const stopTask = () => runAction('stop', () => onStopTask?.(taskId));
     const deleteTask = () => runAction('delete', () => onDeleteTask?.(taskId));
-    const withdrawLiquidity = () => runAction('withdraw', () => onWithdrawLiquidity?.(taskId));
+    const openWithdrawPanel = () => {
+        if (actionPending) return;
+        setExitPanelOpen(true);
+        setMenuOpen(false);
+    };
+    const withdrawLiquidity = (pct = exitPercent) => {
+        const value = Number(pct);
+        if (!Number.isFinite(value) || value <= 0 || value > 100) return;
+        runAction('withdraw', () => onPartialExit?.(taskId, value));
+    };
+    const withdrawAllLiquidity = () => runAction('withdrawAll', () => onWithdrawLiquidity?.(taskId));
     const swapDust = () => runAction('dust', () => onSwapDust?.(taskId));
     const triggerRebalance = () => runAction('rebalance', () => onTriggerRebalance?.(taskId));
     const updateTaskMode = (nextMode) => runAction('taskMode', () => onUpdateTaskMode?.(taskId, nextMode));
@@ -588,6 +602,8 @@ export default function PositionCard({
 
     const pnlPositive = pnlAbsolute >= 0;
     const statusTheme = getPositionStatusTheme(statusLabel);
+    const parsedExitPercent = Number(exitPercent);
+    const canSubmitExitPercent = Number.isFinite(parsedExitPercent) && parsedExitPercent > 0 && parsedExitPercent <= 100;
 
     // 鐠愬湱宸奸弽鍥╊劮閿涘牅绮?tickSpacing 閹恒劌顕遍敍?
     const feeLabel = useMemo(() => {
@@ -762,6 +778,18 @@ export default function PositionCard({
                                                 {actionPending === 'rebalance' ? '处理中...' : '立即再平衡'}
                                             </button>
                                         )}
+                                        {typeof onPartialExit === 'function' && (
+                                            <button type="button" onClick={openWithdrawPanel} disabled={!canPartialExit || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-sky-600 hover:bg-sky-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-sky-400 dark:hover:bg-sky-500/10">
+                                                {actionPending === 'withdraw' ? '处理中...' : '部分撤仓'}
+                                            </button>
+                                        )}
+                                        {typeof onWithdrawLiquidity === 'function' && (
+                                            <button type="button" onClick={withdrawAllLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-cyan-600 hover:bg-cyan-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-cyan-400 dark:hover:bg-cyan-500/10">
+                                                {actionPending === 'withdrawAll' ? '处理中...' : '取回流动性'}
+                                            </button>
+                                        )}
                                         {typeof onStopTask === 'function' && (
                                             <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-amber-400 dark:hover:bg-amber-500/10">
@@ -835,14 +863,67 @@ export default function PositionCard({
                 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {canTaskAction && (
                     <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
-                        {typeof onWithdrawLiquidity === 'function' && (
-                            <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
+                        {exitPanelOpen && (
+                            <div className="w-full rounded-xl border border-sky-400/25 bg-sky-50/80 p-2 dark:border-sky-500/20 dark:bg-sky-500/10">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-sky-700 dark:text-sky-300">撤出比例</span>
+                                    <button type="button" onClick={() => setExitPanelOpen(false)} className="text-[11px] font-semibold text-zinc-500 dark:text-white/50">关闭</button>
+                                </div>
+                                <div className="mb-2 grid grid-cols-4 gap-1.5">
+                                    {[25, 50, 75, 100].map((pctOption) => (
+                                        <button
+                                            key={pctOption}
+                                            type="button"
+                                            onClick={() => setExitPercent(String(pctOption))}
+                                            disabled={Boolean(actionPending)}
+                                            className={`h-8 rounded-lg border text-[11px] font-bold transition-all active:scale-95 disabled:opacity-40 ${Number(exitPercent) === pctOption
+                                                ? 'border-sky-400 bg-sky-500 text-white shadow-sm shadow-sky-500/25'
+                                                : 'border-sky-200 bg-white text-sky-700 dark:border-sky-500/20 dark:bg-white/5 dark:text-sky-300'
+                                                }`}
+                                        >
+                                            {pctOption}%
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min="0.01"
+                                        max="100"
+                                        step="0.01"
+                                        value={exitPercent}
+                                        onChange={(e) => setExitPercent(e.target.value)}
+                                        className="h-9 min-w-0 flex-1 rounded-lg border border-sky-200 bg-white px-2 text-sm font-semibold text-zinc-900 outline-none focus:border-sky-400 dark:border-sky-500/20 dark:bg-black/20 dark:text-white"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => withdrawLiquidity(parsedExitPercent)}
+                                        disabled={!canPartialExit || Boolean(actionPending) || !canSubmitExitPercent}
+                                        className="h-9 rounded-lg bg-sky-500 px-3 text-xs font-bold text-white shadow-sm shadow-sky-500/25 active:scale-95 disabled:opacity-40"
+                                    >
+                                        {actionPending === 'withdraw' ? '...' : parsedExitPercent >= 100 ? '全撤' : '撤仓'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        {typeof onPartialExit === 'function' && (
+                            <button type="button" onClick={openWithdrawPanel} disabled={!canPartialExit || Boolean(actionPending)}
                                 title="撤出流动性"
                                 className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                                 </svg>
                                 <span>{actionPending === 'withdraw' ? '...' : '撤仓'}</span>
+                            </button>
+                        )}
+                        {typeof onWithdrawLiquidity === 'function' && (
+                            <button type="button" onClick={withdrawAllLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
+                                title="取回流动性"
+                                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-cyan-400/40 bg-cyan-50 px-2.5 text-[10.5px] font-semibold text-cyan-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-cyan-100 dark:bg-cyan-500/15 dark:text-cyan-400 dark:border-cyan-500/25 dark:hover:bg-cyan-500/25">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+                                    <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
+                                </svg>
+                                <span>{actionPending === 'withdrawAll' ? '...' : '取回'}</span>
                             </button>
                         )}
                         {typeof onUpdateTaskMode === 'function' && (
@@ -866,8 +947,8 @@ export default function PositionCard({
                     <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none]">
                         {/* 閺嗗倸浠?閹垹顦?*/}
                         {/* 閸欐牕娲栧ù浣稿З閹?*/}
-                        {typeof onWithdrawLiquidity === 'function' && (
-                            <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
+                        {typeof onPartialExit === 'function' && (
+                            <button type="button" onClick={openWithdrawPanel} disabled={!canPartialExit || Boolean(actionPending)}
                                 title="撤出流动性"
                                 className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">

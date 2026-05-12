@@ -415,6 +415,9 @@ func (b *Bot) taskKeyboard(task *models.StrategyTask) any {
 		tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
 	}
 	if task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting {
+		row1 = append(row1, tgbotapi.NewInlineKeyboardButtonData("部分撤仓", "task_partial_exit_"+idStr))
+	}
+	if task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting {
 		pauseText := "⏸️ 暂停任务"
 		if task.Paused {
 			pauseText = "▶️ 恢复任务"

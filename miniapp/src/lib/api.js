@@ -106,13 +106,15 @@ export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, sign
     return resp.json();
 }
 
-export async function stopTask({ apiBaseUrl, initData, taskId, signal }) {
+export async function stopTask({ apiBaseUrl, initData, taskId, exitPercent, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=stop`;
+    const payload = { initData, taskId };
+    if (exitPercent !== undefined && exitPercent !== null) payload.exitPercent = Number(exitPercent);
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, taskId }),
+        body: JSON.stringify(payload),
         signal,
     });
     if (!resp.ok) {
@@ -164,13 +166,15 @@ export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLower
     return resp.json();
 }
 
-export async function withdrawLiquidity({ apiBaseUrl, initData, taskId, signal }) {
+export async function withdrawLiquidity({ apiBaseUrl, initData, taskId, exitPercent, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=withdraw_liquidity`;
+    const payload = { initData, taskId };
+    if (exitPercent !== undefined && exitPercent !== null) payload.exitPercent = Number(exitPercent);
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, taskId }),
+        body: JSON.stringify(payload),
         signal,
     });
     if (!resp.ok) {

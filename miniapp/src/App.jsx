@@ -3651,8 +3651,8 @@ export default function App() {
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
         const ok = await requestConfirm({
-            title: '取回流动性？',
-            message: '确认要取回流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。',
+            title: '取回全部流动性？',
+            message: '确认要取回全部流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。',
             confirmText: '取回',
             tone: 'danger',
         });
@@ -3660,6 +3660,48 @@ export default function App() {
         try {
             const resp = await withdrawLiquidity({ apiBaseUrl, initData, taskId: id });
             showNotice(resp?.message || '取回流动性请求已提交。', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handlePartialExit = async (taskId, exitPercent) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        const pct = Number(exitPercent);
+        if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+            showNotice('撤仓比例必须大于 0 且不超过 100。', 'error');
+            return;
+        }
+        const ok = await requestConfirm({
+            title: pct >= 100 ? '停止仓位？' : '部分撤仓？',
+            message: pct >= 100
+                ? '确认停止该仓位？\n系统会关闭相关任务，并尽量将剩余价值结算为 USDT。'
+                : `确认撤出当前仓位的 ${pct}% 并兑换为 USDT？\n任务会保留剩余仓位继续运行。`,
+            confirmText: pct >= 100 ? '停止' : '撤仓',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        try {
+            if (pct >= 100) {
+                setOperationProgress({ operation: 'close_position', taskId: id, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
+                const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
+                if (resp?.status === 'stopped' || resp?.pending === false) {
+                    setOperationProgress(prev => prev?.operation === 'close_position'
+                        ? { ...prev, currentStep: 3, status: 'done' } : prev);
+                } else {
+                    setOperationProgress(prev => {
+                        if (!prev || prev.operation !== 'close_position') return prev;
+                        if (prev.status === 'done' || prev.status === 'error') return prev;
+                        if (prev.currentStep > 1) return prev;
+                        return { ...prev, currentStep: 1, status: 'active' };
+                    });
+                }
+                return;
+            }
+            const resp = await stopTask({ apiBaseUrl, initData, taskId: id, exitPercent: pct });
+            showNotice(resp?.message || '部分撤仓请求已提交。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -4366,6 +4408,7 @@ export default function App() {
                                         allowTaskActions={!showAdmin && hasInitData}
                                         onSetTaskPaused={handleSetTaskPaused}
                                         onStopTask={handleStopTask}
+                                        onPartialExit={handlePartialExit}
                                         onDeleteTask={handleDeleteTask}
                                         onUpdateTaskRange={openTaskRangeModal}
                                         onWithdrawLiquidity={handleWithdrawLiquidity}

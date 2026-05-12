@@ -488,6 +488,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskView(query, user)
 	case strings.HasPrefix(query.Data, "task_stop_refresh_"):
 		b.handleTaskStopRefresh(query, user)
+	case strings.HasPrefix(query.Data, "task_partial_exit_"):
+		b.handleTaskPartialExit(query, user)
 	case strings.HasPrefix(query.Data, "task_stop_"):
 		b.handleTaskStop(query, user)
 	case strings.HasPrefix(query.Data, "task_delete_"):
