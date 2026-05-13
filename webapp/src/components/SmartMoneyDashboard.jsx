@@ -2607,15 +2607,18 @@ function AddWalletForm({ apiBaseUrl, onDone }) {
     const [addr, setAddr] = useState('');
     const [label, setLabel] = useState('');
     const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
     return (
         <div className="smd-modal-form">
             <input placeholder="钱包地址 (0x...)" value={addr} onChange={e => setAddr(e.target.value)} />
             <input placeholder="标签（可选）" value={label} onChange={e => setLabel(e.target.value)} />
+            {error ? <div className="smd-inline-error">{error}</div> : null}
             <div className="smd-modal-actions">
                 <button onClick={onDone} className="smd-modal-cancel">取消</button>
                 <button disabled={!addr || saving} className="smd-modal-submit" onClick={async () => {
                     setSaving(true);
-                    try { await addSMWallet({ apiBaseUrl, address: addr, label }); onDone(); } catch (e) { alert(e.message); } finally { setSaving(false); }
+                    setError('');
+                    try { await addSMWallet({ apiBaseUrl, address: addr, label }); onDone(); } catch (e) { setError(String(e?.message || e)); } finally { setSaving(false); }
                 }}>{saving ? '添加中...' : '添加'}</button>
             </div>
         </div>

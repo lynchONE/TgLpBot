@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { fetchGlobalConfig, saveGlobalConfig } from '../api';
 import PanelShell from './PanelShell';
 import { Settings } from 'lucide-react';
+import CustomSelect from './CustomSelect';
 
 const CHAIN_OPTIONS = [
     { value: 'bsc', label: 'BSC' },
@@ -138,9 +139,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
                         </div>
                         <div className="config-row">
                             <label>默认链</label>
-                            <select value={draft.default_chain} onChange={e => updateDraft('default_chain', e.target.value)}>
-                                {CHAIN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
+                            <CustomSelect value={draft.default_chain} onChange={(value) => updateDraft('default_chain', value)} options={CHAIN_OPTIONS} />
                         </div>
                         <div className="config-row config-toggle">
                             <label>多钱包模式</label>

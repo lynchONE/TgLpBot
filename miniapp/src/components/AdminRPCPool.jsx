@@ -10,6 +10,17 @@ import {
     switchAdminRPCEndpoint,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
+import CustomSelect from './CustomSelect.jsx';
+
+const CHAIN_OPTIONS = [
+    { value: 'bsc', label: 'BSC' },
+    { value: 'base', label: 'Base' },
+];
+
+const TRANSPORT_OPTIONS = [
+    { value: 'http', label: 'HTTP' },
+    { value: 'ws', label: 'WebSocket' },
+];
 
 /* ── helpers ── */
 
@@ -408,19 +419,11 @@ function AddForm({ onAdd, adding, addError, brand }) {
                     <div className="grid grid-cols-2 gap-2">
                         <label className="space-y-1">
                             <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">链</div>
-                            <select value={draft.chain} onChange={e => setDraft(p => ({ ...p, chain: e.target.value }))}
-                                className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}>
-                                <option value="bsc">BSC</option>
-                                <option value="base">Base</option>
-                            </select>
+                            <CustomSelect value={draft.chain} onChange={value => setDraft(p => ({ ...p, chain: value }))} options={CHAIN_OPTIONS} />
                         </label>
                         <label className="space-y-1">
                             <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">类型</div>
-                            <select value={draft.transport} onChange={e => setDraft(p => ({ ...p, transport: e.target.value }))}
-                                className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}>
-                                <option value="http">HTTP</option>
-                                <option value="ws">WebSocket</option>
-                            </select>
+                            <CustomSelect value={draft.transport} onChange={value => setDraft(p => ({ ...p, transport: value }))} options={TRANSPORT_OPTIONS} />
                         </label>
                     </div>
                     <label className="block space-y-1">

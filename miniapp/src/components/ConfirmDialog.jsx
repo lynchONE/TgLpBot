@@ -1,18 +1,5 @@
 import React, { useEffect, useState } from 'react';
 
-/**
- * 自定义确认弹框（替代原生 confirm / prompt）
- * Props:
- *   open       - 是否显示
- *   title      - 标题
- *   message    - 内容文本
- *   confirmText - 确认按钮文字
- *   cancelText  - 取消按钮文字
- *   danger      - 危险操作样式
- *   onConfirm   - () => void
- *   onCancel    - () => void
- *   loading     - 确认中状态
- */
 export default function ConfirmDialog({
     open,
     title = '确认',

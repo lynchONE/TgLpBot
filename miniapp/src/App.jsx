@@ -9,6 +9,7 @@ import NumberFlowValue from './components/NumberFlowValue.jsx';
 import StepProgressModal from './components/StepProgressModal.jsx';
 import LiquidityDistributionChart from './components/LiquidityDistributionChart.jsx';
 import GlobalConfigPage from './components/GlobalConfigPage.jsx';
+import CustomSelect from './components/CustomSelect.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
 import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet } from 'lucide-react';
@@ -47,6 +48,11 @@ import { TASK_MODE_OPTIONS, getTaskModeMeta, getOutOfRangeActionSummary as getTa
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
 const LazyAssetManagementPage = lazy(() => import('./components/AssetManagementPage.jsx'));
+
+const CHAIN_SELECT_OPTIONS = [
+    { value: 'bsc', label: 'BSC' },
+    { value: 'base', label: 'Base' },
+];
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -4471,20 +4477,18 @@ export default function App() {
                                     <div className="text-[11px] text-zinc-500 dark:text-white/40">支持池地址、代币符号或关键词搜索（例如 CAKE / USDT）</div>
                                     <div className="mt-2 flex items-center gap-2">
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">链</div>
-                                        <select
+                                        <CustomSelect
                                             value={poolSearchChain}
-                                            onChange={(e) => {
-                                                setPoolSearchChain(e.target.value);
+                                            onChange={(value) => {
+                                                setPoolSearchChain(value);
                                                 setPoolSearchResults([]);
                                                 setPoolSearchError('');
                                                 setPoolSearchPerformed(false);
                                             }}
+                                            options={CHAIN_SELECT_OPTIONS}
                                             disabled={!multiChainEnabled}
-                                            className={`rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
-                                        >
-                                            <option value="bsc">BSC</option>
-                                            <option value="base">Base</option>
-                                        </select>
+                                            className="w-28"
+                                        />
                                     </div>
                                     <div className="mt-1 flex gap-2">
                                         <input

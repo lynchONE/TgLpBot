@@ -282,7 +282,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 				if netInvested < 0 {
 					netInvested = 0
 				}
-				if netInvested <= 0 && pnl.DustValueUSDT <= 0 {
+				if netInvested <= 0 && pnl.DustValueUSDT <= 0 && pnl.RecoveredUSDT <= 0 {
 					netInvested = pnl.InitialCostUSDT
 					if netInvested <= 0 {
 						netInvested = task.AmountUSDT

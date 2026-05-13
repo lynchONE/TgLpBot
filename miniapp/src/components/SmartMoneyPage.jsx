@@ -3034,6 +3034,8 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
     const [newAddr, setNewAddr] = useState('');
     const [newLabel, setNewLabel] = useState('');
     const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [deleteTarget, setDeleteTarget] = useState(null);
 
     const load = useCallback(() => {
         setLoading(true);
@@ -3047,6 +3049,7 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
 
     const handleAdd = async () => {
         setSaving(true);
+        setError('');
         try {
             await addSMWallet({ apiBaseUrl, address: newAddr, label: newLabel });
             setShowAdd(false);
@@ -3054,28 +3057,36 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
             setNewLabel('');
             load();
         } catch (err) {
-            alert(err.message);
+            setError(String(err?.message || err));
         } finally {
             setSaving(false);
         }
     };
 
     const handleToggle = async (w) => {
+        setError('');
         try {
             await updateSMWallet({ apiBaseUrl, address: w.address, updates: { is_active: !w.is_active } });
             load();
         } catch (err) {
-            alert(err.message);
+            setError(String(err?.message || err));
         }
     };
 
     const handleDelete = async (w) => {
-        if (!confirm(`确认删除钱包 ${shortAddr(w.address)}？`)) return;
+        setDeleteTarget(w);
+    };
+
+    const confirmDelete = async () => {
+        const w = deleteTarget;
+        if (!w) return;
+        setDeleteTarget(null);
+        setError('');
         try {
             await deleteSMWallet({ apiBaseUrl, address: w.address });
             load();
         } catch (err) {
-            alert(err.message);
+            setError(String(err?.message || err));
         }
     };
 
@@ -3114,6 +3125,12 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
                 </div>
             )}
 
+            {error ? (
+                <div className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                    {error}
+                </div>
+            ) : null}
+
             {loading ? (
                 <div className="text-center text-zinc-500 py-4">加载中...</div>
             ) : wallets.length === 0 ? (
@@ -3146,6 +3163,15 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
                     ))}
                 </div>
             )}
+            <ConfirmDialog
+                open={Boolean(deleteTarget)}
+                title="删除钱包"
+                message={`确认删除钱包 ${shortAddr(deleteTarget?.address)}？`}
+                confirmText="删除"
+                danger
+                onCancel={() => setDeleteTarget(null)}
+                onConfirm={confirmDelete}
+            />
         </div>
     );
 }
@@ -3635,7 +3661,7 @@ function AddWalletModal({ apiBaseUrl, onClose, onAdded, brand }) {
             onAdded?.();
             onClose();
         } catch (err) {
-            setError(err?.message || '添加失败');
+            setError(String(err?.message || err));
         } finally {
             setSaving(false);
         }

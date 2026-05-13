@@ -31,6 +31,23 @@ import {
 } from '../api';
 import { formatUsd, shortAddress } from '../utils';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
+import ConfirmDialog from './ConfirmDialog';
+import CustomSelect from './CustomSelect';
+
+const CHAIN_OPTIONS = [
+  { value: 'bsc', label: 'BSC' },
+  { value: 'base', label: 'Base' },
+];
+
+const TRANSPORT_OPTIONS = [
+  { value: 'http', label: 'HTTP' },
+  { value: 'ws', label: 'WS' },
+];
+
+const POOL_SOURCE_TYPE_OPTIONS = [
+  { value: 'market_pools', label: 'Market Pools' },
+  { value: 'poolm_top_fees', label: 'PoolM' },
+];
 
 const ADMIN_SYSTEM_SECTIONS = [
   { key: 'config', label: '基础配置' },
@@ -396,6 +413,8 @@ export default function AdminPanel({
   const [privateZapLoading, setPrivateZapLoading] = useState(false);
   const [privateZapError, setPrivateZapError] = useState('');
   const [invalidatingKey, setInvalidatingKey] = useState('');
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const userPositionsList = useMemo(
     () => (Array.isArray(userPositions?.positions) ? userPositions.positions : []),
@@ -407,6 +426,23 @@ export default function AdminPanel({
     setNotice(message);
     setTimeout(() => setNotice(''), 3000);
   }, []);
+
+  const closeConfirmAction = useCallback(() => {
+    if (confirmBusy) return;
+    setConfirmAction(null);
+  }, [confirmBusy]);
+
+  const runConfirmAction = useCallback(async () => {
+    const action = confirmAction?.action;
+    if (confirmBusy || typeof action !== 'function') return;
+    setConfirmBusy(true);
+    try {
+      await action();
+    } finally {
+      setConfirmBusy(false);
+      setConfirmAction(null);
+    }
+  }, [confirmAction, confirmBusy]);
 
   const loadOnlineUsers = useCallback(async () => {
     if (!isReady) return;
@@ -706,24 +742,28 @@ export default function AdminPanel({
     }
   }, [apiBaseUrl, initData, isReady, loadPoolDataSources, poolSourceAddDraft, showNotice]);
 
-  const handleInvalidatePrivateZap = useCallback(async (chain, kind) => {
+  const handleInvalidatePrivateZap = useCallback((chain, kind) => {
     if (!isReady) return;
-    if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(`确认清理 ${formatChain(chain)} / ${formatPrivateZapKind(kind)} 绑定吗？`);
-      if (!confirmed) return;
-    }
-    const busyKey = `${chain}:${kind}`;
-    setInvalidatingKey(busyKey);
-    setPrivateZapError('');
-    try {
-      await invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, kind });
-      await loadPrivateZap();
-      showNotice(`${formatChain(chain)} ${formatPrivateZapKind(kind)} 已失效化`);
-    } catch (err) {
-      setPrivateZapError(errorText(err));
-    } finally {
-      setInvalidatingKey('');
-    }
+    setConfirmAction({
+      title: '清理 Private Zap',
+      message: `确认清理 ${formatChain(chain)} / ${formatPrivateZapKind(kind)} 绑定吗？`,
+      confirmText: '清理',
+      danger: true,
+      action: async () => {
+        const busyKey = `${chain}:${kind}`;
+        setInvalidatingKey(busyKey);
+        setPrivateZapError('');
+        try {
+          await invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, kind });
+          await loadPrivateZap();
+          showNotice(`${formatChain(chain)} ${formatPrivateZapKind(kind)} 已失效化`);
+        } catch (err) {
+          setPrivateZapError(errorText(err));
+        } finally {
+          setInvalidatingKey('');
+        }
+      },
+    });
   }, [apiBaseUrl, initData, isReady, loadPrivateZap, showNotice]);
 
   const rpcGroups = useMemo(
@@ -1057,17 +1097,19 @@ export default function AdminPanel({
                 <div className="am-form">
                   <label className="am-field">
                     <span>链</span>
-                    <select value={rpcAddDraft.chain} onChange={(event) => setRpcAddDraft((prev) => ({ ...prev, chain: event.target.value }))}>
-                      <option value="bsc">BSC</option>
-                      <option value="base">Base</option>
-                    </select>
+                    <CustomSelect
+                      value={rpcAddDraft.chain}
+                      onChange={(value) => setRpcAddDraft((prev) => ({ ...prev, chain: value }))}
+                      options={CHAIN_OPTIONS}
+                    />
                   </label>
                   <label className="am-field">
                     <span>协议</span>
-                    <select value={rpcAddDraft.transport} onChange={(event) => setRpcAddDraft((prev) => ({ ...prev, transport: event.target.value }))}>
-                      <option value="http">HTTP</option>
-                      <option value="ws">WS</option>
-                    </select>
+                    <CustomSelect
+                      value={rpcAddDraft.transport}
+                      onChange={(value) => setRpcAddDraft((prev) => ({ ...prev, transport: value }))}
+                      options={TRANSPORT_OPTIONS}
+                    />
                   </label>
                   <label className="am-field am-field-grow">
                     <span>URL</span>
@@ -1140,14 +1182,16 @@ export default function AdminPanel({
                                     '节点已启用'
                                   )}
                                   onDelete={(item) => {
-                                    if (typeof window !== 'undefined') {
-                                      const confirmed = window.confirm(`确认删除节点 "${endpointDisplayName(item)}" 吗？`);
-                                      if (!confirmed) return;
-                                    }
-                                    runRPCAction(
-                                      () => deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: item?.id }),
-                                      '节点已删除'
-                                    );
+                                    setConfirmAction({
+                                      title: '删除 RPC 节点',
+                                      message: `确认删除节点 "${endpointDisplayName(item)}" 吗？`,
+                                      confirmText: '删除',
+                                      danger: true,
+                                      action: () => runRPCAction(
+                                        () => deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: item?.id }),
+                                        '节点已删除'
+                                      ),
+                                    });
                                   }}
                                 />
                               )) : <EmptyState text="暂无节点" />}
@@ -1174,17 +1218,19 @@ export default function AdminPanel({
                 <div className="am-form">
                   <label className="am-field">
                     <span>来源类型</span>
-                    <select value={poolSourceAddDraft.sourceType} onChange={(event) => updatePoolSourceDraft('sourceType', event.target.value)}>
-                      <option value="market_pools">Market Pools</option>
-                      <option value="poolm_top_fees">PoolM</option>
-                    </select>
+                    <CustomSelect
+                      value={poolSourceAddDraft.sourceType}
+                      onChange={(value) => updatePoolSourceDraft('sourceType', value)}
+                      options={POOL_SOURCE_TYPE_OPTIONS}
+                    />
                   </label>
                   <label className="am-field">
                     <span>链</span>
-                    <select value={poolSourceAddDraft.chain} onChange={(event) => updatePoolSourceDraft('chain', event.target.value)}>
-                      <option value="bsc">BSC</option>
-                      <option value="base">Base</option>
-                    </select>
+                    <CustomSelect
+                      value={poolSourceAddDraft.chain}
+                      onChange={(value) => updatePoolSourceDraft('chain', value)}
+                      options={CHAIN_OPTIONS}
+                    />
                   </label>
                   <label className="am-field am-field-grow">
                     <span>Base URL</span>
@@ -1297,14 +1343,16 @@ export default function AdminPanel({
                               '池子数据源已启用'
                             )}
                             onDelete={(item) => {
-                              if (typeof window !== 'undefined') {
-                                const confirmed = window.confirm(`确认删除池子源 "${poolSourceDisplayName(item)}" 吗？`);
-                                if (!confirmed) return;
-                              }
-                              runPoolSourceAction(
-                                () => deleteAdminPoolDataSource({ apiBaseUrl, initData, sourceId: item?.id }),
-                                '池子数据源已删除'
-                              );
+                              setConfirmAction({
+                                title: '删除池子源',
+                                message: `确认删除池子源 "${poolSourceDisplayName(item)}" 吗？`,
+                                confirmText: '删除',
+                                danger: true,
+                                action: () => runPoolSourceAction(
+                                  () => deleteAdminPoolDataSource({ apiBaseUrl, initData, sourceId: item?.id }),
+                                  '池子数据源已删除'
+                                ),
+                              });
                             }}
                           />
                         )) : <EmptyState text="当前仅使用 ENV 兜底来源" />}
@@ -1359,6 +1407,16 @@ export default function AdminPanel({
           ) : null}
         </div>
       ) : null}
+      <ConfirmDialog
+        open={Boolean(confirmAction)}
+        title={confirmAction?.title}
+        message={confirmAction?.message}
+        confirmText={confirmAction?.confirmText}
+        danger={Boolean(confirmAction?.danger)}
+        loading={confirmBusy}
+        onConfirm={runConfirmAction}
+        onCancel={closeConfirmAction}
+      />
     </PanelShell>
   );
 }

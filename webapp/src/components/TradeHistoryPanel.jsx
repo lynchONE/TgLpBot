@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart2 } from 'lucide-react';
 import { fetchTradeHistory } from '../api';
 import PanelShell from './PanelShell';
+import CustomSelect from './CustomSelect';
 
 const STATUS_MAP = {
     open: { emoji: '🟢', text: '进行中', cls: 'status-open' },
@@ -9,6 +10,13 @@ const STATUS_MAP = {
     aborted: { emoji: '⚠️', text: '已中止', cls: 'status-aborted' },
     orphaned: { emoji: '🔵', text: '记录缺失', cls: 'status-orphaned' },
 };
+
+const STATUS_OPTIONS = [
+    { value: '', label: '全部' },
+    { value: 'open', label: '进行中' },
+    { value: 'closed', label: '已结束' },
+    { value: 'aborted', label: '已中止' },
+];
 
 function formatUsd(value) {
     if (value === undefined || value === null) return '-';
@@ -65,12 +73,7 @@ export default function TradeHistoryPanel({ apiBaseUrl, initData }) {
             icon={BarChart2}
             actions={(
                 <div className="trade-history-filters">
-                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="trade-filter-select">
-                        <option value="">全部</option>
-                        <option value="open">进行中</option>
-                        <option value="closed">已结束</option>
-                        <option value="aborted">已中止</option>
-                    </select>
+                    <CustomSelect value={statusFilter} onChange={setStatusFilter} options={STATUS_OPTIONS} className="trade-filter-select" />
                 </div>
             )}
         >

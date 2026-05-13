@@ -82,6 +82,7 @@ func NewPnLService() *PnLService {
 type PnLInfo struct {
 	InitialCostUSDT   float64
 	NetInvestedUSDT   float64
+	RecoveredUSDT     float64
 	CurrentValueUSDT  float64
 	AbsolutePnLUSDT   float64
 	UnclaimedFeesUSDT float64 // Included in CurrentValueUSDT
@@ -241,7 +242,11 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		}
 	}
 
-	netInvested := initialCost - dustToSubtract
+	recoveredUSDT, err := recoveredUSDTFromOpenRecord(rec)
+	if err != nil {
+		return nil, fmt.Errorf("parse recovered usdt failed: %w", err)
+	}
+	netInvested := initialCost - recoveredUSDT - dustToSubtract
 	if netInvested < 0 {
 		netInvested = 0
 	}
@@ -258,6 +263,7 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 	return &PnLInfo{
 		InitialCostUSDT:   initialCost,
 		NetInvestedUSDT:   netInvested,
+		RecoveredUSDT:     recoveredUSDT,
 		CurrentValueUSDT:  currentValue,
 		AbsolutePnLUSDT:   currentValue - netInvested,
 		UnclaimedFeesUSDT: unclaimedFees,
@@ -298,6 +304,23 @@ func expectedOpenBudgetUSDT(task *models.StrategyTask) float64 {
 		return 0
 	}
 	return expected
+}
+
+func recoveredUSDTFromOpenRecord(rec *models.TradeRecord) (float64, error) {
+	if rec == nil {
+		return 0, nil
+	}
+	if strings.TrimSpace(rec.CloseUSDTReceived) == "" {
+		return 0, nil
+	}
+	received, err := convert.ParseBigInt(rec.CloseUSDTReceived)
+	if err != nil {
+		return 0, err
+	}
+	if received == nil || received.Sign() <= 0 {
+		return 0, nil
+	}
+	return weiToFloat(received, 18), nil
 }
 
 func (s *PnLService) getInitialCost(task *models.StrategyTask) (float64, *models.TradeRecord, error) {

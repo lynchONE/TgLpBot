@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchAdminPrivateZap, invalidateAdminPrivateZap } from '../lib/api';
+import ConfirmDialog from './ConfirmDialog.jsx';
 
 function formatChain(chain) {
     const v = String(chain || '').toLowerCase();
@@ -24,6 +25,7 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
     const [error, setError] = useState('');
     const [invalidatingKey, setInvalidatingKey] = useState('');
     const [lastResult, setLastResult] = useState(null);
+    const [confirmInvalidate, setConfirmInvalidate] = useState(null);
 
     const loadChains = useCallback(async () => {
         if (!hasInitData) return;
@@ -48,10 +50,14 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
         const normalizedChain = String(chain || '').trim().toLowerCase();
         const normalizedKind = String(kind || '').trim().toLowerCase();
         if (!normalizedChain || !normalizedKind) return;
-        if (typeof window !== 'undefined') {
-            const ok = window.confirm(`Invalidate ${formatKind(normalizedKind)} bindings on ${formatChain(normalizedChain)}? Users will redeploy this contract kind on next use.`);
-            if (!ok) return;
-        }
+        setConfirmInvalidate({ chain: normalizedChain, kind: normalizedKind });
+    }, []);
+
+    const confirmInvalidateAction = useCallback(async () => {
+        const normalizedChain = String(confirmInvalidate?.chain || '').trim().toLowerCase();
+        const normalizedKind = String(confirmInvalidate?.kind || '').trim().toLowerCase();
+        if (!normalizedChain || !normalizedKind) return;
+        setConfirmInvalidate(null);
         const busyKey = `${normalizedChain}:${normalizedKind}`;
         setInvalidatingKey(busyKey);
         setError('');
@@ -73,7 +79,7 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
         } finally {
             setInvalidatingKey('');
         }
-    }, [apiBaseUrl, initData, onNotice]);
+    }, [apiBaseUrl, confirmInvalidate, initData, onNotice]);
 
     const chainList = useMemo(() => Array.isArray(chains) ? chains : [], [chains]);
     const kindList = useMemo(() => Array.isArray(kinds) && kinds.length > 0 ? kinds : DEFAULT_KINDS, [kinds]);
@@ -166,6 +172,17 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
                     );
                 })}
             </div>
+            <ConfirmDialog
+                open={Boolean(confirmInvalidate)}
+                title="Invalidate Private Zap"
+                message={`Invalidate ${formatKind(confirmInvalidate?.kind)} bindings on ${formatChain(confirmInvalidate?.chain)}? Users will redeploy this contract kind on next use.`}
+                confirmText="Invalidate"
+                cancelText="Cancel"
+                danger
+                loading={Boolean(invalidatingKey)}
+                onConfirm={confirmInvalidateAction}
+                onCancel={() => setConfirmInvalidate(null)}
+            />
         </div>
     );
 }

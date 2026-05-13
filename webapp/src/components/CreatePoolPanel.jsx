@@ -25,6 +25,7 @@ import pancakeLogo from '../img/pancake.svg';
 import uniswapLogo from '../img/uniswap.svg';
 import PanelShell, { EmptyState } from './PanelShell';
 import { normalizeHexAddress, normalizePoolAddress, shortAddress } from '../utils';
+import CustomSelect from './CustomSelect';
 
 const PROTOCOL_OPTIONS = [
   { key: 'univ3', label: 'Uniswap V3', badge: 'V3', logoSrc: uniswapLogo, accent: '#ff007a' },
@@ -812,21 +813,20 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
                   <span>执行钱包</span>
                 </label>
                 <div className="cp-select-wrap">
-                  <select
+                  <CustomSelect
                     value={selectedWalletId || ''}
-                    onChange={(event) => {
-                      setWalletId(Number(event.target.value || 0));
+                    onChange={(value) => {
+                      setWalletId(Number(value || 0));
                       invalidate();
                     }}
-                  >
-                    {wallets.length === 0 ? <option value="">暂无可用钱包</option> : null}
-                    {wallets.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {(item.name || shortAddress(item.address, 6, 4))} · {shortAddress(item.address, 6, 4)}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} className="cp-select-arrow" />
+                    options={wallets.length === 0
+                      ? [{ value: '', label: '暂无可用钱包' }]
+                      : wallets.map((item) => ({
+                        value: item.id,
+                        label: `${item.name || shortAddress(item.address, 6, 4)} · ${shortAddress(item.address, 6, 4)}`,
+                      }))}
+                    disabled={wallets.length === 0}
+                  />
                 </div>
                 {walletsLoading ? <small className="cp-field-hint">正在读取钱包列表...</small> : null}
                 {walletsError ? <small className="cp-field-error">{walletsError}</small> : null}

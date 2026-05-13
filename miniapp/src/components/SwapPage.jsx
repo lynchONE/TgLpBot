@@ -189,15 +189,15 @@ export default function SwapPage({ open, onClose, apiBaseUrl, initData, accentTh
                         {walletLoading ? (
                             <div className="text-xs text-zinc-400">加载钱包中...</div>
                         ) : (
-                            <select
+                            <CustomSelect
                                 value={selectedWalletId}
-                                onChange={(e) => setSelectedWalletId(e.target.value)}
-                                className="w-full appearance-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none dark:border-white/10 dark:bg-black/20 dark:text-white"
-                            >
-                                {wallets.map(w => (
-                                    <option key={w.id} value={w.id}>{w.name || '钱包'} ({w.address.slice(0,6)}...${w.address.slice(-4)}) - {chain==='bsc'?'BNB':'ETH'}: {w.native_balance}</option>
-                                ))}
-                            </select>
+                                onChange={setSelectedWalletId}
+                                options={wallets.map(w => ({
+                                    value: w.id,
+                                    label: `${w.name || '钱包'} (${w.address.slice(0, 6)}...${w.address.slice(-4)}) - ${chain === 'bsc' ? 'BNB' : 'ETH'}: ${w.native_balance}`,
+                                }))}
+                                placeholder="选择钱包"
+                            />
                         )}
                     </div>
                 </div>

@@ -9,6 +9,17 @@ import {
     switchAdminPoolDataSource,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
+import CustomSelect from './CustomSelect.jsx';
+
+const SOURCE_TYPE_OPTIONS = [
+    { value: 'market_pools', label: 'Market Pools' },
+    { value: 'poolm_top_fees', label: 'PoolM' },
+];
+
+const CHAIN_OPTIONS = [
+    { value: 'bsc', label: 'BSC' },
+    { value: 'base', label: 'Base' },
+];
 
 function formatTime(ts) {
     if (!ts) return '--';
@@ -97,19 +108,11 @@ function AddSourceForm({ onAdd, adding, error, brand }) {
                     <div className="grid grid-cols-2 gap-2">
                         <label className="space-y-1">
                             <div className="text-[11px] text-zinc-500 dark:text-white/50">来源类型</div>
-                            <select value={draft.sourceType} onChange={(e) => update('sourceType', e.target.value)}
-                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white">
-                                <option value="market_pools">Market Pools</option>
-                                <option value="poolm_top_fees">PoolM</option>
-                            </select>
+                            <CustomSelect value={draft.sourceType} onChange={(value) => update('sourceType', value)} options={SOURCE_TYPE_OPTIONS} />
                         </label>
                         <label className="space-y-1">
                             <div className="text-[11px] text-zinc-500 dark:text-white/50">链</div>
-                            <select value={draft.chain} onChange={(e) => update('chain', e.target.value)}
-                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white">
-                                <option value="bsc">BSC</option>
-                                <option value="base">Base</option>
-                            </select>
+                            <CustomSelect value={draft.chain} onChange={(value) => update('chain', value)} options={CHAIN_OPTIONS} />
                         </label>
                     </div>
                     <label className="block space-y-1">

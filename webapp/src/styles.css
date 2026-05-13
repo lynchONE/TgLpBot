@@ -25,6 +25,192 @@
   --radius-md: 12px;
 }
 
+.ui-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.ui-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(1, 6, 14, 0.72);
+  backdrop-filter: blur(10px);
+  cursor: default;
+}
+
+.ui-dialog {
+  position: relative;
+  width: min(420px, 100%);
+  border: 1px solid rgba(139, 160, 196, 0.24);
+  border-radius: 18px;
+  background: rgba(12, 18, 28, 0.98);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.5);
+  padding: 22px;
+  color: var(--text);
+}
+
+.ui-dialog-icon {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+}
+
+.ui-dialog-icon.danger {
+  color: var(--negative);
+  background: rgba(255, 94, 118, 0.12);
+  border-color: rgba(255, 94, 118, 0.22);
+}
+
+.ui-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(139, 160, 196, 0.18);
+  background: rgba(18, 26, 40, 0.78);
+  color: var(--text-muted);
+}
+
+.ui-dialog h3 {
+  margin: 14px 36px 0 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.ui-dialog p {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+.ui-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.ui-dialog-cancel,
+.ui-dialog-confirm {
+  min-width: 92px;
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 16px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ui-dialog-cancel {
+  color: var(--text);
+  background: rgba(139, 160, 196, 0.12);
+}
+
+.ui-dialog-confirm {
+  color: var(--accent-contrast);
+  background: linear-gradient(135deg, var(--accent-gradient-start), var(--accent-gradient-end));
+}
+
+.ui-dialog-confirm.danger {
+  color: #fff;
+  background: linear-gradient(135deg, #ff5e76, #ef4444);
+}
+
+.ui-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-select {
+  position: relative;
+  min-width: 130px;
+}
+
+.ui-select-trigger {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(139, 160, 196, 0.28);
+  background: rgba(18, 26, 40, 0.86);
+  color: var(--text);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ui-select-trigger svg {
+  color: var(--text-muted);
+  transition: transform 0.16s ease;
+}
+
+.ui-select-trigger svg.open {
+  transform: rotate(180deg);
+}
+
+.ui-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-menu {
+  position: absolute;
+  z-index: 200;
+  left: 0;
+  right: 0;
+  top: calc(100% + 7px);
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(139, 160, 196, 0.26);
+  background: rgba(10, 16, 26, 0.98);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+  padding: 6px;
+}
+
+.ui-select-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  padding: 10px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ui-select-option:hover,
+.ui-select-option.active {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
 .app-shell[data-accent-theme='yellow'] {
   --accent: #ffb11a;
   --accent-rgb: 255, 177, 26;

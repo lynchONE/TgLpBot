@@ -49,6 +49,7 @@ import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import AddLiquidityModal from './components/AddLiquidityModal';
+import ConfirmDialog from './components/ConfirmDialog';
 import NumberFlowValue from './components/NumberFlowValue';
 import GlobalConfigPanel from './components/GlobalConfigPanel';
 import WalletManagePanel from './components/WalletManagePanel';
@@ -1777,6 +1778,21 @@ export default function App() {
   const [taskActionPos, setTaskActionPos] = useState(null);
   const [addLiqPosition, setAddLiqPosition] = useState(null);
   const [operationProgress, setOperationProgress] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  const requestConfirm = useCallback((options) => new Promise((resolve) => {
+    setConfirmDialog({
+      ...options,
+      onResolve: resolve,
+    });
+  }), []);
+
+  const closeConfirmDialog = useCallback((value) => {
+    setConfirmDialog((current) => {
+      current?.onResolve?.(value);
+      return null;
+    });
+  }, []);
 
   const loadWalletsForModal = useCallback(async (posChain) => {
     if (!hasInitData) return;
@@ -1941,7 +1957,13 @@ export default function App() {
     const message = pct >= 100
       ? '确认停止该仓位？\n系统会关闭相关任务，并尽量将剩余价值结算为 USDT。'
       : `确认撤出当前仓位的 ${pct}% 并兑换为 USDT？\n任务会保留剩余仓位继续运行。`;
-    if (!window.confirm(message)) return;
+    const ok = await requestConfirm({
+      title: pct >= 100 ? '停止仓位？' : '部分撤仓？',
+      message,
+      confirmText: pct >= 100 ? '停止' : '撤仓',
+      danger: true,
+    });
+    if (!ok) return;
     if (pct >= 100) {
       await handleTaskStop(taskId);
       return;
@@ -1951,7 +1973,7 @@ export default function App() {
       setPositionsError('');
     }
     loadPositions();
-  }, [apiBaseUrl, initData, handleTaskStop, loadPositions]);
+  }, [apiBaseUrl, initData, handleTaskStop, loadPositions, requestConfirm]);
 
   // Polling fallback: detect close completion from positions data
   useEffect(() => {
@@ -1983,10 +2005,16 @@ export default function App() {
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleWithdrawLiquidity = useCallback(async (taskId) => {
-    if (!window.confirm('确认要取回全部流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。')) return;
+    const ok = await requestConfirm({
+      title: '取回全部流动性？',
+      message: '确认要取回全部流动性？\n该操作只会撤出仓位流动性，不会自动兑换为 USDT，并会停止任务。',
+      confirmText: '取回',
+      danger: true,
+    });
+    if (!ok) return;
     await withdrawLiquidity({ apiBaseUrl, initData, taskId });
     loadPositions();
-  }, [apiBaseUrl, initData, loadPositions]);
+  }, [apiBaseUrl, initData, loadPositions, requestConfirm]);
 
   const handleSwapDust = useCallback(async (taskId) => {
     await swapDust({ apiBaseUrl, initData, taskId });
@@ -2004,13 +2032,10 @@ export default function App() {
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleAddLiquidity = useCallback(async (taskId, position) => {
-    const input = prompt('请输入补充金额 (USDT):');
-    if (!input) return;
-    const amount = Number(input);
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount });
-    loadPositions();
-  }, [apiBaseUrl, initData, loadPositions]);
+    const resolvedTaskId = Number(taskId || position?.task_id || 0);
+    if (!Number.isFinite(resolvedTaskId) || resolvedTaskId <= 0) return;
+    setAddLiqPosition({ ...position, task_id: resolvedTaskId });
+  }, []);
 
   const openAddLiquidityModal = useCallback((taskId, position) => {
     const resolvedTaskId = Number(taskId || position?.task_id || 0);
@@ -3598,6 +3623,17 @@ export default function App() {
           onClose={() => setAddLiqPosition(null)}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmText={confirmDialog?.confirmText}
+        cancelText={confirmDialog?.cancelText}
+        danger={Boolean(confirmDialog?.danger)}
+        onConfirm={() => closeConfirmDialog(true)}
+        onCancel={() => closeConfirmDialog(false)}
+      />
     </div>
   );
 }

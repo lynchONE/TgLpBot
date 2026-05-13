@@ -3,6 +3,7 @@ import { fetchWallets, walletCRUD } from '../api';
 import PanelShell from './PanelShell';
 import { Wallet, Plus, Download, Edit2, Star, Trash2 } from 'lucide-react';
 import { shortAddress } from '../utils';
+import ConfirmDialog from './ConfirmDialog';
 
 export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData, chain = 'bsc' }) {
     const [wallets, setWallets] = useState([]);
@@ -15,6 +16,7 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData, c
     const [crudAction, setCrudAction] = useState(null); // 'import', 'create', 'rename'
     const [crudForm, setCrudForm] = useState({ name: '', privateKey: '', walletId: null });
     const [crudLoading, setCrudLoading] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
 
     const load = useCallback(async () => {
         if (!initData) return;
@@ -66,29 +68,45 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData, c
             setCrudForm({ name: '', privateKey: '', walletId: null });
             await load();
         } catch (err) {
-            setError(err.message || '操作失败');
+            setError(String(err?.message || err));
         } finally {
             setCrudLoading(false);
         }
     };
 
     const handleAction = async (action, w) => {
+        if (action === 'delete') {
+            setDeleteTarget(w);
+            return;
+        }
         if (action === 'set_default' || action === 'delete') {
-            if (action === 'delete') {
-                if (!window.confirm(`确定要删除钱包 ${w.name || shortAddress(w.address)} 吗？`)) return;
-            }
             setLoading(true);
             setError('');
             try {
-                await walletCRUD({ apiBaseUrl, initData, action, walletId: w.id });
-                await load();
-            } catch (err) {
-                setError(err.message || '操作失败');
+            await walletCRUD({ apiBaseUrl, initData, action, walletId: w.id });
+            await load();
+        } catch (err) {
+                setError(String(err?.message || err));
                 setLoading(false);
             }
         } else if (action === 'rename') {
             setCrudAction('rename');
             setCrudForm({ name: w.name || '', privateKey: '', walletId: w.id });
+        }
+    };
+
+    const confirmDelete = async () => {
+        const w = deleteTarget;
+        if (!w) return;
+        setDeleteTarget(null);
+        setLoading(true);
+        setError('');
+        try {
+            await walletCRUD({ apiBaseUrl, initData, action: 'delete', walletId: w.id });
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err));
+            setLoading(false);
         }
     };
 
@@ -219,6 +237,16 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData, c
                     ))}
                 </div>
             )}
+            <ConfirmDialog
+                open={Boolean(deleteTarget)}
+                title="删除钱包"
+                message={`确定要删除钱包 ${deleteTarget?.name || shortAddress(deleteTarget?.address || '')} 吗？`}
+                confirmText="删除"
+                danger
+                loading={loading}
+                onConfirm={confirmDelete}
+                onCancel={() => setDeleteTarget(null)}
+            />
         </PanelShell>
     );
 }

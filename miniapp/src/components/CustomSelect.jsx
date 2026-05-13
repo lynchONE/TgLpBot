@@ -1,15 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/**
- * 自定义下拉选择组件（替代原生 <select>）
- * Props:
- *   value    - 当前选中值
- *   onChange - 回调 (newValue) => void
- *   options  - [{ value, label, icon? }]
- *   placeholder - 占位文本
- *   className - 额外 class
- *   disabled - 是否禁用
- */
 export default function CustomSelect({
     value,
     onChange,

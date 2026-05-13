@@ -46,6 +46,23 @@ func TestFinalizeTaskPnLViewMetricsKeepsZeroWhenNoCurrentValue(t *testing.T) {
 	}
 }
 
+func TestFinalizeTaskPnLViewMetricsKeepsZeroAfterRecoveredPrincipal(t *testing.T) {
+	t.Parallel()
+
+	metrics := finalizeTaskPnLViewMetrics(taskPnLViewMetrics{
+		initialCost:  100,
+		netInvested:  0,
+		recovered:    100,
+		currentValue: 5,
+		absolutePnL:  5,
+		hasPnL:       true,
+	}, 100)
+
+	if metrics.netInvested != 0 {
+		t.Fatalf("netInvested = %.2f, want 0", metrics.netInvested)
+	}
+}
+
 func TestDisplayTaskAmountUSDT(t *testing.T) {
 	t.Parallel()
 
@@ -59,6 +76,8 @@ func TestDisplayTaskAmountUSDT(t *testing.T) {
 		{name: "dca total still pending", task: &models.StrategyTask{DCAEnabled: true, DCATotalAmountUSDT: 500, AmountUSDT: 400}, want: 500},
 		{name: "dca current catches up", task: &models.StrategyTask{DCAEnabled: true, DCATotalAmountUSDT: 500, AmountUSDT: 500}, want: 500},
 		{name: "dca current exceeds stale total", task: &models.StrategyTask{DCAEnabled: true, DCATotalAmountUSDT: 500, AmountUSDT: 600}, want: 600},
+		{name: "net invested after partial exit", task: &models.StrategyTask{AmountUSDT: 1000}, want: 600},
+		{name: "net invested after full principal recovered", task: &models.StrategyTask{AmountUSDT: 1000}, want: 0},
 	}
 
 	for _, tt := range tests {
@@ -66,8 +85,15 @@ func TestDisplayTaskAmountUSDT(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := displayTaskAmountUSDT(tt.task); got != tt.want {
-				t.Fatalf("displayTaskAmountUSDT() = %v, want %v", got, tt.want)
+			metrics := taskPnLViewMetrics{}
+			if tt.name == "net invested after partial exit" {
+				metrics.netInvested = 600
+			}
+			if tt.name == "net invested after full principal recovered" {
+				metrics.recovered = 1000
+			}
+			if got := displayTaskAmountUSDTWithMetrics(tt.task, metrics); got != tt.want {
+				t.Fatalf("displayTaskAmountUSDTWithMetrics() = %v, want %v", got, tt.want)
 			}
 		})
 	}
