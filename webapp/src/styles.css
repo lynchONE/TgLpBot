@@ -12031,6 +12031,43 @@ img.swap-token-glyph {
   text-transform: uppercase;
   font-weight: 600;
 }
+.af-wallet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.af-inline-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(136, 157, 191, 0.18);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.af-inline-btn:hover {
+  color: var(--text);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+.af-wallet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.af-wallet-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
+  align-items: center;
+}
 .af-input {
   width: 100%;
   padding: 9px 11px;

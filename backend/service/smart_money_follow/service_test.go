@@ -1,9 +1,20 @@
 package smart_money_follow
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/models"
 	"testing"
+	"time"
 )
+
+func ensureTestChainConfig(t *testing.T) {
+	t.Helper()
+	config.AppConfig = &config.Config{
+		Chains: map[string]config.ChainConfig{
+			"bsc": {ChainID: 56},
+		},
+	}
+}
 
 func TestCalculateFollowAmountFixed(t *testing.T) {
 	cfg := &models.SmartMoneyFollowConfig{
@@ -45,6 +56,7 @@ func TestCalculateFollowAmountRatioRequiresEventUSD(t *testing.T) {
 }
 
 func TestNormalizeSaveInputRejectsInvalidDelay(t *testing.T) {
+	ensureTestChainConfig(t)
 	_, err := NormalizeSaveInput(SaveConfigInput{
 		Chain:               "bsc",
 		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
@@ -55,5 +67,77 @@ func TestNormalizeSaveInputRejectsInvalidDelay(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid delay error")
+	}
+}
+
+func TestNormalizeSaveInputAcceptsWalletGroup(t *testing.T) {
+	ensureTestChainConfig(t)
+	got, err := NormalizeSaveInput(SaveConfigInput{
+		Chain: "bsc",
+		TargetWallets: []string{
+			"0x0000000000000000000000000000000000000001",
+			"0x0000000000000000000000000000000000000002",
+			"0x0000000000000000000000000000000000000001",
+		},
+		AmountMode:           models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:      10,
+		DelayMode:            models.SmartMoneyFollowDelayModeImmediate,
+		TriggerMode:          models.SmartMoneyFollowTriggerModeThreshold,
+		TriggerMinWallets:    2,
+		TriggerWindowSeconds: 600,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSaveInput returned error: %v", err)
+	}
+	if len(got.TargetWallets) != 2 {
+		t.Fatalf("wallet count = %d, want 2", len(got.TargetWallets))
+	}
+	if got.TargetWalletAddress != "0x0000000000000000000000000000000000000001" {
+		t.Fatalf("primary wallet = %s", got.TargetWalletAddress)
+	}
+	if got.TriggerMode != models.SmartMoneyFollowTriggerModeThreshold {
+		t.Fatalf("trigger mode = %s", got.TriggerMode)
+	}
+}
+
+func TestNormalizeSaveInputRejectsThresholdAboveWalletCount(t *testing.T) {
+	ensureTestChainConfig(t)
+	_, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:                "bsc",
+		TargetWallets:        []string{"0x0000000000000000000000000000000000000001"},
+		AmountMode:           models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:      10,
+		DelayMode:            models.SmartMoneyFollowDelayModeImmediate,
+		TriggerMode:          models.SmartMoneyFollowTriggerModeThreshold,
+		TriggerMinWallets:    2,
+		TriggerWindowSeconds: 60,
+	})
+	if err == nil {
+		t.Fatal("expected threshold wallet count error")
+	}
+}
+
+func TestTargetPositionRefForThresholdIgnoresWallet(t *testing.T) {
+	lower := -100
+	upper := 100
+	cfg := &models.SmartMoneyFollowConfig{TriggerMode: models.SmartMoneyFollowTriggerModeThreshold}
+	eventA := &models.SmartMoneyLPEvent{
+		WalletAddress: "0x0000000000000000000000000000000000000001",
+		ChainID:       56,
+		Protocol:      "pancake_v3",
+		PoolAddress:   "0x00000000000000000000000000000000000000aa",
+		TickLower:     &lower,
+		TickUpper:     &upper,
+		TxTimestamp:   time.Now(),
+	}
+	eventB := *eventA
+	eventB.WalletAddress = "0x0000000000000000000000000000000000000002"
+	refA := targetPositionRefForFollowJob(cfg, eventA)
+	refB := targetPositionRefForFollowJob(cfg, &eventB)
+	if refA == "" {
+		t.Fatal("expected threshold position ref")
+	}
+	if refA != refB {
+		t.Fatalf("threshold refs differ: %s vs %s", refA, refB)
 	}
 }

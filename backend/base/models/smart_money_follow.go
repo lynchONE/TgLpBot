@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 const (
 	SmartMoneyFollowAmountModeFixed = "fixed"
@@ -8,6 +13,9 @@ const (
 
 	SmartMoneyFollowDelayModeImmediate = "immediate"
 	SmartMoneyFollowDelayModeFixed     = "fixed_delay"
+
+	SmartMoneyFollowTriggerModeAny       = "any"
+	SmartMoneyFollowTriggerModeThreshold = "threshold"
 
 	SmartMoneyFollowJobActionOpen  = "open"
 	SmartMoneyFollowJobActionClose = "close"
@@ -22,46 +30,92 @@ const (
 	SmartMoneyFollowTaskStatusClosed = "closed"
 )
 
+type StringArray []string
+
+func (a StringArray) Value() (driver.Value, error) {
+	if len(a) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal([]string(a))
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func (a *StringArray) Scan(value any) error {
+	if value == nil {
+		*a = nil
+		return nil
+	}
+	var raw []byte
+	switch v := value.(type) {
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return fmt.Errorf("scan StringArray from %T", value)
+	}
+	if len(raw) == 0 {
+		*a = nil
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return err
+	}
+	*a = out
+	return nil
+}
+
 type SmartMoneyFollowConfig struct {
-	ID                  uint      `gorm:"primaryKey" json:"id"`
-	UserID              uint      `gorm:"not null;index" json:"user_id"`
-	Chain               string    `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
-	ChainID             int       `gorm:"not null;default:56;index" json:"chain_id"`
-	TargetWalletAddress string    `gorm:"size:42;not null;index" json:"target_wallet_address"`
-	Enabled             bool      `gorm:"not null;default:false;index" json:"enabled"`
-	AmountMode          string    `gorm:"size:16;not null;default:'fixed'" json:"amount_mode"`
-	FixedAmountUSDT     float64   `gorm:"type:decimal(20,8);not null;default:0" json:"fixed_amount_usdt"`
-	Ratio               float64   `gorm:"type:decimal(12,8);not null;default:1" json:"ratio"`
-	DelayMode           string    `gorm:"size:20;not null;default:'immediate'" json:"delay_mode"`
-	DelaySeconds        int       `gorm:"not null;default:0" json:"delay_seconds"`
-	FollowClose         bool      `gorm:"not null;default:false" json:"follow_close"`
-	CursorEventID       uint      `gorm:"not null;default:0" json:"cursor_event_id"`
-	LastSeenEventID     uint      `gorm:"not null;default:0" json:"last_seen_event_id"`
-	CreatedAt           time.Time `gorm:"not null;autoCreateTime" json:"created_at"`
-	UpdatedAt           time.Time `gorm:"not null;autoUpdateTime" json:"updated_at"`
+	ID                   uint        `gorm:"primaryKey" json:"id"`
+	UserID               uint        `gorm:"not null;index" json:"user_id"`
+	Chain                string      `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
+	ChainID              int         `gorm:"not null;default:56;index" json:"chain_id"`
+	TargetWalletAddress  string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
+	TargetWallets        StringArray `gorm:"column:target_wallet_addresses;type:json" json:"target_wallet_addresses"`
+	TriggerMode          string      `gorm:"size:16;not null;default:'any'" json:"trigger_mode"`
+	TriggerMinWallets    int         `gorm:"not null;default:1" json:"trigger_min_wallets"`
+	TriggerWindowSeconds int         `gorm:"not null;default:300" json:"trigger_window_seconds"`
+	Enabled              bool        `gorm:"not null;default:false;index" json:"enabled"`
+	AmountMode           string      `gorm:"size:16;not null;default:'fixed'" json:"amount_mode"`
+	FixedAmountUSDT      float64     `gorm:"type:decimal(20,8);not null;default:0" json:"fixed_amount_usdt"`
+	Ratio                float64     `gorm:"type:decimal(12,8);not null;default:1" json:"ratio"`
+	DelayMode            string      `gorm:"size:20;not null;default:'immediate'" json:"delay_mode"`
+	DelaySeconds         int         `gorm:"not null;default:0" json:"delay_seconds"`
+	FollowClose          bool        `gorm:"not null;default:false" json:"follow_close"`
+	CursorEventID        uint        `gorm:"not null;default:0" json:"cursor_event_id"`
+	LastSeenEventID      uint        `gorm:"not null;default:0" json:"last_seen_event_id"`
+	CreatedAt            time.Time   `gorm:"not null;autoCreateTime" json:"created_at"`
+	UpdatedAt            time.Time   `gorm:"not null;autoUpdateTime" json:"updated_at"`
 }
 
 func (SmartMoneyFollowConfig) TableName() string { return "smart_money_follow_configs" }
 
 type SmartMoneyFollowJob struct {
-	ID                  uint       `gorm:"primaryKey" json:"id"`
-	ConfigID            uint       `gorm:"not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:1;index" json:"config_id"`
-	UserID              uint       `gorm:"not null;index" json:"user_id"`
-	Chain               string     `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
-	ChainID             int        `gorm:"not null;default:56;index" json:"chain_id"`
-	TargetWalletAddress string     `gorm:"size:42;not null;index" json:"target_wallet_address"`
-	EventID             uint       `gorm:"not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:2;index" json:"event_id"`
-	TargetPositionRef   string     `gorm:"size:255;not null;default:'';index" json:"target_position_ref"`
-	Action              string     `gorm:"size:16;not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:3;index" json:"action"`
-	Status              string     `gorm:"size:16;not null;default:'pending';index" json:"status"`
-	ScheduledAt         time.Time  `gorm:"not null;index" json:"scheduled_at"`
-	StartedAt           *time.Time `json:"started_at"`
-	FinishedAt          *time.Time `json:"finished_at"`
-	AmountUSDT          float64    `gorm:"type:decimal(20,8);not null;default:0" json:"amount_usdt"`
-	TaskID              *uint      `gorm:"index" json:"task_id,omitempty"`
-	ErrorMessage        string     `gorm:"type:text" json:"error_message"`
-	CreatedAt           time.Time  `gorm:"not null;autoCreateTime" json:"created_at"`
-	UpdatedAt           time.Time  `gorm:"not null;autoUpdateTime" json:"updated_at"`
+	ID                  uint        `gorm:"primaryKey" json:"id"`
+	ConfigID            uint        `gorm:"not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:1;index" json:"config_id"`
+	UserID              uint        `gorm:"not null;index" json:"user_id"`
+	Chain               string      `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
+	ChainID             int         `gorm:"not null;default:56;index" json:"chain_id"`
+	TargetWalletAddress string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
+	EventID             uint        `gorm:"not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:2;index" json:"event_id"`
+	TriggerMode         string      `gorm:"size:16;not null;default:'any'" json:"trigger_mode"`
+	TriggerWallets      StringArray `gorm:"column:trigger_wallet_addresses;type:json" json:"trigger_wallet_addresses"`
+	TriggerEventIDs     StringArray `gorm:"column:trigger_event_ids;type:json" json:"trigger_event_ids"`
+	TargetPositionRef   string      `gorm:"size:255;not null;default:'';index" json:"target_position_ref"`
+	Action              string      `gorm:"size:16;not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:3;index" json:"action"`
+	Status              string      `gorm:"size:16;not null;default:'pending';index" json:"status"`
+	ScheduledAt         time.Time   `gorm:"not null;index" json:"scheduled_at"`
+	StartedAt           *time.Time  `json:"started_at"`
+	FinishedAt          *time.Time  `json:"finished_at"`
+	AmountUSDT          float64     `gorm:"type:decimal(20,8);not null;default:0" json:"amount_usdt"`
+	TaskID              *uint       `gorm:"index" json:"task_id,omitempty"`
+	ErrorMessage        string      `gorm:"type:text" json:"error_message"`
+	CreatedAt           time.Time   `gorm:"not null;autoCreateTime" json:"created_at"`
+	UpdatedAt           time.Time   `gorm:"not null;autoUpdateTime" json:"updated_at"`
 }
 
 func (SmartMoneyFollowJob) TableName() string { return "smart_money_follow_jobs" }

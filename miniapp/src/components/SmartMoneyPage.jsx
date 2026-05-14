@@ -3032,6 +3032,10 @@ function GoldenDogPage({ apiBaseUrl, initData, brand, watchedWallets = [], watch
 const AUTO_FOLLOW_DEFAULT_DRAFT = {
     id: 0,
     target_wallet_address: '',
+    target_wallet_addresses: [''],
+    trigger_mode: 'any',
+    trigger_min_wallets: '2',
+    trigger_window_seconds: '300',
     enabled: true,
     amount_mode: 'fixed',
     fixed_amount_usdt: '50',
@@ -3041,12 +3045,51 @@ const AUTO_FOLLOW_DEFAULT_DRAFT = {
     follow_close: true,
 };
 
+function normalizeAutoFollowWalletList(config) {
+    const source = Array.isArray(config?.target_wallet_addresses) && config.target_wallet_addresses.length > 0
+        ? config.target_wallet_addresses
+        : [config?.target_wallet_address || ''];
+    const wallets = source.map((value) => String(value || '').trim()).filter(Boolean);
+    return wallets.length ? wallets : [''];
+}
+
+function parseAutoFollowWalletInputs(values) {
+    const seen = new Set();
+    const wallets = [];
+    (Array.isArray(values) ? values : []).forEach((value) => {
+        const address = normalizeWalletAddress(value);
+        if (!address) {
+            if (String(value || '').trim()) throw new Error('请输入有效的钱包地址');
+            return;
+        }
+        if (!seen.has(address)) {
+            seen.add(address);
+            wallets.push(address);
+        }
+    });
+    if (!wallets.length) throw new Error('至少填写一个跟单钱包地址');
+    return wallets;
+}
+
+function autoFollowTriggerText(config) {
+    const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+    if (String(config?.trigger_mode || 'any') === 'threshold') {
+        return `${Number(config?.trigger_min_wallets || 2)} / ${wallets.length} 钱包 · ${Number(config?.trigger_window_seconds || 300)}s`;
+    }
+    return wallets.length > 1 ? `任意 1 / ${wallets.length} 钱包` : '单钱包触发';
+}
+
 function createAutoFollowDraft(config) {
     if (!config) return { ...AUTO_FOLLOW_DEFAULT_DRAFT };
     const ratio = Number(config.ratio);
+    const wallets = normalizeAutoFollowWalletList(config);
     return {
         id: Number(config.id) || 0,
         target_wallet_address: String(config.target_wallet_address || ''),
+        target_wallet_addresses: wallets,
+        trigger_mode: config.trigger_mode === 'threshold' ? 'threshold' : 'any',
+        trigger_min_wallets: config.trigger_min_wallets != null ? String(config.trigger_min_wallets) : '2',
+        trigger_window_seconds: config.trigger_window_seconds != null ? String(config.trigger_window_seconds) : '300',
         enabled: Boolean(config.enabled),
         amount_mode: String(config.amount_mode || 'fixed'),
         fixed_amount_usdt: String(config.fixed_amount_usdt || ''),
@@ -3058,8 +3101,7 @@ function createAutoFollowDraft(config) {
 }
 
 function normalizeAutoFollowDraft(draft) {
-    const address = normalizeWalletAddress(draft.target_wallet_address);
-    if (!address) throw new Error('请输入有效的钱包地址');
+    const wallets = parseAutoFollowWalletInputs(draft.target_wallet_addresses);
 
     const amountMode = String(draft.amount_mode || '').trim();
     const fixedAmount = Number(String(draft.fixed_amount_usdt || '').trim());
@@ -3074,10 +3116,26 @@ function normalizeAutoFollowDraft(draft) {
     if (delayMode === 'fixed_delay' && (!Number.isFinite(delaySeconds) || delaySeconds < 0 || delaySeconds > 86400)) {
         throw new Error('延时秒数必须在 0 到 86400 之间');
     }
+    const triggerMode = draft.trigger_mode === 'threshold' ? 'threshold' : 'any';
+    let triggerMinWallets = 1;
+    let triggerWindowSeconds = 300;
+    if (triggerMode === 'threshold') {
+        triggerMinWallets = Math.round(Number(String(draft.trigger_min_wallets || '').trim()));
+        triggerWindowSeconds = Math.round(Number(String(draft.trigger_window_seconds || '').trim()));
+        if (!Number.isFinite(triggerMinWallets) || triggerMinWallets < 2) throw new Error('触发钱包数至少为 2');
+        if (triggerMinWallets > wallets.length) throw new Error('触发钱包数不能超过目标钱包数量');
+        if (!Number.isFinite(triggerWindowSeconds) || triggerWindowSeconds <= 0 || triggerWindowSeconds > 86400) {
+            throw new Error('统计窗口必须在 1 到 86400 秒之间');
+        }
+    }
 
     return {
         id: Number(draft.id) || 0,
-        target_wallet_address: address,
+        target_wallet_address: wallets[0],
+        target_wallet_addresses: wallets,
+        trigger_mode: triggerMode,
+        trigger_min_wallets: triggerMinWallets,
+        trigger_window_seconds: triggerWindowSeconds,
         enabled: Boolean(draft.enabled),
         amount_mode: amountMode,
         fixed_amount_usdt: amountMode === 'fixed' ? fixedAmount : 0,
@@ -3197,6 +3255,10 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     id: config.id,
                     chain: config.chain,
                     target_wallet_address: config.target_wallet_address,
+                    target_wallet_addresses: normalizeAutoFollowWalletList(config).filter(Boolean),
+                    trigger_mode: config.trigger_mode || 'any',
+                    trigger_min_wallets: Number(config.trigger_min_wallets || 1),
+                    trigger_window_seconds: Number(config.trigger_window_seconds || 300),
                     enabled: !config.enabled,
                     amount_mode: config.amount_mode,
                     fixed_amount_usdt: config.fixed_amount_usdt,
@@ -3215,6 +3277,36 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     }, [apiBaseUrl, hasInitData, initData, load]);
 
     const activeCount = configs.filter((item) => item?.enabled).length;
+    const draftWallets = Array.isArray(draft.target_wallet_addresses) && draft.target_wallet_addresses.length > 0
+        ? draft.target_wallet_addresses
+        : [''];
+    const setDraftWallet = (index, value) => {
+        setDraft((prev) => {
+            const current = Array.isArray(prev.target_wallet_addresses) && prev.target_wallet_addresses.length > 0
+                ? prev.target_wallet_addresses
+                : [''];
+            const next = current.map((wallet, i) => (i === index ? value : wallet));
+            return { ...prev, target_wallet_addresses: next, target_wallet_address: next[0] || '' };
+        });
+    };
+    const addDraftWallet = () => {
+        setDraft((prev) => {
+            const current = Array.isArray(prev.target_wallet_addresses) && prev.target_wallet_addresses.length > 0
+                ? prev.target_wallet_addresses
+                : [''];
+            return { ...prev, target_wallet_addresses: [...current, ''] };
+        });
+    };
+    const removeDraftWallet = (index) => {
+        setDraft((prev) => {
+            const current = Array.isArray(prev.target_wallet_addresses) && prev.target_wallet_addresses.length > 0
+                ? prev.target_wallet_addresses
+                : [''];
+            const next = current.filter((_, i) => i !== index);
+            const finalWallets = next.length ? next : [''];
+            return { ...prev, target_wallet_addresses: finalWallets, target_wallet_address: finalWallets[0] || '' };
+        });
+    };
 
     return (
         <div className="space-y-4">
@@ -3275,12 +3367,78 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 </div>
 
                 <div className="space-y-3">
-                    <input
-                        className={getInputClass(brand)}
-                        placeholder="跟单钱包地址 (0x...)"
-                        value={draft.target_wallet_address}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, target_wallet_address: e.target.value }))}
-                    />
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-[11px] font-medium text-zinc-500">跟单钱包</div>
+                            <button
+                                type="button"
+                                onClick={addDraftWallet}
+                                className={`rounded-xl px-2.5 py-1.5 text-xs ${getFilterButtonClass(false, brand)}`}
+                            >
+                                <Plus size={12} className="mr-1 inline" /> 添加
+                            </button>
+                        </div>
+                        {draftWallets.map((wallet, index) => (
+                            <div key={index} className="grid grid-cols-[minmax(0,1fr)_38px] gap-2">
+                                <input
+                                    className={getInputClass(brand)}
+                                    placeholder="跟单钱包地址 (0x...)"
+                                    value={wallet}
+                                    onChange={(e) => setDraftWallet(index, e.target.value)}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => removeDraftWallet(index)}
+                                    disabled={draftWallets.length === 1}
+                                    className={`${getIconButtonClass(true)} h-full min-h-[42px] disabled:opacity-40`}
+                                    title="移除钱包"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.trigger_mode !== 'threshold', brand)}`}
+                                onClick={() => setDraft((prev) => ({ ...prev, trigger_mode: 'any' }))}
+                            >
+                                <Zap size={13} className="mr-1 inline" /> 任意钱包
+                            </button>
+                            <button
+                                type="button"
+                                className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.trigger_mode === 'threshold', brand)}`}
+                                onClick={() => setDraft((prev) => ({ ...prev, trigger_mode: 'threshold' }))}
+                            >
+                                <Users size={13} className="mr-1 inline" /> 多钱包确认
+                            </button>
+                        </div>
+                        {draft.trigger_mode === 'threshold' ? (
+                            <div className="grid grid-cols-2 gap-2">
+                                <input
+                                    className={getInputClass(brand)}
+                                    type="number"
+                                    min="2"
+                                    step="1"
+                                    placeholder="触发数量"
+                                    value={draft.trigger_min_wallets}
+                                    onChange={(e) => setDraft((prev) => ({ ...prev, trigger_min_wallets: e.target.value }))}
+                                />
+                                <input
+                                    className={getInputClass(brand)}
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    placeholder="统计窗口(秒)"
+                                    value={draft.trigger_window_seconds}
+                                    onChange={(e) => setDraft((prev) => ({ ...prev, trigger_window_seconds: e.target.value }))}
+                                />
+                            </div>
+                        ) : null}
+                    </div>
 
                     <div className="grid grid-cols-2 gap-2">
                         <button
@@ -3397,46 +3555,54 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         暂无自动跟单配置
                     </div>
                 ) : (
-                    configs.map((config) => (
-                        <div key={config.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/60 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <span className="truncate font-mono text-sm text-zinc-100">{shortAddr(config.target_wallet_address)}</span>
-                                        <Badge className={config.enabled
-                                            ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
-                                            : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
-                                            {config.enabled ? '开启' : '暂停'}
-                                        </Badge>
+                    configs.map((config) => {
+                        const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+                        return (
+                            <div key={config.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/60 p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className="truncate font-mono text-sm text-zinc-100">
+                                                {wallets.length > 1 ? `${shortAddr(wallets[0])} +${wallets.length - 1}` : shortAddr(config.target_wallet_address)}
+                                            </span>
+                                            <Badge className={config.enabled
+                                                ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                                                : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
+                                                {config.enabled ? '开启' : '暂停'}
+                                            </Badge>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                {autoFollowTriggerText(config)}
+                                            </Badge>
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                {config.amount_mode === 'ratio'
+                                                    ? `${Number(config.ratio * 100).toFixed(0)}%`
+                                                    : formatUSDCompact(config.fixed_amount_usdt)}
+                                            </Badge>
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                {config.delay_mode === 'fixed_delay' ? `${config.delay_seconds}s` : '立即'}
+                                            </Badge>
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                撤仓{config.follow_close ? '跟单' : '忽略'}
+                                            </Badge>
+                                        </div>
                                     </div>
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                                            {config.amount_mode === 'ratio'
-                                                ? `${Number(config.ratio * 100).toFixed(0)}%`
-                                                : formatUSDCompact(config.fixed_amount_usdt)}
-                                        </Badge>
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                                            {config.delay_mode === 'fixed_delay' ? `${config.delay_seconds}s` : '立即'}
-                                        </Badge>
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                                            撤仓{config.follow_close ? '跟单' : '忽略'}
-                                        </Badge>
+                                    <div className="flex shrink-0 gap-1.5">
+                                        <button type="button" className={getIconButtonClass(false)} onClick={() => setDraft(createAutoFollowDraft(config))} title="编辑">
+                                            <Pencil size={14} />
+                                        </button>
+                                        <button type="button" className={getIconButtonClass(false)} onClick={() => toggleConfig(config)} title={config.enabled ? '暂停' : '开启'} disabled={saving}>
+                                            {config.enabled ? <Pause size={14} /> : <Play size={14} />}
+                                        </button>
+                                        <button type="button" className={getIconButtonClass(true)} onClick={() => deleteConfig(config.id)} title="删除" disabled={saving}>
+                                            <Trash2 size={14} />
+                                        </button>
                                     </div>
-                                </div>
-                                <div className="flex shrink-0 gap-1.5">
-                                    <button type="button" className={getIconButtonClass(false)} onClick={() => setDraft(createAutoFollowDraft(config))} title="编辑">
-                                        <Pencil size={14} />
-                                    </button>
-                                    <button type="button" className={getIconButtonClass(false)} onClick={() => toggleConfig(config)} title={config.enabled ? '暂停' : '开启'} disabled={saving}>
-                                        {config.enabled ? <Pause size={14} /> : <Play size={14} />}
-                                    </button>
-                                    <button type="button" className={getIconButtonClass(true)} onClick={() => deleteConfig(config.id)} title="删除" disabled={saving}>
-                                        <Trash2 size={14} />
-                                    </button>
                                 </div>
                             </div>
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </section>
 
@@ -3447,28 +3613,31 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         暂无执行记录
                     </div>
                 ) : (
-                    jobs.slice(0, 8).map((job) => (
-                        <div key={job.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <Badge className={autoFollowStatusClass(job.status)}>{job.status}</Badge>
-                                        <span className="text-sm text-zinc-100">{job.action === 'close' ? '撤仓' : '开仓'}</span>
+                    jobs.slice(0, 8).map((job) => {
+                        const triggerWallets = Array.isArray(job.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
+                        return (
+                            <div key={job.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <Badge className={autoFollowStatusClass(job.status)}>{job.status}</Badge>
+                                            <span className="text-sm text-zinc-100">{job.action === 'close' ? '撤仓' : '开仓'}</span>
+                                        </div>
+                                        <div className="mt-1 truncate text-[11px] text-zinc-500">
+                                            {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)} · {formatAutoFollowJobTime(job.scheduled_at)}
+                                        </div>
+                                        {job.error_message ? (
+                                            <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{job.error_message}</div>
+                                        ) : null}
                                     </div>
-                                    <div className="mt-1 truncate text-[11px] text-zinc-500">
-                                        {shortAddr(job.target_wallet_address)} · {formatAutoFollowJobTime(job.scheduled_at)}
+                                    <div className="shrink-0 text-right">
+                                        <div className="text-sm font-semibold text-zinc-100">{Number(job.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
+                                        <div className="text-[10px] text-zinc-500">#{job.id}</div>
                                     </div>
-                                    {job.error_message ? (
-                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{job.error_message}</div>
-                                    ) : null}
-                                </div>
-                                <div className="shrink-0 text-right">
-                                    <div className="text-sm font-semibold text-zinc-100">{Number(job.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
-                                    <div className="text-[10px] text-zinc-500">#{job.id}</div>
                                 </div>
                             </div>
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </section>
         </div>

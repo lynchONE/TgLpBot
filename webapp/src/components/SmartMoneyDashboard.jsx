@@ -3692,6 +3692,10 @@ function GoldenDogPanelContent({
 const AUTO_FOLLOW_DRAFT_INITIAL = Object.freeze({
     id: 0,
     target_wallet_address: '',
+    target_wallet_addresses: [''],
+    trigger_mode: 'any',
+    trigger_min_wallets: '2',
+    trigger_window_seconds: '300',
     enabled: true,
     amount_mode: 'fixed',
     fixed_amount_usdt: '',
@@ -3701,12 +3705,54 @@ const AUTO_FOLLOW_DRAFT_INITIAL = Object.freeze({
     follow_close: true,
 });
 
+function normalizeAutoFollowWalletList(config) {
+    const source = Array.isArray(config?.target_wallet_addresses) && config.target_wallet_addresses.length > 0
+        ? config.target_wallet_addresses
+        : [config?.target_wallet_address || ''];
+    const wallets = source.map((value) => String(value || '').trim()).filter(Boolean);
+    return wallets.length ? wallets : [''];
+}
+
+function parseAutoFollowWalletInputs(values) {
+    const seen = new Set();
+    const wallets = [];
+    (Array.isArray(values) ? values : []).forEach((value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return;
+        if (!/^0x[a-fA-F0-9]{40}$/.test(raw)) {
+            throw new Error('请填写正确的钱包地址 (0x 开头 42 位)');
+        }
+        const address = `0x${raw.slice(2).toLowerCase()}`;
+        if (!seen.has(address)) {
+            seen.add(address);
+            wallets.push(address);
+        }
+    });
+    if (wallets.length === 0) {
+        throw new Error('至少填写一个跟单钱包地址');
+    }
+    return wallets;
+}
+
+function autoFollowTriggerText(config) {
+    const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+    if (String(config?.trigger_mode || 'any') === 'threshold') {
+        return `${Number(config?.trigger_min_wallets || 2)} / ${wallets.length} 钱包 · ${Number(config?.trigger_window_seconds || 300)}s`;
+    }
+    return wallets.length > 1 ? `任意 1 / ${wallets.length} 钱包` : '单钱包触发';
+}
+
 function createAutoFollowDraft(config) {
     if (!config) return { ...AUTO_FOLLOW_DRAFT_INITIAL };
     const ratioPct = Number(config.ratio || 0) * 100;
+    const wallets = normalizeAutoFollowWalletList(config);
     return {
         id: Number(config.id) || 0,
         target_wallet_address: String(config.target_wallet_address || ''),
+        target_wallet_addresses: wallets,
+        trigger_mode: config.trigger_mode === 'threshold' ? 'threshold' : 'any',
+        trigger_min_wallets: config.trigger_min_wallets != null ? String(config.trigger_min_wallets) : '2',
+        trigger_window_seconds: config.trigger_window_seconds != null ? String(config.trigger_window_seconds) : '300',
         enabled: Boolean(config.enabled),
         amount_mode: config.amount_mode === 'ratio' ? 'ratio' : 'fixed',
         fixed_amount_usdt: config.fixed_amount_usdt != null ? String(config.fixed_amount_usdt) : '',
@@ -3729,10 +3775,7 @@ function autoFollowDraftReducer(state, action) {
 }
 
 function normalizeAutoFollowDraft(draft) {
-    const address = String(draft.target_wallet_address || '').trim();
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-        throw new Error('请填写正确的钱包地址 (0x 开头 42 位)');
-    }
+    const wallets = parseAutoFollowWalletInputs(draft.target_wallet_addresses);
     const amountMode = draft.amount_mode === 'ratio' ? 'ratio' : 'fixed';
     let fixedAmount = 0;
     let ratio = 1;
@@ -3753,9 +3796,29 @@ function normalizeAutoFollowDraft(draft) {
     if (delayMode === 'fixed_delay') {
         delaySeconds = Math.max(0, Math.round(Number(draft.delay_seconds) || 0));
     }
+    const triggerMode = draft.trigger_mode === 'threshold' ? 'threshold' : 'any';
+    let triggerMinWallets = 1;
+    let triggerWindowSeconds = 300;
+    if (triggerMode === 'threshold') {
+        triggerMinWallets = Math.round(Number(draft.trigger_min_wallets));
+        triggerWindowSeconds = Math.round(Number(draft.trigger_window_seconds));
+        if (!Number.isFinite(triggerMinWallets) || triggerMinWallets < 2) {
+            throw new Error('触发钱包数至少为 2');
+        }
+        if (triggerMinWallets > wallets.length) {
+            throw new Error('触发钱包数不能超过目标钱包数量');
+        }
+        if (!Number.isFinite(triggerWindowSeconds) || triggerWindowSeconds <= 0 || triggerWindowSeconds > 86400) {
+            throw new Error('统计窗口必须在 1 到 86400 秒之间');
+        }
+    }
     return {
         id: Number(draft.id) || 0,
-        target_wallet_address: address,
+        target_wallet_address: wallets[0],
+        target_wallet_addresses: wallets,
+        trigger_mode: triggerMode,
+        trigger_min_wallets: triggerMinWallets,
+        trigger_window_seconds: triggerWindowSeconds,
         enabled: Boolean(draft.enabled),
         amount_mode: amountMode,
         fixed_amount_usdt: amountMode === 'fixed' ? fixedAmount : 0,
@@ -3838,19 +3901,103 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, onSubmit, onRese
     const editing = Number(draft.id) > 0;
     const isFixed = draft.amount_mode === 'fixed';
     const isImmediate = draft.delay_mode === 'immediate';
+    const wallets = Array.isArray(draft.target_wallet_addresses) && draft.target_wallet_addresses.length > 0
+        ? draft.target_wallet_addresses
+        : [''];
+    const isThreshold = draft.trigger_mode === 'threshold';
+    const updateWallet = (index, value) => {
+        const next = wallets.map((wallet, i) => (i === index ? value : wallet));
+        dispatch({ type: 'set', payload: { target_wallet_addresses: next, target_wallet_address: next[0] || '' } });
+    };
+    const removeWallet = (index) => {
+        const next = wallets.filter((_, i) => i !== index);
+        const finalWallets = next.length ? next : [''];
+        dispatch({ type: 'set', payload: { target_wallet_addresses: finalWallets, target_wallet_address: finalWallets[0] || '' } });
+    };
+    const addWallet = () => {
+        dispatch({ type: 'set', payload: { target_wallet_addresses: [...wallets, ''] } });
+    };
     return (
         <div className="af-form">
             <div className="af-form-row">
-                <label className="af-field-label">跟单钱包地址</label>
-                <input
-                    type="text"
-                    className="af-input af-input--mono"
-                    placeholder="0x... 42 位 EVM 地址"
-                    value={draft.target_wallet_address}
-                    onChange={(e) => dispatch({ type: 'set', payload: { target_wallet_address: e.target.value } })}
-                    spellCheck={false}
-                    autoComplete="off"
-                />
+                <div className="af-wallet-head">
+                    <label className="af-field-label">跟单钱包地址</label>
+                    <button type="button" className="af-inline-btn" onClick={addWallet}>
+                        <Plus size={12} /> 添加钱包
+                    </button>
+                </div>
+                <div className="af-wallet-list">
+                    {wallets.map((wallet, index) => (
+                        <div className="af-wallet-row" key={index}>
+                            <input
+                                type="text"
+                                className="af-input af-input--mono"
+                                placeholder="0x... 42 位 EVM 地址"
+                                value={wallet}
+                                onChange={(e) => updateWallet(index, e.target.value)}
+                                spellCheck={false}
+                                autoComplete="off"
+                            />
+                            <button
+                                type="button"
+                                className="af-icon-btn af-icon-btn--danger"
+                                onClick={() => removeWallet(index)}
+                                disabled={wallets.length === 1}
+                                title="移除钱包"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="af-form-row">
+                <label className="af-field-label">触发规则</label>
+                <div className="af-segmented">
+                    <button
+                        type="button"
+                        className={`af-segmented-btn${!isThreshold ? ' active' : ''}`}
+                        onClick={() => dispatch({ type: 'set', payload: { trigger_mode: 'any' } })}
+                    >
+                        <Zap size={13} /> 任意钱包
+                    </button>
+                    <button
+                        type="button"
+                        className={`af-segmented-btn${isThreshold ? ' active' : ''}`}
+                        onClick={() => dispatch({ type: 'set', payload: { trigger_mode: 'threshold' } })}
+                    >
+                        <Users size={13} /> 多钱包确认
+                    </button>
+                </div>
+                {isThreshold && (
+                    <div className="af-form-row af-form-row--split">
+                        <div className="af-input-wrap">
+                            <input
+                                type="number"
+                                min="2"
+                                step="1"
+                                className="af-input"
+                                placeholder="触发数量"
+                                value={draft.trigger_min_wallets}
+                                onChange={(e) => dispatch({ type: 'set', payload: { trigger_min_wallets: e.target.value } })}
+                            />
+                            <span className="af-input-suffix">个</span>
+                        </div>
+                        <div className="af-input-wrap">
+                            <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                className="af-input"
+                                placeholder="统计窗口"
+                                value={draft.trigger_window_seconds}
+                                onChange={(e) => dispatch({ type: 'set', payload: { trigger_window_seconds: e.target.value } })}
+                            />
+                            <span className="af-input-suffix">秒</span>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="af-form-row af-form-row--split">
@@ -3999,12 +4146,15 @@ function AutoFollowConfigCard({ config, busy, onEdit, onToggle, onDelete }) {
         ? `${Math.round(Number(config.ratio || 0) * 100)}% 仓位`
         : `${formatUsd(config.fixed_amount_usdt)} 固定`;
     const delayText = config.delay_mode === 'fixed_delay' ? `延时 ${config.delay_seconds}s` : '立即跟单';
+    const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
     return (
         <div className={`af-config-card${config.enabled ? ' active' : ''}`}>
             <div className="af-config-head">
                 <div className="af-config-addr">
                     <span className="af-config-dot" />
-                    <span className="af-config-addr-text">{shortAddr(config.target_wallet_address)}</span>
+                    <span className="af-config-addr-text">
+                        {wallets.length > 1 ? `${shortAddr(wallets[0])} +${wallets.length - 1}` : shortAddr(config.target_wallet_address)}
+                    </span>
                     <span className={`af-pill ${config.enabled ? 'af-pill--on' : 'af-pill--off'}`}>
                         {config.enabled ? '运行中' : '已暂停'}
                     </span>
@@ -4034,6 +4184,7 @@ function AutoFollowConfigCard({ config, busy, onEdit, onToggle, onDelete }) {
                 </div>
             </div>
             <div className="af-config-meta">
+                <span className="af-meta-tag"><Users size={11} />{autoFollowTriggerText(config)}</span>
                 <span className="af-meta-tag"><DollarSign size={11} />{amountText}</span>
                 <span className="af-meta-tag"><Clock size={11} />{delayText}</span>
                 <span className="af-meta-tag">
@@ -4050,6 +4201,7 @@ function AutoFollowJobCard({ job }) {
     const StatusIcon = info.Icon;
     const isOpen = job.action === 'open';
     const amount = Number(job.amount_usdt) > 0 ? formatUsd(job.amount_usdt) : '—';
+    const triggerWallets = Array.isArray(job.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
     return (
         <div className="af-job-card">
             <div className={`af-job-stripe ${info.cls}`} />
@@ -4065,7 +4217,9 @@ function AutoFollowJobCard({ job }) {
                     <span className="af-job-amount">{amount}</span>
                 </div>
                 <div className="af-job-row2">
-                    <span className="af-job-addr">{shortAddr(job.target_wallet_address)}</span>
+                    <span className="af-job-addr">
+                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)}
+                    </span>
                     <span className="af-job-time">{formatJobTime(job.scheduled_at)}</span>
                     <span className="af-job-id">#{job.id}</span>
                 </div>
@@ -4175,6 +4329,10 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                     id: config.id,
                     chain: config.chain,
                     target_wallet_address: config.target_wallet_address,
+                    target_wallet_addresses: normalizeAutoFollowWalletList(config).filter(Boolean),
+                    trigger_mode: config.trigger_mode || 'any',
+                    trigger_min_wallets: Number(config.trigger_min_wallets || 1),
+                    trigger_window_seconds: Number(config.trigger_window_seconds || 300),
                     enabled: !config.enabled,
                     amount_mode: config.amount_mode,
                     fixed_amount_usdt: config.fixed_amount_usdt,

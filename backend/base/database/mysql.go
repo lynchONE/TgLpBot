@@ -228,6 +228,20 @@ func ensureColumnExists(table, column, definition string) error {
 	return nil
 }
 
+func allowNullableLegacyWalletAddress(tableName string) error {
+	if DB == nil {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(
+		"ALTER TABLE %s MODIFY COLUMN `wallet_address` VARCHAR(42) NULL",
+		quoteTableName(tableName),
+	)).Error; err != nil {
+		return fmt.Errorf("make legacy %s.wallet_address nullable: %w", tableName, err)
+	}
+	log.Printf("[DB] made legacy %s.wallet_address nullable", tableName)
+	return nil
+}
+
 func ensureIndex(table, indexName, columns string) {
 	if DB == nil {
 		return
@@ -320,6 +334,18 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 	if err := ensureColumnExists(tableName, "target_wallet_address", "VARCHAR(42) NULL"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(tableName, "target_wallet_addresses", "JSON NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "trigger_mode", "VARCHAR(16) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "trigger_min_wallets", "BIGINT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "trigger_window_seconds", "BIGINT NULL"); err != nil {
+		return err
+	}
 	if err := ensureColumnExists(tableName, "chain_id", "BIGINT NULL"); err != nil {
 		return err
 	}
@@ -361,6 +387,9 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		`, quoteTableName(tableName))).Error; err != nil {
 			return fmt.Errorf("backfill %s.target_wallet_address: %w", tableName, err)
 		}
+		if err := allowNullableLegacyWalletAddress(tableName); err != nil {
+			return err
+		}
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		DELETE FROM %s
@@ -373,6 +402,35 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		SET target_wallet_address = LOWER(TRIM(target_wallet_address))
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("normalize %s.target_wallet_address before migrate: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_wallet_addresses = JSON_ARRAY(target_wallet_address)
+		WHERE (target_wallet_addresses IS NULL OR JSON_LENGTH(target_wallet_addresses) = 0)
+		  AND COALESCE(TRIM(target_wallet_address), '') <> ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.target_wallet_addresses: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET trigger_mode = '%s'
+		WHERE COALESCE(TRIM(trigger_mode), '') = ''
+	`, quoteTableName(tableName), models.SmartMoneyFollowTriggerModeAny)).Error; err != nil {
+		return fmt.Errorf("backfill %s.trigger_mode: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET trigger_min_wallets = 1
+		WHERE trigger_min_wallets IS NULL OR trigger_min_wallets <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.trigger_min_wallets: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET trigger_window_seconds = 300
+		WHERE trigger_window_seconds IS NULL OR trigger_window_seconds <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.trigger_window_seconds: %w", tableName, err)
 	}
 
 	if err := DB.Exec(fmt.Sprintf(`
@@ -530,6 +588,14 @@ func cleanupSmartMoneyFollowConfigRows(tableName string) error {
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("normalize smart money follow wallet rows: %w", err)
 	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_wallet_addresses = JSON_ARRAY(target_wallet_address)
+		WHERE (target_wallet_addresses IS NULL OR JSON_LENGTH(target_wallet_addresses) = 0)
+		  AND COALESCE(TRIM(target_wallet_address), '') <> ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill smart money follow wallet array rows: %w", err)
+	}
 
 	if err := DB.Exec(fmt.Sprintf(`
 		DELETE older
@@ -578,6 +644,15 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 	if err := ensureColumnExists(tableName, "event_id", "BIGINT UNSIGNED NULL"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(tableName, "trigger_mode", "VARCHAR(16) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "trigger_wallet_addresses", "JSON NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "trigger_event_ids", "JSON NULL"); err != nil {
+		return err
+	}
 	if err := ensureColumnExists(tableName, "target_position_ref", "VARCHAR(255) NULL"); err != nil {
 		return err
 	}
@@ -617,6 +692,9 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 		`, quoteTableName(tableName))).Error; err != nil {
 			return fmt.Errorf("backfill %s.target_wallet_address: %w", tableName, err)
 		}
+		if err := allowNullableLegacyWalletAddress(tableName); err != nil {
+			return err
+		}
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s
@@ -650,6 +728,28 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 		WHERE event_id IS NULL OR event_id = 0
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("backfill %s.event_id sentinel: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET trigger_mode = '%s'
+		WHERE COALESCE(TRIM(trigger_mode), '') = ''
+	`, quoteTableName(tableName), models.SmartMoneyFollowTriggerModeAny)).Error; err != nil {
+		return fmt.Errorf("backfill %s.trigger_mode: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET trigger_wallet_addresses = JSON_ARRAY(target_wallet_address)
+		WHERE (trigger_wallet_addresses IS NULL OR JSON_LENGTH(trigger_wallet_addresses) = 0)
+		  AND COALESCE(TRIM(target_wallet_address), '') <> ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.trigger_wallet_addresses: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET trigger_event_ids = JSON_ARRAY(CAST(event_id AS CHAR))
+		WHERE trigger_event_ids IS NULL OR JSON_LENGTH(trigger_event_ids) = 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.trigger_event_ids: %w", tableName, err)
 	}
 
 	if err := backfillSmartMoneyFollowJobPositionRefs(tableName); err != nil {
@@ -983,6 +1083,9 @@ func repairSmartMoneyFollowTaskRowsBeforeMigrate() error {
 			  AND COALESCE(TRIM(wallet_address), '') <> ''
 		`, quoteTableName(tableName))).Error; err != nil {
 			return fmt.Errorf("backfill %s.target_wallet_address: %w", tableName, err)
+		}
+		if err := allowNullableLegacyWalletAddress(tableName); err != nil {
+			return err
 		}
 	}
 	if err := DB.Exec(fmt.Sprintf(`

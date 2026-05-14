@@ -9,16 +9,20 @@ import (
 )
 
 type smartMoneyAutoFollowSaveRequest struct {
-	ID                  uint    `json:"id"`
-	Chain               string  `json:"chain"`
-	TargetWalletAddress string  `json:"target_wallet_address"`
-	Enabled             bool    `json:"enabled"`
-	AmountMode          string  `json:"amount_mode"`
-	FixedAmountUSDT     float64 `json:"fixed_amount_usdt"`
-	Ratio               float64 `json:"ratio"`
-	DelayMode           string  `json:"delay_mode"`
-	DelaySeconds        int     `json:"delay_seconds"`
-	FollowClose         bool    `json:"follow_close"`
+	ID                   uint     `json:"id"`
+	Chain                string   `json:"chain"`
+	TargetWalletAddress  string   `json:"target_wallet_address"`
+	TargetWallets        []string `json:"target_wallet_addresses"`
+	TriggerMode          string   `json:"trigger_mode"`
+	TriggerMinWallets    int      `json:"trigger_min_wallets"`
+	TriggerWindowSeconds int      `json:"trigger_window_seconds"`
+	Enabled              bool     `json:"enabled"`
+	AmountMode           string   `json:"amount_mode"`
+	FixedAmountUSDT      float64  `json:"fixed_amount_usdt"`
+	Ratio                float64  `json:"ratio"`
+	DelayMode            string   `json:"delay_mode"`
+	DelaySeconds         int      `json:"delay_seconds"`
+	FollowClose          bool     `json:"follow_close"`
 }
 
 type smartMoneyAutoFollowRequest struct {
@@ -72,16 +76,20 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 	switch action {
 	case "save", "":
 		input := smfollow.SaveConfigInput{
-			ID:                  req.Config.ID,
-			Chain:               firstSmartMoneyAutoFollowChain(req.Config.Chain, req.Chain),
-			TargetWalletAddress: req.Config.TargetWalletAddress,
-			Enabled:             req.Config.Enabled,
-			AmountMode:          req.Config.AmountMode,
-			FixedAmountUSDT:     req.Config.FixedAmountUSDT,
-			Ratio:               req.Config.Ratio,
-			DelayMode:           req.Config.DelayMode,
-			DelaySeconds:        req.Config.DelaySeconds,
-			FollowClose:         req.Config.FollowClose,
+			ID:                   req.Config.ID,
+			Chain:                firstSmartMoneyAutoFollowChain(req.Config.Chain, req.Chain),
+			TargetWalletAddress:  req.Config.TargetWalletAddress,
+			TargetWallets:        req.Config.TargetWallets,
+			TriggerMode:          req.Config.TriggerMode,
+			TriggerMinWallets:    req.Config.TriggerMinWallets,
+			TriggerWindowSeconds: req.Config.TriggerWindowSeconds,
+			Enabled:              req.Config.Enabled,
+			AmountMode:           req.Config.AmountMode,
+			FixedAmountUSDT:      req.Config.FixedAmountUSDT,
+			Ratio:                req.Config.Ratio,
+			DelayMode:            req.Config.DelayMode,
+			DelaySeconds:         req.Config.DelaySeconds,
+			FollowClose:          req.Config.FollowClose,
 		}
 		cfg, err := smartMoneyFollowService().SaveConfig(r.Context(), user.ID, input)
 		if err != nil {

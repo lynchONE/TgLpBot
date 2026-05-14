@@ -26,6 +26,8 @@ import (
 )
 
 const maxFollowDelaySeconds = 24 * 60 * 60
+const defaultFollowTriggerWindowSeconds = 5 * 60
+const maxFollowTriggerWindowSeconds = 24 * 60 * 60
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -36,16 +38,27 @@ type Service struct {
 }
 
 type SaveConfigInput struct {
-	ID                  uint
-	Chain               string
-	TargetWalletAddress string
-	Enabled             bool
-	AmountMode          string
-	FixedAmountUSDT     float64
-	Ratio               float64
-	DelayMode           string
-	DelaySeconds        int
-	FollowClose         bool
+	ID                   uint
+	Chain                string
+	TargetWalletAddress  string
+	TargetWallets        []string
+	TriggerMode          string
+	TriggerMinWallets    int
+	TriggerWindowSeconds int
+	Enabled              bool
+	AmountMode           string
+	FixedAmountUSDT      float64
+	Ratio                float64
+	DelayMode            string
+	DelaySeconds         int
+	FollowClose          bool
+}
+
+type followJobTrigger struct {
+	Mode           string
+	Wallets        []string
+	EventIDs       []uint
+	PrimaryEventID uint
 }
 
 type ConfigEnvelope struct {
@@ -168,7 +181,7 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 				return err
 			}
 			existingFound = true
-		} else {
+		} else if normalized.TriggerMode == models.SmartMoneyFollowTriggerModeAny && len(normalized.TargetWallets) == 1 {
 			err := tx.Where("user_id = ? AND chain = ? AND target_wallet_address = ?", userID, chain, normalized.TargetWalletAddress).First(&existing).Error
 			if err == nil {
 				existingFound = true
@@ -177,28 +190,36 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			}
 		}
 
-		latestID, err := latestEventIDForWallet(ctx, tx, chainID, normalized.TargetWalletAddress)
+		latestID, err := latestEventIDForWallets(ctx, tx, chainID, normalized.TargetWallets)
 		if err != nil {
 			return err
 		}
 
 		if existingFound {
 			cursorID := existing.CursorEventID
-			if normalized.Enabled && !existing.Enabled {
+			triggerChanged, err := followConfigTriggerChanged(&existing, normalized)
+			if err != nil {
+				return err
+			}
+			if normalized.Enabled && (!existing.Enabled || triggerChanged) {
 				cursorID = latestID
 			}
 			updates := map[string]any{
-				"chain":                 chain,
-				"chain_id":              chainID,
-				"target_wallet_address": normalized.TargetWalletAddress,
-				"enabled":               normalized.Enabled,
-				"amount_mode":           normalized.AmountMode,
-				"fixed_amount_usdt":     normalized.FixedAmountUSDT,
-				"ratio":                 normalized.Ratio,
-				"delay_mode":            normalized.DelayMode,
-				"delay_seconds":         normalized.DelaySeconds,
-				"follow_close":          normalized.FollowClose,
-				"cursor_event_id":       cursorID,
+				"chain":                   chain,
+				"chain_id":                chainID,
+				"target_wallet_address":   normalized.TargetWalletAddress,
+				"target_wallet_addresses": models.StringArray(normalized.TargetWallets),
+				"trigger_mode":            normalized.TriggerMode,
+				"trigger_min_wallets":     normalized.TriggerMinWallets,
+				"trigger_window_seconds":  normalized.TriggerWindowSeconds,
+				"enabled":                 normalized.Enabled,
+				"amount_mode":             normalized.AmountMode,
+				"fixed_amount_usdt":       normalized.FixedAmountUSDT,
+				"ratio":                   normalized.Ratio,
+				"delay_mode":              normalized.DelayMode,
+				"delay_seconds":           normalized.DelaySeconds,
+				"follow_close":            normalized.FollowClose,
+				"cursor_event_id":         cursorID,
 			}
 			if latestID > existing.LastSeenEventID {
 				updates["last_seen_event_id"] = latestID
@@ -214,19 +235,23 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			cursorID = latestID
 		}
 		row := models.SmartMoneyFollowConfig{
-			UserID:              userID,
-			Chain:               chain,
-			ChainID:             chainID,
-			TargetWalletAddress: normalized.TargetWalletAddress,
-			Enabled:             normalized.Enabled,
-			AmountMode:          normalized.AmountMode,
-			FixedAmountUSDT:     normalized.FixedAmountUSDT,
-			Ratio:               normalized.Ratio,
-			DelayMode:           normalized.DelayMode,
-			DelaySeconds:        normalized.DelaySeconds,
-			FollowClose:         normalized.FollowClose,
-			CursorEventID:       cursorID,
-			LastSeenEventID:     latestID,
+			UserID:               userID,
+			Chain:                chain,
+			ChainID:              chainID,
+			TargetWalletAddress:  normalized.TargetWalletAddress,
+			TargetWallets:        models.StringArray(normalized.TargetWallets),
+			TriggerMode:          normalized.TriggerMode,
+			TriggerMinWallets:    normalized.TriggerMinWallets,
+			TriggerWindowSeconds: normalized.TriggerWindowSeconds,
+			Enabled:              normalized.Enabled,
+			AmountMode:           normalized.AmountMode,
+			FixedAmountUSDT:      normalized.FixedAmountUSDT,
+			Ratio:                normalized.Ratio,
+			DelayMode:            normalized.DelayMode,
+			DelaySeconds:         normalized.DelaySeconds,
+			FollowClose:          normalized.FollowClose,
+			CursorEventID:        cursorID,
+			LastSeenEventID:      latestID,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -261,10 +286,11 @@ func NormalizeSaveInput(input SaveConfigInput) (SaveConfigInput, error) {
 	if err != nil {
 		return SaveConfigInput{}, err
 	}
-	address := normalizeWalletAddress(input.TargetWalletAddress)
-	if address == "" {
-		return SaveConfigInput{}, fmt.Errorf("invalid target wallet address")
+	wallets, err := normalizeWalletAddresses(input.TargetWallets, input.TargetWalletAddress)
+	if err != nil {
+		return SaveConfigInput{}, err
 	}
+	address := wallets[0]
 
 	amountMode := strings.ToLower(strings.TrimSpace(input.AmountMode))
 	switch amountMode {
@@ -292,8 +318,34 @@ func NormalizeSaveInput(input SaveConfigInput) (SaveConfigInput, error) {
 		return SaveConfigInput{}, fmt.Errorf("invalid delay mode")
 	}
 
+	triggerMode := strings.ToLower(strings.TrimSpace(input.TriggerMode))
+	if triggerMode == "" {
+		triggerMode = models.SmartMoneyFollowTriggerModeAny
+	}
+	switch triggerMode {
+	case models.SmartMoneyFollowTriggerModeAny:
+		input.TriggerMinWallets = 1
+		if input.TriggerWindowSeconds <= 0 {
+			input.TriggerWindowSeconds = defaultFollowTriggerWindowSeconds
+		}
+	case models.SmartMoneyFollowTriggerModeThreshold:
+		if input.TriggerMinWallets < 2 {
+			return SaveConfigInput{}, fmt.Errorf("trigger min wallets must be at least 2")
+		}
+		if input.TriggerMinWallets > len(wallets) {
+			return SaveConfigInput{}, fmt.Errorf("trigger min wallets cannot exceed target wallet count")
+		}
+		if input.TriggerWindowSeconds <= 0 || input.TriggerWindowSeconds > maxFollowTriggerWindowSeconds {
+			return SaveConfigInput{}, fmt.Errorf("trigger window seconds must be between 1 and %d", maxFollowTriggerWindowSeconds)
+		}
+	default:
+		return SaveConfigInput{}, fmt.Errorf("invalid trigger mode")
+	}
+
 	input.Chain = chain
 	input.TargetWalletAddress = address
+	input.TargetWallets = wallets
+	input.TriggerMode = triggerMode
 	input.AmountMode = amountMode
 	input.DelayMode = delayMode
 	return input, nil
@@ -384,9 +436,17 @@ func (s *Service) scanNewEvents(ctx context.Context) error {
 
 	for i := range configs {
 		cfg := configs[i]
+		wallets, err := configTargetWallets(&cfg)
+		if err != nil {
+			return fmt.Errorf("invalid follow config wallet set config_id=%d: %w", cfg.ID, err)
+		}
+		if len(wallets) == 0 {
+			log.Printf("[SmartMoneyFollow] skip config with empty wallet set: config_id=%d", cfg.ID)
+			continue
+		}
 		var events []models.SmartMoneyLPEvent
 		if err := database.DB.WithContext(ctx).
-			Where("wallet_address = ? AND chain_id = ? AND id > ? AND event_type IN ?", cfg.TargetWalletAddress, cfg.ChainID, cfg.CursorEventID, []string{"add", "remove"}).
+			Where("wallet_address IN ? AND chain_id = ? AND id > ? AND event_type IN ?", wallets, cfg.ChainID, cfg.CursorEventID, []string{"add", "remove"}).
 			Order("id ASC").
 			Limit(50).
 			Find(&events).Error; err != nil {
@@ -430,12 +490,19 @@ func (s *Service) createJobsForEvent(ctx context.Context, event *models.SmartMon
 
 	var configs []models.SmartMoneyFollowConfig
 	if err := database.DB.WithContext(ctx).
-		Where("enabled = ? AND target_wallet_address = ? AND chain_id = ? AND cursor_event_id < ?", true, address, event.ChainID, event.ID).
+		Where("enabled = ? AND chain_id = ? AND cursor_event_id < ?", true, event.ChainID, event.ID).
 		Find(&configs).Error; err != nil {
 		return fmt.Errorf("list follow configs for event failed: %w", err)
 	}
 	for i := range configs {
 		cfg := configs[i]
+		wallets, err := configTargetWallets(&cfg)
+		if err != nil {
+			return fmt.Errorf("invalid follow config wallet set config_id=%d: %w", cfg.ID, err)
+		}
+		if !stringSliceContains(wallets, address) {
+			continue
+		}
 		if err := s.createJobForConfig(ctx, &cfg, event); err != nil {
 			log.Printf("[SmartMoneyFollow] create event job failed config_id=%d event_id=%d err=%v", cfg.ID, event.ID, err)
 		}
@@ -461,6 +528,13 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 	if !ok {
 		return nil
 	}
+	trigger, ok, err := s.resolveJobTrigger(ctx, cfg, event, action)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
 	status := models.SmartMoneyFollowJobStatusPending
 	errorMessage := ""
 	amountUSDT := float64(0)
@@ -477,10 +551,19 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		status = models.SmartMoneyFollowJobStatusSkipped
 		errorMessage = "follow close disabled"
 	}
-	positionRef := sm.BuildPositionRefFromEvent(event)
+	positionRef := targetPositionRefForFollowJob(cfg, event)
 	if strings.TrimSpace(positionRef) == "" {
 		status = models.SmartMoneyFollowJobStatusFailed
 		errorMessage = "target position ref is missing"
+	}
+	if action == models.SmartMoneyFollowJobActionOpen && normalizeConfigTriggerMode(cfg.TriggerMode) == models.SmartMoneyFollowTriggerModeThreshold {
+		exists, err := thresholdOpenJobExists(ctx, cfg.ID, positionRef)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
 	}
 	now := time.Now()
 	scheduledAt := now
@@ -497,8 +580,11 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		UserID:              cfg.UserID,
 		Chain:               cfg.Chain,
 		ChainID:             cfg.ChainID,
-		TargetWalletAddress: cfg.TargetWalletAddress,
-		EventID:             event.ID,
+		TargetWalletAddress: normalizeWalletAddress(event.WalletAddress),
+		EventID:             trigger.PrimaryEventID,
+		TriggerMode:         trigger.Mode,
+		TriggerWallets:      models.StringArray(trigger.Wallets),
+		TriggerEventIDs:     uintIDsToStringArray(trigger.EventIDs),
 		TargetPositionRef:   positionRef,
 		Action:              action,
 		Status:              status,
@@ -524,6 +610,146 @@ func followActionForEvent(eventType string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func targetPositionRefForFollowJob(cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent) string {
+	if cfg == nil || event == nil {
+		return ""
+	}
+	if normalizeConfigTriggerMode(cfg.TriggerMode) != models.SmartMoneyFollowTriggerModeThreshold {
+		return sm.BuildPositionRefFromEvent(event)
+	}
+	if event.ChainID <= 0 || strings.TrimSpace(event.Protocol) == "" || strings.TrimSpace(event.PoolAddress) == "" || event.TickLower == nil || event.TickUpper == nil {
+		return ""
+	}
+	return sm.NormalizePositionRef(fmt.Sprintf(
+		"%d:%s:threshold:%s:%d:%d",
+		event.ChainID,
+		strings.ToLower(strings.TrimSpace(event.Protocol)),
+		strings.ToLower(strings.TrimSpace(event.PoolAddress)),
+		*event.TickLower,
+		*event.TickUpper,
+	))
+}
+
+func thresholdOpenJobExists(ctx context.Context, configID uint, positionRef string) (bool, error) {
+	if configID == 0 || strings.TrimSpace(positionRef) == "" {
+		return false, nil
+	}
+	var count int64
+	if err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyFollowJob{}).
+		Where("config_id = ? AND action = ? AND target_position_ref = ? AND status IN ?",
+			configID,
+			models.SmartMoneyFollowJobActionOpen,
+			positionRef,
+			[]string{
+				models.SmartMoneyFollowJobStatusPending,
+				models.SmartMoneyFollowJobStatusRunning,
+				models.SmartMoneyFollowJobStatusSuccess,
+			}).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check threshold open job exists failed: %w", err)
+	}
+	if count > 0 {
+		return true, nil
+	}
+	if err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyFollowTask{}).
+		Where("config_id = ? AND target_position_ref = ? AND status = ?", configID, positionRef, models.SmartMoneyFollowTaskStatusOpen).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check threshold follow task exists failed: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (s *Service) resolveJobTrigger(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, action string) (followJobTrigger, bool, error) {
+	triggerMode := normalizeConfigTriggerMode(cfg.TriggerMode)
+	eventWallet := normalizeWalletAddress(event.WalletAddress)
+	if eventWallet == "" {
+		return followJobTrigger{}, false, fmt.Errorf("event has invalid wallet address")
+	}
+	if action != models.SmartMoneyFollowJobActionOpen || triggerMode == models.SmartMoneyFollowTriggerModeAny {
+		return followJobTrigger{
+			Mode:           triggerMode,
+			Wallets:        []string{eventWallet},
+			EventIDs:       []uint{event.ID},
+			PrimaryEventID: event.ID,
+		}, true, nil
+	}
+
+	if cfg.TriggerMinWallets <= 1 {
+		return followJobTrigger{}, false, fmt.Errorf("threshold trigger min wallets must be greater than 1")
+	}
+	if event.TickLower == nil || event.TickUpper == nil {
+		return followJobTrigger{}, false, nil
+	}
+	wallets, err := configTargetWallets(cfg)
+	if err != nil {
+		return followJobTrigger{}, false, err
+	}
+	if len(wallets) == 0 {
+		return followJobTrigger{}, false, fmt.Errorf("follow config has empty wallet set")
+	}
+	windowSeconds := cfg.TriggerWindowSeconds
+	if windowSeconds <= 0 {
+		windowSeconds = defaultFollowTriggerWindowSeconds
+	}
+	windowStart := event.TxTimestamp.Add(-time.Duration(windowSeconds) * time.Second)
+
+	var events []models.SmartMoneyLPEvent
+	if err := database.DB.WithContext(ctx).
+		Where("wallet_address IN ? AND chain_id = ? AND event_type = ? AND id <= ? AND tx_timestamp >= ? AND protocol = ? AND pool_address = ? AND tick_lower = ? AND tick_upper = ?",
+			wallets, event.ChainID, "add", event.ID, windowStart, event.Protocol, event.PoolAddress, *event.TickLower, *event.TickUpper).
+		Order("id DESC").
+		Find(&events).Error; err != nil {
+		return followJobTrigger{}, false, fmt.Errorf("list threshold trigger events failed: %w", err)
+	}
+
+	walletSeen := make(map[string]models.SmartMoneyLPEvent, len(wallets))
+	for i := range events {
+		evt := events[i]
+		addr := normalizeWalletAddress(evt.WalletAddress)
+		if addr == "" {
+			continue
+		}
+		if _, ok := walletSeen[addr]; !ok {
+			walletSeen[addr] = evt
+		}
+	}
+	if len(walletSeen) < cfg.TriggerMinWallets {
+		return followJobTrigger{}, false, nil
+	}
+
+	triggerWallets := make([]string, 0, len(walletSeen))
+	triggerEventIDs := make([]uint, 0, len(walletSeen))
+	if evt, ok := walletSeen[eventWallet]; ok {
+		triggerWallets = append(triggerWallets, eventWallet)
+		triggerEventIDs = append(triggerEventIDs, evt.ID)
+	}
+	for _, wallet := range wallets {
+		if wallet == eventWallet {
+			continue
+		}
+		evt, ok := walletSeen[wallet]
+		if !ok {
+			continue
+		}
+		triggerWallets = append(triggerWallets, wallet)
+		triggerEventIDs = append(triggerEventIDs, evt.ID)
+		if len(triggerWallets) == cfg.TriggerMinWallets {
+			break
+		}
+	}
+	if len(triggerWallets) < cfg.TriggerMinWallets {
+		return followJobTrigger{}, false, fmt.Errorf("threshold trigger wallet selection mismatch")
+	}
+	return followJobTrigger{
+		Mode:           triggerMode,
+		Wallets:        triggerWallets,
+		EventIDs:       triggerEventIDs,
+		PrimaryEventID: event.ID,
+	}, true, nil
 }
 
 func (s *Service) executeDueJobs(ctx context.Context) error {
@@ -938,10 +1164,128 @@ func latestEventIDForWallet(ctx context.Context, tx *gorm.DB, chainID int, addre
 	return 0, err
 }
 
+func latestEventIDForWallets(ctx context.Context, tx *gorm.DB, chainID int, wallets []string) (uint, error) {
+	if len(wallets) == 0 {
+		return 0, fmt.Errorf("target wallet set is empty")
+	}
+	var row models.SmartMoneyLPEvent
+	err := tx.WithContext(ctx).
+		Where("wallet_address IN ? AND chain_id = ?", wallets, chainID).
+		Order("id DESC").
+		First(&row).Error
+	if err == nil {
+		return row.ID, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	return 0, err
+}
+
 func normalizeWalletAddress(value string) string {
 	value = strings.TrimSpace(value)
 	if !common.IsHexAddress(value) {
 		return ""
 	}
 	return strings.ToLower(common.HexToAddress(value).Hex())
+}
+
+func normalizeWalletAddresses(values []string, legacy string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values)+1)
+	wallets := make([]string, 0, len(values)+1)
+	appendWallet := func(value string) error {
+		addr := normalizeWalletAddress(value)
+		if addr == "" {
+			if strings.TrimSpace(value) == "" {
+				return nil
+			}
+			return fmt.Errorf("invalid target wallet address")
+		}
+		if _, ok := seen[addr]; ok {
+			return nil
+		}
+		seen[addr] = struct{}{}
+		wallets = append(wallets, addr)
+		return nil
+	}
+	for _, value := range values {
+		if err := appendWallet(value); err != nil {
+			return nil, err
+		}
+	}
+	if err := appendWallet(legacy); err != nil {
+		return nil, err
+	}
+	if len(wallets) == 0 {
+		return nil, fmt.Errorf("target wallet address is required")
+	}
+	return wallets, nil
+}
+
+func configTargetWallets(cfg *models.SmartMoneyFollowConfig) ([]string, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("follow config is nil")
+	}
+	wallets, err := normalizeWalletAddresses([]string(cfg.TargetWallets), cfg.TargetWalletAddress)
+	if err != nil {
+		return nil, err
+	}
+	return wallets, nil
+}
+
+func normalizeConfigTriggerMode(value string) string {
+	mode := strings.ToLower(strings.TrimSpace(value))
+	if mode == models.SmartMoneyFollowTriggerModeThreshold {
+		return mode
+	}
+	return models.SmartMoneyFollowTriggerModeAny
+}
+
+func followConfigTriggerChanged(existing *models.SmartMoneyFollowConfig, next SaveConfigInput) (bool, error) {
+	if existing == nil {
+		return true, nil
+	}
+	if normalizeConfigTriggerMode(existing.TriggerMode) != next.TriggerMode {
+		return true, nil
+	}
+	if existing.TriggerMinWallets != next.TriggerMinWallets || existing.TriggerWindowSeconds != next.TriggerWindowSeconds {
+		return true, nil
+	}
+	wallets, err := configTargetWallets(existing)
+	if err != nil {
+		return false, err
+	}
+	return !stringSlicesEqual(wallets, next.TargetWallets), nil
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func stringSliceContains(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func uintIDsToStringArray(ids []uint) models.StringArray {
+	out := make(models.StringArray, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		out = append(out, strconv.FormatUint(uint64(id), 10))
+	}
+	return out
 }
