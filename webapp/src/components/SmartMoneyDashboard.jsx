@@ -1,7 +1,8 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
+    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Activity,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
@@ -11,6 +12,7 @@ import {
     buildSMEventsWsUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
+    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig,
 } from '../smartMoneyApi';
 import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
@@ -2514,6 +2516,13 @@ export default function SmartMoneyDashboard({
                         >
                             <Flame size={16} /> 监控通知
                         </button>
+                        <button
+                            key="auto_follow"
+                            className={`smd-tab${view === 'auto_follow' ? ' active' : ''}`}
+                            onClick={() => setView('auto_follow')}
+                        >
+                            <Users size={16} /> 自动跟单
+                        </button>
                         {isAdmin ? (
                             <button
                                 key="assets"
@@ -2572,6 +2581,14 @@ export default function SmartMoneyDashboard({
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={onToggleWatchWallet}
+                    />
+                ) : view === 'auto_follow' ? (
+                    <AutoFollowPanelContent
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        chain="bsc"
+                        refreshInterval={refreshInterval}
+                        active={view === 'auto_follow'}
                     />
                 ) : view === 'assets' && isAdmin ? (
                     <React.Suspense fallback={<div className="panel-loading">正在加载聪明钱资产...</div>}>
@@ -3664,6 +3681,630 @@ function GoldenDogPanelContent({
                     )}
                 </>
             )}
+        </div>
+    );
+}
+
+// ============================================================
+//  自动跟单 Panel
+// ============================================================
+
+const AUTO_FOLLOW_DRAFT_INITIAL = Object.freeze({
+    id: 0,
+    target_wallet_address: '',
+    enabled: true,
+    amount_mode: 'fixed',
+    fixed_amount_usdt: '',
+    ratio_percent: '100',
+    delay_mode: 'immediate',
+    delay_seconds: '0',
+    follow_close: true,
+});
+
+function createAutoFollowDraft(config) {
+    if (!config) return { ...AUTO_FOLLOW_DRAFT_INITIAL };
+    const ratioPct = Number(config.ratio || 0) * 100;
+    return {
+        id: Number(config.id) || 0,
+        target_wallet_address: String(config.target_wallet_address || ''),
+        enabled: Boolean(config.enabled),
+        amount_mode: config.amount_mode === 'ratio' ? 'ratio' : 'fixed',
+        fixed_amount_usdt: config.fixed_amount_usdt != null ? String(config.fixed_amount_usdt) : '',
+        ratio_percent: Number.isFinite(ratioPct) ? String(ratioPct) : '100',
+        delay_mode: config.delay_mode === 'fixed_delay' ? 'fixed_delay' : 'immediate',
+        delay_seconds: config.delay_seconds != null ? String(config.delay_seconds) : '0',
+        follow_close: Boolean(config.follow_close),
+    };
+}
+
+function autoFollowDraftReducer(state, action) {
+    switch (action.type) {
+        case 'reset':
+            return action.payload ? createAutoFollowDraft(action.payload) : { ...AUTO_FOLLOW_DRAFT_INITIAL };
+        case 'set':
+            return { ...state, ...action.payload };
+        default:
+            return state;
+    }
+}
+
+function normalizeAutoFollowDraft(draft) {
+    const address = String(draft.target_wallet_address || '').trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        throw new Error('请填写正确的钱包地址 (0x 开头 42 位)');
+    }
+    const amountMode = draft.amount_mode === 'ratio' ? 'ratio' : 'fixed';
+    let fixedAmount = 0;
+    let ratio = 1;
+    if (amountMode === 'fixed') {
+        fixedAmount = Number(draft.fixed_amount_usdt);
+        if (!Number.isFinite(fixedAmount) || fixedAmount <= 0) {
+            throw new Error('固定金额必须大于 0');
+        }
+    } else {
+        const pct = Number(draft.ratio_percent);
+        if (!Number.isFinite(pct) || pct <= 0) {
+            throw new Error('跟单比例必须大于 0');
+        }
+        ratio = pct / 100;
+    }
+    const delayMode = draft.delay_mode === 'fixed_delay' ? 'fixed_delay' : 'immediate';
+    let delaySeconds = 0;
+    if (delayMode === 'fixed_delay') {
+        delaySeconds = Math.max(0, Math.round(Number(draft.delay_seconds) || 0));
+    }
+    return {
+        id: Number(draft.id) || 0,
+        target_wallet_address: address,
+        enabled: Boolean(draft.enabled),
+        amount_mode: amountMode,
+        fixed_amount_usdt: amountMode === 'fixed' ? fixedAmount : 0,
+        ratio: amountMode === 'ratio' ? ratio : 1,
+        delay_mode: delayMode,
+        delay_seconds: delaySeconds,
+        follow_close: Boolean(draft.follow_close),
+    };
+}
+
+function autoFollowStatusInfo(status) {
+    const s = String(status || '').toLowerCase();
+    switch (s) {
+        case 'success': return { label: '成功', cls: 'af-status-success', Icon: CheckCircle2 };
+        case 'failed': return { label: '失败', cls: 'af-status-failed', Icon: XCircle };
+        case 'running': return { label: '执行中', cls: 'af-status-running', Icon: Activity };
+        case 'skipped': return { label: '跳过', cls: 'af-status-skipped', Icon: AlertCircle };
+        case 'pending': return { label: '等待', cls: 'af-status-pending', Icon: Clock };
+        default: return { label: s || '未知', cls: 'af-status-pending', Icon: Clock };
+    }
+}
+
+function formatJobTime(value) {
+    if (!value) return '--';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '--';
+    const now = Date.now();
+    const diff = now - date.getTime();
+    if (diff >= 0 && diff < 60_000) return '刚刚';
+    if (diff >= 0 && diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+    if (diff >= 0 && diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+    return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function aggregateAutoFollowStats(configs, jobs) {
+    const total = configs.length;
+    const running = configs.reduce((acc, c) => acc + (c?.enabled ? 1 : 0), 0);
+    const finished = jobs.filter((j) => ['success', 'failed', 'skipped'].includes(String(j.status || '').toLowerCase()));
+    const succeeded = jobs.filter((j) => String(j.status || '').toLowerCase() === 'success');
+    const successRate = finished.length > 0 ? Math.round((succeeded.length / finished.length) * 100) : 0;
+    const totalUsdt = jobs.reduce((acc, j) => acc + (Number(j.amount_usdt) || 0), 0);
+    const openCount = jobs.filter((j) => j.action === 'open').length;
+    const closeCount = jobs.filter((j) => j.action === 'close').length;
+    return { total, running, successRate, totalUsdt, openCount, closeCount, finished: finished.length, jobs: jobs.length };
+}
+
+function AutoFollowSummaryBar({ stats }) {
+    return (
+        <div className="af-summary-grid">
+            <div className="af-summary-cell">
+                <div className="af-summary-label">配置数</div>
+                <div className="af-summary-value">{stats.total}</div>
+                <div className="af-summary-sub">{stats.running} 运行中</div>
+            </div>
+            <div className="af-summary-cell">
+                <div className="af-summary-label">近 30 笔成功率</div>
+                <div className={`af-summary-value${stats.successRate >= 80 ? ' pos' : stats.successRate > 0 && stats.successRate < 60 ? ' neg' : ''}`}>
+                    {stats.finished > 0 ? `${stats.successRate}%` : '--'}
+                </div>
+                <div className="af-summary-sub">{stats.finished} / {stats.jobs} 已完成</div>
+            </div>
+            <div className="af-summary-cell">
+                <div className="af-summary-label">近 30 笔金额</div>
+                <div className="af-summary-value">{formatUsd(stats.totalUsdt)}</div>
+                <div className="af-summary-sub">累计跟单</div>
+            </div>
+            <div className="af-summary-cell">
+                <div className="af-summary-label">动作分布</div>
+                <div className="af-summary-value af-summary-value--mini">
+                    <span className="af-pill af-pill--open">开 {stats.openCount}</span>
+                    <span className="af-pill af-pill--close">撤 {stats.closeCount}</span>
+                </div>
+                <div className="af-summary-sub">近 30 笔</div>
+            </div>
+        </div>
+    );
+}
+
+function AutoFollowForm({ draft, dispatch, saving, hasInitData, onSubmit, onReset }) {
+    const editing = Number(draft.id) > 0;
+    const isFixed = draft.amount_mode === 'fixed';
+    const isImmediate = draft.delay_mode === 'immediate';
+    return (
+        <div className="af-form">
+            <div className="af-form-row">
+                <label className="af-field-label">跟单钱包地址</label>
+                <input
+                    type="text"
+                    className="af-input af-input--mono"
+                    placeholder="0x... 42 位 EVM 地址"
+                    value={draft.target_wallet_address}
+                    onChange={(e) => dispatch({ type: 'set', payload: { target_wallet_address: e.target.value } })}
+                    spellCheck={false}
+                    autoComplete="off"
+                />
+            </div>
+
+            <div className="af-form-row af-form-row--split">
+                <div className="af-field">
+                    <label className="af-field-label">状态</label>
+                    <div className="af-segmented">
+                        <button
+                            type="button"
+                            className={`af-segmented-btn${draft.enabled ? ' active' : ''}`}
+                            onClick={() => dispatch({ type: 'set', payload: { enabled: true } })}
+                        >
+                            <Play size={13} /> 开启
+                        </button>
+                        <button
+                            type="button"
+                            className={`af-segmented-btn${!draft.enabled ? ' active' : ''}`}
+                            onClick={() => dispatch({ type: 'set', payload: { enabled: false } })}
+                        >
+                            <Pause size={13} /> 暂停
+                        </button>
+                    </div>
+                </div>
+                <div className="af-field">
+                    <label className="af-field-label">撤仓跟单</label>
+                    <div className="af-segmented">
+                        <button
+                            type="button"
+                            className={`af-segmented-btn${draft.follow_close ? ' active' : ''}`}
+                            onClick={() => dispatch({ type: 'set', payload: { follow_close: true } })}
+                        >
+                            <Check size={13} /> 跟单
+                        </button>
+                        <button
+                            type="button"
+                            className={`af-segmented-btn${!draft.follow_close ? ' active' : ''}`}
+                            onClick={() => dispatch({ type: 'set', payload: { follow_close: false } })}
+                        >
+                            <X size={13} /> 忽略
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="af-form-row">
+                <label className="af-field-label">金额模式</label>
+                <div className="af-segmented">
+                    <button
+                        type="button"
+                        className={`af-segmented-btn${isFixed ? ' active' : ''}`}
+                        onClick={() => dispatch({ type: 'set', payload: { amount_mode: 'fixed' } })}
+                    >
+                        <DollarSign size={13} /> 固定金额
+                    </button>
+                    <button
+                        type="button"
+                        className={`af-segmented-btn${!isFixed ? ' active' : ''}`}
+                        onClick={() => dispatch({ type: 'set', payload: { amount_mode: 'ratio' } })}
+                    >
+                        <Percent size={13} /> 按比例
+                    </button>
+                </div>
+                {isFixed ? (
+                    <div className="af-input-wrap">
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="af-input"
+                            placeholder="例如 100"
+                            value={draft.fixed_amount_usdt}
+                            onChange={(e) => dispatch({ type: 'set', payload: { fixed_amount_usdt: e.target.value } })}
+                        />
+                        <span className="af-input-suffix">USDT</span>
+                    </div>
+                ) : (
+                    <div className="af-input-wrap">
+                        <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            className="af-input"
+                            placeholder="例如 50"
+                            value={draft.ratio_percent}
+                            onChange={(e) => dispatch({ type: 'set', payload: { ratio_percent: e.target.value } })}
+                        />
+                        <span className="af-input-suffix">%</span>
+                    </div>
+                )}
+            </div>
+
+            <div className="af-form-row">
+                <label className="af-field-label">跟单时机</label>
+                <div className="af-segmented">
+                    <button
+                        type="button"
+                        className={`af-segmented-btn${isImmediate ? ' active' : ''}`}
+                        onClick={() => dispatch({ type: 'set', payload: { delay_mode: 'immediate', delay_seconds: '0' } })}
+                    >
+                        <Zap size={13} /> 立即
+                    </button>
+                    <button
+                        type="button"
+                        className={`af-segmented-btn${!isImmediate ? ' active' : ''}`}
+                        onClick={() => dispatch({ type: 'set', payload: { delay_mode: 'fixed_delay' } })}
+                    >
+                        <Clock size={13} /> 延时
+                    </button>
+                </div>
+                {!isImmediate && (
+                    <div className="af-input-wrap">
+                        <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            className="af-input"
+                            placeholder="延时秒数"
+                            value={draft.delay_seconds}
+                            onChange={(e) => dispatch({ type: 'set', payload: { delay_seconds: e.target.value } })}
+                        />
+                        <span className="af-input-suffix">秒</span>
+                    </div>
+                )}
+            </div>
+
+            <div className="af-form-actions">
+                {editing && (
+                    <button type="button" className="af-btn af-btn--ghost" onClick={onReset} disabled={saving}>
+                        新建配置
+                    </button>
+                )}
+                <button
+                    type="button"
+                    className="af-btn af-btn--primary"
+                    onClick={onSubmit}
+                    disabled={saving || !hasInitData}
+                >
+                    {saving ? '保存中…' : editing ? '保存修改' : '新增配置'}
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function AutoFollowConfigCard({ config, busy, onEdit, onToggle, onDelete }) {
+    const amountText = config.amount_mode === 'ratio'
+        ? `${Math.round(Number(config.ratio || 0) * 100)}% 仓位`
+        : `${formatUsd(config.fixed_amount_usdt)} 固定`;
+    const delayText = config.delay_mode === 'fixed_delay' ? `延时 ${config.delay_seconds}s` : '立即跟单';
+    return (
+        <div className={`af-config-card${config.enabled ? ' active' : ''}`}>
+            <div className="af-config-head">
+                <div className="af-config-addr">
+                    <span className="af-config-dot" />
+                    <span className="af-config-addr-text">{shortAddr(config.target_wallet_address)}</span>
+                    <span className={`af-pill ${config.enabled ? 'af-pill--on' : 'af-pill--off'}`}>
+                        {config.enabled ? '运行中' : '已暂停'}
+                    </span>
+                </div>
+                <div className="af-config-actions">
+                    <button type="button" className="af-icon-btn" onClick={() => onEdit(config)} title="编辑">
+                        <Pencil size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        className="af-icon-btn"
+                        onClick={() => onToggle(config)}
+                        title={config.enabled ? '暂停' : '开启'}
+                        disabled={busy}
+                    >
+                        {config.enabled ? <Pause size={14} /> : <Play size={14} />}
+                    </button>
+                    <button
+                        type="button"
+                        className="af-icon-btn af-icon-btn--danger"
+                        onClick={() => onDelete(config)}
+                        title="删除"
+                        disabled={busy}
+                    >
+                        <Trash2 size={14} />
+                    </button>
+                </div>
+            </div>
+            <div className="af-config-meta">
+                <span className="af-meta-tag"><DollarSign size={11} />{amountText}</span>
+                <span className="af-meta-tag"><Clock size={11} />{delayText}</span>
+                <span className="af-meta-tag">
+                    {config.follow_close ? <Check size={11} /> : <X size={11} />}
+                    撤仓{config.follow_close ? '跟单' : '忽略'}
+                </span>
+            </div>
+        </div>
+    );
+}
+
+function AutoFollowJobCard({ job }) {
+    const info = autoFollowStatusInfo(job.status);
+    const StatusIcon = info.Icon;
+    const isOpen = job.action === 'open';
+    const amount = Number(job.amount_usdt) > 0 ? formatUsd(job.amount_usdt) : '—';
+    return (
+        <div className="af-job-card">
+            <div className={`af-job-stripe ${info.cls}`} />
+            <div className="af-job-body">
+                <div className="af-job-row1">
+                    <span className={`af-job-status ${info.cls}`}>
+                        <StatusIcon size={12} />
+                        {info.label}
+                    </span>
+                    <span className={`af-job-action${isOpen ? ' open' : ' close'}`}>
+                        {isOpen ? '开仓' : '撤仓'}
+                    </span>
+                    <span className="af-job-amount">{amount}</span>
+                </div>
+                <div className="af-job-row2">
+                    <span className="af-job-addr">{shortAddr(job.target_wallet_address)}</span>
+                    <span className="af-job-time">{formatJobTime(job.scheduled_at)}</span>
+                    <span className="af-job-id">#{job.id}</span>
+                </div>
+                {job.error_message ? (
+                    <div className="af-job-error" title={job.error_message}>{job.error_message}</div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshInterval = 10, active = true }) {
+    const hasInitData = Boolean(String(initData || '').trim());
+    const [configs, setConfigs] = useState([]);
+    const [jobs, setJobs] = useState([]);
+    const [draft, dispatch] = useReducer(autoFollowDraftReducer, undefined, () => createAutoFollowDraft());
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
+    const [confirmTarget, setConfirmTarget] = useState(null);
+
+    const refreshMs = useMemo(() => {
+        const sec = Number(refreshInterval);
+        if (!Number.isFinite(sec) || sec <= 0) return 10_000;
+        return Math.max(5_000, Math.round(sec * 1000));
+    }, [refreshInterval]);
+
+    const load = useCallback(async (signal) => {
+        if (!hasInitData) {
+            setConfigs([]);
+            setJobs([]);
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            const resp = await fetchSMAutoFollow({ apiBaseUrl, initData, chain, signal });
+            setConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
+            setJobs(Array.isArray(resp?.jobs) ? resp.jobs : []);
+        } catch (err) {
+            if (err?.name === 'AbortError') return;
+            setError(String(err?.message || err || '加载失败'));
+        } finally {
+            setLoading(false);
+        }
+    }, [apiBaseUrl, chain, hasInitData, initData]);
+
+    useEffect(() => {
+        if (!active) return undefined;
+        const ctrl = new AbortController();
+        load(ctrl.signal);
+        const timer = setInterval(() => {
+            const c = new AbortController();
+            load(c.signal);
+        }, refreshMs);
+        return () => {
+            ctrl.abort();
+            clearInterval(timer);
+        };
+    }, [active, load, refreshMs]);
+
+    const stats = useMemo(() => aggregateAutoFollowStats(configs, jobs), [configs, jobs]);
+
+    const handleReset = useCallback(() => {
+        dispatch({ type: 'reset' });
+    }, []);
+
+    const handleEdit = useCallback((config) => {
+        dispatch({ type: 'reset', payload: config });
+        setNotice('');
+        setError('');
+    }, []);
+
+    const handleSubmit = useCallback(async () => {
+        if (!hasInitData) {
+            setError('缺少 Telegram initData，无法保存');
+            return;
+        }
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            const config = normalizeAutoFollowDraft(draft);
+            await saveSMAutoFollowConfig({ apiBaseUrl, initData, chain, config });
+            setNotice(draft.id ? '配置已更新' : '配置已新增');
+            dispatch({ type: 'reset' });
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, chain, draft, hasInitData, initData, load]);
+
+    const handleToggle = useCallback(async (config) => {
+        if (!config || !hasInitData) return;
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            await saveSMAutoFollowConfig({
+                apiBaseUrl,
+                initData,
+                chain,
+                config: {
+                    id: config.id,
+                    chain: config.chain,
+                    target_wallet_address: config.target_wallet_address,
+                    enabled: !config.enabled,
+                    amount_mode: config.amount_mode,
+                    fixed_amount_usdt: config.fixed_amount_usdt,
+                    ratio: config.ratio,
+                    delay_mode: config.delay_mode,
+                    delay_seconds: config.delay_seconds,
+                    follow_close: config.follow_close,
+                },
+            });
+            setNotice(config.enabled ? '已暂停' : '已开启');
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '更新失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, chain, hasInitData, initData, load]);
+
+    const handleDelete = useCallback(async () => {
+        if (!confirmTarget || !hasInitData) return;
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            await deleteSMAutoFollowConfig({ apiBaseUrl, initData, chain, id: confirmTarget.id });
+            setNotice('配置已删除');
+            setConfirmTarget(null);
+            if (draft.id === confirmTarget.id) {
+                dispatch({ type: 'reset' });
+            }
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '删除失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, chain, confirmTarget, draft.id, hasInitData, initData, load]);
+
+    return (
+        <div className="af-panel">
+            {!hasInitData && (
+                <div className="af-banner af-banner--warn">
+                    <AlertCircle size={14} />
+                    缺少 Telegram initData，请通过 Telegram 入口打开以启用自动跟单。
+                </div>
+            )}
+            {error && (
+                <div className="af-banner af-banner--err">
+                    <XCircle size={14} />
+                    {error}
+                </div>
+            )}
+            {notice && !error && (
+                <div className="af-banner af-banner--ok">
+                    <CheckCircle2 size={14} />
+                    {notice}
+                </div>
+            )}
+
+            <AutoFollowSummaryBar stats={stats} />
+
+            <section className="af-section">
+                <header className="af-section-head">
+                    <h3 className="af-section-title">
+                        {Number(draft.id) > 0 ? '编辑跟单配置' : '新增跟单配置'}
+                    </h3>
+                    <span className="af-section-hint">
+                        {Number(draft.id) > 0 ? `正在编辑 #${draft.id}` : 'BSC 链 · 监听目标钱包的 LP 动作'}
+                    </span>
+                </header>
+                <AutoFollowForm
+                    draft={draft}
+                    dispatch={dispatch}
+                    saving={saving}
+                    hasInitData={hasInitData}
+                    onSubmit={handleSubmit}
+                    onReset={handleReset}
+                />
+            </section>
+
+            <section className="af-section">
+                <header className="af-section-head">
+                    <h3 className="af-section-title">我的跟单 ({configs.length})</h3>
+                    <span className="af-section-hint">{stats.running} 个运行中</span>
+                </header>
+                {loading && configs.length === 0 ? (
+                    <div className="af-empty">加载中…</div>
+                ) : configs.length === 0 ? (
+                    <div className="af-empty">暂无跟单配置，使用上方表单新增。</div>
+                ) : (
+                    <div className="af-config-list">
+                        {configs.map((c) => (
+                            <AutoFollowConfigCard
+                                key={c.id}
+                                config={c}
+                                busy={saving}
+                                onEdit={handleEdit}
+                                onToggle={handleToggle}
+                                onDelete={setConfirmTarget}
+                            />
+                        ))}
+                    </div>
+                )}
+            </section>
+
+            <section className="af-section">
+                <header className="af-section-head">
+                    <h3 className="af-section-title">最近任务</h3>
+                    <span className="af-section-hint">近 {jobs.length} 条</span>
+                </header>
+                {jobs.length === 0 ? (
+                    <div className="af-empty">还没有执行记录，跟单生效后会在这里出现。</div>
+                ) : (
+                    <div className="af-job-list">
+                        {jobs.slice(0, 12).map((j) => (
+                            <AutoFollowJobCard key={j.id} job={j} />
+                        ))}
+                    </div>
+                )}
+            </section>
+
+            <ConfirmDialog
+                open={Boolean(confirmTarget)}
+                title="删除跟单配置"
+                description={confirmTarget ? `确认删除对钱包 ${shortAddr(confirmTarget.target_wallet_address)} 的跟单配置？删除后将不再跟单该钱包。` : ''}
+                confirmLabel="删除"
+                busy={saving}
+                onConfirm={handleDelete}
+                onCancel={() => setConfirmTarget(null)}
+            />
         </div>
     );
 }
