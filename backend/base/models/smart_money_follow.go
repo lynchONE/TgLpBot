@@ -24,10 +24,10 @@ const (
 
 type SmartMoneyFollowConfig struct {
 	ID                  uint      `gorm:"primaryKey" json:"id"`
-	UserID              uint      `gorm:"not null;uniqueIndex:uq_sm_follow_user_chain_wallet,priority:1;index" json:"user_id"`
-	Chain               string    `gorm:"size:16;not null;default:'bsc';uniqueIndex:uq_sm_follow_user_chain_wallet,priority:2;index" json:"chain"`
+	UserID              uint      `gorm:"not null;index" json:"user_id"`
+	Chain               string    `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
 	ChainID             int       `gorm:"not null;default:56;index" json:"chain_id"`
-	TargetWalletAddress string    `gorm:"size:42;not null;uniqueIndex:uq_sm_follow_user_chain_wallet,priority:3;index" json:"target_wallet_address"`
+	TargetWalletAddress string    `gorm:"size:42;not null;index" json:"target_wallet_address"`
 	Enabled             bool      `gorm:"not null;default:false;index" json:"enabled"`
 	AmountMode          string    `gorm:"size:16;not null;default:'fixed'" json:"amount_mode"`
 	FixedAmountUSDT     float64   `gorm:"type:decimal(20,8);not null;default:0" json:"fixed_amount_usdt"`

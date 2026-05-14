@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/timeutil"
 	"fmt"
 	"log"
+	"strings"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -97,10 +98,13 @@ func autoMigrate() error {
 		&models.SmartMoneyWatchWallet{},
 		&models.SmartMoneyWatchOpenAlertConfig{},
 		&models.SmartMoneyWatchOpenAlertReceipt{},
-		&models.SmartMoneyFollowConfig{},
 		&models.SmartMoneyFollowJob{},
 		&models.SmartMoneyFollowTask{},
 	); err != nil {
+		return err
+	}
+
+	if err := migrateSmartMoneyFollowConfigTable(); err != nil {
 		return err
 	}
 
@@ -253,6 +257,99 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("pools", "idx_pools_chain_address", "`chain`, `address`")
 	ensureIndex("pools", "idx_pools_chain_updated_at", "`chain`, `updated_at`")
 	ensureIndex("pools", "idx_pools_source_chain_updated_at", "`source_requested_chain`, `updated_at`")
+}
+
+func migrateSmartMoneyFollowConfigTable() error {
+	if DB == nil {
+		return nil
+	}
+
+	model := &models.SmartMoneyFollowConfig{}
+	if err := DB.AutoMigrate(model); err != nil {
+		return err
+	}
+	if err := cleanupSmartMoneyFollowConfigRows(model.TableName()); err != nil {
+		return err
+	}
+
+	return ensureUniqueIndex(model.TableName(), "uq_sm_follow_user_chain_wallet", "`user_id`, `chain`, `target_wallet_address`")
+}
+
+func cleanupSmartMoneyFollowConfigRows(tableName string) error {
+	if err := DB.Exec(fmt.Sprintf(`
+		DELETE FROM %s
+		WHERE COALESCE(TRIM(target_wallet_address), '') = ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("delete empty smart money follow wallet rows: %w", err)
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_wallet_address = LOWER(TRIM(target_wallet_address))
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("normalize smart money follow wallet rows: %w", err)
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		DELETE older
+		FROM %s AS older
+		INNER JOIN %s AS newer
+			ON older.user_id = newer.user_id
+			AND older.chain = newer.chain
+			AND older.target_wallet_address = newer.target_wallet_address
+			AND (
+				older.updated_at < newer.updated_at
+				OR (older.updated_at = newer.updated_at AND older.id < newer.id)
+			)
+	`, quoteTableName(tableName), quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("dedupe smart money follow wallet rows: %w", err)
+	}
+
+	return nil
+}
+
+func ensureUniqueIndex(table, indexName, columns string) error {
+	if DB == nil {
+		return nil
+	}
+	var existing int64
+	if err := DB.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = ?
+		  AND INDEX_NAME = ?
+	`, table, indexName).Scan(&existing).Error; err != nil {
+		return fmt.Errorf("inspect index %s.%s: %w", table, indexName, err)
+	}
+	var count int64
+	if err := DB.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = ?
+		  AND INDEX_NAME = ?
+		  AND NON_UNIQUE = 0
+	`, table, indexName).Scan(&count).Error; err != nil {
+		return fmt.Errorf("inspect unique index %s.%s: %w", table, indexName, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	if existing > 0 {
+		if err := DB.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX `%s`", quoteTableName(table), indexName)).Error; err != nil {
+			return fmt.Errorf("drop non-unique index %s.%s: %w", table, indexName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD UNIQUE INDEX `%s` (%s)", quoteTableName(table), indexName, columns)).Error; err != nil {
+		return fmt.Errorf("add unique index %s.%s: %w", table, indexName, err)
+	}
+	log.Printf("[DB] added unique index %s.%s", table, indexName)
+	return nil
+}
+
+func quoteTableName(tableName string) string {
+	return "`" + strings.ReplaceAll(tableName, "`", "``") + "`"
 }
 
 func normalizeTradeRecordProfitFormula() {
