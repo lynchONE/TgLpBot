@@ -907,16 +907,12 @@ func failUnexecutableSmartMoneyFollowJobs(tableName string) error {
 func repairSmartMoneyFollowJobUniqueKeys(tableName string) error {
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s AS job
-		INNER JOIN (
-			SELECT id, ROW_NUMBER() OVER (
-				PARTITION BY config_id, event_id, action
-				ORDER BY id
-			) AS row_num
-			FROM %s
-		) AS dup
-			ON dup.id = job.id
+		INNER JOIN %s AS keeper
+			ON keeper.config_id = job.config_id
+			AND keeper.event_id = job.event_id
+			AND keeper.action = job.action
+			AND keeper.id < job.id
 		SET job.event_id = 1000000000000000000 + job.id
-		WHERE dup.row_num > 1
 	`, quoteTableName(tableName), quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("repair duplicate %s unique keys: %w", tableName, err)
 	}
@@ -1195,16 +1191,10 @@ func normalizeSmartMoneyFollowTaskStatuses(tableName string) error {
 func repairSmartMoneyFollowTaskUniqueKeys(tableName string) error {
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s AS task
-		INNER JOIN (
-			SELECT id, ROW_NUMBER() OVER (
-				PARTITION BY open_event_id
-				ORDER BY id
-			) AS row_num
-			FROM %s
-		) AS dup
-			ON dup.id = task.id
+		INNER JOIN %s AS keeper
+			ON keeper.open_event_id = task.open_event_id
+			AND keeper.id < task.id
 		SET task.open_event_id = 1000000000000000000 + task.id
-		WHERE dup.row_num > 1
 	`, quoteTableName(tableName), quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("repair duplicate %s open_event_id keys: %w", tableName, err)
 	}
