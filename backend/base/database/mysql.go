@@ -98,13 +98,25 @@ func autoMigrate() error {
 		&models.SmartMoneyWatchWallet{},
 		&models.SmartMoneyWatchOpenAlertConfig{},
 		&models.SmartMoneyWatchOpenAlertReceipt{},
-		&models.SmartMoneyFollowJob{},
-		&models.SmartMoneyFollowTask{},
 	); err != nil {
 		return err
 	}
 
 	if err := migrateSmartMoneyFollowConfigTable(); err != nil {
+		return err
+	}
+
+	if err := repairSmartMoneyFollowJobRowsBeforeMigrate(); err != nil {
+		return err
+	}
+	if err := repairSmartMoneyFollowTaskRowsBeforeMigrate(); err != nil {
+		return err
+	}
+
+	if err := DB.AutoMigrate(
+		&models.SmartMoneyFollowJob{},
+		&models.SmartMoneyFollowTask{},
+	); err != nil {
 		return err
 	}
 
@@ -198,6 +210,24 @@ func ensureColumn(table, column, definition string) {
 	}
 }
 
+func ensureColumnExists(table, column, definition string) error {
+	if DB == nil {
+		return nil
+	}
+	exists, err := tableColumnExists(table, column)
+	if err != nil {
+		return fmt.Errorf("inspect column %s.%s: %w", table, column, err)
+	}
+	if exists {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", quoteTableName(table), quoteColumnName(column), definition)).Error; err != nil {
+		return fmt.Errorf("add column %s.%s: %w", table, column, err)
+	}
+	log.Printf("[DB] added column %s.%s", table, column)
+	return nil
+}
+
 func ensureIndex(table, indexName, columns string) {
 	if DB == nil {
 		return
@@ -265,6 +295,9 @@ func migrateSmartMoneyFollowConfigTable() error {
 	}
 
 	model := &models.SmartMoneyFollowConfig{}
+	if err := repairSmartMoneyFollowConfigRowsBeforeMigrate(model.TableName()); err != nil {
+		return err
+	}
 	if err := DB.AutoMigrate(model); err != nil {
 		return err
 	}
@@ -273,6 +306,214 @@ func migrateSmartMoneyFollowConfigTable() error {
 	}
 
 	return ensureUniqueIndex(model.TableName(), "uq_sm_follow_user_chain_wallet", "`user_id`, `chain`, `target_wallet_address`")
+}
+
+func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
+	exists, err := tableExists(tableName)
+	if err != nil {
+		return fmt.Errorf("inspect %s before migrate: %w", tableName, err)
+	}
+	if !exists {
+		return nil
+	}
+
+	if err := ensureColumnExists(tableName, "target_wallet_address", "VARCHAR(42) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "chain_id", "BIGINT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "amount_mode", "VARCHAR(16) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "fixed_amount_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "ratio", "DECIMAL(12,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "delay_mode", "VARCHAR(20) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "delay_seconds", "BIGINT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "follow_close", "TINYINT(1) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "cursor_event_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "last_seen_event_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+
+	hasWalletAddress, err := tableColumnExists(tableName, "wallet_address")
+	if err != nil {
+		return fmt.Errorf("inspect %s.wallet_address before migrate: %w", tableName, err)
+	}
+	if hasWalletAddress {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET target_wallet_address = LOWER(TRIM(wallet_address))
+			WHERE COALESCE(TRIM(target_wallet_address), '') = ''
+			  AND COALESCE(TRIM(wallet_address), '') <> ''
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.target_wallet_address: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		DELETE FROM %s
+		WHERE COALESCE(TRIM(target_wallet_address), '') = ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("delete empty %s target_wallet_address rows before migrate: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_wallet_address = LOWER(TRIM(target_wallet_address))
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("normalize %s.target_wallet_address before migrate: %w", tableName, err)
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET chain_id = CASE LOWER(TRIM(chain))
+			WHEN 'base' THEN 8453
+			WHEN 'bsc' THEN 56
+			WHEN '' THEN 56
+			ELSE chain_id
+		END
+		WHERE chain_id IS NULL OR chain_id <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.chain_id: %w", tableName, err)
+	}
+
+	hasPerTradeAmount, err := tableColumnExists(tableName, "per_trade_amount_usdt")
+	if err != nil {
+		return fmt.Errorf("inspect %s.per_trade_amount_usdt before migrate: %w", tableName, err)
+	}
+	if hasPerTradeAmount {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET fixed_amount_usdt = per_trade_amount_usdt
+			WHERE (fixed_amount_usdt IS NULL OR fixed_amount_usdt = 0)
+			  AND per_trade_amount_usdt IS NOT NULL
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.fixed_amount_usdt: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET fixed_amount_usdt = 0
+		WHERE fixed_amount_usdt IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("finalize %s.fixed_amount_usdt: %w", tableName, err)
+	}
+
+	hasDelayMax, err := tableColumnExists(tableName, "delay_max_seconds")
+	if err != nil {
+		return fmt.Errorf("inspect %s.delay_max_seconds before migrate: %w", tableName, err)
+	}
+	if hasDelayMax {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET delay_seconds = delay_max_seconds
+			WHERE delay_seconds IS NULL
+			  AND delay_max_seconds IS NOT NULL
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.delay_seconds: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET delay_seconds = 0
+		WHERE delay_seconds IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("finalize %s.delay_seconds: %w", tableName, err)
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET amount_mode = '%s'
+		WHERE COALESCE(TRIM(amount_mode), '') = ''
+	`, quoteTableName(tableName), models.SmartMoneyFollowAmountModeFixed)).Error; err != nil {
+		return fmt.Errorf("backfill %s.amount_mode: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET ratio = 1
+		WHERE ratio IS NULL OR ratio <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.ratio: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET delay_mode = CASE
+			WHEN COALESCE(delay_seconds, 0) > 0 THEN '%s'
+			ELSE '%s'
+		END
+		WHERE COALESCE(TRIM(delay_mode), '') = ''
+	`, quoteTableName(tableName), models.SmartMoneyFollowDelayModeFixed, models.SmartMoneyFollowDelayModeImmediate)).Error; err != nil {
+		return fmt.Errorf("backfill %s.delay_mode: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET follow_close = 1
+		WHERE follow_close IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.follow_close: %w", tableName, err)
+	}
+
+	if err := backfillSmartMoneyFollowConfigCursors(tableName); err != nil {
+		return err
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET chain_id = 56
+		WHERE chain_id IS NULL OR chain_id <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("finalize %s.chain_id: %w", tableName, err)
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowConfigCursors(tableName string) error {
+	eventsTable := (&models.SmartMoneyLPEvent{}).TableName()
+	eventsExists, err := tableExists(eventsTable)
+	if err != nil {
+		return fmt.Errorf("inspect %s before follow config cursor migrate: %w", eventsTable, err)
+	}
+	if !eventsExists {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET cursor_event_id = COALESCE(cursor_event_id, 0),
+			    last_seen_event_id = COALESCE(last_seen_event_id, 0)
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s cursors without events: %w", tableName, err)
+		}
+		return nil
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS cfg
+		LEFT JOIN (
+			SELECT wallet_address, chain_id, MAX(id) AS latest_id
+			FROM %s
+			GROUP BY wallet_address, chain_id
+		) AS evt
+			ON evt.wallet_address = cfg.target_wallet_address
+			AND evt.chain_id = cfg.chain_id
+		SET cfg.cursor_event_id = COALESCE(NULLIF(cfg.cursor_event_id, 0), COALESCE(evt.latest_id, 0)),
+		    cfg.last_seen_event_id = COALESCE(NULLIF(cfg.last_seen_event_id, 0), COALESCE(evt.latest_id, 0))
+		WHERE cfg.cursor_event_id IS NULL
+		   OR cfg.cursor_event_id = 0
+		   OR cfg.last_seen_event_id IS NULL
+		   OR cfg.last_seen_event_id = 0
+	`, quoteTableName(tableName), quoteTableName(eventsTable))).Error; err != nil {
+		return fmt.Errorf("backfill %s cursors: %w", tableName, err)
+	}
+	return nil
 }
 
 func cleanupSmartMoneyFollowConfigRows(tableName string) error {
@@ -298,13 +539,675 @@ func cleanupSmartMoneyFollowConfigRows(tableName string) error {
 			AND older.chain = newer.chain
 			AND older.target_wallet_address = newer.target_wallet_address
 			AND (
-				older.updated_at < newer.updated_at
-				OR (older.updated_at = newer.updated_at AND older.id < newer.id)
+				COALESCE(older.updated_at, '1000-01-01 00:00:00') < COALESCE(newer.updated_at, '1000-01-01 00:00:00')
+				OR (
+					COALESCE(older.updated_at, '1000-01-01 00:00:00') = COALESCE(newer.updated_at, '1000-01-01 00:00:00')
+					AND older.id < newer.id
+				)
 			)
 	`, quoteTableName(tableName), quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("dedupe smart money follow wallet rows: %w", err)
 	}
 
+	return nil
+}
+
+func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
+	if DB == nil {
+		return nil
+	}
+
+	tableName := (&models.SmartMoneyFollowJob{}).TableName()
+	exists, err := tableExists(tableName)
+	if err != nil {
+		return fmt.Errorf("inspect %s before migrate: %w", tableName, err)
+	}
+	if !exists {
+		return nil
+	}
+
+	if err := ensureColumnExists(tableName, "config_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "chain_id", "BIGINT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "target_wallet_address", "VARCHAR(42) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "event_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "target_position_ref", "VARCHAR(255) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "started_at", "DATETIME(3) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "finished_at", "DATETIME(3) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "amount_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET chain_id = CASE LOWER(TRIM(chain))
+			WHEN 'base' THEN 8453
+			WHEN 'bsc' THEN 56
+			WHEN '' THEN 56
+			ELSE chain_id
+		END
+		WHERE chain_id IS NULL OR chain_id <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.chain_id: %w", tableName, err)
+	}
+
+	hasWalletAddress, err := tableColumnExists(tableName, "wallet_address")
+	if err != nil {
+		return fmt.Errorf("inspect %s.wallet_address before migrate: %w", tableName, err)
+	}
+	if hasWalletAddress {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET target_wallet_address = LOWER(TRIM(wallet_address))
+			WHERE COALESCE(TRIM(target_wallet_address), '') = ''
+			  AND COALESCE(TRIM(wallet_address), '') <> ''
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.target_wallet_address: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_wallet_address = LOWER(TRIM(target_wallet_address))
+		WHERE COALESCE(TRIM(target_wallet_address), '') <> ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("normalize %s.target_wallet_address: %w", tableName, err)
+	}
+
+	if err := backfillSmartMoneyFollowJobConfigIDs(tableName); err != nil {
+		return err
+	}
+
+	hasEventSeq, err := tableColumnExists(tableName, "event_seq")
+	if err != nil {
+		return fmt.Errorf("inspect %s.event_seq before migrate: %w", tableName, err)
+	}
+	if hasEventSeq {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET event_id = event_seq
+			WHERE (event_id IS NULL OR event_id = 0)
+			  AND event_seq > 0
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.event_id from event_seq: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET event_id = 1000000000000000000 + id
+		WHERE event_id IS NULL OR event_id = 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.event_id sentinel: %w", tableName, err)
+	}
+
+	if err := backfillSmartMoneyFollowJobPositionRefs(tableName); err != nil {
+		return err
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET action = CASE LOWER(TRIM(action))
+			WHEN 'add' THEN '%s'
+			WHEN 'open' THEN '%s'
+			WHEN 'remove' THEN '%s'
+			WHEN 'close' THEN '%s'
+			ELSE '%s'
+		END
+	`, quoteTableName(tableName),
+		models.SmartMoneyFollowJobActionOpen,
+		models.SmartMoneyFollowJobActionOpen,
+		models.SmartMoneyFollowJobActionClose,
+		models.SmartMoneyFollowJobActionClose,
+		models.SmartMoneyFollowJobActionOpen,
+	)).Error; err != nil {
+		return fmt.Errorf("normalize %s.action: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET status = CASE LOWER(TRIM(status))
+			WHEN 'done' THEN '%s'
+			WHEN 'completed' THEN '%s'
+			WHEN 'success' THEN '%s'
+			WHEN 'skip' THEN '%s'
+			WHEN 'skipped' THEN '%s'
+			WHEN 'error' THEN '%s'
+			WHEN 'failed' THEN '%s'
+			WHEN 'running' THEN '%s'
+			WHEN 'pending' THEN '%s'
+			ELSE '%s'
+		END
+	`, quoteTableName(tableName),
+		models.SmartMoneyFollowJobStatusSuccess,
+		models.SmartMoneyFollowJobStatusSuccess,
+		models.SmartMoneyFollowJobStatusSuccess,
+		models.SmartMoneyFollowJobStatusSkipped,
+		models.SmartMoneyFollowJobStatusSkipped,
+		models.SmartMoneyFollowJobStatusFailed,
+		models.SmartMoneyFollowJobStatusFailed,
+		models.SmartMoneyFollowJobStatusRunning,
+		models.SmartMoneyFollowJobStatusPending,
+		models.SmartMoneyFollowJobStatusFailed,
+	)).Error; err != nil {
+		return fmt.Errorf("normalize %s.status: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET amount_usdt = 0
+		WHERE amount_usdt IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.amount_usdt: %w", tableName, err)
+	}
+
+	hasScheduledAt, err := tableColumnExists(tableName, "scheduled_at")
+	if err != nil {
+		return fmt.Errorf("inspect %s.scheduled_at before migrate: %w", tableName, err)
+	}
+	if !hasScheduledAt {
+		if err := DB.Exec(fmt.Sprintf(
+			"ALTER TABLE %s ADD COLUMN `scheduled_at` DATETIME(3) NULL",
+			quoteTableName(tableName),
+		)).Error; err != nil {
+			return fmt.Errorf("add nullable scheduled_at to %s before migrate: %w", tableName, err)
+		}
+		log.Printf("[DB] added nullable %s.scheduled_at before migration backfill", tableName)
+	}
+
+	sourceColumns := make([]string, 0, 5)
+	for _, column := range []string{"execute_at", "created_at", "updated_at", "started_at", "finished_at"} {
+		exists, err := tableColumnExists(tableName, column)
+		if err != nil {
+			return fmt.Errorf("inspect %s.%s before migrate: %w", tableName, column, err)
+		}
+		if exists {
+			sourceColumns = append(sourceColumns, column)
+		}
+	}
+
+	caseLines := make([]string, 0, len(sourceColumns)+1)
+	for _, column := range sourceColumns {
+		quotedColumn := quoteColumnName(column)
+		caseLines = append(caseLines, fmt.Sprintf(
+			"WHEN CAST(%s AS CHAR) NOT IN ('', '0000-00-00 00:00:00') THEN %s",
+			quotedColumn,
+			quotedColumn,
+		))
+	}
+	caseLines = append(caseLines, "ELSE CURRENT_TIMESTAMP")
+
+	tx := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET scheduled_at = CASE
+			%s
+		END
+		WHERE scheduled_at IS NULL
+		   OR CAST(scheduled_at AS CHAR) IN ('', '0000-00-00 00:00:00')
+	`, quoteTableName(tableName), strings.Join(caseLines, "\n\t\t\t")))
+	if tx.Error != nil {
+		return fmt.Errorf("repair zero scheduled_at in %s: %w", tableName, tx.Error)
+	}
+	if tx.RowsAffected > 0 {
+		log.Printf("[DB] repaired %d %s rows with invalid scheduled_at", tx.RowsAffected, tableName)
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET finished_at = CASE
+			WHEN CAST(updated_at AS CHAR) NOT IN ('', '0000-00-00 00:00:00') THEN updated_at
+			WHEN CAST(scheduled_at AS CHAR) NOT IN ('', '0000-00-00 00:00:00') THEN scheduled_at
+			WHEN CAST(created_at AS CHAR) NOT IN ('', '0000-00-00 00:00:00') THEN created_at
+			ELSE CURRENT_TIMESTAMP
+		END
+		WHERE finished_at IS NULL
+		  AND status IN ('%s', '%s', '%s')
+	`, quoteTableName(tableName),
+		models.SmartMoneyFollowJobStatusSuccess,
+		models.SmartMoneyFollowJobStatusFailed,
+		models.SmartMoneyFollowJobStatusSkipped,
+	)).Error; err != nil {
+		return fmt.Errorf("backfill terminal %s.finished_at: %w", tableName, err)
+	}
+
+	if err := failUnexecutableSmartMoneyFollowJobs(tableName); err != nil {
+		return err
+	}
+	if err := repairSmartMoneyFollowJobUniqueKeys(tableName); err != nil {
+		return err
+	}
+
+	if err := DB.Exec(fmt.Sprintf(
+		"ALTER TABLE %s MODIFY COLUMN `scheduled_at` DATETIME(3) NOT NULL",
+		quoteTableName(tableName),
+	)).Error; err != nil {
+		return fmt.Errorf("make %s.scheduled_at not null: %w", tableName, err)
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowJobConfigIDs(tableName string) error {
+	configTable := (&models.SmartMoneyFollowConfig{}).TableName()
+	configExists, err := tableExists(configTable)
+	if err != nil {
+		return fmt.Errorf("inspect %s before follow job config backfill: %w", configTable, err)
+	}
+	if !configExists {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS job
+		INNER JOIN %s AS cfg
+			ON cfg.user_id = job.user_id
+			AND cfg.chain = job.chain
+			AND cfg.target_wallet_address = job.target_wallet_address
+		SET job.config_id = cfg.id
+		WHERE (job.config_id IS NULL OR job.config_id = 0)
+		  AND COALESCE(TRIM(job.target_wallet_address), '') <> ''
+	`, quoteTableName(tableName), quoteTableName(configTable))).Error; err != nil {
+		return fmt.Errorf("backfill %s.config_id: %w", tableName, err)
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowJobPositionRefs(tableName string) error {
+	hasPoolID, err := tableColumnExists(tableName, "pool_id")
+	if err != nil {
+		return fmt.Errorf("inspect %s.pool_id before migrate: %w", tableName, err)
+	}
+	if !hasPoolID {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET target_position_ref = LOWER(CONCAT('legacy:', id))
+			WHERE COALESCE(TRIM(target_position_ref), '') = ''
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.target_position_ref: %w", tableName, err)
+		}
+		return nil
+	}
+
+	protocolExpr := "'legacy'"
+	if exists, err := tableColumnExists(tableName, "pool_version"); err != nil {
+		return fmt.Errorf("inspect %s.pool_version before migrate: %w", tableName, err)
+	} else if exists {
+		protocolExpr = "COALESCE(NULLIF(TRIM(`pool_version`), ''), 'legacy')"
+	}
+	lowerExpr := "''"
+	if exists, err := tableColumnExists(tableName, "tick_lower"); err != nil {
+		return fmt.Errorf("inspect %s.tick_lower before migrate: %w", tableName, err)
+	} else if exists {
+		lowerExpr = "COALESCE(CAST(`tick_lower` AS CHAR), '')"
+	}
+	upperExpr := "''"
+	if exists, err := tableColumnExists(tableName, "tick_upper"); err != nil {
+		return fmt.Errorf("inspect %s.tick_upper before migrate: %w", tableName, err)
+	} else if exists {
+		upperExpr = "COALESCE(CAST(`tick_upper` AS CHAR), '')"
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_position_ref = LOWER(CONCAT(
+			'legacy:',
+			COALESCE(CAST(chain_id AS CHAR), '0'), ':',
+			COALESCE(NULLIF(TRIM(target_wallet_address), ''), 'unknown'), ':',
+			%s, ':',
+			COALESCE(NULLIF(TRIM(pool_id), ''), CAST(id AS CHAR)), ':',
+			%s, ':',
+			%s
+		))
+		WHERE COALESCE(TRIM(target_position_ref), '') = ''
+	`, quoteTableName(tableName), protocolExpr, lowerExpr, upperExpr)).Error; err != nil {
+		return fmt.Errorf("backfill %s.target_position_ref: %w", tableName, err)
+	}
+	return nil
+}
+
+func failUnexecutableSmartMoneyFollowJobs(tableName string) error {
+	eventsTable := (&models.SmartMoneyLPEvent{}).TableName()
+	eventsExists, err := tableExists(eventsTable)
+	if err != nil {
+		return fmt.Errorf("inspect %s before follow job validation: %w", eventsTable, err)
+	}
+	if !eventsExists {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS job
+		LEFT JOIN %s AS evt
+			ON evt.id = job.event_id
+		SET job.status = '%s',
+		    job.error_message = CONCAT('legacy follow job cannot be executed after schema migration', CASE
+			WHEN COALESCE(TRIM(job.error_message), '') = '' THEN ''
+			ELSE CONCAT(': ', job.error_message)
+		    END),
+		    job.finished_at = COALESCE(job.finished_at, job.updated_at, job.scheduled_at, job.created_at, CURRENT_TIMESTAMP)
+		WHERE job.status IN ('%s', '%s')
+		  AND evt.id IS NULL
+	`, quoteTableName(tableName),
+		quoteTableName(eventsTable),
+		models.SmartMoneyFollowJobStatusFailed,
+		models.SmartMoneyFollowJobStatusPending,
+		models.SmartMoneyFollowJobStatusRunning,
+	)).Error; err != nil {
+		return fmt.Errorf("mark unexecutable %s rows failed: %w", tableName, err)
+	}
+	return nil
+}
+
+func repairSmartMoneyFollowJobUniqueKeys(tableName string) error {
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS job
+		INNER JOIN (
+			SELECT id, ROW_NUMBER() OVER (
+				PARTITION BY config_id, event_id, action
+				ORDER BY id
+			) AS row_num
+			FROM %s
+		) AS dup
+			ON dup.id = job.id
+		SET job.event_id = 1000000000000000000 + job.id
+		WHERE dup.row_num > 1
+	`, quoteTableName(tableName), quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("repair duplicate %s unique keys: %w", tableName, err)
+	}
+	return nil
+}
+
+func repairSmartMoneyFollowTaskRowsBeforeMigrate() error {
+	if DB == nil {
+		return nil
+	}
+
+	tableName := (&models.SmartMoneyFollowTask{}).TableName()
+	exists, err := tableExists(tableName)
+	if err != nil {
+		return fmt.Errorf("inspect %s before migrate: %w", tableName, err)
+	}
+	if !exists {
+		return nil
+	}
+
+	if err := ensureColumnExists(tableName, "config_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "chain_id", "BIGINT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "target_wallet_address", "VARCHAR(42) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "target_position_ref", "VARCHAR(255) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "open_event_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "open_job_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "close_event_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "close_job_id", "BIGINT UNSIGNED NULL"); err != nil {
+		return err
+	}
+
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET chain_id = CASE LOWER(TRIM(chain))
+			WHEN 'base' THEN 8453
+			WHEN 'bsc' THEN 56
+			WHEN '' THEN 56
+			ELSE chain_id
+		END
+		WHERE chain_id IS NULL OR chain_id <= 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.chain_id: %w", tableName, err)
+	}
+
+	hasWalletAddress, err := tableColumnExists(tableName, "wallet_address")
+	if err != nil {
+		return fmt.Errorf("inspect %s.wallet_address before migrate: %w", tableName, err)
+	}
+	if hasWalletAddress {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET target_wallet_address = LOWER(TRIM(wallet_address))
+			WHERE COALESCE(TRIM(target_wallet_address), '') = ''
+			  AND COALESCE(TRIM(wallet_address), '') <> ''
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.target_wallet_address: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_wallet_address = LOWER(TRIM(target_wallet_address))
+		WHERE COALESCE(TRIM(target_wallet_address), '') <> ''
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("normalize %s.target_wallet_address: %w", tableName, err)
+	}
+
+	if err := backfillSmartMoneyFollowTaskConfigIDs(tableName); err != nil {
+		return err
+	}
+	if err := backfillSmartMoneyFollowTaskPositionRefs(tableName); err != nil {
+		return err
+	}
+	if err := backfillSmartMoneyFollowTaskEvents(tableName); err != nil {
+		return err
+	}
+	if err := backfillSmartMoneyFollowTaskJobs(tableName); err != nil {
+		return err
+	}
+	if err := normalizeSmartMoneyFollowTaskStatuses(tableName); err != nil {
+		return err
+	}
+	if err := repairSmartMoneyFollowTaskUniqueKeys(tableName); err != nil {
+		return err
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowTaskConfigIDs(tableName string) error {
+	configTable := (&models.SmartMoneyFollowConfig{}).TableName()
+	configExists, err := tableExists(configTable)
+	if err != nil {
+		return fmt.Errorf("inspect %s before follow task config backfill: %w", configTable, err)
+	}
+	if !configExists {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS task
+		INNER JOIN %s AS cfg
+			ON cfg.user_id = task.user_id
+			AND cfg.chain = task.chain
+			AND cfg.target_wallet_address = task.target_wallet_address
+		SET task.config_id = cfg.id
+		WHERE (task.config_id IS NULL OR task.config_id = 0)
+		  AND COALESCE(TRIM(task.target_wallet_address), '') <> ''
+	`, quoteTableName(tableName), quoteTableName(configTable))).Error; err != nil {
+		return fmt.Errorf("backfill %s.config_id: %w", tableName, err)
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowTaskPositionRefs(tableName string) error {
+	hasPoolID, err := tableColumnExists(tableName, "pool_id")
+	if err != nil {
+		return fmt.Errorf("inspect %s.pool_id before migrate: %w", tableName, err)
+	}
+	if !hasPoolID {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET target_position_ref = LOWER(CONCAT('legacy:', id))
+			WHERE COALESCE(TRIM(target_position_ref), '') = ''
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.target_position_ref: %w", tableName, err)
+		}
+		return nil
+	}
+
+	protocolExpr := "'legacy'"
+	if exists, err := tableColumnExists(tableName, "pool_version"); err != nil {
+		return fmt.Errorf("inspect %s.pool_version before migrate: %w", tableName, err)
+	} else if exists {
+		protocolExpr = "COALESCE(NULLIF(TRIM(`pool_version`), ''), 'legacy')"
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET target_position_ref = LOWER(CONCAT(
+			'legacy:',
+			COALESCE(CAST(chain_id AS CHAR), '0'), ':',
+			COALESCE(NULLIF(TRIM(target_wallet_address), ''), 'unknown'), ':',
+			%s, ':',
+			COALESCE(NULLIF(TRIM(pool_id), ''), CAST(id AS CHAR))
+		))
+		WHERE COALESCE(TRIM(target_position_ref), '') = ''
+	`, quoteTableName(tableName), protocolExpr)).Error; err != nil {
+		return fmt.Errorf("backfill %s.target_position_ref: %w", tableName, err)
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowTaskEvents(tableName string) error {
+	hasLastAddEventSeq, err := tableColumnExists(tableName, "last_add_event_seq")
+	if err != nil {
+		return fmt.Errorf("inspect %s.last_add_event_seq before migrate: %w", tableName, err)
+	}
+	if hasLastAddEventSeq {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET open_event_id = last_add_event_seq
+			WHERE (open_event_id IS NULL OR open_event_id = 0)
+			  AND last_add_event_seq > 0
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.open_event_id: %w", tableName, err)
+		}
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET open_event_id = 1000000000000000000 + id
+		WHERE open_event_id IS NULL OR open_event_id = 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.open_event_id sentinel: %w", tableName, err)
+	}
+
+	hasLastRemoveEventSeq, err := tableColumnExists(tableName, "last_remove_event_seq")
+	if err != nil {
+		return fmt.Errorf("inspect %s.last_remove_event_seq before migrate: %w", tableName, err)
+	}
+	if hasLastRemoveEventSeq {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET close_event_id = last_remove_event_seq
+			WHERE (close_event_id IS NULL OR close_event_id = 0)
+			  AND last_remove_event_seq > 0
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.close_event_id: %w", tableName, err)
+		}
+	}
+	return nil
+}
+
+func backfillSmartMoneyFollowTaskJobs(tableName string) error {
+	jobsTable := (&models.SmartMoneyFollowJob{}).TableName()
+	jobsExists, err := tableExists(jobsTable)
+	if err != nil {
+		return fmt.Errorf("inspect %s before follow task job backfill: %w", jobsTable, err)
+	}
+	if !jobsExists {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS task
+		LEFT JOIN %s AS job
+			ON job.config_id = task.config_id
+			AND job.event_id = task.open_event_id
+			AND job.action = '%s'
+		SET task.open_job_id = CASE
+			WHEN task.open_job_id IS NULL OR task.open_job_id = 0 THEN COALESCE(job.id, 0)
+			ELSE task.open_job_id
+		END
+		WHERE task.open_job_id IS NULL OR task.open_job_id = 0
+	`, quoteTableName(tableName),
+		quoteTableName(jobsTable),
+		models.SmartMoneyFollowJobActionOpen,
+	)).Error; err != nil {
+		return fmt.Errorf("backfill %s.open_job_id: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS task
+		LEFT JOIN %s AS job
+			ON job.config_id = task.config_id
+			AND job.event_id = task.close_event_id
+			AND job.action = '%s'
+		SET task.close_job_id = CASE
+			WHEN task.close_event_id IS NULL OR task.close_event_id = 0 THEN NULL
+			WHEN task.close_job_id IS NULL OR task.close_job_id = 0 THEN COALESCE(job.id, 0)
+			ELSE task.close_job_id
+		END
+		WHERE task.close_event_id IS NULL
+		   OR task.close_event_id = 0
+		   OR task.close_job_id IS NULL
+		   OR task.close_job_id = 0
+	`, quoteTableName(tableName),
+		quoteTableName(jobsTable),
+		models.SmartMoneyFollowJobActionClose,
+	)).Error; err != nil {
+		return fmt.Errorf("backfill %s.close_job_id: %w", tableName, err)
+	}
+	return nil
+}
+
+func normalizeSmartMoneyFollowTaskStatuses(tableName string) error {
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET status = CASE LOWER(TRIM(status))
+			WHEN 'active' THEN '%s'
+			WHEN 'open' THEN '%s'
+			WHEN 'closing' THEN '%s'
+			WHEN 'closed' THEN '%s'
+			ELSE '%s'
+		END
+	`, quoteTableName(tableName),
+		models.SmartMoneyFollowTaskStatusOpen,
+		models.SmartMoneyFollowTaskStatusOpen,
+		models.SmartMoneyFollowTaskStatusOpen,
+		models.SmartMoneyFollowTaskStatusClosed,
+		models.SmartMoneyFollowTaskStatusClosed,
+	)).Error; err != nil {
+		return fmt.Errorf("normalize %s.status: %w", tableName, err)
+	}
+	return nil
+}
+
+func repairSmartMoneyFollowTaskUniqueKeys(tableName string) error {
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s AS task
+		INNER JOIN (
+			SELECT id, ROW_NUMBER() OVER (
+				PARTITION BY open_event_id
+				ORDER BY id
+			) AS row_num
+			FROM %s
+		) AS dup
+			ON dup.id = task.id
+		SET task.open_event_id = 1000000000000000000 + task.id
+		WHERE dup.row_num > 1
+	`, quoteTableName(tableName), quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("repair duplicate %s open_event_id keys: %w", tableName, err)
+	}
 	return nil
 }
 
@@ -350,6 +1253,24 @@ func ensureUniqueIndex(table, indexName, columns string) error {
 
 func quoteTableName(tableName string) string {
 	return "`" + strings.ReplaceAll(tableName, "`", "``") + "`"
+}
+
+func quoteColumnName(columnName string) string {
+	return "`" + strings.ReplaceAll(columnName, "`", "``") + "`"
+}
+
+func tableExists(tableName string) (bool, error) {
+	var count int64
+	err := DB.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.tables
+		WHERE table_schema = DATABASE()
+		  AND table_name = ?
+	`, tableName).Scan(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func normalizeTradeRecordProfitFormula() {
