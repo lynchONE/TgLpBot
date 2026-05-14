@@ -35,6 +35,8 @@ type TxOptions struct {
 	// EntrySwapSlippageOverride only applies to the initial wallet-side entry swap before opening.
 	// It must not change the task's persisted slippage tolerance.
 	EntrySwapSlippageOverride *float64
+	// SlippageToleranceOverride applies to one liquidity operation without changing the task record.
+	SlippageToleranceOverride *float64
 }
 
 func normalizeGasMultiplier(v float64) float64 {

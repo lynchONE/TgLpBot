@@ -2043,12 +2043,14 @@ export default function App() {
     setAddLiqPosition({ ...position, task_id: resolvedTaskId });
   }, []);
 
-  const confirmAddLiquidity = useCallback(async (amount) => {
+  const confirmAddLiquidity = useCallback(async (payload) => {
     const taskId = Number(addLiqPosition?.task_id || 0);
     if (!Number.isFinite(taskId) || taskId <= 0) {
       throw new Error('Task is missing for add liquidity.');
     }
-    await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount });
+    const amount = typeof payload === 'object' && payload !== null ? payload.amount : payload;
+    const slippageTolerance = typeof payload === 'object' && payload !== null ? payload.slippageTolerance : undefined;
+    await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount, slippageTolerance });
     loadPositions().catch(() => {});
   }, [addLiqPosition, apiBaseUrl, initData, loadPositions]);
 

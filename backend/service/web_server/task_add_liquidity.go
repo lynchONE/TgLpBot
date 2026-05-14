@@ -18,9 +18,11 @@ import (
 )
 
 type taskAddLiquidityRequest struct {
-	InitData   string  `json:"initData"`
-	TaskID     uint    `json:"taskId"`
-	AmountUSDT float64 `json:"amountUsdt"`
+	InitData               string   `json:"initData"`
+	TaskID                 uint     `json:"taskId"`
+	AmountUSDT             float64  `json:"amountUsdt"`
+	SlippageTolerance      *float64 `json:"slippage_tolerance"`
+	SlippageToleranceCamel *float64 `json:"slippageTolerance"`
 }
 
 type taskAddLiquidityResponse struct {
@@ -34,6 +36,27 @@ type taskAddLiquidityResponse struct {
 type taskAddLiquidityRunResult struct {
 	res *liquidity.IncreaseLiquidityResult
 	err error
+}
+
+func requestAddLiquiditySlippage(snake *float64, camel *float64) (*float64, error) {
+	if snake != nil && camel != nil && *snake != *camel {
+		return nil, fmt.Errorf("slippage_tolerance and slippageTolerance conflict")
+	}
+	var raw *float64
+	if snake != nil {
+		raw = snake
+	}
+	if camel != nil {
+		raw = camel
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	value := *raw
+	if value < 0 || value > 100 {
+		return nil, fmt.Errorf("slippage_tolerance must be between 0 and 100")
+	}
+	return &value, nil
 }
 
 func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +81,12 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 	}
 	if req.AmountUSDT <= 0 {
 		http.Error(w, "补仓金额必须大于 0", http.StatusBadRequest)
+		return
+	}
+
+	slippageOverride, err := requestAddLiquiditySlippage(req.SlippageTolerance, req.SlippageToleranceCamel)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -117,7 +146,9 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 		}()
 
 		liqSvc := liquidity.NewLiquidityService()
-		increaseRes, increaseErr := liqSvc.IncreaseLiquidityForTask(userID, task, amountUSDT)
+		increaseRes, increaseErr := liqSvc.IncreaseLiquidityForTaskWithOptions(userID, task, amountUSDT, liquidity.TxOptions{
+			SlippageToleranceOverride: slippageOverride,
+		})
 		if increaseErr != nil {
 			log.Printf("[WebAPI] add_liquidity failed: task_id=%d err=%v", taskID, increaseErr)
 			resultCh <- taskAddLiquidityRunResult{err: increaseErr}

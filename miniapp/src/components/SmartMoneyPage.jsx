@@ -2,6 +2,7 @@
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal,
+    Clock, DollarSign, Percent,
 } from 'lucide-react';
 
 const LazySmartMoneyAssetsPage = lazy(() => import('./SmartMoneyAssetsPage.jsx'));
@@ -14,6 +15,7 @@ import {
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchWallets, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
+    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig,
     buildSMEventsWsUrl,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
@@ -3027,6 +3029,452 @@ function GoldenDogPage({ apiBaseUrl, initData, brand, watchedWallets = [], watch
     );
 }
 
+const AUTO_FOLLOW_DEFAULT_DRAFT = {
+    id: 0,
+    target_wallet_address: '',
+    enabled: true,
+    amount_mode: 'fixed',
+    fixed_amount_usdt: '50',
+    ratio_percent: '100',
+    delay_mode: 'immediate',
+    delay_seconds: '0',
+    follow_close: true,
+};
+
+function createAutoFollowDraft(config) {
+    if (!config) return { ...AUTO_FOLLOW_DEFAULT_DRAFT };
+    const ratio = Number(config.ratio);
+    return {
+        id: Number(config.id) || 0,
+        target_wallet_address: String(config.target_wallet_address || ''),
+        enabled: Boolean(config.enabled),
+        amount_mode: String(config.amount_mode || 'fixed'),
+        fixed_amount_usdt: String(config.fixed_amount_usdt || ''),
+        ratio_percent: Number.isFinite(ratio) ? String(ratio * 100) : '100',
+        delay_mode: String(config.delay_mode || 'immediate'),
+        delay_seconds: String(config.delay_seconds || '0'),
+        follow_close: Boolean(config.follow_close),
+    };
+}
+
+function normalizeAutoFollowDraft(draft) {
+    const address = normalizeWalletAddress(draft.target_wallet_address);
+    if (!address) throw new Error('请输入有效的钱包地址');
+
+    const amountMode = String(draft.amount_mode || '').trim();
+    const fixedAmount = Number(String(draft.fixed_amount_usdt || '').trim());
+    const ratioPercent = Number(String(draft.ratio_percent || '').trim());
+    const delayMode = String(draft.delay_mode || '').trim();
+    const delaySeconds = Number(String(draft.delay_seconds || '').trim());
+
+    if (amountMode !== 'fixed' && amountMode !== 'ratio') throw new Error('请选择跟单金额模式');
+    if (amountMode === 'fixed' && (!Number.isFinite(fixedAmount) || fixedAmount <= 0)) throw new Error('固定金额必须大于 0');
+    if (amountMode === 'ratio' && (!Number.isFinite(ratioPercent) || ratioPercent <= 0)) throw new Error('比例必须大于 0');
+    if (delayMode !== 'immediate' && delayMode !== 'fixed_delay') throw new Error('请选择跟单延时模式');
+    if (delayMode === 'fixed_delay' && (!Number.isFinite(delaySeconds) || delaySeconds < 0 || delaySeconds > 86400)) {
+        throw new Error('延时秒数必须在 0 到 86400 之间');
+    }
+
+    return {
+        id: Number(draft.id) || 0,
+        target_wallet_address: address,
+        enabled: Boolean(draft.enabled),
+        amount_mode: amountMode,
+        fixed_amount_usdt: amountMode === 'fixed' ? fixedAmount : 0,
+        ratio: amountMode === 'ratio' ? ratioPercent / 100 : 1,
+        delay_mode: delayMode,
+        delay_seconds: delayMode === 'fixed_delay' ? Math.round(delaySeconds) : 0,
+        follow_close: Boolean(draft.follow_close),
+    };
+}
+
+function formatAutoFollowJobTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '--';
+    return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function autoFollowStatusClass(status) {
+    switch (String(status || '').toLowerCase()) {
+        case 'success':
+            return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200';
+        case 'failed':
+            return 'border-red-400/20 bg-red-500/10 text-red-200';
+        case 'running':
+            return 'border-amber-400/20 bg-amber-500/10 text-amber-200';
+        case 'skipped':
+            return 'border-white/10 bg-zinc-800/80 text-zinc-400';
+        default:
+            return 'border-sky-400/20 bg-sky-500/10 text-sky-200';
+    }
+}
+
+function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
+    const [loading, setLoading] = useState(Boolean(hasInitData));
+    const [saving, setSaving] = useState(false);
+    const [configs, setConfigs] = useState([]);
+    const [jobs, setJobs] = useState([]);
+    const [draft, setDraft] = useState(() => createAutoFollowDraft());
+    const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
+
+    const load = useCallback(async () => {
+        if (!hasInitData) {
+            setLoading(false);
+            setConfigs([]);
+            setJobs([]);
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            const resp = await fetchSMAutoFollow({ apiBaseUrl, initData, chain: 'bsc' });
+            setConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
+            setJobs(Array.isArray(resp?.jobs) ? resp.jobs : []);
+        } catch (err) {
+            setError(String(err?.message || err || '加载失败'));
+        } finally {
+            setLoading(false);
+        }
+    }, [apiBaseUrl, hasInitData, initData]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    const resetDraft = useCallback(() => {
+        setDraft(createAutoFollowDraft());
+    }, []);
+
+    const saveDraft = useCallback(async () => {
+        if (!hasInitData) {
+            setError('缺少 Telegram initData');
+            return;
+        }
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            const config = normalizeAutoFollowDraft(draft);
+            await saveSMAutoFollowConfig({ apiBaseUrl, initData, chain: 'bsc', config });
+            setNotice('自动跟单配置已保存');
+            resetDraft();
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, draft, hasInitData, initData, load, resetDraft]);
+
+    const deleteConfig = useCallback(async (id) => {
+        if (!id || !hasInitData) return;
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            await deleteSMAutoFollowConfig({ apiBaseUrl, initData, chain: 'bsc', id });
+            setNotice('配置已删除');
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '删除失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, hasInitData, initData, load]);
+
+    const toggleConfig = useCallback(async (config) => {
+        if (!config || !hasInitData) return;
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            await saveSMAutoFollowConfig({
+                apiBaseUrl,
+                initData,
+                chain: 'bsc',
+                config: {
+                    id: config.id,
+                    chain: config.chain,
+                    target_wallet_address: config.target_wallet_address,
+                    enabled: !config.enabled,
+                    amount_mode: config.amount_mode,
+                    fixed_amount_usdt: config.fixed_amount_usdt,
+                    ratio: config.ratio,
+                    delay_mode: config.delay_mode,
+                    delay_seconds: config.delay_seconds,
+                    follow_close: config.follow_close,
+                },
+            });
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '更新失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, hasInitData, initData, load]);
+
+    const activeCount = configs.filter((item) => item?.enabled).length;
+
+    return (
+        <div className="space-y-4">
+            <section className="rounded-[30px] border border-white/[0.04] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_34%),linear-gradient(180deg,rgba(24,24,27,0.94),rgba(9,9,11,0.98))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-400/10 text-sky-200">
+                            <Copy size={18} />
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-base font-semibold text-zinc-100">自动跟单</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                <Badge className="border-sky-400/20 bg-sky-400/10 text-sky-200">BSC</Badge>
+                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{activeCount} 个运行中</Badge>
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={load}
+                        disabled={loading}
+                        className={`rounded-2xl px-3 py-2 text-sm disabled:opacity-50 ${getFilterButtonClass(false, brand)}`}
+                    >
+                        刷新
+                    </button>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                    <StatCard label="配置数" value={configs.length} compact />
+                    <StatCard label="运行中" value={activeCount} compact />
+                    <StatCard label="最近任务" value={jobs.length} compact />
+                </div>
+            </section>
+
+            {!hasInitData ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    缺少 Telegram initData，无法保存自动跟单配置。
+                </div>
+            ) : null}
+            {error ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {error}
+                </div>
+            ) : null}
+            {!error && notice ? (
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                    {notice}
+                </div>
+            ) : null}
+
+            <section className="rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-zinc-100">{draft.id ? '编辑配置' : '新增配置'}</div>
+                    {draft.id ? (
+                        <button type="button" onClick={resetDraft} className="text-xs text-zinc-400 hover:text-zinc-200">
+                            新建
+                        </button>
+                    ) : null}
+                </div>
+
+                <div className="space-y-3">
+                    <input
+                        className={getInputClass(brand)}
+                        placeholder="跟单钱包地址 (0x...)"
+                        value={draft.target_wallet_address}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, target_wallet_address: e.target.value }))}
+                    />
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.enabled, brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
+                        >
+                            <Play size={13} className="mr-1 inline" /> 开启
+                        </button>
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(!draft.enabled, brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
+                        >
+                            <Pause size={13} className="mr-1 inline" /> 暂停
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.amount_mode === 'fixed', brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, amount_mode: 'fixed' }))}
+                        >
+                            <DollarSign size={13} className="mr-1 inline" /> 固定金额
+                        </button>
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.amount_mode === 'ratio', brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, amount_mode: 'ratio' }))}
+                        >
+                            <Percent size={13} className="mr-1 inline" /> 按比例
+                        </button>
+                    </div>
+
+                    {draft.amount_mode === 'fixed' ? (
+                        <input
+                            className={getInputClass(brand)}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="固定金额 USDT"
+                            value={draft.fixed_amount_usdt}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, fixed_amount_usdt: e.target.value }))}
+                        />
+                    ) : (
+                        <input
+                            className={getInputClass(brand)}
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="开仓金额比例 (%)"
+                            value={draft.ratio_percent}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, ratio_percent: e.target.value }))}
+                        />
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.delay_mode === 'immediate', brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, delay_mode: 'immediate', delay_seconds: '0' }))}
+                        >
+                            <Clock size={13} className="mr-1 inline" /> 立即
+                        </button>
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.delay_mode === 'fixed_delay', brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, delay_mode: 'fixed_delay' }))}
+                        >
+                            <Clock size={13} className="mr-1 inline" /> 延时
+                        </button>
+                    </div>
+
+                    {draft.delay_mode === 'fixed_delay' ? (
+                        <input
+                            className={getInputClass(brand)}
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="延时秒数"
+                            value={draft.delay_seconds}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, delay_seconds: e.target.value }))}
+                        />
+                    ) : null}
+
+                    <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-3">
+                        <span className="text-sm text-zinc-200">撤仓跟单</span>
+                        <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-lime-400"
+                            checked={draft.follow_close}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, follow_close: e.target.checked }))}
+                        />
+                    </label>
+
+                    <button
+                        type="button"
+                        onClick={saveDraft}
+                        disabled={saving || !hasInitData}
+                        className={`w-full rounded-[24px] px-4 py-3 text-sm font-semibold disabled:opacity-50 ${brand.solidButtonClass}`}
+                    >
+                        {saving ? '保存中...' : '保存自动跟单配置'}
+                    </button>
+                </div>
+            </section>
+
+            <section className="space-y-2">
+                <div className="text-sm font-semibold text-zinc-100">跟单配置</div>
+                {loading ? (
+                    <div className="py-6 text-center text-zinc-500">加载中...</div>
+                ) : configs.length === 0 ? (
+                    <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
+                        暂无自动跟单配置
+                    </div>
+                ) : (
+                    configs.map((config) => (
+                        <div key={config.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/60 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="truncate font-mono text-sm text-zinc-100">{shortAddr(config.target_wallet_address)}</span>
+                                        <Badge className={config.enabled
+                                            ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+                                            : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
+                                            {config.enabled ? '开启' : '暂停'}
+                                        </Badge>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                            {config.amount_mode === 'ratio'
+                                                ? `${Number(config.ratio * 100).toFixed(0)}%`
+                                                : formatUSDCompact(config.fixed_amount_usdt)}
+                                        </Badge>
+                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                            {config.delay_mode === 'fixed_delay' ? `${config.delay_seconds}s` : '立即'}
+                                        </Badge>
+                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                            撤仓{config.follow_close ? '跟单' : '忽略'}
+                                        </Badge>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 gap-1.5">
+                                    <button type="button" className={getIconButtonClass(false)} onClick={() => setDraft(createAutoFollowDraft(config))} title="编辑">
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button type="button" className={getIconButtonClass(false)} onClick={() => toggleConfig(config)} title={config.enabled ? '暂停' : '开启'} disabled={saving}>
+                                        {config.enabled ? <Pause size={14} /> : <Play size={14} />}
+                                    </button>
+                                    <button type="button" className={getIconButtonClass(true)} onClick={() => deleteConfig(config.id)} title="删除" disabled={saving}>
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </section>
+
+            <section className="space-y-2">
+                <div className="text-sm font-semibold text-zinc-100">最近任务</div>
+                {jobs.length === 0 ? (
+                    <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
+                        暂无执行记录
+                    </div>
+                ) : (
+                    jobs.slice(0, 8).map((job) => (
+                        <div key={job.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <Badge className={autoFollowStatusClass(job.status)}>{job.status}</Badge>
+                                        <span className="text-sm text-zinc-100">{job.action === 'close' ? '撤仓' : '开仓'}</span>
+                                    </div>
+                                    <div className="mt-1 truncate text-[11px] text-zinc-500">
+                                        {shortAddr(job.target_wallet_address)} · {formatAutoFollowJobTime(job.scheduled_at)}
+                                    </div>
+                                    {job.error_message ? (
+                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{job.error_message}</div>
+                                    ) : null}
+                                </div>
+                                <div className="shrink-0 text-right">
+                                    <div className="text-sm font-semibold text-zinc-100">{Number(job.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
+                                    <div className="text-[10px] text-zinc-500">#{job.id}</div>
+                                </div>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </section>
+        </div>
+    );
+}
+
 function WalletSettingsTab({ apiBaseUrl, brand }) {
     const [wallets, setWallets] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -3872,11 +4320,12 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                 )}
 
                 {!isDetailView && (
-                    <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'} gap-2 mb-4`}>
+                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-6' : 'grid-cols-5'} gap-2 mb-4`}>
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
                             { key: 'settings', label: '合约视图', icon: Settings },
+                            { key: 'auto_follow', label: '自动跟单', icon: Copy },
                         ].map(({ key, label, icon: Icon }) => (
                             <button
                                 key={key}
@@ -3957,6 +4406,13 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={handleToggleWatchWallet}
+                    />
+                ) : view === 'auto_follow' ? (
+                    <AutoFollowPage
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        hasInitData={hasInitData}
+                        brand={brand}
                     />
                 ) : view === 'assets' && isAdmin ? (
                     <Suspense fallback={<div className="py-6 text-center text-[11px] text-zinc-500">加载聪明钱资产模块...</div>}>

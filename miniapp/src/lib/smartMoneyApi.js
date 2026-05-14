@@ -315,6 +315,34 @@ export async function testSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain =
     });
 }
 
+export async function fetchSMAutoFollow({ apiBaseUrl, initData, chain = 'bsc', signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', initData);
+    if (chain) params.set('chain', chain);
+    return goldenDogRequest(`${base}/api/smart_money_auto_follow?${params.toString()}`, { signal });
+}
+
+export async function saveSMAutoFollowConfig({ apiBaseUrl, initData, chain = 'bsc', config, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_auto_follow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, action: 'save', config }),
+        signal,
+    });
+}
+
+export async function deleteSMAutoFollowConfig({ apiBaseUrl, initData, chain = 'bsc', id, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_auto_follow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, action: 'delete', id }),
+        signal,
+    });
+}
+
 export function buildSMEventsWsUrl(apiBaseUrl) {
     const base = normalizeBase(apiBaseUrl) || (typeof window !== 'undefined' ? window.location.origin : '');
     if (!base) return '';

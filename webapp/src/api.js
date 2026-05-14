@@ -1205,13 +1205,17 @@ export async function updateTaskMode({ apiBaseUrl, initData, taskId, taskMode, s
   });
 }
 
-export async function addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt, signal }) {
+export async function addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt, slippageTolerance, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/task_action?action=add_liquidity`;
+  const body = { initData, taskId, amountUsdt: Number(amountUsdt) };
+  if (Number.isFinite(Number(slippageTolerance))) {
+    body.slippageTolerance = Number(slippageTolerance);
+  }
   return requestJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, taskId, amountUsdt: Number(amountUsdt) }),
+    body: JSON.stringify(body),
     signal,
   });
 }

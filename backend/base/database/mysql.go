@@ -97,6 +97,9 @@ func autoMigrate() error {
 		&models.SmartMoneyWatchWallet{},
 		&models.SmartMoneyWatchOpenAlertConfig{},
 		&models.SmartMoneyWatchOpenAlertReceipt{},
+		&models.SmartMoneyFollowConfig{},
+		&models.SmartMoneyFollowJob{},
+		&models.SmartMoneyFollowTask{},
 	); err != nil {
 		return err
 	}

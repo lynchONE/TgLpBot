@@ -79,38 +79,39 @@ type RealtimeSummary struct {
 }
 
 type RealtimePosition struct {
-	Chain                string             `json:"chain"`
-	Version              string             `json:"version"`
-	Exchange             string             `json:"exchange"`
-	Title                string             `json:"title"`
-	FeeTier              uint64             `json:"fee_tier,omitempty"`
-	PoolID               string             `json:"pool_id"`
-	PositionID           string             `json:"position_id"`
-	WalletID             uint               `json:"wallet_id,omitempty"`
-	WalletAddress        string             `json:"wallet_address,omitempty"`
-	TaskID               uint               `json:"task_id,omitempty"`
-	TaskPaused           bool               `json:"task_paused"`
-	TaskRebalanceEnabled bool               `json:"task_rebalance_enabled"`
-	TaskMode             string             `json:"task_mode,omitempty"`
-	TaskAmountUSDT       float64            `json:"task_amount_usdt,omitempty"`
-	StatusLabel          string             `json:"status_label"`
-	InRange              bool               `json:"in_range"`
-	CurrentTick          int                `json:"current_tick"`
-	TickLower            int                `json:"tick_lower"`
-	TickUpper            int                `json:"tick_upper"`
-	TickSpacing          int                `json:"tick_spacing,omitempty"`
-	RangePercent         float64            `json:"range_percent"`
-	TaskRangeLowerPct    float64            `json:"task_range_lower_pct,omitempty"`
-	TaskRangeUpperPct    float64            `json:"task_range_upper_pct,omitempty"`
-	OutOfRange           string             `json:"out_of_range"`
-	RunningSince         *time.Time         `json:"running_since,omitempty"`
-	HasLiquidity         bool               `json:"has_liquidity"`
-	InitialCostUSD       float64            `json:"initial_cost_usd,omitempty"`
-	NetInvestedUSD       float64            `json:"net_invested_usd,omitempty"`
-	CurrentValueUSD      float64            `json:"current_value_usd,omitempty"`
-	AbsolutePnLUSD       float64            `json:"absolute_pnl_usd,omitempty"`
-	HasPnL               bool               `json:"has_pnl,omitempty"`
-	DCA                  *RealtimeDCAStatus `json:"dca,omitempty"`
+	Chain                 string             `json:"chain"`
+	Version               string             `json:"version"`
+	Exchange              string             `json:"exchange"`
+	Title                 string             `json:"title"`
+	FeeTier               uint64             `json:"fee_tier,omitempty"`
+	PoolID                string             `json:"pool_id"`
+	PositionID            string             `json:"position_id"`
+	WalletID              uint               `json:"wallet_id,omitempty"`
+	WalletAddress         string             `json:"wallet_address,omitempty"`
+	TaskID                uint               `json:"task_id,omitempty"`
+	TaskPaused            bool               `json:"task_paused"`
+	TaskRebalanceEnabled  bool               `json:"task_rebalance_enabled"`
+	TaskMode              string             `json:"task_mode,omitempty"`
+	TaskAmountUSDT        float64            `json:"task_amount_usdt,omitempty"`
+	TaskSlippageTolerance float64            `json:"task_slippage_tolerance,omitempty"`
+	StatusLabel           string             `json:"status_label"`
+	InRange               bool               `json:"in_range"`
+	CurrentTick           int                `json:"current_tick"`
+	TickLower             int                `json:"tick_lower"`
+	TickUpper             int                `json:"tick_upper"`
+	TickSpacing           int                `json:"tick_spacing,omitempty"`
+	RangePercent          float64            `json:"range_percent"`
+	TaskRangeLowerPct     float64            `json:"task_range_lower_pct,omitempty"`
+	TaskRangeUpperPct     float64            `json:"task_range_upper_pct,omitempty"`
+	OutOfRange            string             `json:"out_of_range"`
+	RunningSince          *time.Time         `json:"running_since,omitempty"`
+	HasLiquidity          bool               `json:"has_liquidity"`
+	InitialCostUSD        float64            `json:"initial_cost_usd,omitempty"`
+	NetInvestedUSD        float64            `json:"net_invested_usd,omitempty"`
+	CurrentValueUSD       float64            `json:"current_value_usd,omitempty"`
+	AbsolutePnLUSD        float64            `json:"absolute_pnl_usd,omitempty"`
+	HasPnL                bool               `json:"has_pnl,omitempty"`
+	DCA                   *RealtimeDCAStatus `json:"dca,omitempty"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -1029,12 +1030,14 @@ func (s *RealtimePositionsService) buildV3Position(
 	pnlMetrics := taskPnLViewMetrics{}
 	taskRangeLowerPct := 0.0
 	taskRangeUpperPct := 0.0
+	taskSlippageTolerance := 0.0
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
 		taskRebalanceEnabled = models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task))
 		taskMode = models.EffectiveStrategyTaskMode(task)
 		pnlMetrics = s.getTaskPnLViewMetrics(task)
+		taskSlippageTolerance = task.SlippageTolerance
 		initialCostUSD = pnlMetrics.initialCost
 		netInvestedUSD = pnlMetrics.netInvested
 		currentValueUSD = pnlMetrics.currentValue
@@ -1080,16 +1083,17 @@ func (s *RealtimePositionsService) buildV3Position(
 			}
 			return walletAddr.Hex()
 		}(),
-		TaskID:               taskID,
-		TaskPaused:           taskPaused,
-		TaskRebalanceEnabled: taskRebalanceEnabled,
-		TaskMode:             taskMode,
-		TaskAmountUSDT:       displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
-		StatusLabel:          statusLabel,
-		InRange:              inRange,
-		CurrentTick:          currentTick,
-		TickLower:            tickLower,
-		TickUpper:            tickUpper,
+		TaskID:                taskID,
+		TaskPaused:            taskPaused,
+		TaskRebalanceEnabled:  taskRebalanceEnabled,
+		TaskMode:              taskMode,
+		TaskAmountUSDT:        displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
+		TaskSlippageTolerance: taskSlippageTolerance,
+		StatusLabel:           statusLabel,
+		InRange:               inRange,
+		CurrentTick:           currentTick,
+		TickLower:             tickLower,
+		TickUpper:             tickUpper,
 		TickSpacing: func() int {
 			if task != nil && task.TickSpacing > 0 {
 				return task.TickSpacing
@@ -1459,31 +1463,32 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 			}
 			return walletAddr.Hex()
 		}(),
-		TaskID:               task.ID,
-		TaskPaused:           task.Paused,
-		TaskRebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
-		TaskMode:             models.EffectiveStrategyTaskMode(task),
-		TaskAmountUSDT:       displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
-		StatusLabel:          statusLabelFromTask(task),
-		InRange:              inRange,
-		CurrentTick:          currentTick,
-		TickLower:            tickLower,
-		TickUpper:            tickUpper,
-		TickSpacing:          task.TickSpacing,
-		RangePercent:         rangePct,
-		TaskRangeLowerPct:    taskRangeLowerPct,
-		TaskRangeUpperPct:    taskRangeUpperPct,
-		OutOfRange:           formatOutOfRange(task, tickLower, tickUpper, currentTick),
-		RunningSince:         &task.CreatedAt,
-		HasLiquidity:         hasLiquidity,
-		InitialCostUSD:       initialCostUSD,
-		NetInvestedUSD:       netInvestedUSD,
-		CurrentValueUSD:      currentValueUSD,
-		AbsolutePnLUSD:       absolutePnLUSD,
-		HasPnL:               hasPnL,
-		DCA:                  buildRealtimeDCAStatus(task),
-		TokenRows:            []RealtimeTokenRow{row0, row1},
-		Totals:               totals,
+		TaskID:                task.ID,
+		TaskPaused:            task.Paused,
+		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
+		TaskMode:              models.EffectiveStrategyTaskMode(task),
+		TaskAmountUSDT:        displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
+		TaskSlippageTolerance: task.SlippageTolerance,
+		StatusLabel:           statusLabelFromTask(task),
+		InRange:               inRange,
+		CurrentTick:           currentTick,
+		TickLower:             tickLower,
+		TickUpper:             tickUpper,
+		TickSpacing:           task.TickSpacing,
+		RangePercent:          rangePct,
+		TaskRangeLowerPct:     taskRangeLowerPct,
+		TaskRangeUpperPct:     taskRangeUpperPct,
+		OutOfRange:            formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince:          &task.CreatedAt,
+		HasLiquidity:          hasLiquidity,
+		InitialCostUSD:        initialCostUSD,
+		NetInvestedUSD:        netInvestedUSD,
+		CurrentValueUSD:       currentValueUSD,
+		AbsolutePnLUSD:        absolutePnLUSD,
+		HasPnL:                hasPnL,
+		DCA:                   buildRealtimeDCAStatus(task),
+		TokenRows:             []RealtimeTokenRow{row0, row1},
+		Totals:                totals,
 	}, warn
 }
 
@@ -1704,31 +1709,32 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 			}
 			return walletAddr.Hex()
 		}(),
-		TaskID:               task.ID,
-		TaskPaused:           task.Paused,
-		TaskRebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
-		TaskMode:             models.EffectiveStrategyTaskMode(task),
-		TaskAmountUSDT:       displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
-		StatusLabel:          statusLabelFromTask(task),
-		InRange:              inRange,
-		CurrentTick:          currentTick,
-		TickLower:            tickLower,
-		TickUpper:            tickUpper,
-		TickSpacing:          task.TickSpacing,
-		RangePercent:         rangePct,
-		TaskRangeLowerPct:    taskRangeLowerPct,
-		TaskRangeUpperPct:    taskRangeUpperPct,
-		OutOfRange:           formatOutOfRange(task, tickLower, tickUpper, currentTick),
-		RunningSince:         &task.CreatedAt,
-		HasLiquidity:         false,
-		InitialCostUSD:       initialCostUSD,
-		NetInvestedUSD:       netInvestedUSD,
-		CurrentValueUSD:      currentValueUSD,
-		AbsolutePnLUSD:       absolutePnLUSD,
-		HasPnL:               hasPnL,
-		DCA:                  buildRealtimeDCAStatus(task),
-		TokenRows:            []RealtimeTokenRow{row0, row1},
-		Totals:               totals,
+		TaskID:                task.ID,
+		TaskPaused:            task.Paused,
+		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
+		TaskMode:              models.EffectiveStrategyTaskMode(task),
+		TaskAmountUSDT:        displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
+		TaskSlippageTolerance: task.SlippageTolerance,
+		StatusLabel:           statusLabelFromTask(task),
+		InRange:               inRange,
+		CurrentTick:           currentTick,
+		TickLower:             tickLower,
+		TickUpper:             tickUpper,
+		TickSpacing:           task.TickSpacing,
+		RangePercent:          rangePct,
+		TaskRangeLowerPct:     taskRangeLowerPct,
+		TaskRangeUpperPct:     taskRangeUpperPct,
+		OutOfRange:            formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince:          &task.CreatedAt,
+		HasLiquidity:          false,
+		InitialCostUSD:        initialCostUSD,
+		NetInvestedUSD:        netInvestedUSD,
+		CurrentValueUSD:       currentValueUSD,
+		AbsolutePnLUSD:        absolutePnLUSD,
+		HasPnL:                hasPnL,
+		DCA:                   buildRealtimeDCAStatus(task),
+		TokenRows:             []RealtimeTokenRow{row0, row1},
+		Totals:                totals,
 	}, ""
 }
 

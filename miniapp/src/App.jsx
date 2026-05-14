@@ -353,6 +353,21 @@ function parseAmountInput(value) {
     return Number(String(value || '').replace(/,/g, '').trim());
 }
 
+function resolvePositionSlippage(position) {
+    const candidates = [
+        position?.task_slippage_tolerance,
+        position?.slippage_tolerance,
+        position?.task?.slippage_tolerance,
+    ];
+    for (const candidate of candidates) {
+        const n = Number(candidate);
+        if (Number.isFinite(n) && n >= 0 && n <= 100) {
+            return n;
+        }
+    }
+    return undefined;
+}
+
 function roundPresetAmount(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return 0;
@@ -1099,6 +1114,7 @@ export default function App() {
 
     const [addLiqModal, setAddLiqModal] = useState(null); // { taskId, title }
     const [addLiqAmount, setAddLiqAmount] = useState('');
+    const [addLiqSlippage, setAddLiqSlippage] = useState('');
     const [addLiqError, setAddLiqError] = useState('');
     const [addLiqLoading, setAddLiqLoading] = useState(false);
 
@@ -1487,6 +1503,8 @@ export default function App() {
         ?? 0
     );
     const addLiqParsedAmount = parseAmountInput(addLiqAmount);
+    const addLiqPositionSlippage = resolvePositionSlippage(addLiqPosition);
+    const addLiqParsedSlippage = parseOptionalPercent(addLiqSlippage);
     const addLiqPresetOptions = useMemo(
         () => buildAddLiquidityPresetOptions(addLiqReferenceAmount),
         [addLiqReferenceAmount]
@@ -3756,8 +3774,11 @@ export default function App() {
         setAddLiqModal({
             taskId: id,
             title: String(position?.title || '').trim() || `补充流动性 #${id}`,
+            task_slippage_tolerance: resolvePositionSlippage(position),
         });
         setAddLiqAmount('');
+        const currentSlippage = resolvePositionSlippage(position);
+        setAddLiqSlippage(Number.isFinite(currentSlippage) ? String(currentSlippage) : '');
         setAddLiqError('');
     };
 
@@ -3765,6 +3786,7 @@ export default function App() {
         if (addLiqLoading) return;
         setAddLiqModal(null);
         setAddLiqAmount('');
+        setAddLiqSlippage('');
         setAddLiqError('');
     };
 
@@ -3775,12 +3797,24 @@ export default function App() {
             setAddLiqError('请输入有效的补仓金额。');
             return;
         }
+        const slippage = parseOptionalPercent(addLiqSlippage);
+        if (!slippage.valid) {
+            setAddLiqError('滑点必须在 0 到 100 之间。');
+            return;
+        }
         setAddLiqLoading(true);
         setAddLiqError('');
         try {
-            const resp = await addLiquidity({ apiBaseUrl, initData, taskId: addLiqModal.taskId, amountUsdt: amount });
+            const resp = await addLiquidity({
+                apiBaseUrl,
+                initData,
+                taskId: addLiqModal.taskId,
+                amountUsdt: amount,
+                slippageTolerance: slippage.value,
+            });
             setAddLiqModal(null);
             setAddLiqAmount('');
+            setAddLiqSlippage('');
             showNotice(resp?.message || '补充流动性已提交。', 'success');
         } catch (e) {
             setAddLiqError(String(e?.message || e));
@@ -6179,6 +6213,31 @@ export default function App() {
                                     </div>
                                 </div>
 
+                                <div className={`mt-3 rounded-[20px] border px-3 py-3 ${addLiqParsedSlippage.valid
+                                    ? 'border-zinc-200 bg-white/80 dark:border-white/10 dark:bg-white/5'
+                                    : 'border-red-500/30 bg-red-500/10'
+                                }`}>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/35">Slippage</div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">
+                                            当前 {Number.isFinite(addLiqPositionSlippage) ? `${addLiqPositionSlippage}%` : '--'}
+                                        </div>
+                                    </div>
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <input
+                                            value={addLiqSlippage}
+                                            onChange={(e) => { setAddLiqSlippage(e.target.value); setAddLiqError(''); }}
+                                            inputMode="decimal"
+                                            placeholder={Number.isFinite(addLiqPositionSlippage) ? String(addLiqPositionSlippage) : '0.5'}
+                                            disabled={addLiqLoading}
+                                            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-xl font-semibold text-zinc-950 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-white/20"
+                                        />
+                                        <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700 shadow-sm dark:border-white/10 dark:bg-white/10 dark:text-white/75">
+                                            %
+                                        </span>
+                                    </div>
+                                </div>
+
                                 {addLiqPresetOptions.length ? (
                                     <div className="mt-3 grid grid-cols-2 gap-2">
                                         {addLiqPresetOptions.map((preset) => {
@@ -6230,8 +6289,8 @@ export default function App() {
                             <button
                                 type="button"
                                 onClick={submitAddLiquidity}
-                                disabled={addLiqLoading || !(Number.isFinite(addLiqParsedAmount) && addLiqParsedAmount > 0)}
-                                className={`w-full rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${addLiqLoading || !(Number.isFinite(addLiqParsedAmount) && addLiqParsedAmount > 0)
+                                disabled={addLiqLoading || !(Number.isFinite(addLiqParsedAmount) && addLiqParsedAmount > 0) || !addLiqParsedSlippage.valid}
+                                className={`w-full rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${addLiqLoading || !(Number.isFinite(addLiqParsedAmount) && addLiqParsedAmount > 0) || !addLiqParsedSlippage.valid
                                     ? `${brand.solidButtonClass} cursor-not-allowed opacity-60`
                                     : brand.solidButtonClass
                                 }`}

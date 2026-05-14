@@ -6,6 +6,31 @@ function parseAmountInput(value) {
   return Number(String(value || '').replace(/,/g, '').trim());
 }
 
+function parsePercentInput(value) {
+  const text = String(value || '').trim();
+  if (!text) return { valid: true, value: undefined };
+  const num = Number(text);
+  if (!Number.isFinite(num) || num < 0 || num > 100) {
+    return { valid: false, value: undefined };
+  }
+  return { valid: true, value: num };
+}
+
+function resolvePositionSlippage(position) {
+  const candidates = [
+    position?.task_slippage_tolerance,
+    position?.slippage_tolerance,
+    position?.task?.slippage_tolerance,
+  ];
+  for (const candidate of candidates) {
+    const num = Number(candidate);
+    if (Number.isFinite(num) && num >= 0 && num <= 100) {
+      return num;
+    }
+  }
+  return undefined;
+}
+
 function roundPresetAmount(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return 0;
@@ -76,6 +101,7 @@ function resolvePositionTitle(position) {
 
 export default function AddLiquidityModal({ position, onConfirm, onClose }) {
   const [amount, setAmount] = useState('');
+  const [slippage, setSlippage] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef(null);
@@ -93,6 +119,8 @@ export default function AddLiquidityModal({ position, onConfirm, onClose }) {
     ?? 0
   );
   const parsedAmount = parseAmountInput(amount);
+  const parsedSlippage = parsePercentInput(slippage);
+  const positionSlippage = resolvePositionSlippage(position);
   const isValid = Number.isFinite(parsedAmount) && parsedAmount > 0;
   const title = resolvePositionTitle(position);
   const presets = useMemo(() => buildPresetOptions(referenceAmount), [referenceAmount]);
@@ -108,8 +136,9 @@ export default function AddLiquidityModal({ position, onConfirm, onClose }) {
 
   useEffect(() => {
     setAmount('');
+    setSlippage(Number.isFinite(positionSlippage) ? String(positionSlippage) : '');
     setError('');
-  }, [position]);
+  }, [position, positionSlippage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => inputRef.current?.focus(), 80);
@@ -125,17 +154,17 @@ export default function AddLiquidityModal({ position, onConfirm, onClose }) {
   }, [requestClose]);
 
   const handleSubmit = useCallback(async () => {
-    if (!isValid || submitting) return;
+    if (!isValid || !parsedSlippage.valid || submitting) return;
     setSubmitting(true);
     setError('');
     try {
-      await onConfirm(parsedAmount);
+      await onConfirm({ amount: parsedAmount, slippageTolerance: parsedSlippage.value });
       onClose();
     } catch (submitError) {
       setError(String(submitError?.message || submitError || '补充流动性失败'));
       setSubmitting(false);
     }
-  }, [isValid, onClose, onConfirm, parsedAmount, submitting]);
+  }, [isValid, onClose, onConfirm, parsedAmount, parsedSlippage, submitting]);
 
   const handleKeyDown = useCallback((event) => {
     if (event.key === 'Enter') {
@@ -240,6 +269,33 @@ export default function AddLiquidityModal({ position, onConfirm, onClose }) {
             </div>
           ) : null}
 
+          <div className="add-liq-input-panel">
+            <div className="add-liq-field-head">
+              <span>Slippage</span>
+              <span className="add-liq-field-tag">
+                当前 {Number.isFinite(positionSlippage) ? `${positionSlippage}%` : '--'}
+              </span>
+            </div>
+            <div className="add-liq-input-shell">
+              <input
+                className="add-liq-input"
+                type="text"
+                inputMode="decimal"
+                placeholder={Number.isFinite(positionSlippage) ? String(positionSlippage) : '0.5'}
+                value={slippage}
+                onChange={(event) => {
+                  setSlippage(event.target.value);
+                  if (error) setError('');
+                }}
+                onKeyDown={handleKeyDown}
+                disabled={submitting}
+                autoComplete="off"
+              />
+              <span className="add-liq-unit-badge">%</span>
+            </div>
+            {!parsedSlippage.valid ? <div className="add-liq-note">滑点必须在 0 到 100 之间。</div> : null}
+          </div>
+
           {error ? <div className="add-liq-error">{error}</div> : null}
 
           <div className="add-liq-actions">
@@ -255,7 +311,7 @@ export default function AddLiquidityModal({ position, onConfirm, onClose }) {
               type="button"
               className="add-liq-btn-confirm"
               onClick={handleSubmit}
-              disabled={!isValid || submitting}
+              disabled={!isValid || !parsedSlippage.valid || submitting}
             >
               {submitting ? '处理中...' : '确认补充'}
             </button>

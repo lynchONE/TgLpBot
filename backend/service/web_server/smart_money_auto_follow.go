@@ -1,0 +1,125 @@
+package web_server
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	smfollow "TgLpBot/service/smart_money_follow"
+)
+
+type smartMoneyAutoFollowSaveRequest struct {
+	ID                  uint    `json:"id"`
+	Chain               string  `json:"chain"`
+	TargetWalletAddress string  `json:"target_wallet_address"`
+	Enabled             bool    `json:"enabled"`
+	AmountMode          string  `json:"amount_mode"`
+	FixedAmountUSDT     float64 `json:"fixed_amount_usdt"`
+	Ratio               float64 `json:"ratio"`
+	DelayMode           string  `json:"delay_mode"`
+	DelaySeconds        int     `json:"delay_seconds"`
+	FollowClose         bool    `json:"follow_close"`
+}
+
+type smartMoneyAutoFollowRequest struct {
+	InitData string                          `json:"initData"`
+	Action   string                          `json:"action"`
+	Config   smartMoneyAutoFollowSaveRequest `json:"config"`
+	ID       uint                            `json:"id"`
+	Chain    string                          `json:"chain"`
+}
+
+func (s *Server) handleSmartMoneyAutoFollow(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleGetSmartMoneyAutoFollow(w, r)
+	case http.MethodPost:
+		s.handlePostSmartMoneyAutoFollow(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleGetSmartMoneyAutoFollow(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := authenticateSmartMoneyGoldenDogUser(w, initDataFromQuery(r))
+	if !ok {
+		return
+	}
+	envelope, err := smartMoneyFollowService().ListEnvelope(r.Context(), user.ID, r.URL.Query().Get("chain"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope)
+}
+
+func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	var req smartMoneyAutoFollowRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	user, _, ok := authenticateSmartMoneyGoldenDogUser(w, strings.TrimSpace(req.InitData))
+	if !ok {
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	switch action {
+	case "save", "":
+		input := smfollow.SaveConfigInput{
+			ID:                  req.Config.ID,
+			Chain:               firstSmartMoneyAutoFollowChain(req.Config.Chain, req.Chain),
+			TargetWalletAddress: req.Config.TargetWalletAddress,
+			Enabled:             req.Config.Enabled,
+			AmountMode:          req.Config.AmountMode,
+			FixedAmountUSDT:     req.Config.FixedAmountUSDT,
+			Ratio:               req.Config.Ratio,
+			DelayMode:           req.Config.DelayMode,
+			DelaySeconds:        req.Config.DelaySeconds,
+			FollowClose:         req.Config.FollowClose,
+		}
+		cfg, err := smartMoneyFollowService().SaveConfig(r.Context(), user.ID, input)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"config": cfg,
+		})
+	case "delete":
+		id := req.ID
+		if id == 0 {
+			id = req.Config.ID
+		}
+		if err := smartMoneyFollowService().DeleteConfig(r.Context(), user.ID, id); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		http.Error(w, "invalid action", http.StatusBadRequest)
+	}
+}
+
+func firstSmartMoneyAutoFollowChain(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return "bsc"
+}
+
+func smartMoneyFollowService() *smfollow.Service {
+	if smFollowSvc == nil {
+		smFollowSvc = smfollow.NewService()
+	}
+	return smFollowSvc
+}

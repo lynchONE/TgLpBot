@@ -223,17 +223,27 @@ func appendStableBudgetDustToIncreaseResult(
 // NonfungiblePositionManager.increaseLiquidity (V3) or modifyLiquidities with
 // INCREASE_LIQUIDITY action (V4) to add to the existing tokenId.
 func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.StrategyTask, addAmountUSDT float64) (*IncreaseLiquidityResult, error) {
+	return s.IncreaseLiquidityForTaskWithOptions(userID, task, addAmountUSDT, TxOptions{})
+}
+
+func (s *LiquidityService) IncreaseLiquidityForTaskWithOptions(userID uint, task *models.StrategyTask, addAmountUSDT float64, opts TxOptions) (*IncreaseLiquidityResult, error) {
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
+	if opts.SlippageToleranceOverride != nil {
+		taskCopy := *task
+		taskCopy.SlippageTolerance = *opts.SlippageToleranceOverride
+		task = &taskCopy
+	}
 	task.Chain = config.NormalizeChain(task.Chain)
 	exec, err := chainexec.GetEVM(task.Chain)
 	if err != nil {
 		return nil, err
 	}
+	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
 	cc := exec.Config()
 	client := exec.Client()
 
@@ -285,9 +295,9 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 		var res *IncreaseLiquidityResult
 		switch version {
 		case "v4":
-			res, err = s.increaseV4LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
+			res, err = s.increaseV4LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, opts)
 		default:
-			res, err = s.increaseV3LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
+			res, err = s.increaseV3LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, opts)
 		}
 		if err != nil {
 			return nil, err
@@ -323,9 +333,9 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 	var res *IncreaseLiquidityResult
 	switch version {
 	case "v4":
-		res, err = s.increaseV4Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, TxOptions{})
+		res, err = s.increaseV4Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, opts)
 	default:
-		res, err = s.increaseV3Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, TxOptions{})
+		res, err = s.increaseV3Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, opts)
 	}
 	if err != nil {
 		return nil, err

@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	sm "TgLpBot/service/smart_money"
+	smfollow "TgLpBot/service/smart_money_follow"
 	smgd "TgLpBot/service/smart_money_golden_dog"
 	smwoa "TgLpBot/service/smart_money_watch_open_alert"
 	"context"
@@ -26,12 +27,14 @@ var (
 	smWSHub        *sm.WSHub
 	smGoldenDogSvc *smgd.Service
 	smWatchOpenSvc *smwoa.Service
+	smFollowSvc    *smfollow.Service
 )
 
 func initSmartMoney() {
 	smService = sm.NewService()
 	smWSHub = sm.NewWSHub()
 	smWatchOpenSvc = smwoa.NewService()
+	smFollowSvc = smfollow.NewService()
 
 	smService.SetNotifier(func(event *models.SmartMoneyLPEvent) {
 		// Lookup wallet label
@@ -45,11 +48,15 @@ func initSmartMoney() {
 		if smWatchOpenSvc != nil {
 			go smWatchOpenSvc.HandleEvent(context.Background(), event, label)
 		}
+		if smFollowSvc != nil {
+			go smFollowSvc.HandleEvent(context.Background(), event)
+		}
 	})
 
 	smService.Start()
 	smGoldenDogSvc = smgd.NewService()
 	smGoldenDogSvc.Start()
+	smFollowSvc.Start()
 }
 
 func stopSmartMoney() {
@@ -58,6 +65,9 @@ func stopSmartMoney() {
 	}
 	if smGoldenDogSvc != nil {
 		smGoldenDogSvc.Stop()
+	}
+	if smFollowSvc != nil {
+		smFollowSvc.Stop()
 	}
 }
 
@@ -79,6 +89,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/smart_money_watch_wallets", s.handleSmartMoneyWatchWallets)
 	mux.HandleFunc("/api/smart_money_watch_open_alert_config", s.handleSmartMoneyWatchOpenAlertConfig)
 	mux.HandleFunc("/api/smart_money_watch_open_alert_test", s.handleSmartMoneyWatchOpenAlertTest)
+	mux.HandleFunc("/api/smart_money_auto_follow", s.handleSmartMoneyAutoFollow)
 	mux.HandleFunc("/ws/sm/events", smWSHub.HandleWS)
 }
 
@@ -110,6 +121,8 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMEvents(w, r)
 		case "stats":
 			s.handleSMStats(w, r)
+		case "auto_follow":
+			s.handleSmartMoneyAutoFollow(w, r)
 		}
 	})
 }
@@ -129,6 +142,8 @@ func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
 	case "wallets", "contracts", "pools", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
+	case "auto_follow":
+		return "/api/smart_money_auto_follow", true
 	default:
 		return "", false
 	}
