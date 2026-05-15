@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "BSC RPC 抓取器",
-  "version": "0.1.0",
-  "description": "抓取网页中的 BSC JSON-RPC 端点，并主动验证是否可用。",
+  "name": "多链 Key RPC 抓取器",
+  "version": "0.2.0",
+  "description": "抓取网页中的 BSC、Base、Ethereum、Solana JSON-RPC 端点，并只导出带 key 或认证信息的可用 RPC。",
   "permissions": [
     "storage",
     "tabs",
@@ -16,7 +16,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "BSC RPC 抓取器",
+    "default_title": "多链 Key RPC 抓取器",
     "default_popup": "popup.html"
   },
   "content_scripts": [

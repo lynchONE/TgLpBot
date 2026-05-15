@@ -69,6 +69,19 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function getStatusText(endpoint) {
+  if (endpoint.status === "usable") {
+    return endpoint.hasCredential ? "可导出" : "公共可用";
+  }
+  if (endpoint.status === "validating") {
+    return "校验中";
+  }
+  if (endpoint.status === "invalid") {
+    return "不可用";
+  }
+  return "待校验";
+}
+
 function renderEndpoint(endpoint) {
   const fragment = endpointTemplate.content.cloneNode(true);
   const card = fragment.querySelector(".endpoint-card");
@@ -79,21 +92,19 @@ function renderEndpoint(endpoint) {
   const revalidateButton = fragment.querySelector(".revalidate-btn");
   const copyEndpointButton = fragment.querySelector(".copy-endpoint-btn");
 
-  status.textContent =
-    endpoint.status === "usable"
-      ? "已确认可用"
-      : endpoint.status === "validating"
-        ? "校验中"
-        : endpoint.status === "invalid"
-          ? "不可用"
-          : "待校验";
+  status.textContent = getStatusText(endpoint);
   status.classList.add(endpoint.status || "pending");
+  if (endpoint.status === "usable" && !endpoint.hasCredential) {
+    status.classList.add("public");
+  }
 
   endpointUrl.textContent = endpoint.url;
 
   const metaParts = [
-    `协议: ${endpoint.transport.toUpperCase()}`,
-    `观察次数: ${endpoint.observationCount}`,
+    `协议: ${String(endpoint.transport || "").toUpperCase()}`,
+    `链: ${endpoint.chainName || endpoint.chain || "未确认"}`,
+    `凭据: ${endpoint.hasCredential ? endpoint.credentialKind || "yes" : "no"}`,
+    `观察次数: ${endpoint.observationCount || 0}`,
     `最近抓到: ${formatDateTime(endpoint.lastSeenAt)}`
   ];
   if (endpoint.validation && endpoint.validation.latencyMs) {
@@ -102,11 +113,17 @@ function renderEndpoint(endpoint) {
   endpointMeta.textContent = metaParts.join(" | ");
 
   const details = [];
-  if (endpoint.validation && endpoint.validation.chainId !== null) {
+  if (endpoint.validation && typeof endpoint.validation.chainId === "number") {
     details.push(`chainId=${endpoint.validation.chainId}`);
   }
-  if (endpoint.validation && endpoint.validation.blockNumber !== null) {
+  if (endpoint.validation && typeof endpoint.validation.blockNumber === "number") {
     details.push(`block=${endpoint.validation.blockNumber}`);
+  }
+  if (endpoint.validation && typeof endpoint.validation.slot === "number") {
+    details.push(`slot=${endpoint.validation.slot}`);
+  }
+  if (endpoint.rpcFamilies && endpoint.rpcFamilies.length) {
+    details.push(`families=${endpoint.rpcFamilies.join(", ")}`);
   }
   if (endpoint.observedMethods && endpoint.observedMethods.length) {
     details.push(`methods=${endpoint.observedMethods.join(", ")}`);
@@ -117,6 +134,9 @@ function renderEndpoint(endpoint) {
   if (endpoint.headers && Object.keys(endpoint.headers).length) {
     details.push(`headers=${JSON.stringify(endpoint.headers)}`);
   }
+  if (endpoint.status === "usable" && !endpoint.hasCredential) {
+    details.push("export=skipped: no key/token/auth header detected");
+  }
   if (endpoint.validation && endpoint.validation.error) {
     details.push(`error=${endpoint.validation.error}`);
   }
@@ -126,7 +146,7 @@ function renderEndpoint(endpoint) {
   endpointDetails.innerHTML = details.map((item) => `<div><code>${escapeHtml(item)}</code></div>`).join("");
 
   revalidateButton.addEventListener("click", async () => {
-    notify("正在重新校验单个端点…");
+    notify("正在重新校验单个端点...");
     await sendMessage({
       type: "revalidate-endpoint",
       key: endpoint.key
@@ -180,11 +200,11 @@ reloadTabBtn.addEventListener("click", async () => {
     return;
   }
   await chrome.tabs.reload(tab.id);
-  notify("当前页已重载，等待抓包结果…");
+  notify("当前页已重载，等待抓包结果...");
 });
 
 revalidateAllBtn.addEventListener("click", async () => {
-  notify("正在重新校验全部端点…");
+  notify("正在重新校验全部端点...");
   await sendMessage({
     type: "revalidate-all"
   });
@@ -193,7 +213,7 @@ revalidateAllBtn.addEventListener("click", async () => {
 
 copyBtn.addEventListener("click", async () => {
   await copyText(usableOutput.value || "[]");
-  notify("确认可用结果已复制");
+  notify("可导出结果已复制");
 });
 
 exportBtn.addEventListener("click", async () => {
@@ -204,7 +224,7 @@ exportBtn.addEventListener("click", async () => {
     notify("导出失败");
     return;
   }
-  downloadJson("bsc-rpc-usable.json", response.state.usable || []);
+  downloadJson("keyed-rpc-usable.json", response.state.usable || []);
   notify("已导出 JSON");
 });
 

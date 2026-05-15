@@ -1,7 +1,68 @@
 (function () {
-  const HOOK_FLAG = "__BSC_RPC_SNIFFER_PAGE_HOOK__";
-  const MESSAGE_SOURCE = "bsc-rpc-sniffer:page";
+  const HOOK_FLAG = "__MULTICHAIN_RPC_SNIFFER_PAGE_HOOK__";
+  const MESSAGE_SOURCE = "multichain-rpc-sniffer:page";
   const RPC_METHOD_PATTERN = /^(eth|net|web3|debug|trace|txpool|parity|bor|engine)_/i;
+  const SOLANA_METHODS = new Set([
+    "getAccountInfo",
+    "getBalance",
+    "getBlock",
+    "getBlockCommitment",
+    "getBlockHeight",
+    "getBlockProduction",
+    "getBlocks",
+    "getBlocksWithLimit",
+    "getClusterNodes",
+    "getEpochInfo",
+    "getEpochSchedule",
+    "getFeeForMessage",
+    "getFirstAvailableBlock",
+    "getGenesisHash",
+    "getHealth",
+    "getHighestSnapshotSlot",
+    "getIdentity",
+    "getInflationGovernor",
+    "getInflationRate",
+    "getInflationReward",
+    "getLargestAccounts",
+    "getLatestBlockhash",
+    "getLeaderSchedule",
+    "getMaxRetransmitSlot",
+    "getMaxShredInsertSlot",
+    "getMinimumBalanceForRentExemption",
+    "getMultipleAccounts",
+    "getProgramAccounts",
+    "getRecentPerformanceSamples",
+    "getRecentPrioritizationFees",
+    "getSignaturesForAddress",
+    "getSignatureStatuses",
+    "getSlot",
+    "getSlotLeader",
+    "getSlotLeaders",
+    "getStakeActivation",
+    "getSupply",
+    "getTokenAccountBalance",
+    "getTokenAccountsByDelegate",
+    "getTokenAccountsByOwner",
+    "getTokenLargestAccounts",
+    "getTokenSupply",
+    "getTransaction",
+    "getTransactionCount",
+    "getVersion",
+    "isBlockhashValid",
+    "minimumLedgerSlot",
+    "requestAirdrop",
+    "sendTransaction",
+    "simulateTransaction",
+    "accountSubscribe",
+    "blockSubscribe",
+    "logsSubscribe",
+    "programSubscribe",
+    "rootSubscribe",
+    "signatureSubscribe",
+    "slotSubscribe",
+    "slotsUpdatesSubscribe",
+    "voteSubscribe"
+  ]);
 
   if (window[HOOK_FLAG]) {
     return;
@@ -96,7 +157,7 @@
         continue;
       }
       const method = value.trim();
-      if (!method || !RPC_METHOD_PATTERN.test(method) || seen.has(method)) {
+      if (!method || (!RPC_METHOD_PATTERN.test(method) && !SOLANA_METHODS.has(method)) || seen.has(method)) {
         continue;
       }
       seen.add(method);

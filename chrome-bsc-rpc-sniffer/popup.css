@@ -234,6 +234,11 @@ textarea {
   color: #8cf1cb;
 }
 
+.status-pill.usable.public {
+  background: rgba(96, 165, 250, 0.14);
+  color: #9cc7ff;
+}
+
 .status-pill.validating {
   background: rgba(251, 191, 36, 0.14);
   color: #ffd873;

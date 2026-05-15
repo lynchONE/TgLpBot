@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BSC RPC 抓取器</title>
+    <title>多链 Key RPC 抓取器</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -11,9 +11,9 @@
       <header class="hero">
         <div>
           <div class="eyebrow">Chrome Extension</div>
-          <h1>BSC RPC 抓取器</h1>
+          <h1>多链 Key RPC 抓取器</h1>
         </div>
-        <div class="meta" id="currentTabLabel">正在读取当前页面…</div>
+        <div class="meta" id="currentTabLabel">正在读取当前页面...</div>
       </header>
 
       <section class="panel stats-panel">
@@ -22,7 +22,7 @@
           <strong id="totalCount">0</strong>
         </div>
         <div class="stat-card">
-          <span class="stat-label">确认可用</span>
+          <span class="stat-label">可导出</span>
           <strong id="usableCount">0</strong>
         </div>
         <div class="stat-card">
@@ -35,19 +35,18 @@
         <div class="action-row">
           <button id="reloadTabBtn">重载当前页</button>
           <button id="revalidateAllBtn">重新校验</button>
-          <button id="copyBtn">复制可用结果</button>
+          <button id="copyBtn">复制可导出结果</button>
           <button id="exportBtn">导出 JSON</button>
           <button id="clearBtn" class="danger">清空记录</button>
         </div>
         <p class="hint">
-          只有通过 <code>eth_chainId</code> 和 <code>eth_blockNumber</code> 校验、且链 ID 为
-          <code>56</code> 的端点，才会进入“确认可用”结果。
+          支持 BSC、Base、Ethereum 和 Solana。只有链上校验成功且 URL 或 headers 中带 key/token/认证信息的端点，才会进入可导出结果。
         </p>
       </section>
 
       <section class="panel">
         <div class="section-head">
-          <h2>确认可用输出</h2>
+          <h2>可导出输出</h2>
           <span class="tag" id="usableTag">0 个</span>
         </div>
         <textarea id="usableOutput" readonly></textarea>
@@ -59,7 +58,7 @@
           <span class="tag neutral" id="listTag">0 条</span>
         </div>
         <div id="endpointList" class="endpoint-list">
-          <div class="empty-state">打开目标网页并产生链上请求后，这里会出现捕获结果。</div>
+          <div class="empty-state">打开目标网页并触发链上请求后，这里会出现捕获结果。</div>
         </div>
       </section>
     </div>

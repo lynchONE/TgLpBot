@@ -1,6 +1,6 @@
 (function () {
-  const BRIDGE_FLAG = "__BSC_RPC_SNIFFER_BRIDGE__";
-  const MESSAGE_SOURCE = "bsc-rpc-sniffer:page";
+  const BRIDGE_FLAG = "__MULTICHAIN_RPC_SNIFFER_BRIDGE__";
+  const MESSAGE_SOURCE = "multichain-rpc-sniffer:page";
 
   if (window[BRIDGE_FLAG]) {
     return;
