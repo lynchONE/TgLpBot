@@ -372,7 +372,7 @@ export default function GlobalConfigPage({ open = true, onClose, apiBaseUrl, ini
                         />
                     </Section>
 
-                    <div className={`${embedded ? 'sticky bottom-[calc(76px+env(safe-area-inset-bottom,0px))] -mx-1 rounded-[24px] border border-zinc-200/70 bg-white/[0.92] px-4 pb-4 pt-3 shadow-[0_18px_50px_rgba(15,23,42,0.12)] dark:border-white/[0.08] dark:bg-[#111318]/92' : 'sticky bottom-0 -mx-5 border-t border-zinc-200/70 bg-white/[0.88] px-5 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-3 dark:border-white/[0.08] dark:bg-[#111318]/90'} backdrop-blur-xl`}>
+                    <div className={`${embedded ? 'sticky bottom-[calc(76px+env(safe-area-inset-bottom,0px))] -mx-1 rounded-[24px] border border-zinc-200/70 bg-white/[0.92] px-4 pb-4 pt-3 shadow-[0_18px_50px_rgba(15,23,42,0.12)] dark:border-white/[0.08] dark:bg-[rgba(17,19,24,0.96)] dark:shadow-[0_18px_50px_rgba(0,0,0,0.42)]' : 'sticky bottom-0 -mx-5 border-t border-zinc-200/70 bg-white/[0.88] px-5 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-3 dark:border-white/[0.08] dark:bg-[rgba(17,19,24,0.94)]'} backdrop-blur-xl`}>
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <div className="min-w-0">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
