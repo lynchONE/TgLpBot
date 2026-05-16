@@ -131,7 +131,7 @@ function SmartMoneyRangeSummary({ groups }) {
                         <span className="shrink-0 font-semibold text-zinc-900 dark:text-white/95">{formatRangePercentPlain(group?.range_percent)}</span>
                         {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
                             <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                                {Number(group.position_count)}娑?
+                                {Number(group.position_count)} 笔
                             </span>
                         ) : null}
                         <span className="truncate text-zinc-500 dark:text-white/55">{formatUsdCompact(group?.total_amount_usd)}</span>
@@ -213,7 +213,7 @@ const normalizeHexPrefixed = (v) => {
     return `0x${raw}`;
 };
 
-// 閻?tickSpacing 閹恒劌顕辩拹鍦芳閺嶅洨顒?
+// Normalize legacy smart money range groups before rendering.
 function SmartMoneyRangeSummaryClean({ groups }) {
     const [expanded, setExpanded] = useState(false);
     const validGroups = useMemo(() => normalizeSmartMoneyRangeGroups(groups), [groups]);
@@ -605,7 +605,7 @@ export default function PositionCard({
     const parsedExitPercent = Number(exitPercent);
     const canSubmitExitPercent = Number.isFinite(parsedExitPercent) && parsedExitPercent > 0 && parsedExitPercent <= 100;
 
-    // 鐠愬湱宸奸弽鍥╊劮閿涘牅绮?tickSpacing 閹恒劌顕遍敍?
+    // Prefer backend fee tier, then infer from tick spacing.
     const feeLabel = useMemo(() => {
         const feeTier = Number(position?.fee_tier || 0) || inferFeeTierFromTickSpacing(position?.pool?.tickSpacing ?? position?.tick_spacing);
         return formatFeeTierPercent(feeTier);
@@ -614,13 +614,8 @@ export default function PositionCard({
     return (
         <div className="relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#131518] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
             <div className="px-3 pt-3 pb-2 flex flex-col gap-2">
-                {/* 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-                    閸栧搫鐓?1閿涙碍鐖ｆ０妯款攽 & 閹垮秳缍旈懣婊冨礋
-                閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 <div className="flex items-start justify-between gap-2">
-                    {/* 瀹革缚鏅舵稉鏄忣洣娣団剝浼?*/}
                     <div className="flex items-start gap-2 min-w-0 flex-1">
-                        {/* 閹靛綊鍣烘径宥夆偓澶嬵攱 */}
                         {batchMode && (
                             <button type="button" onClick={onToggleSelect}
                                 className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-all active:scale-90 ${isSelected ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm shadow-emerald-500/30' : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800'}`}>
@@ -632,7 +627,6 @@ export default function PositionCard({
                             </button>
                         )}
                         <div className="flex flex-col gap-1 min-w-0 flex-1">
-                            {/* 娴溿倖妲楃€电懓鎮曠粔?+ 鐠愬湱宸?*/}
                             <div className="flex items-center gap-1.5 flex-wrap pr-1">
                                 {dexConfig ? (
                                     <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ring-1 ${dexConfig.bgClass} ${dexConfig.textClass} ${dexConfig.ringClass}`}>
@@ -649,7 +643,6 @@ export default function PositionCard({
                                     </span>
                                 )}
                             </div>
-                            {/* 閻樿埖鈧?+ 娴犺濮烮D */}
                             <div className="flex flex-wrap items-center gap-1.5 pr-1">
                                 <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 shrink-0 ${statusTheme.pill}`}>
                                     <span className={`h-1 w-1 rounded-full shrink-0 ${statusTheme.dot}`} />
@@ -669,7 +662,6 @@ export default function PositionCard({
                         </div>
                     </div>
 
-                    {/* 閸欏厖鏅堕敍姘偓璁崇幆閸?+ 閹垮秳缍旈懣婊冨礋 */}
                     <div className="ml-auto flex shrink-0 items-start gap-2 pl-2">
                         {false && <>
                         <div className="text-right">
@@ -691,7 +683,6 @@ export default function PositionCard({
                                 </div>
                             )}
                         </div>
-                        {/* 閹鐜崐?+ PnL */}
                         <div className="text-right">
                             <div className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">价值</div>
                             <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
@@ -807,14 +798,13 @@ export default function PositionCard({
                             </div>
                         )}
 
-                        {/* 閹垮秳缍旈懣婊冨礋 */}
                         {false && canTaskAction && (
                             <div className="relative z-20" ref={menuRef}>
                                 <button
                                     type="button"
                                     onClick={() => setMenuOpen((v) => !v)}
                                     className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
-                                    aria-label="娴犺濮熼幙宥勭稊"
+                                    aria-label="任务操作"
                                     disabled={Boolean(actionPending)}
                                 >
                                     <Icon path={icons.kebab} className="h-4 w-4" />
@@ -858,9 +848,6 @@ export default function PositionCard({
                     </div>
                 </div>
 
-                {/* 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-                    閹垮秳缍旈幐澶愭尦鐞?
-                閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {canTaskAction && (
                     <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
                         {exitPanelOpen && (
@@ -945,8 +932,6 @@ export default function PositionCard({
 
                 {false && canTaskAction && (
                     <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none]">
-                        {/* 閺嗗倸浠?閹垹顦?*/}
-                        {/* 閸欐牕娲栧ù浣稿З閹?*/}
                         {typeof onPartialExit === 'function' && (
                             <button type="button" onClick={openWithdrawPanel} disabled={!canPartialExit || Boolean(actionPending)}
                                 title="撤出流动性"
@@ -957,7 +942,6 @@ export default function PositionCard({
                                 <span>{actionPending === 'withdraw' ? '...' : '撤仓'}</span>
                             </button>
                         )}
-                        {/* 閸忔垶宕插▓瀣╃稇 */}
                         {typeof onSwapDust === 'function' && (
                             <button type="button" onClick={swapDust} disabled={!canSwapDust || Boolean(actionPending)}
                                 title="兑换碎币"
@@ -968,7 +952,6 @@ export default function PositionCard({
                                 <span>{actionPending === 'dust' ? '...' : '碎币兑换'}</span>
                             </button>
                         )}
-                        {/* 鐟欙箑褰傞崘宥呴挬鐞?*/}
                         {typeof onTriggerRebalance === 'function' && (
                             <button type="button" onClick={triggerRebalance} disabled={!canTriggerRebalance || Boolean(actionPending)}
                                 title="立即触发再平衡"
@@ -979,7 +962,6 @@ export default function PositionCard({
                                 <span>{actionPending === 'rebalance' ? '...' : '再平衡'}</span>
                             </button>
                         )}
-                        {/* 閸愬秴閽╃悰鈥崇磻閸?*/}
                                                 {typeof onUpdateTaskMode === 'function' && (
                             <>
                                 {TASK_MODE_OPTIONS.map((option) => (
@@ -997,9 +979,6 @@ export default function PositionCard({
                     </div>
                 )}
 
-                {/* 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-                    閸栧搫鐓?2閿涙矮缍戞０婵囨缂佸棴绱欓崣顖涘閸欑媴绱?
-                閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
                     <SmartMoneyRangeSummaryClean groups={smartMoneyRangeGroups} />
                 ) : null}
@@ -1114,10 +1093,10 @@ export default function PositionCard({
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">
                         <div className="flex items-center gap-1.5">
-                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/50 uppercase tracking-wide">娴ｆ瑩顤傞弰搴ｇ矎</div>
+                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/50 uppercase tracking-wide">资产明细</div>
                             {!expanded && (
                                 <div className="text-[9px] text-zinc-400 dark:text-white/35 tabular-nums">
-                                    娴犳挷缍?<NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} /> 璺?鐠愬湱鏁?<NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                    仓位 <NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} /> · 手续费 <NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
                                 </div>
                             )}
                         </div>
@@ -1129,7 +1108,6 @@ export default function PositionCard({
 
                     <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
                         <div className="px-3 pb-3">
-                            {/* 鐞涖劌銇?*/}
                             <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/10">
                                 <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase">Token</div>
                                 <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right flex items-center justify-end gap-1">
@@ -1139,7 +1117,6 @@ export default function PositionCard({
                                 <div className="text-[11px] font-bold text-emerald-600/80 dark:text-emerald-500/80 tracking-wide uppercase text-right">手续费</div>
                             </div>
 
-                            {/* Token 鐞?*/}
                             {[token0, token1].filter(Boolean).map((row) => (
                                 <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
                                     <div className="min-w-0 pr-1">
@@ -1199,7 +1176,6 @@ export default function PositionCard({
                                 </div>
                             </div>
 
-                            {/* 閻忓繐绻楅鍝ユ偘?*/}
                             <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
                                 <div className="text-xs font-bold text-zinc-500 dark:text-white/70">合计</div>
                                 <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">

@@ -31,7 +31,7 @@ function formatUsd(value) {
     return `$${num.toFixed(2)}`;
 }
 
-export default function TradeHistoryPage({ open, onClose, apiBaseUrl, initData, multiChainEnabled = true }) {
+export default function TradeHistoryPage({ open = true, onClose, apiBaseUrl, initData, multiChainEnabled = true, embedded = false }) {
     const [chain, setChain] = useState('');
     const [status, setStatus] = useState('');
     const [records, setRecords] = useState([]);
@@ -75,7 +75,7 @@ export default function TradeHistoryPage({ open, onClose, apiBaseUrl, initData, 
     const hasMore = records.length < total;
 
     return (
-        <BottomSheet open={open} onClose={onClose} title="交易历史" maxHeightClass="max-h-[90vh]">
+        <TradeHistoryFrame embedded={embedded} open={open} onClose={onClose} title="交易历史" maxHeightClass="max-h-[90vh]">
             <div className="mb-4 flex gap-2">
                 {multiChainEnabled && (
                     <div className="flex-1">
@@ -140,8 +140,15 @@ export default function TradeHistoryPage({ open, onClose, apiBaseUrl, initData, 
                     )}
                 </div>
             )}
-        </BottomSheet>
+        </TradeHistoryFrame>
     );
+}
+
+function TradeHistoryFrame({ embedded, children, ...sheetProps }) {
+    if (embedded) {
+        return <div className="space-y-4 pb-1">{children}</div>;
+    }
+    return <BottomSheet {...sheetProps}>{children}</BottomSheet>;
 }
 
 function TradeRecordCard({ rec }) {

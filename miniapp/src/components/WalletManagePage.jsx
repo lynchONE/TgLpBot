@@ -23,7 +23,7 @@ function formatBalance(value, digits) {
     return num.toFixed(digits);
 }
 
-export default function WalletManagePage({ open, onClose, apiBaseUrl, initData, accentTheme = 'lime', multiChainEnabled = true }) {
+export default function WalletManagePage({ open = true, onClose, apiBaseUrl, initData, accentTheme = 'lime', multiChainEnabled = true, embedded = false }) {
     const brand = getBrandTheme(accentTheme);
     const [chain, setChain] = useState('bsc');
     const [wallets, setWallets] = useState([]);
@@ -226,24 +226,27 @@ export default function WalletManagePage({ open, onClose, apiBaseUrl, initData, 
         );
     };
 
+    const footer = (
+        <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-black shadow-sm transition-all ${loading ? 'cursor-not-allowed opacity-50' : ''} ${brand.solidButtonClass}`}
+        >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? '刷新中...' : '刷新余额'}
+        </button>
+    );
+
     return (
-        <BottomSheet
+        <WalletFrame
+            embedded={embedded}
             open={open}
             onClose={onClose}
             title="钱包管理"
             maxHeightClass="max-h-[92vh]"
             contentClassName="px-5 pb-0 sm:pb-0"
-            footer={(
-                <button
-                    type="button"
-                    onClick={load}
-                    disabled={loading}
-                    className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-black shadow-sm transition-all ${loading ? 'cursor-not-allowed opacity-50' : ''} ${brand.solidButtonClass}`}
-                >
-                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                    {loading ? '刷新中...' : '刷新余额'}
-                </button>
-            )}
+            footer={footer}
         >
             <section className="relative mb-4 overflow-hidden rounded-[32px] border border-zinc-200/70 bg-zinc-950 p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.24)] dark:border-white/[0.1]">
                 <div className={`absolute -right-8 -top-10 h-36 w-36 rounded-full blur-2xl ${brand.dotClass} opacity-40`} />
@@ -349,8 +352,20 @@ export default function WalletManagePage({ open, onClose, apiBaseUrl, initData, 
                 onConfirm={confirmDeleteWallet}
                 onCancel={() => setDeleteTarget(null)}
             />
-        </BottomSheet>
+            {embedded ? (
+                <div className="sticky bottom-[calc(76px+env(safe-area-inset-bottom,0px))] -mx-1 border-t border-zinc-200/70 bg-white/[0.88] px-1 pb-2 pt-3 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#111318]/90">
+                    {footer}
+                </div>
+            ) : null}
+        </WalletFrame>
     );
+}
+
+function WalletFrame({ embedded, children, footer, ...sheetProps }) {
+    if (embedded) {
+        return <div className="space-y-4 pb-1">{children}</div>;
+    }
+    return <BottomSheet {...sheetProps} footer={footer}>{children}</BottomSheet>;
 }
 
 function WalletMetric({ label, value }) {

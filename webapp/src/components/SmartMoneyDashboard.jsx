@@ -4236,6 +4236,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
     const [configs, setConfigs] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [draft, dispatch] = useReducer(autoFollowDraftReducer, undefined, () => createAutoFollowDraft());
+    const [activeTab, setActiveTab] = useState('configure');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -4292,6 +4293,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         dispatch({ type: 'reset', payload: config });
         setNotice('');
         setError('');
+        setActiveTab('configure');
     }, []);
 
     const handleSubmit = useCallback(async () => {
@@ -4394,65 +4396,92 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
 
             <AutoFollowSummaryBar stats={stats} />
 
-            <section className="af-section">
-                <header className="af-section-head">
-                    <h3 className="af-section-title">
-                        {Number(draft.id) > 0 ? '编辑跟单配置' : '新增跟单配置'}
-                    </h3>
-                    <span className="af-section-hint">
-                        {Number(draft.id) > 0 ? `正在编辑 #${draft.id}` : 'BSC 链 · 监听目标钱包的 LP 动作'}
-                    </span>
-                </header>
-                <AutoFollowForm
-                    draft={draft}
-                    dispatch={dispatch}
-                    saving={saving}
-                    hasInitData={hasInitData}
-                    onSubmit={handleSubmit}
-                    onReset={handleReset}
-                />
-            </section>
+            <div className="af-tabs" role="tablist" aria-label="自动跟单">
+                {[
+                    { key: 'configure', label: Number(draft.id) > 0 ? '编辑任务' : '配置任务', Icon: Settings },
+                    { key: 'configs', label: '我的跟单', Icon: Users, count: configs.length },
+                    { key: 'jobs', label: '最近任务', Icon: Activity, count: jobs.length },
+                ].map(({ key, label, Icon, count }) => (
+                    <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === key}
+                        className={`af-tab-btn${activeTab === key ? ' active' : ''}`}
+                        onClick={() => setActiveTab(key)}
+                    >
+                        <Icon size={14} />
+                        <span>{label}</span>
+                        {typeof count === 'number' ? <em>{count}</em> : null}
+                    </button>
+                ))}
+            </div>
 
-            <section className="af-section">
-                <header className="af-section-head">
-                    <h3 className="af-section-title">我的跟单 ({configs.length})</h3>
-                    <span className="af-section-hint">{stats.running} 个运行中</span>
-                </header>
-                {loading && configs.length === 0 ? (
-                    <div className="af-empty">加载中…</div>
-                ) : configs.length === 0 ? (
-                    <div className="af-empty">暂无跟单配置，使用上方表单新增。</div>
-                ) : (
-                    <div className="af-config-list">
-                        {configs.map((c) => (
-                            <AutoFollowConfigCard
-                                key={c.id}
-                                config={c}
-                                busy={saving}
-                                onEdit={handleEdit}
-                                onToggle={handleToggle}
-                                onDelete={setConfirmTarget}
-                            />
-                        ))}
-                    </div>
-                )}
-            </section>
+            {activeTab === 'configure' ? (
+                <section className="af-section">
+                    <header className="af-section-head">
+                        <h3 className="af-section-title">
+                            {Number(draft.id) > 0 ? '编辑跟单配置' : '新增跟单配置'}
+                        </h3>
+                        <span className="af-section-hint">
+                            {Number(draft.id) > 0 ? `正在编辑 #${draft.id}` : 'BSC 链 · 监听目标钱包的 LP 动作'}
+                        </span>
+                    </header>
+                    <AutoFollowForm
+                        draft={draft}
+                        dispatch={dispatch}
+                        saving={saving}
+                        hasInitData={hasInitData}
+                        onSubmit={handleSubmit}
+                        onReset={handleReset}
+                    />
+                </section>
+            ) : null}
 
-            <section className="af-section">
-                <header className="af-section-head">
-                    <h3 className="af-section-title">最近任务</h3>
-                    <span className="af-section-hint">近 {jobs.length} 条</span>
-                </header>
-                {jobs.length === 0 ? (
-                    <div className="af-empty">还没有执行记录，跟单生效后会在这里出现。</div>
-                ) : (
-                    <div className="af-job-list">
-                        {jobs.slice(0, 12).map((j) => (
-                            <AutoFollowJobCard key={j.id} job={j} />
-                        ))}
-                    </div>
-                )}
-            </section>
+            {activeTab === 'configs' ? (
+                <section className="af-section">
+                    <header className="af-section-head">
+                        <h3 className="af-section-title">我的跟单 ({configs.length})</h3>
+                        <span className="af-section-hint">{stats.running} 个运行中</span>
+                    </header>
+                    {loading && configs.length === 0 ? (
+                        <div className="af-empty">加载中…</div>
+                    ) : configs.length === 0 ? (
+                        <div className="af-empty">暂无跟单配置，可到“配置任务”新增。</div>
+                    ) : (
+                        <div className="af-config-list">
+                            {configs.map((c) => (
+                                <AutoFollowConfigCard
+                                    key={c.id}
+                                    config={c}
+                                    busy={saving}
+                                    onEdit={handleEdit}
+                                    onToggle={handleToggle}
+                                    onDelete={setConfirmTarget}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </section>
+            ) : null}
+
+            {activeTab === 'jobs' ? (
+                <section className="af-section">
+                    <header className="af-section-head">
+                        <h3 className="af-section-title">最近任务</h3>
+                        <span className="af-section-hint">近 {jobs.length} 条</span>
+                    </header>
+                    {jobs.length === 0 ? (
+                        <div className="af-empty">还没有执行记录，跟单生效后会在这里出现。</div>
+                    ) : (
+                        <div className="af-job-list">
+                            {jobs.slice(0, 12).map((j) => (
+                                <AutoFollowJobCard key={j.id} job={j} />
+                            ))}
+                        </div>
+                    )}
+                </section>
+            ) : null}
 
             <ConfirmDialog
                 open={Boolean(confirmTarget)}

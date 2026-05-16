@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity,
     Clock, DollarSign, Percent,
 } from 'lucide-react';
 
@@ -3173,6 +3173,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     const [configs, setConfigs] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [draft, setDraft] = useState(() => createAutoFollowDraft());
+    const [activeTab, setActiveTab] = useState('configure');
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
 
@@ -3356,6 +3357,34 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 </div>
             ) : null}
 
+            <div className="grid grid-cols-3 gap-1.5 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1.5">
+                {[
+                    { key: 'configure', label: draft.id ? '编辑任务' : '配置任务', icon: Settings },
+                    { key: 'configs', label: '我的跟单', icon: Users, count: configs.length },
+                    { key: 'jobs', label: '最近任务', icon: Activity, count: jobs.length },
+                ].map(({ key, label, icon: Icon, count }) => (
+                    <button
+                        key={key}
+                        type="button"
+                        onClick={() => setActiveTab(key)}
+                        className={`relative inline-flex min-h-[54px] flex-col items-center justify-center gap-1 rounded-[18px] px-1.5 py-2 text-[11px] font-semibold leading-tight transition active:scale-[0.98] ${
+                            activeTab === key
+                                ? `${brand.softButtonClass}`
+                                : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
+                        }`}
+                    >
+                        <Icon size={14} />
+                        <span className="text-center">{label}</span>
+                        {typeof count === 'number' ? (
+                            <span className="absolute right-1.5 top-1.5 min-w-4 rounded-full bg-white/10 px-1 text-[9px] font-bold tabular-nums text-zinc-300">
+                                {count}
+                            </span>
+                        ) : null}
+                    </button>
+                ))}
+            </div>
+
+            {activeTab === 'configure' ? (
             <section className="rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                     <div className="text-sm font-semibold text-zinc-100">{draft.id ? '编辑配置' : '新增配置'}</div>
@@ -3545,14 +3574,16 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     </button>
                 </div>
             </section>
+            ) : null}
 
+            {activeTab === 'configs' ? (
             <section className="space-y-2">
                 <div className="text-sm font-semibold text-zinc-100">跟单配置</div>
                 {loading ? (
                     <div className="py-6 text-center text-zinc-500">加载中...</div>
                 ) : configs.length === 0 ? (
                     <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
-                        暂无自动跟单配置
+                        暂无自动跟单配置，可到“配置任务”新增。
                     </div>
                 ) : (
                     configs.map((config) => {
@@ -3589,7 +3620,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                         </div>
                                     </div>
                                     <div className="flex shrink-0 gap-1.5">
-                                        <button type="button" className={getIconButtonClass(false)} onClick={() => setDraft(createAutoFollowDraft(config))} title="编辑">
+                                        <button type="button" className={getIconButtonClass(false)} onClick={() => { setDraft(createAutoFollowDraft(config)); setActiveTab('configure'); }} title="编辑">
                                             <Pencil size={14} />
                                         </button>
                                         <button type="button" className={getIconButtonClass(false)} onClick={() => toggleConfig(config)} title={config.enabled ? '暂停' : '开启'} disabled={saving}>
@@ -3605,7 +3636,9 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     })
                 )}
             </section>
+            ) : null}
 
+            {activeTab === 'jobs' ? (
             <section className="space-y-2">
                 <div className="text-sm font-semibold text-zinc-100">最近任务</div>
                 {jobs.length === 0 ? (
@@ -3640,6 +3673,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     })
                 )}
             </section>
+            ) : null}
         </div>
     );
 }

@@ -1153,7 +1153,6 @@ export default function AssetManagementPage({
 
     const isLoading = assetsLoading || assetsRefreshing;
     const canManualRefresh = hasInitData;
-    const openPanelTab = activeTab !== 'my_assets' ? activeTab : null;
     const selectedPnLEntry = useMemo(() => {
         if (!selectedPnLDay) return null;
         const rows = Array.isArray(assetsData.lp?.daily_history) ? assetsData.lp.daily_history : [];
@@ -1281,14 +1280,16 @@ export default function AssetManagementPage({
                                 {hasInitData ? '我的资产 / 全局配置 / 钱包管理 / 交易记录' : '需要有效的 Telegram initData'}
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => loadAssets({ forceRefresh: true })}
-                            disabled={!canManualRefresh || isLoading}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
-                        >
-                            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                        </button>
+                        {activeTab === 'my_assets' ? (
+                            <button
+                                type="button"
+                                onClick={() => loadAssets({ forceRefresh: true })}
+                                disabled={!canManualRefresh || isLoading}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
+                            >
+                                <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                            </button>
+                        ) : null}
                     </div>
                 </div>
                 <div className="flex border-t border-zinc-100 dark:border-white/[0.04]">
@@ -1317,12 +1318,8 @@ export default function AssetManagementPage({
                 </div>
             </Card>
 
+            {activeTab === 'my_assets' ? (
             <>
-                    {openPanelTab ? (
-                        <div className="rounded-2xl border border-zinc-200/70 bg-white/80 px-3 py-2.5 text-[11px] text-zinc-500 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.035] dark:text-white/45">
-                            已打开 {tabs.find((tab) => tab.key === openPanelTab)?.label}，关闭面板后返回我的资产。
-                        </div>
-                    ) : null}
                     {assetsError && (
                         <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2.5 text-[11px] font-medium text-red-600 ring-1 ring-red-500/15 dark:text-red-300">{assetsError}</div>
                     )}
@@ -1498,27 +1495,40 @@ export default function AssetManagementPage({
                         ) : <div className="mt-2.5"><Empty text={assetsLoading ? '加载中...' : '暂无钱包数据'} /></div>}
                     </Card>
             </>
-            <GlobalConfigPage
-                open={openPanelTab === 'global_config'}
-                onClose={() => setActiveTab('my_assets')}
-                apiBaseUrl={apiBaseUrl}
-                initData={initData}
-                accentTheme={accentTheme}
-                onConfigChanged={onNotice ? () => onNotice('全局配置已保存', 'success') : undefined}
-            />
-            <WalletManagePage
-                open={openPanelTab === 'wallet_manage'}
-                onClose={() => setActiveTab('my_assets')}
-                apiBaseUrl={apiBaseUrl}
-                initData={initData}
-                accentTheme={accentTheme}
-            />
-            <TradeHistoryPage
-                open={openPanelTab === 'trade_history'}
-                onClose={() => setActiveTab('my_assets')}
-                apiBaseUrl={apiBaseUrl}
-                initData={initData}
-            />
+            ) : activeTab === 'global_config' ? (
+            <div className="space-y-3">
+                <GlobalConfigPage
+                    embedded
+                    open
+                    onClose={() => setActiveTab('my_assets')}
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                    accentTheme={accentTheme}
+                    onConfigChanged={onNotice ? () => onNotice('全局配置已保存', 'success') : undefined}
+                />
+            </div>
+            ) : activeTab === 'wallet_manage' ? (
+            <div className="space-y-3">
+                <WalletManagePage
+                    embedded
+                    open
+                    onClose={() => setActiveTab('my_assets')}
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                    accentTheme={accentTheme}
+                />
+            </div>
+            ) : (
+            <div className="space-y-3">
+                <TradeHistoryPage
+                    embedded
+                    open
+                    onClose={() => setActiveTab('my_assets')}
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                />
+            </div>
+            )}
         </div>
     );
 }

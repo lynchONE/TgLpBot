@@ -518,7 +518,7 @@ function parseOptionalPercent(raw) {
 
 function formatDCAIntervalHint(seconds) {
     const n = Number(seconds);
-    if (!Number.isFinite(n) || n <= 0) return '缂佹柨顑呭畵?;'
+    if (!Number.isFinite(n) || n <= 0) return '立即执行';
     if (n < 1) return `${Math.round(n * 1000)}ms`;
     if (Number.isInteger(n)) return `${n}s`;
     return `${n.toFixed(1)}s`;
@@ -812,11 +812,11 @@ function formatUSDTValue(value) {
 function formatSizingModeLabel(mode) {
     switch (String(mode || '').trim()) {
         case 'conservative':
-            return '濞ｅ洦绻傞悾?';
+            return '保守';
         case 'neutral':
-            return '濞戞搩鍘介埀?';
+            return '均衡';
         case 'aggressive':
-            return '婵犵鍋撻弶?';
+            return '激进';
         default:
             return '--';
     }
@@ -826,17 +826,17 @@ function getSizingEfficiencyMeta(efficiency) {
     switch (String(efficiency || '').trim()) {
         case 'high':
             return {
-                label: '濡ゅ倹蓱閺呫儵鎮?',
+                label: '资金利用高',
                 chipClass: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
             };
         case 'medium':
             return {
-                label: '濞戞搩鍘介弲銉╂偝?',
+                label: '资金利用适中',
                 chipClass: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
             };
         default:
             return {
-                label: '濞达絽瀛╅弲銉╂偝?',
+                label: '资金利用低',
                 chipClass: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200',
             };
     }
@@ -949,7 +949,7 @@ function extractOpenPositionErrorChecks(error, fallbackKey = 'submit_safety') {
 }
 
 function formatUserLabel(user) {
-    if (!user) return '闁哄牜浜為悡锟犳偨閵婏箑鐓?;'
+    if (!user) return '未选择用户';
     const username = String(user.username || '').trim();
     if (username) return `@${username}`;
     const first = String(user.first_name || '').trim();
@@ -959,8 +959,8 @@ function formatUserLabel(user) {
     const telegramId = String(user.telegram_id || '').trim();
     if (telegramId) return `TG ${telegramId}`;
     const userId = String(user.user_id || '').trim();
-    if (userId) return `闁活潿鍔嶉崺?${userId}`;
-    return '闁哄牜浜為悡锟犳偨閵婏箑鐓?';
+    if (userId) return `用户 ${userId}`;
+    return '未选择用户';
 }
 
 function formatOnOff(value) {
@@ -1007,7 +1007,7 @@ const HOT_POOL_SORT_TABS = [
 ];
 export default function App() {
     const initData = useInitData();
-    const tick = useTick(); // 濡炵懓宕慨鈺呮儎缁嬫鍤犻柡鍐ㄧ埣濡寧绋夋惔銈囨瀭閻犲洢鍨绘慨鎼佸箑娴ｅ摜娼旂紒鈧?
+    const tick = useTick();
     const [me, setMe] = useState(null);
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
@@ -1805,10 +1805,10 @@ export default function App() {
     const requestConfirm = (options) => new Promise((resolve) => {
         confirmResolveRef.current = resolve;
         setConfirmState({
-            title: options?.title || '缁绢収鍠涢濠氬箼瀹ュ嫮绋?',
+            title: options?.title || '确认操作',
             message: options?.message || '',
-            confirmText: options?.confirmText || '缁绢収鍠涢?',
-            cancelText: options?.cancelText || '闁告瑦鐗楃粔?',
+            confirmText: options?.confirmText || '确认',
+            cancelText: options?.cancelText || '取消',
             tone: options?.tone || 'primary',
         });
     });
@@ -2254,13 +2254,13 @@ export default function App() {
         if (poolSearchLoading) return;
         const keyword = String(poolSearchQuery || '').trim();
         if (!keyword) {
-            setPoolSearchError('閻犲洨鏌夌欢顓㈠礂閵夛妇娼ㄩ悗娑欏姇濠€鎾锤閳ь剟骞嬮弽褍褰犻梺娆惧枦閻︽繈濡?');
+            setPoolSearchError('请输入池子地址、交易对或代币符号。');
             setPoolSearchResults([]);
             setPoolSearchPerformed(false);
             return;
         }
         if (!hasInitData) {
-            setPoolSearchError('缂傚倸鎼惃?Telegram initData闁靛棗鍊瑰﹢浼村捶閻楀牏銈婚悷娆忕墕濞呮帞鎷崘顓犳Ц闁哄啳顔愮槐婵堟嫚瀹勭増韬?backend/.env 濞戞搩鍙€椤旀洜绱?TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1闁?');
+            setPoolSearchError('缺少 Telegram initData，无法搜索池子。开发环境可在 backend/.env 开启 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1。');
             return;
         }
 
@@ -2773,7 +2773,7 @@ export default function App() {
             setOpenPositionLiqProfile(null);
             return undefined;
         }
-        // 婵湱濮撮悺娆撳礆閸ャ劌搴婇柡鍐硾閸樻稑銆掗崨顖楁晞闁哄唲鍕闁硅鍣槐婵嬫焼閸喖甯抽悘鐐存礈閵囨岸宕氶銈嗙暠 pool
+        // Reset stale liquidity data before loading the selected pool.
         setOpenPositionLiqProfile(null);
         const ctrl = new AbortController();
         setOpenPositionLiqProfileLoading(true);
@@ -2807,7 +2807,7 @@ export default function App() {
                 if (!ctrl.signal.aborted) setOpenPositionLiqProfileLoading(false);
             });
 
-        // 3s 閺夌儐鍠涢妤呮晬閸ф樆-flight 闁告ê顭烽崳鎼佹晬濞戞ɑ鍊电紒鏃戝灠閸戯繝宕㈤懡銈囧閻庢稒锕槐婵嬪矗椤栨繄绠悗鍦仦濡炲倿鎯囩€ｎ亜鐓傞柛娆惷€垫煡鏁?
+        // Refresh every 3s while avoiding duplicate in-flight requests.
         const timer = setInterval(() => {
             if (document.hidden) return;
             if (openPositionLiqInFlightRef.current) return;
@@ -3867,7 +3867,7 @@ export default function App() {
             return;
         }
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-            setTaskRangeError('闁告牗妞藉Λ鑳疀閸涙番鈧繘宕?0 闁?100 濞戞柨顑夊Λ鍧楀Υ?');
+            setTaskRangeError('区间百分比必须在 0 到 100 之间。');
             return;
         }
 
@@ -3889,7 +3889,7 @@ export default function App() {
                 rangeUpperPct: range.upper,
                 amountUSDT: amount,
             });
-            showNotice('濞寸姾顕ф慨鐔煎礌濞差亝锛熺€圭寮跺ú鍧楀棘閼割兘鍋?', 'success');
+            showNotice('任务区间已更新', 'success');
             setTaskRangeEdit(null);
             setTaskRangeLower('');
             setTaskRangeUpper('');
@@ -4010,9 +4010,9 @@ export default function App() {
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
-            ? '闁告梻濮惧ù鍥偨閵婏箑鐓曞ù鐘虫尫缂嶅懏绋?..'
-            : '閻犲洢鍎抽弫銈夊箣闁垮鐣柡鍐С缁劍鎷呭鍡樻闁?'
-        : '閻犲洤鍢查崢娑㈡焻婢跺顏ュ☉鎾亾濞戞搩浜為鎼佹偠閸℃鍠呴柣顫妽閸?';
+            ? '正在加载用户仓位...'
+            : '当前用户没有活跃仓位'
+        : '请选择用户查看仓位';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
     const hotPoolsPairMap = useMemo(() => {
         const m = new Map();
@@ -4061,7 +4061,6 @@ export default function App() {
                     </div>
                 </div>
             ) : null}
-            {/* 婵犵數濮烽。顔炬閺囥垹纾婚柟杈剧畱绾惧綊鏌￠崶銉ョ仾闁稿顦埞鎴﹀磼濠婂海鍔哥紒鐐劤濞硷繝寮婚悢铏圭＜闁靛繒濮甸悘鍫㈢磽娴ｆ彃浜炬繝銏ｅ煐閸旀牠鎮￠悢闀愮箚妞ゆ牗绮岀敮鍫曟煕閺傛鍎戠紒杈ㄥ笚閹峰懎鐣￠弶璺ㄣ偖闁诲孩顔栭崰鏍偉婵傜鏄ラ柨鐔哄Т绾惧吋绻濊閸嬫捇锝炲澶嬧拺閻犲洤寮堕崬澶嬨亜椤愩埄妲圭紒缁樼⊕缁绘繈宕掗妶鍛吙?*/}
             <div className="progress-bar-container">
                 <div
                     className={`progress-bar ${loading || hotPoolsLoading ? 'loading' : ''}`}
@@ -4096,7 +4095,7 @@ export default function App() {
                             type="button"
                             onClick={() => setSettingsOpen(true)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                            aria-label="闁瑰灚鎸哥槐鎴犳媼閸撗呮瀭"
+                            aria-label="打开设置"
                         >
                             <Icon path={icons.gear} className="h-5 w-5" />
                         </button>
@@ -4137,7 +4136,7 @@ export default function App() {
                     </ModuleHeader>
                 ) : isAssets ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">婵繐绲藉﹢顏堝礉閻樼儤绁伴柟瀛樺灩濞堟垵螣閳ヨ櫕鍋?..</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载我的资产...</div>}>
                             <LazyAssetManagementPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -4166,7 +4165,7 @@ export default function App() {
                     </div>
                 ) : isAdminPage ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">婵繐绲藉﹢顏堝礉閻樼儤绁扮紒鐙呯磿閹﹪宕ㄥΟ鑽掍線宕?..</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理页...</div>}>
                             <LazyAdminPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -4203,8 +4202,8 @@ export default function App() {
                                     type="button"
                                     onClick={openPoolSearch}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/70 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                    aria-label="闁瑰吋绮庨崒銊バч悩鑼憤"
-                                    title="闁瑰吋绮庨崒銊バч悩鑼憤"
+                                    aria-label="搜索池子"
+                                    title="搜索池子"
                                 >
                                     <Icon path={icons.search} className="h-4 w-4" />
                                 </button>
@@ -4312,20 +4311,22 @@ export default function App() {
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        闁哄棗鍊瑰Λ銈夋倻椤撱垺锛屾慨鍦Т閻℃瑩寮悧鍫濈ウ闁?                   </div>
+                        暂无热门池子数据。
+                    </div>
                 ) : null
             }
 
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        缂佹稒鐩埀顒€顦幃妤呭汲閸屾稒锟ラ柣鎴弮濡剙效閻樿尙鎽嶉柡浣哄瀹撲線濡?                   </div>
+                        当前筛选条件下暂无池子。
+                    </div>
                 ) : null
             }
 
             {
                 !isHotPools && showAdmin ? (
-                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">婵繐绲藉﹢顏堝礉閻樼儤绁扮紒鐙呯磿閹﹤螣閳ヨ櫕鍋?..</div>}>
+                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理模块...</div>}>
                         <LazyAdminPage
                             apiBaseUrl={apiBaseUrl}
                             initData={initData}
@@ -4342,7 +4343,8 @@ export default function App() {
             {
                 !isHotPools && initDataMissing ? (
                     <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
-                        闁哄牜浜ｉ獮蹇涘矗閺嵮冪厒 Telegram initData闁挎稑鐭侀顒佺鎼淬垺绨氶柛锝冨妺濮瑰宕楅妷銉ョ稉闁瑰灚鎸哥槐鎴炪亜閻㈠憡妗ㄩ柕?                   </div>
+                        缺少 Telegram initData，请从 Telegram 机器人入口打开页面。
+                    </div>
                 ) : null
             }
 
@@ -4369,7 +4371,7 @@ export default function App() {
                                 : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                 }`}
                         >
-                            {batchMode ? '闂侇偀鍋撻柛鎴犲劋婢规帡鏌岃箛鏂堜礁顕?' : '闁归潧缍婇崳鍝勎熼垾宕囩'}
+                            {batchMode ? '退出批量' : '批量管理'}
                         </button>
 
                         {batchMode && (
@@ -4541,7 +4543,7 @@ export default function App() {
                                                 }
                                             }}
                                             className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="濞撴艾顑呴々?USDT / WBNB / 0x..."
+                                            placeholder="输入 USDT / WBNB / 0x..."
                                         />
                                         <button
                                             type="button"
@@ -5351,7 +5353,7 @@ export default function App() {
                             <div className="hidden">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">
-                                        {openPositionRangeInputMode === 'percentage' ? '闁煎浜滈悾鐐▕婢跺﹤闅橀梻?(%)'' : 'Tick 闁告牗妞藉Λ璺ㄧ磽閺嶎剛甯?}
+                                        {openPositionRangeInputMode === 'percentage' ? '百分比区间 (%)' : 'Tick 区间'}
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-1.5">
                                         {OPEN_POSITION_MANUAL_OPTIONS.map((option) => (
@@ -5377,19 +5379,19 @@ export default function App() {
                                         onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="濞戞挸顑夊?%"
+                                        placeholder="下限 %"
                                     />
                                     <input
                                         value={openPositionRangeUpper}
                                         onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="濞戞挸锕?%"
+                                        placeholder="上限 %"
                                     />
                                 </div>
                                 {openPositionSmartRangesLoading ? (
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        闁奸硸浜濆Σ鎴︽煢閸楃偛闅橀梻鍌涙綑婵偞娼幋鎺曞幀...
+                                        正在读取聪明钱区间...
                                     </div>
                                 ) : null}
                                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -5428,7 +5430,8 @@ export default function App() {
                                 {smartQuickRangeOptions.length > 0 ? (
                                     <>
                                         <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                            闁奸硸浜濆Σ鎴︽煢鏉堫偆绠柡鍫㈠枎缁辨垶绂掗幘璇叉濡?                                       </div>
+                                            也可以继续使用默认区间。
+                                        </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                             {defaultQuickRangeOptions.map((option) => {
                                                 const lowerValue = Number(option.lowerValue);
@@ -6122,7 +6125,6 @@ export default function App() {
                 ) : null
             }
 
-            {/* 閻炴稏鍎遍崢鏍规担绋啃楅柟?Modal */}
             {addLiqModal ? (
                 <div className="fixed inset-0 z-[60]">
                     <button
@@ -6342,7 +6344,7 @@ export default function App() {
                                     onClick={() => closeConfirm(false)}
                                     className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
                                 >
-                                    {confirmState.cancelText || '闁告瑦鐗楃粔?'}
+                                    {confirmState.cancelText || '取消'}
                                 </button>
                                 <button
                                     type="button"

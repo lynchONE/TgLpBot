@@ -67,7 +67,7 @@ function countEnabledFeatures(draft) {
     ].filter(Boolean).length;
 }
 
-export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, accentTheme = 'lime', onConfigChanged }) {
+export default function GlobalConfigPage({ open = true, onClose, apiBaseUrl, initData, accentTheme = 'lime', onConfigChanged, embedded = false }) {
     const brand = getBrandTheme(accentTheme);
     const [config, setConfig] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -134,7 +134,8 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
     const inputClass = `w-full rounded-2xl border border-zinc-200/80 bg-white/[0.95] px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/[0.04] dark:text-white/90 dark:placeholder:text-white/25`;
 
     return (
-        <BottomSheet
+        <ConfigFrame
+            embedded={embedded}
             open={open}
             onClose={onClose}
             title="全局配置"
@@ -377,7 +378,7 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                         />
                     </Section>
 
-                    <div className="sticky bottom-0 -mx-5 border-t border-zinc-200/70 bg-white/[0.88] px-5 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-3 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#111318]/90">
+                    <div className={`${embedded ? 'sticky bottom-[calc(76px+env(safe-area-inset-bottom,0px))] -mx-1 rounded-[24px] border border-zinc-200/70 bg-white/[0.92] px-4 pb-4 pt-3 shadow-[0_18px_50px_rgba(15,23,42,0.12)] dark:border-white/[0.08] dark:bg-[#111318]/92' : 'sticky bottom-0 -mx-5 border-t border-zinc-200/70 bg-white/[0.88] px-5 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-3 dark:border-white/[0.08] dark:bg-[#111318]/90'} backdrop-blur-xl`}>
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <div className="min-w-0">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
@@ -410,8 +411,15 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                     </div>
                 </div>
             ) : null}
-        </BottomSheet>
+        </ConfigFrame>
     );
+}
+
+function ConfigFrame({ embedded, children, ...sheetProps }) {
+    if (embedded) {
+        return <div className="space-y-4 pb-1">{children}</div>;
+    }
+    return <BottomSheet {...sheetProps}>{children}</BottomSheet>;
 }
 
 function NoticeBanner({ tone = 'success', icon: Icon, children }) {
