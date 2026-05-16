@@ -8399,11 +8399,35 @@ body {
   grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 0.9fr));
 }
 
+.pnl-window-summary {
+  margin: 0 0 12px;
+}
+
 .am-stat {
   border: 1px solid rgba(136, 157, 191, 0.1);
   border-radius: var(--radius-md);
   background: rgba(7, 11, 17, 0.5);
   padding: 10px 12px;
+}
+
+.am-stat-positive {
+  border-color: rgba(34, 211, 138, 0.16);
+  background: rgba(34, 211, 138, 0.06);
+}
+
+.am-stat-positive .am-stat-label,
+.am-stat-positive .am-stat-value {
+  color: var(--positive);
+}
+
+.am-stat-negative {
+  border-color: rgba(255, 94, 118, 0.16);
+  background: rgba(255, 94, 118, 0.06);
+}
+
+.am-stat-negative .am-stat-label,
+.am-stat-negative .am-stat-value {
+  color: var(--negative);
 }
 
 .am-stat-compact {

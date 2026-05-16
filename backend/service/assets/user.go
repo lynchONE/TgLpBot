@@ -578,6 +578,10 @@ func setUserLPWindowPnL(stats *UserLPWindowStats, pnl float64) {
 func applyUserSnapshotPnL(base UserLPStatsResponse, snapshotRows []models.UserAssetDailySnapshot, transferByDay map[string]userTransferActivity, adjustmentsByDay map[string]userPnLAdjustment, liveTotalUSD *float64, now time.Time) UserLPStatsResponse {
 	startOfToday := dayStart(now)
 	historyStart := startOfToday.AddDate(0, 0, -30)
+	monthStart := time.Date(startOfToday.Year(), startOfToday.Month(), 1, 0, 0, 0, 0, startOfToday.Location())
+	if monthStart.Before(historyStart) {
+		historyStart = monthStart
+	}
 	snapshotPnLByDay := buildUserSnapshotPnLByDay(snapshotRows, transferByDay)
 
 	base.DailyHistory = mergeUserDailyHistoryPnL(base.DailyHistory, snapshotPnLByDay, adjustmentsByDay, historyStart, startOfToday)
@@ -1152,23 +1156,29 @@ func (s *Service) GetUserHistory(ctx context.Context, userID uint, days int) (*U
 
 func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStatsResponse, error) {
 	now := timeutil.Now()
-	start := dayStart(now).AddDate(0, 0, -30)
+	startOfToday := dayStart(now)
+	start := startOfToday.AddDate(0, 0, -30)
+	snapshotStart := startOfToday.AddDate(0, 0, -31)
+	monthStart := time.Date(startOfToday.Year(), startOfToday.Month(), 1, 0, 0, 0, 0, startOfToday.Location())
+	if monthStart.AddDate(0, 0, -1).Before(snapshotStart) {
+		snapshotStart = monthStart.AddDate(0, 0, -1)
+	}
 	trades, err := s.loadUserLPTrades(ctx, userID, start, now)
 	if err != nil {
 		return nil, err
 	}
 	resp := buildUserLPStatsFromTrades(trades, now)
 
-	snapshotRows, err := s.loadUserAssetSnapshotRows(ctx, userID, dayStart(now).AddDate(0, 0, -31), dayStart(now))
+	snapshotRows, err := s.loadUserAssetSnapshotRows(ctx, userID, snapshotStart, startOfToday)
 	if err != nil {
 		return nil, err
 	}
-	transferRows, err := s.smRepo.AggregateUserTransferActivityByDay(ctx, userID, dayStart(now).AddDate(0, 0, -31), now)
+	transferRows, err := s.smRepo.AggregateUserTransferActivityByDay(ctx, userID, snapshotStart, now)
 	if err != nil {
 		return nil, err
 	}
 	transferByDay := buildUserTransferActivityByDay(transferRows)
-	adjustmentsByDay, err := s.loadUserLPAdjustments(ctx, userID, dayStart(now).AddDate(0, 0, -31), dayStart(now).AddDate(0, 0, 1))
+	adjustmentsByDay, err := s.loadUserLPAdjustments(ctx, userID, snapshotStart, startOfToday.AddDate(0, 0, 1))
 	if err != nil {
 		return nil, err
 	}

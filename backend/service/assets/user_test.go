@@ -263,6 +263,36 @@ func TestApplyUserSnapshotPnL(t *testing.T) {
 	}
 }
 
+func TestApplyUserSnapshotPnLIncludesCurrentMonthBeforeThirtyDays(t *testing.T) {
+	timeutil.Init()
+	now := time.Date(2026, time.March, 31, 16, 20, 0, 0, timeutil.Location())
+
+	base := UserLPStatsResponse{
+		Windows: []UserLPWindowStats{
+			{Days: 1},
+			{Days: 7},
+			{Days: 30},
+		},
+	}
+	snapshots := []models.UserAssetDailySnapshot{
+		{SnapshotDay: "2026-02-28", TotalUSD: 100},
+		{SnapshotDay: "2026-03-01", TotalUSD: 107},
+		{SnapshotDay: "2026-03-02", TotalUSD: 109},
+	}
+
+	stats := applyUserSnapshotPnL(base, snapshots, nil, map[string]userPnLAdjustment{}, nil, now)
+
+	if got, want := len(stats.DailyHistory), 2; got != want {
+		t.Fatalf("daily history size = %d, want %d", got, want)
+	}
+	if got, want := stats.DailyHistory[0].Day, "2026-03-01"; got != want {
+		t.Fatalf("first history day = %s, want %s", got, want)
+	}
+	if got, want := stats.DailyHistory[0].RealizedPnLUSD, 7.0; got != want {
+		t.Fatalf("first day pnl = %.2f, want %.2f", got, want)
+	}
+}
+
 func TestBuildUserProfitCurve(t *testing.T) {
 	history := []UserLPDailyPoint{
 		{Day: "2026-03-18", FinalPnLUSD: 2},

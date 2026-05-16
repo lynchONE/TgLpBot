@@ -59,6 +59,10 @@ import WalletManagePanel from './WalletManagePanel';
 import TradeHistoryPanel from './TradeHistoryPanel';
 
 const HISTORY_WINDOWS = [7, 30, 90];
+const PNL_CALENDAR_WINDOWS = [
+  { key: 'month', label: '本月' },
+  { key: '30d', label: '30天' },
+];
 const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const HISTORY_METRICS = [
   { key: 'total_usd', label: '总资产', color: '#59f09d' },
@@ -147,6 +151,52 @@ function filterPointsByWindow(points, days) {
     const stamp = dayStamp(item?.day);
     return Number.isFinite(stamp) && stamp >= cutoff && stamp <= end;
   });
+}
+
+function mergeDailyPoints(history, todayPoint) {
+  const merged = new Map();
+  if (Array.isArray(history)) {
+    history.forEach((item) => {
+      const day = String(item?.day || '').trim();
+      if (day) merged.set(day, item);
+    });
+  }
+  const todayDay = String(todayPoint?.day || '').trim();
+  if (todayDay) merged.set(todayDay, todayPoint);
+  return [...merged.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)));
+}
+
+function filterPnLCalendarPoints(points, windowKey) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  if (windowKey === '30d') {
+    const today = dayStamp(formatChinaDay());
+    if (!Number.isFinite(today)) return points;
+    const start = today - 29 * 24 * 60 * 60 * 1000;
+    return points.filter((item) => {
+      const stamp = dayStamp(item?.day);
+      return Number.isFinite(stamp) && stamp >= start && stamp <= today;
+    });
+  }
+  const monthPrefix = formatChinaDay().slice(0, 7);
+  return points.filter((item) => String(item?.day || '').startsWith(monthPrefix));
+}
+
+function summarizePnLCalendarPoints(points) {
+  const summary = {
+    total: 0,
+    positiveDays: 0,
+    negativeDays: 0,
+  };
+  if (!Array.isArray(points)) return summary;
+  points.forEach((item) => {
+    const pnl = Number(item?.final_pnl_usd ?? item?.realized_pnl_usd ?? 0);
+    if (!Number.isFinite(pnl)) return;
+    summary.total += pnl;
+    if (pnl > 0) summary.positiveDays += 1;
+    if (pnl < 0) summary.negativeDays += 1;
+  });
+  summary.total = Number(summary.total.toFixed(2));
+  return summary;
 }
 
 function formatChain(chainId) {
@@ -327,7 +377,7 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay, onDismiss }) {
+function PnLCalendar({ data, loading = false, note = '', selectedDay = '', allowNavigation = true, onSelectDay, onDismiss }) {
   const [viewDate, setViewDate] = useState(() => new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -349,6 +399,10 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
   const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
   const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
   const todayStr = formatChinaDay();
+
+  useEffect(() => {
+    if (!allowNavigation) setViewDate(new Date());
+  }, [allowNavigation]);
 
   if (loading) {
     return <div className="am-chart-empty">加载中...</div>;
@@ -424,10 +478,12 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
             <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
           </svg>
         </div>
-        <div className="pnl-cal-nav" data-pnl-calendar-keep="true">
-          <button type="button" onClick={prevMonth}><ChevronLeft size={14} /></button>
-          <button type="button" onClick={nextMonth}><ChevronRight size={14} /></button>
-        </div>
+        {allowNavigation ? (
+          <div className="pnl-cal-nav" data-pnl-calendar-keep="true">
+            <button type="button" onClick={prevMonth}><ChevronLeft size={14} /></button>
+            <button type="button" onClick={nextMonth}><ChevronRight size={14} /></button>
+          </div>
+        ) : null}
       </div>
       <div className="pnl-cal-grid">
         {PNL_CAL_WEEKDAYS.map((d) => (
@@ -441,189 +497,6 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
           <span>{note}</span>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/* ─── Per-pool PnL overview for today ─── */
-function formatPoolPair(pool) {
-  const token0 = String(pool?.token0_symbol || '').trim();
-  const token1 = String(pool?.token1_symbol || '').trim();
-  if (token0 || token1) return `${token0 || '?'} / ${token1 || '?'}`;
-  const poolId = String(pool?.pool_id || '').trim();
-  return poolId ? `${poolId.slice(0, 6)}...${poolId.slice(-4)}` : '未命名池子';
-}
-
-function summarizeTodayPools(pools) {
-  if (!Array.isArray(pools) || pools.length === 0) {
-    return {
-      rows: [],
-      positiveRows: [],
-      negativeRows: [],
-      flatCount: 0,
-      topPositive: [],
-      topNegative: [],
-      remainingCount: 0,
-      maxAbsPnl: 1,
-    };
-  }
-
-  const merged = new Map();
-  for (const pool of pools) {
-    const chain = String(pool?.chain || 'bsc').toUpperCase();
-    const poolId = String(pool?.pool_id || '').trim();
-    const pair = formatPoolPair(pool);
-    const key = poolId ? `${chain}:${poolId}` : `${chain}:${pair}`;
-    const prev = merged.get(key) || {
-      key,
-      chain,
-      pair,
-      closed_count: 0,
-      profit_usd: 0,
-    };
-    prev.closed_count += Number(pool?.closed_count || 0);
-    prev.profit_usd += Number(pool?.profit_usd || 0);
-    merged.set(key, prev);
-  }
-
-  const rows = [...merged.values()].sort((a, b) => Math.abs(b.profit_usd) - Math.abs(a.profit_usd));
-  const positiveRows = rows.filter((row) => row.profit_usd > 0).sort((a, b) => b.profit_usd - a.profit_usd);
-  const negativeRows = rows.filter((row) => row.profit_usd < 0).sort((a, b) => a.profit_usd - b.profit_usd);
-  const topPositive = positiveRows.slice(0, 3);
-  const topNegative = negativeRows.slice(0, 3);
-  const featuredKeys = new Set([...topPositive, ...topNegative].map((row) => row.key));
-
-  return {
-    rows,
-    positiveRows,
-    negativeRows,
-    flatCount: rows.length - positiveRows.length - negativeRows.length,
-    topPositive,
-    topNegative,
-    remainingCount: rows.filter((row) => !featuredKeys.has(row.key)).length,
-    maxAbsPnl: Math.max(...rows.map((row) => Math.abs(row.profit_usd)), 1),
-  };
-}
-
-function PoolContributionRow({ row, maxAbsPnl }) {
-  const pnl = Number(row?.profit_usd || 0);
-  const ratio = Math.max(Math.abs(pnl) / Math.max(maxAbsPnl, 1), 0.08);
-  const positive = pnl >= 0;
-  const widthPct = Math.min(ratio * 100, 100);
-
-  return (
-    <div className="am-pool-row">
-      <div className="am-pool-row-head">
-        <div className="am-pool-row-title">{row?.pair || '未命名池子'}</div>
-        <span className={`am-badge ${positive ? 'am-badge-ok' : 'am-badge-warn'}`}>
-          {positive ? '+' : ''}{formatUsdCompact(pnl)}
-        </span>
-      </div>
-      <div className="am-pool-row-meta">
-        <span>{String(row?.chain || 'BSC').toUpperCase()}</span>
-        <span>{Number(row?.closed_count || 0)} 笔</span>
-      </div>
-      <div className="am-pool-balance-track">
-        <div className="am-pool-balance-axis" />
-        <div
-          className={`am-pool-balance-bar ${positive ? 'positive' : 'negative'}`}
-          style={positive ? { left: '50%', width: `${widthPct / 2}%` } : { right: '50%', width: `${widthPct / 2}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TodayPoolPnL({ pools }) {
-  const [view, setView] = useState('leaders');
-  const summary = useMemo(() => summarizeTodayPools(pools), [pools]);
-  const showDetailsTab = summary.remainingCount > 0 || summary.flatCount > 0;
-
-  useEffect(() => {
-    if (!showDetailsTab && view !== 'leaders') {
-      setView('leaders');
-    }
-  }, [showDetailsTab, view]);
-
-  if (!summary.rows.length) {
-    return <EmptyState text="今日暂无平仓记录" />;
-  }
-
-  return (
-    <div className="am-pool-card am-pool-card-compact">
-      <div className="am-pool-toolbar">
-        <div>
-          <div className="am-card-title" style={{ fontSize: 12 }}>平仓池子贡献</div>
-          <div className="am-item-sub" style={{ margin: 0 }}>仅统计今日平仓记录，不等于总资产快照盈亏</div>
-        </div>
-        <div className="am-pill-group">
-          <button type="button" className={`am-pill ${view === 'leaders' ? 'active' : ''}`} onClick={() => setView('leaders')}>
-            贡献榜
-          </button>
-          {showDetailsTab ? (
-            <button type="button" className={`am-pill ${view === 'details' ? 'active' : ''}`} onClick={() => setView('details')}>
-              全部明细
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="am-pool-summary-grid">
-        <div className="am-pool-summary">
-          <div className="am-pool-summary-label">参与池子</div>
-          <div className="am-pool-summary-value">{summary.rows.length}</div>
-        </div>
-        <div className="am-pool-summary">
-          <div className="am-pool-summary-label">盈利池</div>
-          <div className="am-pool-summary-value is-positive">{summary.positiveRows.length}</div>
-        </div>
-        <div className="am-pool-summary">
-          <div className="am-pool-summary-label">亏损池</div>
-          <div className="am-pool-summary-value is-negative">{summary.negativeRows.length}</div>
-        </div>
-        <div className="am-pool-summary">
-          <div className="am-pool-summary-label">持平池</div>
-          <div className="am-pool-summary-value">{summary.flatCount}</div>
-        </div>
-      </div>
-
-      {view === 'leaders' ? (
-        <>
-          <div className="am-pool-board">
-            <div className="am-pool-column">
-              <div className="am-pool-section-head">
-                <span className="am-pool-section-title">Top 盈利</span>
-                <span className="am-pool-section-count">{summary.topPositive.length} 个</span>
-              </div>
-              {summary.topPositive.length > 0 ? summary.topPositive.map((row) => (
-                <PoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
-              )) : <div className="am-pool-empty">今日暂无盈利池</div>}
-            </div>
-
-            <div className="am-pool-column">
-              <div className="am-pool-section-head">
-                <span className="am-pool-section-title">Top 亏损</span>
-                <span className="am-pool-section-count">{summary.topNegative.length} 个</span>
-              </div>
-              {summary.topNegative.length > 0 ? summary.topNegative.map((row) => (
-                <PoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
-              )) : <div className="am-pool-empty">今日暂无亏损池</div>}
-            </div>
-          </div>
-
-          {showDetailsTab ? (
-            <div className="am-pool-note">
-              其余 {summary.remainingCount} 个池子已折叠，点“全部明细”查看完整列表。
-            </div>
-          ) : null}
-        </>
-      ) : (
-        <div className="am-pool-details">
-          {summary.rows.map((row) => (
-            <PoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -946,6 +819,7 @@ export default function AssetManagementPanel({
   const [historyDays, setHistoryDays] = useState(30);
   const historyMetric = 'total_usd';
   const [trendMode, setTrendMode] = useState('assets');
+  const [pnlCalendarWindow, setPnlCalendarWindow] = useState('month');
   const [assetState, setAssetState] = useState({ overview: null, history: null, lp: null });
   const [assetLoading, setAssetLoading] = useState(false);
   const [assetRefreshing, setAssetRefreshing] = useState(false);
@@ -1046,6 +920,10 @@ export default function AssetManagementPanel({
   const activeTrendPoints = trendMode === 'profit' ? profitTrendPoints : chartPoints;
   const activeTrendValue = activeTrendPoints[activeTrendPoints.length - 1]?.value;
   const latestProfitCurveDay = profitCurvePoints[profitCurvePoints.length - 1]?.day || formatChinaDay();
+  const pnlCalendarAllPoints = useMemo(() => mergeDailyPoints(assetState.lp?.daily_history, assetState.lp?.today_point), [assetState.lp]);
+  const pnlCalendarPoints = useMemo(() => filterPnLCalendarPoints(pnlCalendarAllPoints, pnlCalendarWindow), [pnlCalendarAllPoints, pnlCalendarWindow]);
+  const pnlCalendarSummary = useMemo(() => summarizePnLCalendarPoints(pnlCalendarPoints), [pnlCalendarPoints]);
+  const pnlWindowLabel = PNL_CALENDAR_WINDOWS.find((item) => item.key === pnlCalendarWindow)?.label || '本月';
 
   const isRefreshing = assetLoading || assetRefreshing;
   const selectedPnLEntry = useMemo(() => {
@@ -1079,6 +957,11 @@ export default function AssetManagementPanel({
       setSelectedPnLDay('');
     }
   }, [assetState.lp, selectedPnLEntry, selectedPnLDay]);
+
+  useEffect(() => {
+    setSelectedPnLDay('');
+    setPnlAdjustmentError('');
+  }, [pnlCalendarWindow]);
 
   const handleSavePnLAdjustment = useCallback(async (day, manualAdjustmentUsd, note) => {
     setPnlAdjustmentSaving(true);
@@ -1311,13 +1194,47 @@ export default function AssetManagementPanel({
                   </>
                 );
               })()}
-              <TodayPoolPnL pools={assetState.lp?.today_pools} />
             </div>
 
             <div className="am-card">
+              <div className="am-card-header">
+                <div>
+                  <div className="am-card-title">盈亏日历</div>
+                  <div className="am-item-sub">{pnlWindowLabel}已记录 {pnlCalendarPoints.length} 天</div>
+                </div>
+                <div className="am-pill-group" data-pnl-calendar-keep="true">
+                  {PNL_CALENDAR_WINDOWS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`am-pill ${pnlCalendarWindow === item.key ? 'active' : ''}`}
+                      onClick={() => setPnlCalendarWindow(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="am-stat-grid am-stat-grid-3 pnl-window-summary">
+                <div className="am-stat">
+                  <div className="am-stat-label">{pnlWindowLabel}盈亏</div>
+                  <div className="am-stat-value" style={{ color: pnlCalendarSummary.total >= 0 ? 'var(--positive)' : 'var(--negative)' }}>
+                    {pnlCalendarSummary.total >= 0 ? '+' : ''}{formatUsdCompact(pnlCalendarSummary.total)}
+                  </div>
+                </div>
+                <div className="am-stat am-stat-positive">
+                  <div className="am-stat-label">盈利日</div>
+                  <div className="am-stat-value">{pnlCalendarSummary.positiveDays}</div>
+                </div>
+                <div className="am-stat am-stat-negative">
+                  <div className="am-stat-label">亏损日</div>
+                  <div className="am-stat-value">{pnlCalendarSummary.negativeDays}</div>
+                </div>
+              </div>
               <PnLCalendar
-                data={[...(Array.isArray(assetState.lp?.daily_history) ? assetState.lp.daily_history : []), ...(assetState.lp?.today_point ? [assetState.lp.today_point] : [])]}
+                data={pnlCalendarPoints}
                 loading={assetLoading}
+                allowNavigation={pnlCalendarWindow === '30d'}
                 note="日历默认按每日资产快照差额计算；如当天有充值、提现等外部资金变化，可点选日期手动校准。蓝点代表有转账提示，金点代表有手动校准。"
                 selectedDay={selectedPnLDay}
                 onSelectDay={(entry) => {

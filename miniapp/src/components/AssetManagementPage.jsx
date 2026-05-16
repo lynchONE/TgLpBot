@@ -22,6 +22,10 @@ const AVATAR_URLS = Object.entries(
 ).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
 
 const HISTORY_WINDOWS = [7, 30, 90];
+const PNL_CALENDAR_WINDOWS = [
+    { key: 'month', label: '本月' },
+    { key: '30d', label: '30天' },
+];
 const SMART_MONEY_WINDOWS = [1, 7, 30];
 const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const LEADERBOARD_METRICS = [
@@ -106,6 +110,52 @@ function filterRowsByWindow(rows, days) {
         const stamp = dayStamp(item?.day);
         return Number.isFinite(stamp) && stamp >= cutoff && stamp <= end;
     });
+}
+
+function mergeDailyPoints(history, todayPoint) {
+    const merged = new Map();
+    if (Array.isArray(history)) {
+        history.forEach((item) => {
+            const day = String(item?.day || '').trim();
+            if (day) merged.set(day, item);
+        });
+    }
+    const todayDay = String(todayPoint?.day || '').trim();
+    if (todayDay) merged.set(todayDay, todayPoint);
+    return [...merged.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)));
+}
+
+function filterPnLCalendarRows(rows, windowKey) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    if (windowKey === '30d') {
+        const today = dayStamp(formatChinaDay());
+        if (!Number.isFinite(today)) return rows;
+        const start = today - 29 * 24 * 60 * 60 * 1000;
+        return rows.filter((item) => {
+            const stamp = dayStamp(item?.day);
+            return Number.isFinite(stamp) && stamp >= start && stamp <= today;
+        });
+    }
+    const monthPrefix = formatChinaDay().slice(0, 7);
+    return rows.filter((item) => String(item?.day || '').startsWith(monthPrefix));
+}
+
+function summarizePnLCalendarRows(rows) {
+    const summary = {
+        total: 0,
+        positiveDays: 0,
+        negativeDays: 0,
+    };
+    if (!Array.isArray(rows)) return summary;
+    rows.forEach((item) => {
+        const pnl = Number(item?.final_pnl_usd ?? item?.realized_pnl_usd ?? 0);
+        if (!Number.isFinite(pnl)) return;
+        summary.total += pnl;
+        if (pnl > 0) summary.positiveDays += 1;
+        if (pnl < 0) summary.negativeDays += 1;
+    });
+    summary.total = Number(summary.total.toFixed(2));
+    return summary;
 }
 
 function formatChain(chainId) {
@@ -382,7 +432,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSelectDay, onDismiss }) {
+function PnLCalendar({ data, loading = false, note = '', selectedDay = '', allowNavigation = true, onSelectDay, onDismiss }) {
     const [viewDate, setViewDate] = useState(() => new Date());
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -404,6 +454,10 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
     const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
     const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
     const todayStr = formatChinaDay();
+
+    useEffect(() => {
+        if (!allowNavigation) setViewDate(new Date());
+    }, [allowNavigation]);
 
     if (loading) {
         return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 200 }} />;
@@ -487,10 +541,12 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
                         <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
                 </div>
-                <div className="flex items-center gap-0.5" data-pnl-calendar-keep="true">
-                    <button onClick={prevMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronLeft size={14} /></button>
-                    <button onClick={nextMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronRight size={14} /></button>
-                </div>
+                {allowNavigation ? (
+                    <div className="flex items-center gap-0.5" data-pnl-calendar-keep="true">
+                        <button onClick={prevMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronLeft size={14} /></button>
+                        <button onClick={nextMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronRight size={14} /></button>
+                    </div>
+                ) : null}
             </div>
             <div className="grid grid-cols-7 gap-1">
                 {PNL_CAL_WEEKDAYS.map((d) => (
@@ -504,184 +560,6 @@ function PnLCalendar({ data, loading = false, note = '', selectedDay = '', onSel
                     <span>{note}</span>
                 </div>
             ) : null}
-        </div>
-    );
-}
-
-/* ─── Per-pool PnL list for today ─── */
-function formatPoolPair(pool) {
-    const token0 = String(pool?.token0_symbol || '').trim();
-    const token1 = String(pool?.token1_symbol || '').trim();
-    if (token0 || token1) return `${token0 || '?'} / ${token1 || '?'}`;
-    const poolId = String(pool?.pool_id || '').trim();
-    return poolId ? `${poolId.slice(0, 6)}...${poolId.slice(-4)}` : '未命名池子';
-}
-
-function summarizeTodayPools(pools) {
-    if (!Array.isArray(pools) || pools.length === 0) {
-        return {
-            rows: [],
-            positiveRows: [],
-            negativeRows: [],
-            flatCount: 0,
-            topPositive: [],
-            topNegative: [],
-            remainingCount: 0,
-            maxAbsPnl: 1,
-        };
-    }
-
-    const merged = new Map();
-    for (const pool of pools) {
-        const chain = String(pool?.chain || 'bsc').toUpperCase();
-        const poolId = String(pool?.pool_id || '').trim();
-        const pair = formatPoolPair(pool);
-        const key = poolId ? `${chain}:${poolId}` : `${chain}:${pair}`;
-        const prev = merged.get(key) || {
-            key,
-            chain,
-            pair,
-            closed_count: 0,
-            profit_usd: 0,
-        };
-        prev.closed_count += Number(pool?.closed_count || 0);
-        prev.profit_usd += Number(pool?.profit_usd || 0);
-        merged.set(key, prev);
-    }
-
-    const rows = [...merged.values()].sort((a, b) => Math.abs(b.profit_usd) - Math.abs(a.profit_usd));
-    const positiveRows = rows.filter((row) => row.profit_usd > 0).sort((a, b) => b.profit_usd - a.profit_usd);
-    const negativeRows = rows.filter((row) => row.profit_usd < 0).sort((a, b) => a.profit_usd - b.profit_usd);
-    const topPositive = positiveRows.slice(0, 3);
-    const topNegative = negativeRows.slice(0, 3);
-    const featuredKeys = new Set([...topPositive, ...topNegative].map((row) => row.key));
-
-    return {
-        rows,
-        positiveRows,
-        negativeRows,
-        flatCount: rows.length - positiveRows.length - negativeRows.length,
-        topPositive,
-        topNegative,
-        remainingCount: rows.filter((row) => !featuredKeys.has(row.key)).length,
-        maxAbsPnl: Math.max(...rows.map((row) => Math.abs(row.profit_usd)), 1),
-    };
-}
-
-function TodayPoolContributionRow({ row, maxAbsPnl }) {
-    const pnl = Number(row?.profit_usd || 0);
-    const positive = pnl >= 0;
-    const ratio = Math.max(Math.abs(pnl) / Math.max(maxAbsPnl, 1), 0.08);
-    const widthPct = Math.min(ratio * 100, 100);
-
-    return (
-        <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 dark:border-white/[0.04] dark:bg-[#0d0f12]">
-            <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0 truncate text-[11px] font-semibold text-zinc-900 dark:text-white/90">
-                    {row?.pair || '未命名池子'}
-                </div>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ring-1 ${
-                    positive
-                        ? 'bg-emerald-500/[0.08] text-emerald-600 ring-emerald-500/20 dark:bg-emerald-500/[0.12] dark:text-emerald-300 dark:ring-emerald-400/25'
-                        : 'bg-red-500/[0.08] text-red-600 ring-red-500/20 dark:bg-red-500/[0.12] dark:text-red-300 dark:ring-red-400/25'
-                }`}>
-                    {positive ? '+' : ''}{formatUsdCompact(pnl)}
-                </span>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[9px] text-zinc-400 dark:text-white/30">
-                <span>{String(row?.chain || 'BSC').toUpperCase()}</span>
-                <span>{Number(row?.closed_count || 0)} 笔</span>
-            </div>
-            <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-gradient-to-r from-red-500/[0.08] via-zinc-200 to-emerald-500/[0.08] dark:from-red-500/[0.08] dark:via-white/[0.04] dark:to-emerald-500/[0.08]">
-                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-zinc-300 dark:bg-white/20" />
-                <div
-                    className={`absolute inset-y-0 ${positive ? 'left-1/2 rounded-r-full bg-emerald-400/90' : 'right-1/2 rounded-l-full bg-red-400/90'}`}
-                    style={{ width: `${widthPct / 2}%` }}
-                />
-            </div>
-        </div>
-    );
-}
-
-function TodayPoolPnL({ pools, brand }) {
-    const [view, setView] = useState('leaders');
-    const summary = useMemo(() => summarizeTodayPools(pools), [pools]);
-    const showDetailsTab = summary.remainingCount > 0 || summary.flatCount > 0;
-
-    useEffect(() => {
-        if (!showDetailsTab && view !== 'leaders') {
-            setView('leaders');
-        }
-    }, [showDetailsTab, view]);
-
-    if (!summary.rows.length) {
-        return <Empty text="今日暂无平仓记录" />;
-    }
-
-    return (
-        <div className="flex flex-col gap-2.5">
-            <div className="flex items-start justify-between gap-2">
-                <div>
-                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/40">平仓池子贡献</div>
-                    <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/30">仅统计今日平仓记录，不等于总资产快照盈亏</div>
-                </div>
-                <div className="flex gap-1.5">
-                    <Pill active={view === 'leaders'} brand={brand} onClick={() => setView('leaders')}>贡献榜</Pill>
-                    {showDetailsTab ? <Pill active={view === 'details'} brand={brand} onClick={() => setView('details')}>全部明细</Pill> : null}
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-1.5">
-                {[
-                    { label: '参与池子', value: summary.rows.length, tone: '' },
-                    { label: '盈利池', value: summary.positiveRows.length, tone: 'text-emerald-600 dark:text-emerald-300' },
-                    { label: '亏损池', value: summary.negativeRows.length, tone: 'text-red-600 dark:text-red-300' },
-                    { label: '持平池', value: summary.flatCount, tone: '' },
-                ].map((item) => (
-                    <div key={item.label} className="rounded-lg bg-zinc-50 px-2.5 py-2 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
-                        <div className="text-[9px] text-zinc-400 dark:text-white/30">{item.label}</div>
-                        <div className={`mt-0.5 text-[13px] font-bold tabular-nums text-zinc-900 dark:text-white/90 ${item.tone}`.trim()}>
-                            {item.value}
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {view === 'leaders' ? (
-                <div className="flex flex-col gap-2.5">
-                    <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-semibold text-zinc-700 dark:text-white/70">Top 盈利</span>
-                            <span className="text-[9px] text-zinc-400 dark:text-white/30">{summary.topPositive.length} 个</span>
-                        </div>
-                        {summary.topPositive.length > 0
-                            ? summary.topPositive.map((row) => <TodayPoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />)
-                            : <Empty text="今日暂无盈利池" />}
-                    </div>
-
-                    <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-semibold text-zinc-700 dark:text-white/70">Top 亏损</span>
-                            <span className="text-[9px] text-zinc-400 dark:text-white/30">{summary.topNegative.length} 个</span>
-                        </div>
-                        {summary.topNegative.length > 0
-                            ? summary.topNegative.map((row) => <TodayPoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />)
-                            : <Empty text="今日暂无亏损池" />}
-                    </div>
-
-                    {showDetailsTab ? (
-                        <div className="text-[10px] text-zinc-400 dark:text-white/30">
-                            其余 {summary.remainingCount} 个池子已折叠，点“全部明细”查看完整列表。
-                        </div>
-                    ) : null}
-                </div>
-            ) : (
-                <div className="flex max-h-[280px] flex-col gap-1.5 overflow-y-auto pr-1">
-                    {summary.rows.map((row) => (
-                        <TodayPoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
-                    ))}
-                </div>
-            )}
         </div>
     );
 }
@@ -1060,6 +938,7 @@ export default function AssetManagementPage({
 
     const [historyDays, setHistoryDays] = useState(30);
     const [trendMode, setTrendMode] = useState('assets');
+    const [pnlCalendarWindow, setPnlCalendarWindow] = useState('month');
     const [assetsData, setAssetsData] = useState({ overview: null, history: null, lp: null });
     const [assetsLoading, setAssetsLoading] = useState(false);
     const [assetsRefreshing, setAssetsRefreshing] = useState(false);
@@ -1150,6 +1029,10 @@ export default function AssetManagementPage({
     const activeTrendRows = trendMode === 'profit' ? profitTrendRows : chartRows;
     const activeTrendValue = activeTrendRows[activeTrendRows.length - 1]?.value;
     const latestProfitCurveDay = profitCurveRows[profitCurveRows.length - 1]?.day || formatChinaDay();
+    const pnlCalendarAllRows = useMemo(() => mergeDailyPoints(assetsData.lp?.daily_history, assetsData.lp?.today_point), [assetsData.lp]);
+    const pnlCalendarRows = useMemo(() => filterPnLCalendarRows(pnlCalendarAllRows, pnlCalendarWindow), [pnlCalendarAllRows, pnlCalendarWindow]);
+    const pnlCalendarSummary = useMemo(() => summarizePnLCalendarRows(pnlCalendarRows), [pnlCalendarRows]);
+    const pnlWindowLabel = PNL_CALENDAR_WINDOWS.find((item) => item.key === pnlCalendarWindow)?.label || '本月';
 
     const isLoading = assetsLoading || assetsRefreshing;
     const canManualRefresh = hasInitData;
@@ -1184,6 +1067,11 @@ export default function AssetManagementPage({
             setSelectedPnLDay('');
         }
     }, [assetsData.lp, selectedPnLEntry, selectedPnLDay]);
+
+    useEffect(() => {
+        setSelectedPnLDay('');
+        setPnlAdjustmentError('');
+    }, [pnlCalendarWindow]);
 
     const handleSavePnLAdjustment = useCallback(async (day, manualAdjustmentUsd, note) => {
         setPnlAdjustmentSaving(true);
@@ -1435,16 +1323,50 @@ export default function AssetManagementPage({
                                 <div className="mt-0.5 text-[11px] font-bold tabular-nums text-red-700 dark:text-red-300">{Number(assetsData.lp?.today?.loss_count || 0)}</div>
                             </div>
                         </div>
-                        <div className="mt-3">
-                            <TodayPoolPnL pools={assetsData.lp?.today_pools} brand={brand} />
-                        </div>
                     </Card>
 
                     {/* LP daily PnL calendar */}
                     <Card>
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">盈亏日历</div>
+                                <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                    {pnlWindowLabel}已记录 {pnlCalendarRows.length} 天
+                                </div>
+                            </div>
+                            <div className="flex gap-1.5" data-pnl-calendar-keep="true">
+                                {PNL_CALENDAR_WINDOWS.map((item) => (
+                                    <Pill
+                                        key={item.key}
+                                        active={pnlCalendarWindow === item.key}
+                                        brand={brand}
+                                        onClick={() => setPnlCalendarWindow(item.key)}
+                                    >
+                                        {item.label}
+                                    </Pill>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="mb-3 grid grid-cols-3 gap-1.5">
+                            <div className="rounded-lg bg-zinc-50 px-2.5 py-2 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+                                <div className="text-[9px] text-zinc-400 dark:text-white/30">{pnlWindowLabel}盈亏</div>
+                                <div className={`mt-0.5 text-[12px] font-bold tabular-nums ${pnlCalendarSummary.total >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'}`}>
+                                    {pnlCalendarSummary.total >= 0 ? '+' : ''}{formatUsdCompact(pnlCalendarSummary.total)}
+                                </div>
+                            </div>
+                            <div className="rounded-lg bg-emerald-500/[0.06] px-2.5 py-2 ring-1 ring-emerald-500/15 dark:bg-emerald-500/[0.08]">
+                                <div className="text-[9px] text-emerald-600 dark:text-emerald-400">盈利日</div>
+                                <div className="mt-0.5 text-[12px] font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{pnlCalendarSummary.positiveDays}</div>
+                            </div>
+                            <div className="rounded-lg bg-red-500/[0.06] px-2.5 py-2 ring-1 ring-red-500/15 dark:bg-red-500/[0.08]">
+                                <div className="text-[9px] text-red-600 dark:text-red-400">亏损日</div>
+                                <div className="mt-0.5 text-[12px] font-bold tabular-nums text-red-700 dark:text-red-300">{pnlCalendarSummary.negativeDays}</div>
+                            </div>
+                        </div>
                         <PnLCalendar
-                            data={[...(Array.isArray(assetsData.lp?.daily_history) ? assetsData.lp.daily_history : []), ...(assetsData.lp?.today_point ? [assetsData.lp.today_point] : [])]}
+                            data={pnlCalendarRows}
                             loading={assetsLoading}
+                            allowNavigation={pnlCalendarWindow === '30d'}
                             note="日历默认按每日资产快照差额计算；如当天有充值、提现等外部资金变化，可点选日期手动校准。蓝点代表有转账提示，金点代表有手动校准。"
                             selectedDay={selectedPnLDay}
                             onSelectDay={(entry) => {
