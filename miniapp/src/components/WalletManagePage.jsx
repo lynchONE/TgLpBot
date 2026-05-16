@@ -148,7 +148,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
         return s + (Number.isFinite(v) ? v : 0);
     }, 0);
     const defaultWallet = useMemo(() => wallets.find((w) => w.is_default), [wallets]);
-    const inputClass = `w-full rounded-2xl border border-zinc-200/80 bg-white/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/[0.04] dark:text-white/90 dark:placeholder:text-white/25`;
+    const inputClass = `w-full rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2.5 text-sm font-semibold text-zinc-900 outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-white/90 dark:placeholder:text-white/25`;
 
     const renderCrudForm = () => {
         if (!crudAction) return null;
@@ -160,22 +160,21 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                 : '只修改展示名称，不影响链上地址。';
         const Icon = crudAction === 'import' ? KeyRound : crudAction === 'create' ? Plus : Pencil;
         return (
-            <div className="mb-4 overflow-hidden rounded-[28px] border border-zinc-200/70 bg-white/90 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.045]">
-                <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="mb-3 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+                <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
-                        <div className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${brand.iconChipClass}`}>
+                        <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                             <Icon className="h-5 w-5" />
                         </div>
                         <div className="min-w-0">
-                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 dark:text-white/35">WALLET ACTION</div>
-                            <h3 className="mt-1 text-base font-black text-zinc-900 dark:text-white">{title}</h3>
-                            <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-white/45">{description}</p>
+                            <h3 className="text-[12px] font-bold text-zinc-900 dark:text-white/90">{title}</h3>
+                            <p className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/40">{description}</p>
                         </div>
                     </div>
                     <button
                         type="button"
                         onClick={() => setCrudAction(null)}
-                        className="shrink-0 rounded-full bg-zinc-100 px-3 py-1.5 text-[11px] font-bold text-zinc-500 transition hover:bg-zinc-200 dark:bg-white/10 dark:text-white/55 dark:hover:bg-white/15"
+                        className="shrink-0 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-[11px] font-bold text-zinc-500 transition hover:bg-zinc-200 dark:bg-white/[0.06] dark:text-white/50 dark:hover:bg-white/10"
                     >
                         关闭
                     </button>
@@ -205,18 +204,18 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                             required
                         />
                     </div>
-                    <div className="flex justify-end gap-2 pt-2">
+                    <div className="flex justify-end gap-2 pt-1">
                         <button
                             type="button"
                             onClick={() => setCrudAction(null)}
-                            className="rounded-2xl px-4 py-3 text-xs font-bold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/5"
+                            className="rounded-xl px-3 py-2.5 text-xs font-bold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/5"
                         >
                             取消
                         </button>
                         <button
                             type="submit"
                             disabled={crudLoading}
-                            className={`rounded-2xl px-5 py-3 text-xs font-black shadow-sm transition-all ${crudLoading ? 'cursor-not-allowed opacity-50' : ''} ${brand.solidButtonClass}`}
+                            className={`rounded-xl px-4 py-2.5 text-xs font-black shadow-sm transition-all ${crudLoading ? 'cursor-not-allowed opacity-50' : ''} ${brand.solidButtonClass}`}
                         >
                             {crudLoading ? '处理中...' : '确定'}
                         </button>
@@ -231,7 +230,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
             type="button"
             onClick={load}
             disabled={loading}
-            className={`flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-black shadow-sm transition-all ${loading ? 'cursor-not-allowed opacity-50' : ''} ${brand.solidButtonClass}`}
+            className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black shadow-sm transition-all ${loading ? 'cursor-not-allowed opacity-50' : ''} ${brand.solidButtonClass}`}
         >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {loading ? '刷新中...' : '刷新余额'}
@@ -248,19 +247,15 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
             contentClassName="px-5 pb-0 sm:pb-0"
             footer={footer}
         >
-            <section className="relative mb-4 overflow-hidden rounded-[32px] border border-zinc-200/70 bg-zinc-950 p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.24)] dark:border-white/[0.1]">
-                <div className={`absolute -right-8 -top-10 h-36 w-36 rounded-full blur-2xl ${brand.dotClass} opacity-40`} />
-                <div className="absolute -bottom-14 left-4 h-32 w-32 rounded-full bg-sky-400/25 blur-3xl" />
-                <div className="relative">
+            <section className="mb-3 rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
                     <div className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 gap-3">
-                            <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-3xl bg-white/12 text-white ring-1 ring-white/15">
+                        <div className="flex min-w-0 gap-2.5">
+                            <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                                 <WalletCards className="h-5 w-5" />
                             </div>
                             <div className="min-w-0">
-                                <div className="text-[10px] font-black uppercase tracking-[0.28em] text-white/45">VAULTS</div>
-                                <div className="mt-1 text-2xl font-black tracking-tight">{wallets.length} 个钱包</div>
-                                <div className="mt-1 truncate text-xs text-white/55">
+                                <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">{wallets.length} 个钱包</div>
+                                <div className="mt-0.5 truncate text-[10px] text-zinc-500 dark:text-white/40">
                                     默认：{defaultWallet?.name || shortAddress(defaultWallet?.address) || '未设置'}
                                 </div>
                             </div>
@@ -271,11 +266,10 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                             </div>
                         )}
                     </div>
-                    <div className="mt-5 grid grid-cols-2 gap-2">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
                         <WalletMetric label={`${nativeSymbol} 总计`} value={totalNative.toFixed(4)} />
                         <WalletMetric label={`${stableSymbol} 总计`} value={totalStable.toFixed(2)} />
                     </div>
-                </div>
             </section>
 
             {error && (
@@ -286,26 +280,26 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
 
             {/* Actions Top */}
             {!crudAction && (
-                <div className="mb-4 grid grid-cols-2 gap-2">
+                <div className="mb-3 grid grid-cols-2 gap-2">
                     <button
                         onClick={() => { setCrudAction('create'); setCrudForm({ name: '', privateKey: '', walletId: null }); }}
-                        className="group rounded-[24px] border border-zinc-200/80 bg-white/90 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04]"
+                        className="group rounded-2xl border border-zinc-200/80 bg-white p-3 text-left transition hover:bg-zinc-50 dark:border-white/5 dark:bg-[#131518] dark:hover:bg-white/[0.03]"
                     >
-                        <span className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-2xl ${brand.iconChipClass}`}>
+                        <span className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                             <Plus className="h-[18px] w-[18px]" />
                         </span>
-                        <span className="block text-sm font-black text-zinc-900 dark:text-white/90">创建新钱包</span>
-                        <span className="mt-1 block text-[11px] leading-4 text-zinc-500 dark:text-white/42">自动生成并加入当前账户</span>
+                        <span className="block text-[12px] font-bold text-zinc-900 dark:text-white/90">创建新钱包</span>
+                        <span className="mt-1 block text-[10px] leading-4 text-zinc-500 dark:text-white/40">自动生成并加入当前账户</span>
                     </button>
                     <button
                         onClick={() => { setCrudAction('import'); setCrudForm({ name: '', privateKey: '', walletId: null }); }}
-                        className="group rounded-[24px] border border-zinc-200/80 bg-white/90 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04]"
+                        className="group rounded-2xl border border-zinc-200/80 bg-white p-3 text-left transition hover:bg-zinc-50 dark:border-white/5 dark:bg-[#131518] dark:hover:bg-white/[0.03]"
                     >
-                        <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/25">
+                        <span className="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/25">
                             <KeyRound className="h-[18px] w-[18px]" />
                         </span>
-                        <span className="block text-sm font-black text-zinc-900 dark:text-white/90">导入钱包</span>
-                        <span className="mt-1 block text-[11px] leading-4 text-zinc-500 dark:text-white/42">用私钥添加已有地址</span>
+                        <span className="block text-[12px] font-bold text-zinc-900 dark:text-white/90">导入钱包</span>
+                        <span className="mt-1 block text-[10px] leading-4 text-zinc-500 dark:text-white/40">用私钥添加已有地址</span>
                     </button>
                 </div>
             )}
@@ -326,7 +320,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                     <div className="mt-1 text-xs">先创建或导入一个钱包，就能在这里看余额和默认状态。</div>
                 </div>
             ) : (
-                <div className="space-y-3 pb-4">
+                <div className="space-y-2.5 pb-4">
                     {wallets.map((w) => (
                         <WalletCard
                             key={w.id || w.address}
@@ -370,25 +364,25 @@ function WalletFrame({ embedded, children, footer, ...sheetProps }) {
 
 function WalletMetric({ label, value }) {
     return (
-        <div className="rounded-2xl bg-white/10 px-3 py-3 ring-1 ring-white/10">
-            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/45">{label}</div>
-            <div className="mt-1 truncate text-lg font-black tabular-nums text-white">{value}</div>
+        <div className="rounded-xl bg-zinc-50 px-3 py-2.5 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+            <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">{label}</div>
+            <div className="mt-1 truncate text-base font-extrabold leading-none tabular-nums text-zinc-900 dark:text-white/95">{value}</div>
         </div>
     );
 }
 
 function WalletCard({ wallet, nativeSymbol, stableSymbol, copied, onCopy, onAction }) {
-    const actionClass = 'inline-flex items-center justify-center gap-1.5 rounded-xl bg-zinc-100 px-3 py-2 text-[11px] font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white/80';
+    const actionClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-[11px] font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-white/[0.06] dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white/80';
 
     return (
-        <div className="overflow-hidden rounded-[28px] border border-zinc-200/70 bg-white/[0.92] p-4 shadow-[0_14px_34px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_44px_rgba(15,23,42,0.1)] dark:border-white/[0.08] dark:bg-white/[0.035] dark:hover:shadow-none">
+        <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
             <div className="flex items-start gap-3">
-                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${wallet.is_default ? 'bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/[0.06] dark:text-white/50 dark:ring-white/[0.08]'}`}>
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${wallet.is_default ? 'bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/[0.06] dark:text-white/50 dark:ring-white/[0.08]'}`}>
                     {wallet.is_default ? <ShieldCheck className="h-5 w-5" /> : <WalletCards className="h-5 w-5" />}
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-black text-zinc-900 dark:text-white/90">
+                        <span className="truncate text-sm font-extrabold text-zinc-900 dark:text-white/90">
                             {wallet.name || `钱包 ${wallet.id}`}
                         </span>
                         {wallet.is_default ? (
@@ -410,12 +404,12 @@ function WalletCard({ wallet, nativeSymbol, stableSymbol, copied, onCopy, onActi
                 </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-2 gap-2">
                 <BalanceTile label={nativeSymbol} value={formatBalance(wallet.native_balance, 4)} />
                 <BalanceTile label={stableSymbol} value={formatBalance(wallet.stable_balance, 2)} emphasis />
             </div>
 
-            <div className="mt-4 flex items-center gap-2 border-t border-zinc-100 pt-3 dark:border-white/5">
+            <div className="mt-3 flex items-center gap-2 border-t border-zinc-100 pt-3 dark:border-white/5">
                 {!wallet.is_default ? (
                     <button type="button" onClick={() => onAction('set_default', wallet)} className={actionClass}>
                         <Star className="h-3.5 w-3.5" />
@@ -429,7 +423,7 @@ function WalletCard({ wallet, nativeSymbol, stableSymbol, copied, onCopy, onActi
                 <button
                     type="button"
                     onClick={() => onAction('delete', wallet)}
-                    className="ml-auto inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-bold text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                    className="ml-auto inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
                 >
                     <Trash2 className="h-3.5 w-3.5" />
                     删除
@@ -441,9 +435,9 @@ function WalletCard({ wallet, nativeSymbol, stableSymbol, copied, onCopy, onActi
 
 function BalanceTile({ label, value, emphasis = false }) {
     return (
-        <div className={`rounded-2xl px-3 py-3 ring-1 ${emphasis ? 'bg-emerald-500/[0.06] ring-emerald-500/15 dark:bg-emerald-500/[0.08]' : 'bg-zinc-50 ring-zinc-200 dark:bg-black/20 dark:ring-white/[0.06]'}`}>
-            <div className={`text-[10px] font-black uppercase tracking-[0.14em] ${emphasis ? 'text-emerald-600 dark:text-emerald-300' : 'text-zinc-400 dark:text-white/30'}`}>{label}</div>
-            <div className="mt-1 truncate text-sm font-black tabular-nums text-zinc-900 dark:text-white/85">{value}</div>
+        <div className={`rounded-xl px-3 py-2.5 ring-1 ${emphasis ? 'bg-emerald-500/[0.06] ring-emerald-500/15 dark:bg-emerald-500/[0.08]' : 'bg-zinc-50 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]'}`}>
+            <div className={`text-[9px] font-medium uppercase tracking-wide ${emphasis ? 'text-emerald-600 dark:text-emerald-300' : 'text-zinc-400 dark:text-white/30'}`}>{label}</div>
+            <div className="mt-1 truncate text-base font-extrabold leading-none tabular-nums text-zinc-900 dark:text-white/95">{value}</div>
         </div>
     );
 }

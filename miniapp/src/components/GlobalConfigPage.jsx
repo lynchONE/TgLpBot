@@ -131,7 +131,7 @@ export default function GlobalConfigPage({ open = true, onClose, apiBaseUrl, ini
         ? '偏激进'
         : '稳健';
 
-    const inputClass = `w-full rounded-2xl border border-zinc-200/80 bg-white/[0.95] px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/[0.04] dark:text-white/90 dark:placeholder:text-white/25`;
+    const inputClass = `w-full rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2.5 text-sm font-semibold text-zinc-900 outline-none transition placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-white/90 dark:placeholder:text-white/25`;
 
     return (
         <ConfigFrame
@@ -163,32 +163,26 @@ export default function GlobalConfigPage({ open = true, onClose, apiBaseUrl, ini
                     正在加载配置...
                 </div>
             ) : config ? (
-                <div className="space-y-4 pb-4">
-                    <section className="relative overflow-hidden rounded-[34px] border border-zinc-200/70 bg-zinc-950 p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.24)] dark:border-white/[0.1]">
-                        <div className={`absolute -right-10 -top-10 h-36 w-36 rounded-full blur-2xl ${brand.dotClass} opacity-40`} />
-                        <div className="absolute -bottom-14 left-4 h-32 w-32 rounded-full bg-sky-400/25 blur-3xl" />
-                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                        <div className="relative">
-                            <div className="flex items-start gap-3">
-                                <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-3xl bg-white/12 text-white ring-1 ring-white/15">
+                <div className="space-y-3 pb-4">
+                    <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+                        <div className="flex items-start gap-3">
+                                <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                                     <Settings2 className="h-5 w-5" />
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                    <div className="text-[10px] font-black uppercase tracking-[0.28em] text-white/45">CONTROL DECK</div>
-                                    <div className="mt-1 text-2xl font-black tracking-tight">全局策略中枢</div>
-                                    <p className="mt-2 text-xs leading-5 text-white/60">把高频开关放到最上面，复杂参数按交易、批次、通知分组。</p>
+                                    <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">全局配置</div>
+                                    <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">交易保护 / 分批加仓 / 链路钱包 / 通知过滤</div>
                                 </div>
                             </div>
 
-                            <div className="mt-5 grid grid-cols-3 gap-2">
+                            <div className="mt-3 grid grid-cols-3 gap-1.5">
                                 <QuickSwitch label="多钱包" active={draft.multi_wallet_enabled} onClick={() => updateDraft('multi_wallet_enabled', !draft.multi_wallet_enabled)} />
                                 <QuickSwitch label="分批" active={draft.dca_enabled} onClick={() => updateDraft('dca_enabled', !draft.dca_enabled)} />
                                 <QuickSwitch label="Bark" active={draft.bark_enabled} onClick={() => updateDraft('bark_enabled', !draft.bark_enabled)} />
                             </div>
-                        </div>
                     </section>
 
-                    <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                    <section className="grid grid-cols-2 gap-2">
                             <SummaryStat
                                 label="已启用项"
                                 value={`${enabledFeatureCount} 项`}
@@ -208,7 +202,7 @@ export default function GlobalConfigPage({ open = true, onClose, apiBaseUrl, ini
                             />
                     </section>
 
-                    <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                    <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
                         <Section
                             icon={Shield}
                             iconClassName={brand.iconChipClass}
@@ -437,9 +431,9 @@ function NoticeBanner({ tone = 'success', icon: Icon, children }) {
 
 function SummaryStat({ label, value, toneClass = '' }) {
     return (
-        <div className={`rounded-2xl border border-zinc-200/70 bg-white/[0.88] px-3 py-3 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04] ${toneClass || ''}`}>
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500 dark:text-white/45">{label}</div>
-            <div className="mt-1.5 truncate text-sm font-black text-zinc-900 dark:text-white/92">{value}</div>
+        <div className={`rounded-xl border border-zinc-200/70 bg-zinc-50 px-3 py-2.5 ring-1 ring-zinc-200 dark:border-white/[0.06] dark:bg-white/[0.03] dark:ring-white/[0.06] ${toneClass || ''}`}>
+            <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">{label}</div>
+            <div className="mt-1 truncate text-base font-extrabold leading-none text-zinc-900 dark:text-white/95">{value}</div>
         </div>
     );
 }
@@ -449,29 +443,29 @@ function QuickSwitch({ label, active, onClick }) {
         <button
             type="button"
             onClick={onClick}
-            className={`rounded-2xl px-3 py-3 text-left ring-1 transition active:scale-[0.98] ${
+            className={`rounded-xl px-3 py-2.5 text-left ring-1 transition active:scale-[0.98] ${
                 active
-                    ? 'bg-white text-zinc-950 ring-white shadow-[0_10px_24px_rgba(255,255,255,0.18)]'
-                    : 'bg-white/8 text-white/62 ring-white/10 hover:bg-white/12'
+                    ? 'bg-emerald-500/[0.08] text-emerald-700 ring-emerald-500/20 dark:bg-emerald-500/[0.10] dark:text-emerald-300 dark:ring-emerald-400/20'
+                    : 'bg-zinc-50 text-zinc-500 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/[0.03] dark:text-white/45 dark:ring-white/[0.06] dark:hover:bg-white/[0.06]'
             }`}
         >
-            <div className="text-[10px] font-black uppercase tracking-[0.16em]">{active ? 'ON' : 'OFF'}</div>
-            <div className="mt-1 text-sm font-bold">{label}</div>
+            <div className="text-[9px] font-medium uppercase tracking-wide">{active ? 'ON' : 'OFF'}</div>
+            <div className="mt-1 text-xs font-bold">{label}</div>
         </button>
     );
 }
 
 function Section({ icon: Icon, iconClassName, title, description, children, accent = '', compact = false }) {
     return (
-        <section className={`relative overflow-hidden rounded-[28px] border border-zinc-200/70 bg-white/90 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.06)] dark:border-white/[0.08] dark:bg-white/[0.035] dark:shadow-none ${compact ? 'h-full' : ''}`}>
+        <section className={`relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518] ${compact ? 'h-full' : ''}`}>
             {accent ? <div className={`absolute -right-8 -top-8 h-20 w-20 rounded-full blur-2xl opacity-20 ${accent}`} /> : null}
-            <div className="mb-4 flex items-start gap-3">
-                <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${iconClassName}`}>
+            <div className="mb-3 flex items-start gap-2.5">
+                <div className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconClassName}`}>
                     <Icon className="h-[18px] w-[18px]" />
                 </div>
                 <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/92">{title}</div>
-                    <div className="mt-1 text-xs leading-5 text-zinc-500 dark:text-white/45">{description}</div>
+                    <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">{title}</div>
+                    <div className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/40">{description}</div>
                 </div>
             </div>
             <div className="space-y-3">{children}</div>
@@ -481,12 +475,10 @@ function Section({ icon: Icon, iconClassName, title, description, children, acce
 
 function FieldCard({ label, hint, children }) {
     return (
-        <div className="rounded-2xl border border-zinc-200/70 bg-zinc-50/80 p-3 shadow-sm transition hover:bg-white dark:border-white/[0.06] dark:bg-black/20 dark:hover:bg-white/[0.035]">
+        <div className="rounded-xl bg-zinc-50 px-3 py-2.5 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
             <div className="mb-2">
-                <div className="text-sm font-semibold text-zinc-800 dark:text-white/88">{label}</div>
-                {hint ? (
-                    <div className="mt-1 text-[11px] leading-5 text-zinc-500 dark:text-white/45">{hint}</div>
-                ) : null}
+                <div className="text-[11px] font-semibold text-zinc-800 dark:text-white/80">{label}</div>
+                {hint ? <div className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/35">{hint}</div> : null}
             </div>
             {children}
         </div>
@@ -508,7 +500,7 @@ function InputWithSuffix({ className, suffix, ...props }) {
 
 function MutedHint({ children }) {
     return (
-        <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/80 px-3 py-3 text-xs leading-5 text-zinc-500 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-white/45">
+        <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/80 px-3 py-3 text-[11px] leading-5 text-zinc-500 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-white/45">
             {children}
         </div>
     );

@@ -1189,17 +1189,17 @@ export default function AssetManagementPanel({
           </button>
         );
       })}
-      <button
-        type="button"
-        className="am-tab-btn"
-        disabled={isRefreshing}
-        onClick={() => {
-          if (activeTab === 'my_assets') loadAssets({ forceRefresh: true });
-        }}
-      >
-        <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : undefined} />
-        刷新
-      </button>
+      {activeTab === 'my_assets' ? (
+        <button
+          type="button"
+          className="am-tab-btn"
+          disabled={isRefreshing}
+          onClick={() => loadAssets({ forceRefresh: true })}
+        >
+          <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : undefined} />
+          刷新
+        </button>
+      ) : null}
     </div>
   );
 
@@ -1371,15 +1371,15 @@ export default function AssetManagementPanel({
       ) : null}
 
       {hasInitData && activeTab === 'global_config' ? (
-        <GlobalConfigPanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} />
+        <GlobalConfigPanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} embedded />
       ) : null}
 
       {hasInitData && activeTab === 'wallet_manage' ? (
-        <WalletManagePanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} chain="bsc" />
+        <WalletManagePanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} chain="bsc" embedded />
       ) : null}
 
       {hasInitData && activeTab === 'trade_history' ? (
-        <TradeHistoryPanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} />
+        <TradeHistoryPanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} embedded />
       ) : null}
     </PanelShell>
   );

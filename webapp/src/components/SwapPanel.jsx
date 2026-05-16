@@ -916,7 +916,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     } catch (error) {
       if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
       console.error('loadWalletTokens failed', error);
-      // 婵犮垺鍎肩划鍓ф喆閿曞倸绫嶉柡鍫㈡暩閻熸繃绻涢幘铏櫧闁宠鐗犻弫宥囦沪閼测晝顔旈梺浼欑稻閻熴倗绮婚敐澶婄鐎广儱娲﹂悾閬嶆煛娴ｅ搫顣肩€?
+      // 加载失败时清空当前余额，避免展示过期数据。
       setWalletTokens([]);
       setWalletTokensKey(requestKey);
       setWalletTokensError(String(error?.message || error || '\u52a0\u8f7d\u94b1\u5305\u4f59\u989d\u5931\u8d25'));
@@ -1227,7 +1227,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setRefreshingQuote(false);
       setLastQuoteAt(0);
       lastRequestedQuoteKeyRef.current = '';
-      // 濠电偞鎸搁幊鎰板煘閺嶃劍濯存繛鍡樻惄閺夎櫣绱撻崒娑欏碍闁宦板姂閺佸秶浠﹂懖鈺冩啴濠电偛妫岄崜婵囨櫠閿曗偓椤曪綁鍩€椤掑嫭鐒诲璺侯儏椤忋儵鏌涢敐鍐ㄥ婵＄偛鍊块弻灞筋吋閸℃鍘愰梺鍛婃⒒婵儳霉?
+      // 交易完成后刷新钱包、余额和历史记录。
       await Promise.allSettled([loadWallets(), loadWalletTokens(), loadSwapHistory()]);
     } catch (error) {
       setExecError(String(error?.message || error));
