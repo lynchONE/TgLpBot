@@ -7,7 +7,7 @@ import {
 
 const LazySmartMoneyAssetsPage = lazy(() => import('./SmartMoneyAssetsPage.jsx'));
 import {
-    fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
+    fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositions, fetchSMWallets,
     fetchSMPositionDetail,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
@@ -1070,6 +1070,16 @@ const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
+const POOL_HEATMAP_WINDOWS = [
+    { key: '30s', label: '30s' },
+    { key: '1m', label: '1min' },
+    { key: '5m', label: '5min' },
+    { key: '1h', label: '1h' },
+];
+const POOL_HEATMAP_SORTS = [
+    { key: 'rate', label: '速率' },
+    { key: 'fee', label: '手续费' },
+];
 const USD_PREVIEW_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -1091,6 +1101,41 @@ function formatPreviewUsd(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
     return USD_PREVIEW_FORMATTER.format(num);
+}
+
+function formatHeatmapUSD(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (Math.abs(num) < 0.005) return '$0';
+    return formatUSDCompact(num);
+}
+
+function formatHeatmapRate(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (num >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
+    if (num >= 1) return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+    return `$${num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function heatmapWindowLabel(value) {
+    return POOL_HEATMAP_WINDOWS.find((item) => item.key === value)?.label || '1min';
+}
+
+function formatHeatmapAge(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return '--';
+    if (value < 60) return `${Math.max(1, Math.round(value))}秒`;
+    if (value < 3600) return `${Math.round(value / 60)}分钟`;
+    if (value < 86400) return `${Math.round(value / 3600)}小时`;
+    return `${Math.round(value / 86400)}天`;
+}
+
+function heatmapSampleText(row) {
+    const status = String(row?.sample_status || '').trim();
+    if (status === 'ok') return '样本完整';
+    if (status === 'partial') return '部分样本';
+    return '样本不足';
 }
 
 function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
@@ -2022,6 +2067,297 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
             )}
             <PositionPagination page={page} total={poolsTotal} brand={brand} pageSize={POOL_LIST_PAGE_SIZE} onChange={setPage} />
         </div>
+    );
+}
+
+function SmartMoneyPoolViewPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollIntervalSec = 15 }) {
+    const [tab, setTab] = useState('active');
+    return (
+        <div>
+            <div className="mb-4 grid grid-cols-2 gap-2 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1">
+                {[
+                    { key: 'active', label: '活跃池子', icon: Activity },
+                    { key: 'heatmap', label: '收益火焰图', icon: Flame },
+                ].map(({ key, label, icon: Icon }) => (
+                    <button
+                        key={key}
+                        type="button"
+                        className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[18px] px-3 text-xs font-semibold transition ${getFilterButtonClass(tab === key, brand)}`}
+                        onClick={() => setTab(key)}
+                    >
+                        <Icon size={14} />
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {tab === 'heatmap' ? (
+                <PoolFeeHeatmapPage
+                    apiBaseUrl={apiBaseUrl}
+                    onSelectPool={onSelectPool}
+                    onOpenPosition={onOpenPosition}
+                    brand={brand}
+                    pollIntervalSec={pollIntervalSec}
+                />
+            ) : (
+                <PoolListPage
+                    apiBaseUrl={apiBaseUrl}
+                    onSelectPool={onSelectPool}
+                    onOpenPosition={onOpenPosition}
+                    brand={brand}
+                    pollIntervalSec={pollIntervalSec}
+                />
+            )}
+        </div>
+    );
+}
+
+function PoolFeeHeatmapPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollIntervalSec = 15 }) {
+    const [rows, setRows] = useState([]);
+    const [total, setTotal] = useState(0);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [sort, setSort] = useState('rate');
+    const [windowKey, setWindowKey] = useState('1m');
+    const [protocolFilter, setProtocolFilter] = useState('all');
+    const [search, setSearch] = useState('');
+    const [updatedAt, setUpdatedAt] = useState('');
+    const loadSeqRef = useRef(0);
+    const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
+
+    const load = useCallback((silent = false) => {
+        const seq = ++loadSeqRef.current;
+        if (!silent) {
+            setLoading(true);
+            setError('');
+        }
+        fetchSMPoolFeeHeatmap({
+            apiBaseUrl,
+            window: windowKey,
+            sort,
+            keyword: searchKeyword || undefined,
+            protocol: protocolFilter !== 'all' ? protocolFilter : undefined,
+            limit: 40,
+        })
+            .then((data) => {
+                if (seq !== loadSeqRef.current) return;
+                if (!Array.isArray(data?.list)) throw new Error('收益火焰图数据格式错误');
+                setRows(data.list);
+                setTotal(Number(data.total || data.list.length || 0));
+                setUpdatedAt(data.updated_at || '');
+                setError('');
+            })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                setRows([]);
+                setTotal(0);
+                setError(String(err?.message || err || '加载收益火焰图失败'));
+            })
+            .finally(() => {
+                if (!silent && seq === loadSeqRef.current) setLoading(false);
+            });
+    }, [apiBaseUrl, protocolFilter, searchKeyword, sort, windowKey]);
+
+    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const timer = setInterval(() => load(true), Math.max(2, Number(pollIntervalSec)) * 1000);
+        return () => clearInterval(timer);
+    }, [load, pollIntervalSec]);
+
+    const maxIntensity = useMemo(() => {
+        const field = sort === 'fee' ? 'fee_usd' : 'fee_rate_per_1k_usd_window';
+        return Math.max(...rows.map((row) => Number(row?.[field] || 0)), 0);
+    }, [rows, sort]);
+
+    return (
+        <div>
+            <div className="mb-3 rounded-[24px] border border-amber-400/10 bg-[linear-gradient(135deg,rgba(251,146,60,0.12),rgba(24,24,27,0.72)_46%,rgba(16,185,129,0.08))] p-3 shadow-[0_18px_50px_-34px_rgba(0,0,0,0.95)]">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/15 bg-amber-300/10 px-2 py-1 text-[10px] font-semibold text-amber-200">
+                            <Flame size={12} />
+                            实时机会
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-zinc-100">按开仓至今平均速度折算</div>
+                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                            速率为每 1000U 聪明钱仓位在所选窗口的估算手续费，适合快速比较资金效率。
+                        </div>
+                    </div>
+                    <div className="shrink-0 text-right text-[10px] text-zinc-500">
+                        {updatedAt ? `更新 ${relativeTime(updatedAt)}` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <div className="mb-3 flex gap-2">
+                <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input
+                        className={getInputClass(brand).replace('px-3', 'pl-9 pr-3')}
+                        placeholder="搜索池子..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1 text-[11px]">
+                {POOL_HEATMAP_SORTS.map((item) => (
+                    <button
+                        key={item.key}
+                        type="button"
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 ${getFilterButtonClass(sort === item.key, brand)}`}
+                        onClick={() => setSort(item.key)}
+                    >
+                        {item.key === 'rate' ? <Activity size={13} /> : <DollarSign size={13} />}
+                        {item.label}
+                    </button>
+                ))}
+                {POOL_HEATMAP_WINDOWS.map((item) => (
+                    <button
+                        key={item.key}
+                        type="button"
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 ${getFilterButtonClass(windowKey === item.key, brand)}`}
+                        onClick={() => setWindowKey(item.key)}
+                    >
+                        <Clock size={12} />
+                        {item.label}
+                    </button>
+                ))}
+            </div>
+
+            <div className="mb-4 flex gap-1.5 overflow-x-auto pb-1 text-[11px]">
+                {['all', 'pancake_v3', 'uniswap_v3', 'uniswap_v4'].map((p) => {
+                    const info = PROTOCOL_MAP[p];
+                    return (
+                        <button
+                            key={p}
+                            type="button"
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 ${getFilterButtonClass(protocolFilter === p, brand)}`}
+                            onClick={() => setProtocolFilter(p)}
+                        >
+                            {info && <img src={info.icon} alt="" className="h-3.5 w-3.5 rounded-full" />}
+                            {p === 'all' ? '全部' : info?.version || p}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {loading ? (
+                <div className="py-8 text-center text-zinc-500">加载中...</div>
+            ) : error ? (
+                <div className="rounded-2xl border border-red-400/15 bg-red-500/5 px-4 py-8 text-center text-sm text-red-200">{error}</div>
+            ) : rows.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
+                    暂无可计算收益的池子
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    <div className="px-1 text-[10px] text-zinc-500">
+                        当前显示 {rows.length} 个 / 共 {total} 个池子 · {sort === 'rate' ? `按 ${heatmapWindowLabel(windowKey)} 速率` : '按手续费总额'}
+                    </div>
+                    {rows.map((row, index) => (
+                        <PoolFeeHeatmapCard
+                            key={row.pool_address}
+                            row={row}
+                            rank={index + 1}
+                            sort={sort}
+                            windowKey={windowKey}
+                            maxIntensity={maxIntensity}
+                            brand={brand}
+                            onSelectPool={onSelectPool}
+                            onOpenPosition={onOpenPosition}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, onSelectPool, onOpenPosition }) {
+    const metricValue = sort === 'fee' ? Number(row?.fee_usd || 0) : Number(row?.fee_rate_per_1k_usd_window || 0);
+    const intensity = maxIntensity > 0 ? Math.max(0.08, Math.min(1, metricValue / maxIntensity)) : 0.08;
+    const reliable = String(row?.sample_status || '') === 'ok';
+    const partial = String(row?.sample_status || '') === 'partial';
+    return (
+        <button
+            type="button"
+            className="relative w-full overflow-hidden rounded-[24px] border border-white/[0.05] bg-zinc-900/65 p-3 text-left shadow-[0_18px_50px_-32px_rgba(0,0,0,0.95)] transition active:scale-[0.995]"
+            onClick={() => onSelectPool(row)}
+        >
+            <div
+                className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 via-orange-400 to-emerald-300"
+                style={{ opacity: 0.25 + intensity * 0.65 }}
+            />
+            <div
+                className="pointer-events-none absolute -right-10 -top-16 h-32 w-32 rounded-full bg-orange-400/20 blur-3xl"
+                style={{ opacity: intensity * 0.8 }}
+            />
+            <div className="relative flex items-start gap-3">
+                <div className="flex shrink-0 flex-col items-center gap-2">
+                    <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full border border-amber-300/20 bg-amber-300/10 px-2 text-[11px] font-bold text-amber-200">
+                        #{rank}
+                    </span>
+                    <PairAvatar item={row} size="md" />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(row)}</span>
+                        <ProtocolBadge protocol={row.protocol} />
+                        <FeeBadge fee={row.fee_tier} />
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div className="rounded-2xl border border-white/[0.05] bg-black/20 px-3 py-2">
+                            <div className="text-[10px] text-zinc-500">总手续费</div>
+                            <div className="mt-1 text-base font-semibold text-amber-100">{formatHeatmapUSD(row.fee_usd)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/[0.05] bg-black/20 px-3 py-2">
+                            <div className="text-[10px] text-zinc-500">每1000U/{heatmapWindowLabel(windowKey)}</div>
+                            <div className="mt-1 text-base font-semibold text-emerald-200">{formatHeatmapRate(row.fee_rate_per_1k_usd_window)}</div>
+                        </div>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
+                        <div
+                            className="h-full rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-emerald-300"
+                            style={{ width: `${Math.max(6, intensity * 100)}%` }}
+                        />
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
+                        <span>{row.wallet_count} 钱包</span>
+                        <span>·</span>
+                        <span>{row.open_position_count} 仓位</span>
+                        <span>·</span>
+                        <span>仓位 {formatHeatmapUSD(row.total_position_amount_usd)}</span>
+                        <span>·</span>
+                        <span>均龄 {formatHeatmapAge(row.average_position_age_seconds)}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className={`rounded-full border px-2 py-1 text-[10px] ${reliable
+                            ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+                            : partial
+                                ? 'border-amber-400/20 bg-amber-400/10 text-amber-200'
+                                : 'border-zinc-500/20 bg-zinc-500/10 text-zinc-400'
+                            }`}
+                        >
+                            {heatmapSampleText(row)} · {row.rate_position_count || 0}/{row.open_position_count || 0} 仓
+                        </span>
+                        {typeof onOpenPosition === 'function' ? (
+                            <button
+                                type="button"
+                                className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onOpenPosition(row);
+                                }}
+                            >
+                                <FlashIcon className="h-2.5 w-2.5 shrink-0" />
+                                跟单
+                            </button>
+                        ) : null}
+                    </div>
+                </div>
+            </div>
+        </button>
     );
 }
 
@@ -4589,7 +4925,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         onToggleWatchWallet={handleToggleWatchWallet}
                     />
                 ) : view === 'pools' ? (
-                    <PoolListPage
+                    <SmartMoneyPoolViewPage
                         apiBaseUrl={apiBaseUrl}
                         onSelectPool={handleSelectPool}
                         onOpenPosition={onOpenPosition}

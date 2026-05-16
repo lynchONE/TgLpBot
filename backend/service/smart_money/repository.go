@@ -1510,6 +1510,280 @@ type PoolAggRow struct {
 	RangeGroups            []PoolRangeGroup `gorm:"-" json:"range_groups,omitempty"`
 }
 
+type PoolFeeHeatmapOptions struct {
+	WindowSeconds int
+	Sort          string
+	Now           time.Time
+}
+
+type PoolFeeHeatmapRow struct {
+	PoolAddress               string    `json:"pool_address"`
+	Token0Symbol              string    `json:"token0_symbol"`
+	Token1Symbol              string    `json:"token1_symbol"`
+	Token0Address             string    `json:"token0_address"`
+	Token1Address             string    `json:"token1_address"`
+	FeeTier                   *int      `json:"fee_tier"`
+	Protocol                  string    `json:"protocol"`
+	ChainID                   int       `json:"chain_id"`
+	OpenPositionCount         int       `json:"open_position_count"`
+	WalletCount               int       `json:"wallet_count"`
+	LatestEventAt             time.Time `json:"latest_event_at"`
+	TradingPair               string    `json:"trading_pair"`
+	DisplayTokenAddress       string    `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol        string    `json:"display_token_symbol,omitempty"`
+	DisplayTokenLogoURL       string    `json:"display_token_logo_url,omitempty"`
+	TotalPositionAmountUSD    float64   `json:"total_position_amount_usd"`
+	FeeUSD                    float64   `json:"fee_usd"`
+	ProjectedFeeUSD           float64   `json:"projected_fee_usd"`
+	FeeRatePer1KUSDWindow     float64   `json:"fee_rate_per_1k_usd_window"`
+	FeeRatePer1KUSDPerMinute  float64   `json:"fee_rate_per_1k_usd_per_min"`
+	AveragePositionAgeSeconds float64   `json:"average_position_age_seconds"`
+	FeePositionCount          int       `json:"fee_position_count"`
+	RatePositionCount         int       `json:"rate_position_count"`
+	MissingFeeCount           int       `json:"missing_fee_count"`
+	MissingAmountCount        int       `json:"missing_amount_count"`
+	MissingAgeCount           int       `json:"missing_age_count"`
+	SampleStatus              string    `json:"sample_status"`
+}
+
+type poolFeeHeatmapAgg struct {
+	row             PoolFeeHeatmapRow
+	wallets         map[string]struct{}
+	positionRefs    map[string]struct{}
+	feeUSDPerSec    float64
+	rateAmountUSD   float64
+	validAgeSeconds float64
+}
+
+func (r *Repository) ListPoolFeeHeatmap(ctx context.Context, opts PoolFeeHeatmapOptions) ([]PoolFeeHeatmapRow, error) {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	var positions []models.SmartMoneyActivePosition
+	err := database.DB.WithContext(ctx).
+		Where("is_active = ? AND opened_at >= ?", true, smartMoneyDisplayRecentCutoff()).
+		Find(&positions).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return buildPoolFeeHeatmapRows(positions, PoolFeeHeatmapOptions{
+		WindowSeconds: opts.WindowSeconds,
+		Sort:          opts.Sort,
+		Now:           now,
+	}), nil
+}
+
+func buildPoolFeeHeatmapRows(positions []models.SmartMoneyActivePosition, opts PoolFeeHeatmapOptions) []PoolFeeHeatmapRow {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	windowSeconds := opts.WindowSeconds
+	if windowSeconds <= 0 {
+		windowSeconds = 60
+	}
+
+	byPool := make(map[string]*poolFeeHeatmapAgg)
+	for i := range positions {
+		pos := positions[i]
+		poolAddress := strings.ToLower(strings.TrimSpace(pos.PoolAddress))
+		if poolAddress == "" {
+			continue
+		}
+
+		agg := byPool[poolAddress]
+		if agg == nil {
+			agg = &poolFeeHeatmapAgg{
+				row: PoolFeeHeatmapRow{
+					PoolAddress:         poolAddress,
+					Token0Symbol:        strings.TrimSpace(pos.Token0Symbol),
+					Token1Symbol:        strings.TrimSpace(pos.Token1Symbol),
+					Token0Address:       strings.TrimSpace(pos.Token0Address),
+					Token1Address:       strings.TrimSpace(pos.Token1Address),
+					FeeTier:             pos.FeeTier,
+					Protocol:            strings.TrimSpace(pos.Protocol),
+					ChainID:             pos.ChainID,
+					LatestEventAt:       pos.OpenedAt,
+					DisplayTokenAddress: "",
+					DisplayTokenSymbol:  "",
+				},
+				wallets:      make(map[string]struct{}),
+				positionRefs: make(map[string]struct{}),
+			}
+			byPool[poolAddress] = agg
+		}
+
+		wallet := strings.ToLower(strings.TrimSpace(pos.WalletAddress))
+		if wallet != "" {
+			agg.wallets[wallet] = struct{}{}
+		}
+		positionRef := strings.TrimSpace(pos.PositionRef)
+		if positionRef == "" {
+			positionRef = strconv.FormatUint(pos.NftTokenID, 10)
+		}
+		if positionRef != "" && positionRef != "0" {
+			agg.positionRefs[positionRef] = struct{}{}
+		}
+
+		if eventAt := latestSmartMoneyPositionEventAt(pos); eventAt.After(agg.row.LatestEventAt) {
+			agg.row.LatestEventAt = eventAt
+		}
+
+		feeUSD, feeOK := parseSmartMoneyPositiveOrZero(pos.FeeUSD)
+		if !feeOK {
+			agg.row.MissingFeeCount++
+		} else {
+			agg.row.FeeUSD += feeUSD
+			agg.row.FeePositionCount++
+		}
+
+		amountUSD, amountOK := smartMoneyPositionAmountUSD(pos)
+		if !amountOK {
+			agg.row.MissingAmountCount++
+		} else {
+			agg.row.TotalPositionAmountUSD += amountUSD
+		}
+
+		ageSeconds, ageOK := smartMoneyPositionAgeSeconds(pos.OpenedAt, now)
+		if !ageOK {
+			agg.row.MissingAgeCount++
+		}
+
+		if feeOK && amountOK && ageOK {
+			agg.feeUSDPerSec += feeUSD / ageSeconds
+			agg.rateAmountUSD += amountUSD
+			agg.validAgeSeconds += ageSeconds
+			agg.row.RatePositionCount++
+		}
+	}
+
+	rows := make([]PoolFeeHeatmapRow, 0, len(byPool))
+	for _, agg := range byPool {
+		row := agg.row
+		row.WalletCount = len(agg.wallets)
+		row.OpenPositionCount = len(agg.positionRefs)
+		if row.OpenPositionCount == 0 {
+			row.OpenPositionCount = row.FeePositionCount + row.MissingFeeCount
+		}
+		if agg.rateAmountUSD > 0 && row.RatePositionCount > 0 {
+			window := float64(windowSeconds)
+			row.ProjectedFeeUSD = agg.feeUSDPerSec * window
+			row.FeeRatePer1KUSDWindow = row.ProjectedFeeUSD / agg.rateAmountUSD * 1000
+			row.FeeRatePer1KUSDPerMinute = agg.feeUSDPerSec * 60 / agg.rateAmountUSD * 1000
+			row.AveragePositionAgeSeconds = agg.validAgeSeconds / float64(row.RatePositionCount)
+		}
+		row.SampleStatus = smartMoneyHeatmapSampleStatus(row)
+		rows = append(rows, row)
+	}
+
+	sortPoolFeeHeatmapRows(rows, opts.Sort)
+	return rows
+}
+
+func latestSmartMoneyPositionEventAt(pos models.SmartMoneyActivePosition) time.Time {
+	latest := pos.OpenedAt
+	if pos.LastAddAt != nil && pos.LastAddAt.After(latest) {
+		latest = *pos.LastAddAt
+	}
+	if pos.LastRemoveAt != nil && pos.LastRemoveAt.After(latest) {
+		latest = *pos.LastRemoveAt
+	}
+	return latest
+}
+
+func smartMoneyHeatmapSampleStatus(row PoolFeeHeatmapRow) string {
+	if row.RatePositionCount <= 0 {
+		return "insufficient"
+	}
+	if row.MissingFeeCount > 0 || row.MissingAmountCount > 0 || row.MissingAgeCount > 0 {
+		return "partial"
+	}
+	return "ok"
+}
+
+func parseSmartMoneyPositiveOrZero(value *string) (float64, bool) {
+	if value == nil {
+		return 0, false
+	}
+	raw := strings.TrimSpace(*value)
+	if raw == "" {
+		return 0, false
+	}
+	num, err := strconv.ParseFloat(raw, 64)
+	if err != nil || num < 0 {
+		return 0, false
+	}
+	return num, true
+}
+
+func smartMoneyPositionAmountUSD(pos models.SmartMoneyActivePosition) (float64, bool) {
+	if value, ok := parseSmartMoneyPositiveAmount(pos.NetTotalUSD); ok {
+		return value, true
+	}
+	return parseSmartMoneyPositiveAmount(pos.EntryTotalUSD)
+}
+
+func parseSmartMoneyPositiveAmount(value *string) (float64, bool) {
+	if value == nil {
+		return 0, false
+	}
+	raw := strings.TrimSpace(*value)
+	if raw == "" {
+		return 0, false
+	}
+	num, err := strconv.ParseFloat(raw, 64)
+	if err != nil || num <= 0 {
+		return 0, false
+	}
+	return num, true
+}
+
+func smartMoneyPositionAgeSeconds(openedAt time.Time, now time.Time) (float64, bool) {
+	if openedAt.IsZero() || now.IsZero() || openedAt.After(now) {
+		return 0, false
+	}
+	seconds := now.Sub(openedAt).Seconds()
+	if seconds <= 0 {
+		return 1, true
+	}
+	return seconds, true
+}
+
+func sortPoolFeeHeatmapRows(rows []PoolFeeHeatmapRow, sortKey string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		left := rows[i]
+		right := rows[j]
+		if sortKey == "fee" {
+			if left.FeeUSD != right.FeeUSD {
+				return left.FeeUSD > right.FeeUSD
+			}
+			if left.FeeRatePer1KUSDWindow != right.FeeRatePer1KUSDWindow {
+				return left.FeeRatePer1KUSDWindow > right.FeeRatePer1KUSDWindow
+			}
+		} else {
+			if left.FeeRatePer1KUSDWindow != right.FeeRatePer1KUSDWindow {
+				return left.FeeRatePer1KUSDWindow > right.FeeRatePer1KUSDWindow
+			}
+			if left.ProjectedFeeUSD != right.ProjectedFeeUSD {
+				return left.ProjectedFeeUSD > right.ProjectedFeeUSD
+			}
+			if left.FeeUSD != right.FeeUSD {
+				return left.FeeUSD > right.FeeUSD
+			}
+		}
+		if left.TotalPositionAmountUSD != right.TotalPositionAmountUSD {
+			return left.TotalPositionAmountUSD > right.TotalPositionAmountUSD
+		}
+		if !left.LatestEventAt.Equal(right.LatestEventAt) {
+			return left.LatestEventAt.After(right.LatestEventAt)
+		}
+		return left.PoolAddress < right.PoolAddress
+	})
+}
+
 func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, error) {
 	var rows []PoolAggRow
 	cutoff := smartMoneyDisplayRecentCutoff()

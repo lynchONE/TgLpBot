@@ -5,7 +5,7 @@ import {
     Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Activity,
 } from 'lucide-react';
 import {
-    fetchSMPools, fetchSMPoolStats, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
+    fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
@@ -277,6 +277,16 @@ const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
+const POOL_HEATMAP_WINDOWS = [
+    { key: '30s', label: '30s' },
+    { key: '1m', label: '1min' },
+    { key: '5m', label: '5min' },
+    { key: '1h', label: '1h' },
+];
+const POOL_HEATMAP_SORTS = [
+    { key: 'rate', label: '速率' },
+    { key: 'fee', label: '手续费' },
+];
 
 function getPositionSelectionKey(position) {
     const positionRef = String(position?.position_ref || '').trim();
@@ -411,6 +421,41 @@ function relativeTime(dateStr) {
     if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
     return `${Math.floor(diff / 86400)}天前`;
+}
+
+function formatHeatmapUSD(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (Math.abs(num) < 0.005) return '$0';
+    return formatUSDCompact(num);
+}
+
+function formatHeatmapRate(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (num >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
+    if (num >= 1) return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+    return `$${num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function heatmapWindowLabel(value) {
+    return POOL_HEATMAP_WINDOWS.find((item) => item.key === value)?.label || '1min';
+}
+
+function formatHeatmapAge(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return '--';
+    if (value < 60) return `${Math.max(1, Math.round(value))}秒`;
+    if (value < 3600) return `${Math.round(value / 60)}分钟`;
+    if (value < 86400) return `${Math.round(value / 3600)}小时`;
+    return `${Math.round(value / 86400)}天`;
+}
+
+function heatmapSampleText(row) {
+    const status = String(row?.sample_status || '').trim();
+    if (status === 'ok') return '样本完整';
+    if (status === 'partial') return '部分样本';
+    return '样本不足';
 }
 
 function CopyBtn({ text }) {
@@ -1177,6 +1222,281 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                 </>
             )}
             <PositionPagination page={page} total={poolsTotal} pageSize={POOL_LIST_PAGE_SIZE} onChange={setPage} />
+        </div>
+    );
+}
+
+function SmartMoneyPoolView({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePoolAddress = '', refreshInterval = 10 }) {
+    const [tab, setTab] = useState('active');
+    return (
+        <div>
+            <div className="smd-subtabs">
+                {[
+                    { key: 'active', label: '活跃池子', icon: Activity },
+                    { key: 'heatmap', label: '收益火焰图', icon: Flame },
+                ].map(({ key, label, icon: Icon }) => (
+                    <button
+                        key={key}
+                        type="button"
+                        className={`smd-subtab${tab === key ? ' active' : ''}`}
+                        onClick={() => setTab(key)}
+                    >
+                        <Icon size={14} />
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {tab === 'heatmap' ? (
+                <PoolFeeHeatmap
+                    apiBaseUrl={apiBaseUrl}
+                    onSelect={onSelect}
+                    onOpenDetail={onOpenDetail}
+                    onOpenPosition={onOpenPosition}
+                    refreshInterval={refreshInterval}
+                />
+            ) : (
+                <PoolList
+                    apiBaseUrl={apiBaseUrl}
+                    onSelect={onSelect}
+                    onOpenDetail={onOpenDetail}
+                    activePoolAddress={activePoolAddress}
+                    refreshInterval={refreshInterval}
+                    onOpenPosition={onOpenPosition}
+                />
+            )}
+        </div>
+    );
+}
+
+function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, refreshInterval = 10 }) {
+    const [rows, setRows] = useState([]);
+    const [total, setTotal] = useState(0);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [search, setSearch] = useState('');
+    const [proto, setProto] = useState('all');
+    const [sort, setSort] = useState('rate');
+    const [windowKey, setWindowKey] = useState('1m');
+    const [updatedAt, setUpdatedAt] = useState('');
+    const loadSeqRef = useRef(0);
+    const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
+    const refreshIntervalMs = useMemo(
+        () => getRefreshIntervalMs(refreshInterval),
+        [refreshInterval]
+    );
+
+    const loadHeatmap = useCallback((silent = false) => {
+        const seq = ++loadSeqRef.current;
+        if (!silent) {
+            setLoading(true);
+            setError('');
+        }
+        fetchSMPoolFeeHeatmap({
+            apiBaseUrl,
+            window: windowKey,
+            sort,
+            keyword: searchKeyword || undefined,
+            protocol: proto !== 'all' ? proto : undefined,
+            limit: 60,
+        })
+            .then((data) => {
+                if (seq !== loadSeqRef.current) return;
+                if (!Array.isArray(data?.list)) {
+                    throw new Error('收益火焰图数据格式错误');
+                }
+                setRows(data.list);
+                setTotal(Number(data.total || data.list.length || 0));
+                setUpdatedAt(data.updated_at || '');
+                setError('');
+            })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                setRows([]);
+                setTotal(0);
+                setError(String(err?.message || err || '加载收益火焰图失败'));
+            })
+            .finally(() => {
+                if (!silent && seq === loadSeqRef.current) setLoading(false);
+            });
+    }, [apiBaseUrl, proto, searchKeyword, sort, windowKey]);
+
+    useEffect(() => {
+        loadHeatmap();
+    }, [loadHeatmap]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            loadHeatmap(true);
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [loadHeatmap, refreshIntervalMs]);
+
+    const maxIntensity = useMemo(() => {
+        const field = sort === 'fee' ? 'fee_usd' : 'fee_rate_per_1k_usd_window';
+        return Math.max(...rows.map((row) => Number(row?.[field] || 0)), 0);
+    }, [rows, sort]);
+
+    return (
+        <div>
+            <div className="smd-heatmap-hero">
+                <div>
+                    <div className="smd-heatmap-kicker">
+                        <Flame size={13} />
+                        实时机会
+                    </div>
+                    <div className="smd-heatmap-title">收益火焰图</div>
+                    <div className="smd-heatmap-copy">按聪明钱仓位开仓至今的平均手续费速度折算，快速比较池子的资金效率。</div>
+                </div>
+                <div className="smd-heatmap-updated">{updatedAt ? `更新 ${relativeTime(updatedAt)}` : ''}</div>
+            </div>
+
+            <div className="smd-search-row">
+                <div className="smd-search-input">
+                    <Search size={14} />
+                    <input
+                        placeholder="搜索池子..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                    />
+                </div>
+                <div className="smd-filter-group smd-filter-group--wrap">
+                    {POOL_HEATMAP_SORTS.map((item) => (
+                        <button
+                            key={item.key}
+                            type="button"
+                            className={`smd-filter-btn${sort === item.key ? ' active' : ''}`}
+                            onClick={() => setSort(item.key)}
+                        >
+                            {item.key === 'rate' ? <Activity size={13} /> : <DollarSign size={13} />}
+                            {item.label}
+                        </button>
+                    ))}
+                    {POOL_HEATMAP_WINDOWS.map((item) => (
+                        <button
+                            key={item.key}
+                            type="button"
+                            className={`smd-filter-btn${windowKey === item.key ? ' active' : ''}`}
+                            onClick={() => setWindowKey(item.key)}
+                        >
+                            <Clock size={12} />
+                            {item.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <div className="smd-filter-group smd-heatmap-protos">
+                {['all', 'pancake_v3', 'uniswap_v3', 'uniswap_v4'].map((p) => {
+                    const info = PROTOCOL_MAP[p];
+                    return (
+                        <button
+                            key={p}
+                            className={`smd-filter-btn${proto === p ? ' active' : ''}`}
+                            onClick={() => setProto(p)}
+                        >
+                            {info && <img src={info.icon} alt="" className="smd-proto-img" />}
+                            {p === 'all' ? '全部' : info?.version || p}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {loading ? <div className="smd-loading">加载中...</div> : error ? (
+                <div className="smd-empty smd-empty-error">{error}</div>
+            ) : rows.length === 0 ? (
+                <div className="smd-empty">暂无可计算收益的池子</div>
+            ) : (
+                <>
+                    <div className="smd-pool-page-meta">
+                        当前显示 {rows.length} 个 / 共 {total} 个池子 · {sort === 'rate' ? `按 ${heatmapWindowLabel(windowKey)} 速率` : '按手续费总额'}
+                    </div>
+                    <div className="smd-heatmap-grid">
+                        {rows.map((row, index) => (
+                            <PoolFeeHeatmapCard
+                                key={row.pool_address}
+                                row={row}
+                                rank={index + 1}
+                                sort={sort}
+                                windowKey={windowKey}
+                                maxIntensity={maxIntensity}
+                                onSelect={onSelect}
+                                onOpenDetail={onOpenDetail}
+                                onOpenPosition={onOpenPosition}
+                            />
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
+function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect, onOpenDetail, onOpenPosition }) {
+    const metricValue = sort === 'fee' ? Number(row?.fee_usd || 0) : Number(row?.fee_rate_per_1k_usd_window || 0);
+    const intensity = maxIntensity > 0 ? Math.max(0.08, Math.min(1, metricValue / maxIntensity)) : 0.08;
+    const reliable = String(row?.sample_status || '') === 'ok';
+    const partial = String(row?.sample_status || '') === 'partial';
+    return (
+        <div className="smd-heatmap-card" onClick={() => onSelect?.(row)}>
+            <div className="smd-heatmap-card-rail" style={{ opacity: 0.2 + intensity * 0.75 }} />
+            <div className="smd-heatmap-card-glow" style={{ opacity: intensity * 0.75 }} />
+            <div className="smd-heatmap-card-head">
+                <span className="smd-heatmap-rank">#{rank}</span>
+                <PairAvatar item={row} size="sm" />
+                <span className="smd-pool-card-pair">{getPairLabel(row)}</span>
+                <div className="smd-pool-card-badges">
+                    <ProtocolBadge protocol={row.protocol} />
+                    {row.fee_tier && <Badge cls="fee">{formatFeeTier(row.fee_tier)}</Badge>}
+                </div>
+            </div>
+            <div className="smd-heatmap-metrics">
+                <div className="smd-heatmap-metric">
+                    <span>总手续费</span>
+                    <strong>{formatHeatmapUSD(row.fee_usd)}</strong>
+                </div>
+                <div className="smd-heatmap-metric accent">
+                    <span>每1000U/{heatmapWindowLabel(windowKey)}</span>
+                    <strong>{formatHeatmapRate(row.fee_rate_per_1k_usd_window)}</strong>
+                </div>
+            </div>
+            <div className="smd-heatmap-bar">
+                <span style={{ width: `${Math.max(6, intensity * 100)}%` }} />
+            </div>
+            <div className="smd-heatmap-meta">
+                <span>{row.wallet_count} 钱包</span>
+                <span>{row.open_position_count} 仓位</span>
+                <span>仓位 {formatHeatmapUSD(row.total_position_amount_usd)}</span>
+                <span>均龄 {formatHeatmapAge(row.average_position_age_seconds)}</span>
+            </div>
+            <div className="smd-heatmap-foot">
+                <span className={`smd-heatmap-sample ${reliable ? 'ok' : partial ? 'partial' : 'bad'}`}>
+                    {heatmapSampleText(row)} · {row.rate_position_count || 0}/{row.open_position_count || 0} 仓
+                </span>
+                <div className="smd-heatmap-actions">
+                    {typeof onOpenPosition === 'function' ? (
+                        <button
+                            type="button"
+                            className="pool-buy-btn smd-follow-open-btn"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenPosition(row);
+                            }}
+                        >
+                            <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
+                            跟单
+                        </button>
+                    ) : null}
+                    <button
+                        type="button"
+                        className="smd-link smd-pool-card-detail-btn"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenDetail?.(row);
+                        }}
+                    >
+                        详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
@@ -2599,7 +2919,7 @@ export default function SmartMoneyDashboard({
                         onToggleWatchWallet={onToggleWatchWallet}
                     />
                 ) : view === 'pools' ? (
-                    <PoolList
+                    <SmartMoneyPoolView
                         apiBaseUrl={apiBaseUrl}
                         onSelect={handlePoolCardSelect}
                         onOpenDetail={handleOpenPoolDetail}

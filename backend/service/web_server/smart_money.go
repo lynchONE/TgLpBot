@@ -80,6 +80,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/wallet_avatar", s.handleSMWalletAvatar)
 	mux.HandleFunc("/api/sm/contracts", s.handleSMContracts)
 	mux.HandleFunc("/api/sm/pools", s.handleSMPools)
+	mux.HandleFunc("/api/sm/pool_fee_heatmap", s.handleSMPoolFeeHeatmap)
 	mux.HandleFunc("/api/sm/positions", s.handleSMPositions)
 	mux.HandleFunc("/api/sm/position_detail", s.handleSMPositionDetail)
 	mux.HandleFunc("/api/sm/events", s.handleSMEvents)
@@ -113,6 +114,8 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMContracts(w, r)
 		case "pools":
 			s.handleSMPools(w, r)
+		case "pool_fee_heatmap":
+			s.handleSMPoolFeeHeatmap(w, r)
 		case "positions":
 			s.handleSMPositions(w, r)
 		case "position_detail":
@@ -140,7 +143,7 @@ func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
 
 func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
-	case "wallets", "contracts", "pools", "positions", "position_detail", "events", "stats":
+	case "wallets", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
 	case "auto_follow":
 		return "/api/smart_money_auto_follow", true
@@ -741,6 +744,128 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		"total": total,
 		"list":  pagedPools,
 	})
+}
+
+func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	repo := smService.Repo()
+	ctx := r.Context()
+	repairSmartMoneyPositions(ctx, repo)
+
+	windowKey, windowSeconds, ok := parseSmartMoneyHeatmapWindow(r.URL.Query().Get("window"))
+	if !ok {
+		jsonError(w, "invalid window", http.StatusBadRequest)
+		return
+	}
+	sortKey := parseSmartMoneyHeatmapSort(r.URL.Query().Get("sort"))
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
+	protocol := strings.TrimSpace(r.URL.Query().Get("protocol"))
+
+	rows, err := repo.ListPoolFeeHeatmap(ctx, sm.PoolFeeHeatmapOptions{
+		WindowSeconds: windowSeconds,
+		Sort:          sortKey,
+		Now:           time.Now(),
+	})
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for i := range rows {
+		rows[i].TradingPair = buildSmartMoneyTradingPair(rows[i].Token0Symbol, rows[i].Token1Symbol)
+		rows[i].DisplayTokenAddress, rows[i].DisplayTokenSymbol = smartMoneyPickDisplayToken(
+			rows[i].Token0Address,
+			rows[i].Token1Address,
+			rows[i].Token0Symbol,
+			rows[i].Token1Symbol,
+		)
+	}
+
+	filtered := make([]sm.PoolFeeHeatmapRow, 0, len(rows))
+	for _, row := range rows {
+		if protocol != "" && protocol != "all" && row.Protocol != protocol {
+			continue
+		}
+		if keyword != "" {
+			pairText := strings.ToLower(strings.TrimSpace(row.TradingPair))
+			poolAddrText := strings.ToLower(strings.TrimSpace(row.PoolAddress))
+			token0Text := strings.ToLower(strings.TrimSpace(row.Token0Address))
+			token1Text := strings.ToLower(strings.TrimSpace(row.Token1Address))
+			if !strings.Contains(pairText, keyword) &&
+				!strings.Contains(poolAddrText, keyword) &&
+				!strings.Contains(token0Text, keyword) &&
+				!strings.Contains(token1Text, keyword) {
+				continue
+			}
+		}
+		filtered = append(filtered, row)
+	}
+
+	total := len(filtered)
+	if limit < len(filtered) {
+		filtered = filtered[:limit]
+	}
+
+	addressesByChain := make(map[string][]string)
+	for i := range filtered {
+		if filtered[i].DisplayTokenAddress != "" {
+			chain := smartMoneyChainSlug(filtered[i].ChainID)
+			addressesByChain[chain] = append(addressesByChain[chain], filtered[i].DisplayTokenAddress)
+		}
+	}
+	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
+	for i := range filtered {
+		applySmartMoneyDisplayToken(
+			smartMoneyChainSlug(filtered[i].ChainID),
+			&filtered[i].DisplayTokenAddress,
+			&filtered[i].DisplayTokenSymbol,
+			&filtered[i].DisplayTokenLogoURL,
+			metaByChain,
+		)
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"window":         windowKey,
+		"window_seconds": windowSeconds,
+		"sort":           sortKey,
+		"total":          total,
+		"list":           filtered,
+		"updated_at":     time.Now(),
+	})
+}
+
+func parseSmartMoneyHeatmapWindow(raw string) (string, int, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "1m":
+		return "1m", 60, true
+	case "30s":
+		return "30s", 30, true
+	case "5m":
+		return "5m", 300, true
+	case "1h":
+		return "1h", 3600, true
+	default:
+		return "", 0, false
+	}
+}
+
+func parseSmartMoneyHeatmapSort(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "fee":
+		return "fee"
+	default:
+		return "rate"
+	}
 }
 
 // --- Positions ---

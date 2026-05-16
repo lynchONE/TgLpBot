@@ -201,6 +201,16 @@ export async function fetchSMPoolStats({ apiBaseUrl, poolAddress, signal }) {
     return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
 }
 
+export async function fetchSMPoolFeeHeatmap({ apiBaseUrl, window = '1m', sort = 'rate', keyword, protocol, limit = 30, signal }) {
+    const params = new URLSearchParams();
+    params.set('window', String(window));
+    params.set('sort', String(sort));
+    params.set('limit', String(limit));
+    if (keyword) params.set('keyword', keyword);
+    if (protocol) params.set('protocol', protocol);
+    return smRequest(buildSMUrl(apiBaseUrl, 'pool_fee_heatmap', params.toString()), { signal });
+}
+
 export async function fetchSMPositions({ apiBaseUrl, status = 'open', wallet, pool, protocol, page = 1, size = 20, orderBy, signal }) {
     const params = new URLSearchParams();
     params.set('status', status);
