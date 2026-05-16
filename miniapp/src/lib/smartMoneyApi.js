@@ -183,12 +183,14 @@ export async function deleteSMContract({ apiBaseUrl, address, signal }) {
 }
 
 // Pools
-export async function fetchSMPools({ apiBaseUrl, page = 1, size = 10, keyword, protocol, signal }) {
+export async function fetchSMPools({ apiBaseUrl, page = 1, size = 10, keyword, protocol, minSmartMoneyUsd, maxFeeRate, signal }) {
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('size', String(size));
     if (keyword) params.set('keyword', keyword);
     if (protocol) params.set('protocol', protocol);
+    if (Number.isFinite(minSmartMoneyUsd)) params.set('min_smart_money_usd', String(minSmartMoneyUsd));
+    if (Number.isFinite(maxFeeRate)) params.set('max_fee_rate', String(maxFeeRate));
     return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
 }
 

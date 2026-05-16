@@ -1049,12 +1049,6 @@ function writeStoredSmartMoneyPoolFilter(value) {
     }
 }
 
-function getPoolFeePercent(pool) {
-    const feeTier = Number(pool?.fee_tier);
-    if (!Number.isFinite(feeTier) || feeTier <= 0) return NaN;
-    return feeTier / 10000;
-}
-
 function formatRangePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '—';
@@ -1765,6 +1759,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     const [pools, setPools] = useState([]);
     const [poolsTotal, setPoolsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
     const [search, setSearch] = useState('');
     const [protocolFilter, setProtocolFilter] = useState('all');
     const [page, setPage] = useState(1);
@@ -1778,6 +1773,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
         const seq = ++loadSeqRef.current;
         if (!silent) {
             setLoading(true);
+            setError('');
         }
         fetchSMPools({
             apiBaseUrl,
@@ -1785,26 +1781,39 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
             size: POOL_LIST_PAGE_SIZE,
             keyword: searchKeyword || undefined,
             protocol: protocolFilter !== 'all' ? protocolFilter : undefined,
+            minSmartMoneyUsd: poolFilter.minSmartMoneyUsd,
+            maxFeeRate: poolFilter.maxFeeRate,
         })
             .then((d) => {
                 if (seq !== loadSeqRef.current) return;
-                const total = Number(d?.total || 0);
-                const list = Array.isArray(d?.list) ? d.list : [];
+                if (!Array.isArray(d?.list) || !Number.isFinite(Number(d?.total))) {
+                    throw new Error('池子数据格式错误');
+                }
+                const total = Number(d.total);
+                const list = d.list;
                 const totalPages = Math.max(1, Math.ceil(total / POOL_LIST_PAGE_SIZE));
                 if (page > totalPages) {
+                    setPools([]);
+                    setPoolsTotal(total);
                     setPage(totalPages);
                     return;
                 }
                 setPools(list);
                 setPoolsTotal(total);
+                setError('');
             })
-            .catch(() => { })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                setPools([]);
+                setPoolsTotal(0);
+                setError(String(err?.message || err || '加载池子失败'));
+            })
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) {
                     setLoading(false);
                 }
             });
-    }, [apiBaseUrl, page, protocolFilter, searchKeyword]);
+    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword]);
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
@@ -1815,7 +1824,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     }, [load, pollIntervalSec]);
     useEffect(() => {
         setPage(1);
-    }, [protocolFilter, searchKeyword]);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword]);
 
     const poolFilterActive = useMemo(
         () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
@@ -1846,20 +1855,6 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
         setFilterOpen(false);
         setPage(1);
     }, []);
-    const filteredPools = useMemo(() => {
-        let list = pools;
-        if (Number.isFinite(poolFilter.minSmartMoneyUsd)) {
-            list = list.filter((pool) => Number(pool?.total_position_amount_usd || 0) >= poolFilter.minSmartMoneyUsd);
-        }
-        if (Number.isFinite(poolFilter.maxFeeRate)) {
-            list = list.filter((pool) => {
-                const feePercent = getPoolFeePercent(pool);
-                return Number.isFinite(feePercent) && feePercent <= poolFilter.maxFeeRate;
-            });
-        }
-        return list;
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, pools]);
-
     const hasFilter = Boolean(searchKeyword) || protocolFilter !== 'all' || poolFilterActive;
 
     return (
@@ -1871,7 +1866,10 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                         className={getInputClass(brand).replace('px-3', 'pl-9 pr-3')}
                         placeholder="搜索池子..."
                         value={search}
-                        onChange={e => setSearch(e.target.value)}
+                        onChange={(e) => {
+                            setSearch(e.target.value);
+                            setPage(1);
+                        }}
                     />
                 </div>
             </div>
@@ -1883,7 +1881,10 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                             key={p}
                             type="button"
                             className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 ${getFilterButtonClass(protocolFilter === p, brand)}`}
-                            onClick={() => setProtocolFilter(p)}
+                            onClick={() => {
+                                setProtocolFilter(p);
+                                setPage(1);
+                            }}
                         >
                             {info && <img src={info.icon} alt="" className="h-3.5 w-3.5 rounded-full" />}
                             {p === 'all' ? '全部' : info?.version || p}
@@ -1905,7 +1906,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                     <div className="mb-3 flex items-start justify-between gap-3">
                         <div>
                             <div className="text-sm font-semibold text-zinc-100">池子筛选</div>
-                            <div className="mt-0.5 text-[11px] text-zinc-500">按当前页聪明钱仓位和池子费率过滤</div>
+                            <div className="mt-0.5 text-[11px] text-zinc-500">按聪明钱仓位和池子费率过滤全部池子</div>
                         </div>
                         <button
                             type="button"
@@ -1951,13 +1952,20 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
 
             {loading ? (
                 <div className="py-8 text-center text-zinc-500">加载中...</div>
-            ) : filteredPools.length === 0 ? (
+            ) : error ? (
+                <div className="rounded-2xl border border-red-400/15 bg-red-500/5 px-4 py-8 text-center text-sm text-red-200">
+                    {error}
+                </div>
+            ) : pools.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
                     {hasFilter ? '暂无符合条件的池子' : '暂无活跃仓位的池子'}
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {filteredPools.map(pool => (
+                    <div className="px-1 text-[10px] text-zinc-500">
+                        第 {page} 页 · 当前显示 {pools.length} 个 / 共 {poolsTotal} 个池子
+                    </div>
+                    {pools.map(pool => (
                         <button
                             key={pool.pool_address}
                             type="button"

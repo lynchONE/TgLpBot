@@ -186,12 +186,6 @@ function writeStoredSmartMoneyPoolFilter(value) {
     }
 }
 
-function getPoolFeePercent(pool) {
-    const feeTier = Number(pool?.fee_tier);
-    if (!Number.isFinite(feeTier) || feeTier <= 0) return NaN;
-    return feeTier / 10000;
-}
-
 function formatRangePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '--';
@@ -280,6 +274,7 @@ function getPositionAmountSummary(position, preview) {
 
 const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
+const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
 
@@ -899,12 +894,17 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
 
 function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePoolAddress = '', refreshInterval = 10 }) {
     const [pools, setPools] = useState([]);
+    const [poolsTotal, setPoolsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
     const [search, setSearch] = useState('');
     const [proto, setProto] = useState('all');
+    const [page, setPage] = useState(1);
     const [filterOpen, setFilterOpen] = useState(false);
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
     const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
+    const loadSeqRef = useRef(0);
+    const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const normalizedActivePoolAddress = useMemo(
         () => normalizePoolSelectionId(activePoolAddress),
         [activePoolAddress]
@@ -915,14 +915,48 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     );
 
     const loadPools = useCallback((silent = false) => {
-        if (!silent) setLoading(true);
-        return fetchSMPools({ apiBaseUrl })
-            .then((d) => setPools(d?.list || []))
-            .catch(() => { })
+        const seq = ++loadSeqRef.current;
+        if (!silent) {
+            setLoading(true);
+            setError('');
+        }
+        return fetchSMPools({
+            apiBaseUrl,
+            page,
+            size: POOL_LIST_PAGE_SIZE,
+            keyword: searchKeyword || undefined,
+            protocol: proto !== 'all' ? proto : undefined,
+            minSmartMoneyUsd: poolFilter.minSmartMoneyUsd,
+            maxFeeRate: poolFilter.maxFeeRate,
+        })
+            .then((d) => {
+                if (seq !== loadSeqRef.current) return;
+                if (!Array.isArray(d?.list) || !Number.isFinite(Number(d?.total))) {
+                    throw new Error('池子数据格式错误');
+                }
+                const total = Number(d.total);
+                const list = d.list;
+                const totalPages = Math.max(1, Math.ceil(total / POOL_LIST_PAGE_SIZE));
+                if (page > totalPages) {
+                    setPools([]);
+                    setPoolsTotal(total);
+                    setPage(totalPages);
+                    return;
+                }
+                setPools(list);
+                setPoolsTotal(total);
+                setError('');
+            })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                setPools([]);
+                setPoolsTotal(0);
+                setError(String(err?.message || err || '加载池子失败'));
+            })
             .finally(() => {
-                if (!silent) setLoading(false);
+                if (!silent && seq === loadSeqRef.current) setLoading(false);
             });
-    }, [apiBaseUrl]);
+    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword]);
 
     useEffect(() => {
         loadPools();
@@ -935,10 +969,15 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
         return () => clearInterval(timer);
     }, [loadPools, refreshIntervalMs]);
 
+    useEffect(() => {
+        setPage(1);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword]);
+
     const poolFilterActive = useMemo(
         () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
         [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]
     );
+    const hasFilter = Boolean(searchKeyword) || proto !== 'all' || poolFilterActive;
     const openPoolFilter = useCallback(() => {
         setPoolFilterDraft({
             minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
@@ -954,6 +993,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
         setPoolFilter(next);
         writeStoredSmartMoneyPoolFilter(next);
         setFilterOpen(false);
+        setPage(1);
     }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minSmartMoneyUsd]);
     const clearPoolFilter = useCallback(() => {
         const next = { minSmartMoneyUsd: null, maxFeeRate: null };
@@ -961,39 +1001,35 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
         writeStoredSmartMoneyPoolFilter(next);
         setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '' });
         setFilterOpen(false);
+        setPage(1);
     }, []);
-
-    const filtered = useMemo(() => {
-        let l = pools;
-        if (search) {
-            const q = search.toLowerCase();
-            l = l.filter((p) => getPairLabel(p).toLowerCase().includes(q) || getPoolIdentifier(p).toLowerCase().includes(q));
-        }
-        if (proto !== 'all') l = l.filter(p => p.protocol === proto);
-        if (Number.isFinite(poolFilter.minSmartMoneyUsd)) {
-            l = l.filter(p => Number(p?.total_position_amount_usd || 0) >= poolFilter.minSmartMoneyUsd);
-        }
-        if (Number.isFinite(poolFilter.maxFeeRate)) {
-            l = l.filter(p => {
-                const feePercent = getPoolFeePercent(p);
-                return Number.isFinite(feePercent) && feePercent <= poolFilter.maxFeeRate;
-            });
-        }
-        return l;
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, pools, search, proto]);
 
     return (
         <div>
             <div className="smd-search-row">
                 <div className="smd-search-input">
                     <Search size={14} />
-                    <input placeholder="搜索池子..." value={search} onChange={e => setSearch(e.target.value)} />
+                    <input
+                        placeholder="搜索池子..."
+                        value={search}
+                        onChange={(e) => {
+                            setSearch(e.target.value);
+                            setPage(1);
+                        }}
+                    />
                 </div>
                 <div className="smd-filter-group">
                     {['all', 'pancake_v3', 'uniswap_v3', 'uniswap_v4'].map(p => {
                         const info = PROTOCOL_MAP[p];
                         return (
-                            <button key={p} className={`smd-filter-btn${proto === p ? ' active' : ''}`} onClick={() => setProto(p)}>
+                            <button
+                                key={p}
+                                className={`smd-filter-btn${proto === p ? ' active' : ''}`}
+                                onClick={() => {
+                                    setProto(p);
+                                    setPage(1);
+                                }}
+                            >
                                 {info && <img src={info.icon} alt="" className="smd-proto-img" />}
                                 {p === 'all' ? '全部' : info?.version || p}
                             </button>
@@ -1015,7 +1051,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                 <div className="kline-filter-popover-head">
                                     <div>
                                         <div className="kline-filter-popover-title">池子筛选</div>
-                                        <div className="kline-filter-popover-sub">按当前聪明钱仓位和池子费率过滤</div>
+                                        <div className="kline-filter-popover-sub">按聪明钱仓位和池子费率过滤全部池子</div>
                                     </div>
                                     <button
                                         type="button"
@@ -1060,79 +1096,87 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                     </div>
                 </div>
             </div>
-            {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
-                <div className="smd-empty">{poolFilterActive ? '当前筛选条件下暂无池子' : '暂无活跃仓位的池子'}</div>
+            {loading ? <div className="smd-loading">加载中...</div> : error ? (
+                <div className="smd-empty smd-empty-error">{error}</div>
+            ) : pools.length === 0 ? (
+                <div className="smd-empty">{hasFilter ? '当前筛选条件下暂无池子' : '暂无活跃仓位的池子'}</div>
             ) : (
-                <div className="smd-pool-cards">
-                    {filtered.map((p) => {
-                        const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
-                        return (
-                            <div
-                                key={p.pool_address}
-                                className={`smd-pool-card${isActive ? ' active' : ''}`}
-                                onClick={() => {
-                                    if (typeof onSelect === 'function') {
-                                        onSelect(p);
-                                        return;
-                                    }
-                                    onOpenDetail?.(p);
-                                }}
-                            >
-                                <div className="smd-pool-card-head">
-                                    <PairAvatar item={p} size="sm" />
-                                    <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
-                                    <div className="smd-pool-card-badges">
-                                        <ProtocolBadge protocol={p.protocol} />
-                                        {p.fee_tier && <Badge cls="fee">{formatFeeTier(p.fee_tier)}</Badge>}
+                <>
+                    <div className="smd-pool-page-meta">
+                        第 {page} 页 · 当前显示 {pools.length} 个 / 共 {poolsTotal} 个池子
+                    </div>
+                    <div className="smd-pool-cards">
+                        {pools.map((p) => {
+                            const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
+                            return (
+                                <div
+                                    key={p.pool_address}
+                                    className={`smd-pool-card${isActive ? ' active' : ''}`}
+                                    onClick={() => {
+                                        if (typeof onSelect === 'function') {
+                                            onSelect(p);
+                                            return;
+                                        }
+                                        onOpenDetail?.(p);
+                                    }}
+                                >
+                                    <div className="smd-pool-card-head">
+                                        <PairAvatar item={p} size="sm" />
+                                        <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
+                                        <div className="smd-pool-card-badges">
+                                            <ProtocolBadge protocol={p.protocol} />
+                                            {p.fee_tier && <Badge cls="fee">{formatFeeTier(p.fee_tier)}</Badge>}
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="smd-pool-card-meta">
-                                    <CompactIdentifier value={getPoolIdentifier(p)} />
-                                    {p.total_position_amount_usd > 0 && (
-                                        <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
-                                    )}
-                                </div>
-                                <div className="smd-pool-card-range-row">
-                                    <PoolCardRangeSummary pool={p} />
-                                    {typeof onOpenPosition === 'function' ? (
+                                    <div className="smd-pool-card-meta">
+                                        <CompactIdentifier value={getPoolIdentifier(p)} />
+                                        {p.total_position_amount_usd > 0 && (
+                                            <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
+                                        )}
+                                    </div>
+                                    <div className="smd-pool-card-range-row">
+                                        <PoolCardRangeSummary pool={p} />
+                                        {typeof onOpenPosition === 'function' ? (
+                                            <button
+                                                type="button"
+                                                className="pool-buy-btn smd-follow-open-btn"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onOpenPosition(p);
+                                                }}
+                                            >
+                                                <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
+                                                跟单
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                    <div className="smd-pool-card-foot">
+                                        <span>{p.wallet_count} 钱包</span>
+                                        <span className="smd-dot-sep">·</span>
+                                        <span>{p.open_position_count} 仓位</span>
+                                        <span className="smd-pool-card-time">
+                                            <span className={`smd-status-dot ${p.latest_event_at && (Date.now() - new Date(p.latest_event_at).getTime()) < 120000 ? 'green' : 'muted'}`}>
+                                                {relativeTime(p.latest_event_at)}
+                                            </span>
+                                        </span>
                                         <button
                                             type="button"
-                                            className="pool-buy-btn smd-follow-open-btn"
+                                            className="smd-link smd-pool-card-detail-btn"
                                             onClick={(event) => {
                                                 event.stopPropagation();
-                                                onOpenPosition(p);
+                                                onOpenDetail?.(p);
                                             }}
                                         >
-                                            <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                                            跟单
+                                            详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                                         </button>
-                                    ) : null}
+                                    </div>
                                 </div>
-                                <div className="smd-pool-card-foot">
-                                    <span>{p.wallet_count} 钱包</span>
-                                    <span className="smd-dot-sep">·</span>
-                                    <span>{p.open_position_count} 仓位</span>
-                                    <span className="smd-pool-card-time">
-                                        <span className={`smd-status-dot ${p.latest_event_at && (Date.now() - new Date(p.latest_event_at).getTime()) < 120000 ? 'green' : 'muted'}`}>
-                                            {relativeTime(p.latest_event_at)}
-                                        </span>
-                                    </span>
-                                    <button
-                                        type="button"
-                                        className="smd-link smd-pool-card-detail-btn"
-                                        onClick={(event) => {
-                                            event.stopPropagation();
-                                            onOpenDetail?.(p);
-                                        }}
-                                    >
-                                        详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                                    </button>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                            );
+                        })}
+                    </div>
+                </>
             )}
+            <PositionPagination page={page} total={poolsTotal} pageSize={POOL_LIST_PAGE_SIZE} onChange={setPage} />
         </div>
     );
 }

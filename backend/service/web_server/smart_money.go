@@ -640,6 +640,28 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 	}
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 	protocol := strings.TrimSpace(r.URL.Query().Get("protocol"))
+	var minSmartMoneyUSD float64
+	hasMinSmartMoneyUSD := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("min_smart_money_usd")); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			jsonError(w, "invalid min_smart_money_usd", http.StatusBadRequest)
+			return
+		}
+		minSmartMoneyUSD = value
+		hasMinSmartMoneyUSD = true
+	}
+	var maxFeeRate float64
+	hasMaxFeeRate := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_fee_rate")); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			jsonError(w, "invalid max_fee_rate", http.StatusBadRequest)
+			return
+		}
+		maxFeeRate = value
+		hasMaxFeeRate = true
+	}
 
 	pools, err := repo.ListPoolsWithPositions(ctx)
 	if err != nil {
@@ -665,6 +687,18 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			pairText := strings.ToLower(strings.TrimSpace(pool.TradingPair))
 			poolAddrText := strings.ToLower(strings.TrimSpace(pool.PoolAddress))
 			if !strings.Contains(pairText, keyword) && !strings.Contains(poolAddrText, keyword) {
+				continue
+			}
+		}
+		if hasMinSmartMoneyUSD && pool.TotalPositionAmountUSD < minSmartMoneyUSD {
+			continue
+		}
+		if hasMaxFeeRate {
+			if pool.FeeTier == nil {
+				continue
+			}
+			feePercent := float64(*pool.FeeTier) / 10000
+			if feePercent > maxFeeRate {
 				continue
 			}
 		}

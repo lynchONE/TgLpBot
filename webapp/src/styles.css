@@ -6699,6 +6699,9 @@ body {
   color: var(--text-muted);
   font-size: 13px;
 }
+.smd-empty-error {
+  color: #fca5a5;
+}
 .smd-loading {
   text-align: center;
   padding: 32px 0;
@@ -7529,6 +7532,12 @@ body {
 }
 
 /* -- Pool cards -- */
+.smd-pool-page-meta {
+  margin: 0 0 8px;
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
 .smd-pool-cards {
   display: flex;
   flex-direction: column;
