@@ -1561,19 +1561,46 @@ func (r *Repository) ListPoolFeeHeatmap(ctx context.Context, opts PoolFeeHeatmap
 		now = time.Now()
 	}
 
-	var positions []models.SmartMoneyActivePosition
-	err := database.DB.WithContext(ctx).
-		Where("is_active = ? AND opened_at >= ?", true, smartMoneyDisplayRecentCutoff()).
-		Find(&positions).Error
+	positions, err := r.ListActivePositionsForFeeHeatmap(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildPoolFeeHeatmapRows(positions, PoolFeeHeatmapOptions{
+	return BuildPoolFeeHeatmapRows(positions, PoolFeeHeatmapOptions{
 		WindowSeconds: opts.WindowSeconds,
 		Sort:          opts.Sort,
 		Now:           now,
 	}), nil
+}
+
+func (r *Repository) ListActivePositionsForFeeHeatmap(ctx context.Context) ([]models.SmartMoneyActivePosition, error) {
+	var positions []models.SmartMoneyActivePosition
+	err := database.DB.WithContext(ctx).
+		Where("is_active = ? AND opened_at >= ?", true, smartMoneyDisplayRecentCutoff()).
+		Order("opened_at ASC, id ASC").
+		Find(&positions).Error
+	if err != nil {
+		return nil, err
+	}
+	return positions, nil
+}
+
+func (r *Repository) UpdateActivePositionFeeSnapshot(ctx context.Context, id uint, feeUSD *float64, status string, now time.Time) error {
+	updates := map[string]interface{}{
+		"fee_status":     strings.TrimSpace(status),
+		"fee_updated_at": &now,
+	}
+	if feeUSD != nil {
+		updates["fee_usd"] = strconv.FormatFloat(*feeUSD, 'f', 4, 64)
+	}
+	return database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyActivePosition{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+}
+
+func BuildPoolFeeHeatmapRows(positions []models.SmartMoneyActivePosition, opts PoolFeeHeatmapOptions) []PoolFeeHeatmapRow {
+	return buildPoolFeeHeatmapRows(positions, opts)
 }
 
 func buildPoolFeeHeatmapRows(positions []models.SmartMoneyActivePosition, opts PoolFeeHeatmapOptions) []PoolFeeHeatmapRow {
@@ -1633,6 +1660,9 @@ func buildPoolFeeHeatmapRows(positions []models.SmartMoneyActivePosition, opts P
 		}
 
 		feeUSD, feeOK := parseSmartMoneyPositiveOrZero(pos.FeeUSD)
+		if feeOK && !smartMoneyHeatmapFeeSnapshotUsable(pos.FeeStatus) {
+			feeOK = false
+		}
 		if !feeOK {
 			agg.row.MissingFeeCount++
 		} else {
@@ -1702,6 +1732,15 @@ func smartMoneyHeatmapSampleStatus(row PoolFeeHeatmapRow) string {
 		return "partial"
 	}
 	return "ok"
+}
+
+func smartMoneyHeatmapFeeSnapshotUsable(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "ok":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseSmartMoneyPositiveOrZero(value *string) (float64, bool) {

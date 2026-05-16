@@ -201,11 +201,12 @@ export async function fetchSMPoolStats({ apiBaseUrl, poolAddress, signal }) {
     return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
 }
 
-export async function fetchSMPoolFeeHeatmap({ apiBaseUrl, window = '1m', sort = 'rate', keyword, protocol, limit = 30, signal }) {
+export async function fetchSMPoolFeeHeatmap({ apiBaseUrl, window = '1m', sort = 'rate', keyword, protocol, page = 1, size = 10, signal }) {
     const params = new URLSearchParams();
     params.set('window', String(window));
     params.set('sort', String(sort));
-    params.set('limit', String(limit));
+    params.set('page', String(page));
+    params.set('size', String(size));
     if (keyword) params.set('keyword', keyword);
     if (protocol) params.set('protocol', protocol);
     return smRequest(buildSMUrl(apiBaseUrl, 'pool_fee_heatmap', params.toString()), { signal });

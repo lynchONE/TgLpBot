@@ -277,6 +277,7 @@ const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
+const POOL_HEATMAP_PAGE_SIZE = 10;
 const POOL_HEATMAP_WINDOWS = [
     { key: '30s', label: '30s' },
     { key: '1m', label: '1min' },
@@ -1271,6 +1272,7 @@ function SmartMoneyPoolView({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition
 function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, refreshInterval = 10 }) {
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [search, setSearch] = useState('');
@@ -1297,15 +1299,24 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
             sort,
             keyword: searchKeyword || undefined,
             protocol: proto !== 'all' ? proto : undefined,
-            limit: 60,
+            page,
+            size: POOL_HEATMAP_PAGE_SIZE,
         })
             .then((data) => {
                 if (seq !== loadSeqRef.current) return;
                 if (!Array.isArray(data?.list)) {
                     throw new Error('收益火焰图数据格式错误');
                 }
+                const nextTotal = Number(data.total || 0);
+                const totalPages = Math.max(1, Math.ceil(nextTotal / POOL_HEATMAP_PAGE_SIZE));
+                if (page > totalPages) {
+                    setRows([]);
+                    setTotal(nextTotal);
+                    setPage(totalPages);
+                    return;
+                }
                 setRows(data.list);
-                setTotal(Number(data.total || data.list.length || 0));
+                setTotal(nextTotal);
                 setUpdatedAt(data.updated_at || '');
                 setError('');
             })
@@ -1318,7 +1329,11 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) setLoading(false);
             });
-    }, [apiBaseUrl, proto, searchKeyword, sort, windowKey]);
+    }, [apiBaseUrl, page, proto, searchKeyword, sort, windowKey]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [proto, searchKeyword, sort, windowKey]);
 
     useEffect(() => {
         loadHeatmap();
@@ -1332,8 +1347,12 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
     }, [loadHeatmap, refreshIntervalMs]);
 
     const maxIntensity = useMemo(() => {
-        const field = sort === 'fee' ? 'fee_usd' : 'fee_rate_per_1k_usd_window';
-        return Math.max(...rows.map((row) => Number(row?.[field] || 0)), 0);
+        return Math.max(...rows.map((row) => {
+            if (sort === 'fee') {
+                return Number(row?.fee_position_count || 0) > 0 ? Number(row?.fee_usd || 0) : 0;
+            }
+            return Number(row?.rate_position_count || 0) > 0 ? Number(row?.fee_rate_per_1k_usd_window || 0) : 0;
+        }), 0);
     }, [rows, sort]);
 
     return (
@@ -1407,14 +1426,14 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
             ) : (
                 <>
                     <div className="smd-pool-page-meta">
-                        当前显示 {rows.length} 个 / 共 {total} 个池子 · {sort === 'rate' ? `按 ${heatmapWindowLabel(windowKey)} 速率` : '按手续费总额'}
+                        第 {page} 页 · 当前显示 {rows.length} 个 / 共 {total} 个池子 · {sort === 'rate' ? `按 ${heatmapWindowLabel(windowKey)} 速率` : '按手续费总额'}
                     </div>
                     <div className="smd-heatmap-grid">
                         {rows.map((row, index) => (
                             <PoolFeeHeatmapCard
                                 key={row.pool_address}
                                 row={row}
-                                rank={index + 1}
+                                rank={(page - 1) * POOL_HEATMAP_PAGE_SIZE + index + 1}
                                 sort={sort}
                                 windowKey={windowKey}
                                 maxIntensity={maxIntensity}
@@ -1424,6 +1443,7 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
                             />
                         ))}
                     </div>
+                    <PositionPagination page={page} total={total} pageSize={POOL_HEATMAP_PAGE_SIZE} onChange={setPage} />
                 </>
             )}
         </div>
@@ -1431,7 +1451,13 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
 }
 
 function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect, onOpenDetail, onOpenPosition }) {
-    const metricValue = sort === 'fee' ? Number(row?.fee_usd || 0) : Number(row?.fee_rate_per_1k_usd_window || 0);
+    const hasFeeSample = Number(row?.fee_position_count || 0) > 0;
+    const hasRateSample = Number(row?.rate_position_count || 0) > 0;
+    const metricValue = sort === 'fee' && hasFeeSample
+        ? Number(row?.fee_usd || 0)
+        : sort !== 'fee' && hasRateSample
+            ? Number(row?.fee_rate_per_1k_usd_window || 0)
+            : 0;
     const intensity = maxIntensity > 0 ? Math.max(0.08, Math.min(1, metricValue / maxIntensity)) : 0.08;
     const reliable = String(row?.sample_status || '') === 'ok';
     const partial = String(row?.sample_status || '') === 'partial';
@@ -1451,11 +1477,11 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect
             <div className="smd-heatmap-metrics">
                 <div className="smd-heatmap-metric">
                     <span>总手续费</span>
-                    <strong>{formatHeatmapUSD(row.fee_usd)}</strong>
+                    <strong>{hasFeeSample ? formatHeatmapUSD(row.fee_usd) : '--'}</strong>
                 </div>
                 <div className="smd-heatmap-metric accent">
                     <span>每1000U/{heatmapWindowLabel(windowKey)}</span>
-                    <strong>{formatHeatmapRate(row.fee_rate_per_1k_usd_window)}</strong>
+                    <strong>{hasRateSample ? formatHeatmapRate(row.fee_rate_per_1k_usd_window) : '--'}</strong>
                 </div>
             </div>
             <div className="smd-heatmap-bar">

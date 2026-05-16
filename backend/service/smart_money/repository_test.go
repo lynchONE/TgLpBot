@@ -174,3 +174,38 @@ func TestBuildPoolFeeHeatmapRowsReportsMissingAmount(t *testing.T) {
 		t.Fatalf("missing/rate counts = %d/%d, want 1/0", rows[0].MissingAmountCount, rows[0].RatePositionCount)
 	}
 }
+
+func TestBuildPoolFeeHeatmapRowsIgnoresUnavailableFeeSnapshot(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	fee := "0"
+	amount := "1000"
+
+	rows := buildPoolFeeHeatmapRows([]models.SmartMoneyActivePosition{
+		{
+			PositionRef:   "missing-runtime",
+			PoolAddress:   "0xmissingruntime",
+			WalletAddress: "0x0000000000000000000000000000000000000001",
+			FeeUSD:        &fee,
+			FeeStatus:     "unavailable",
+			NetTotalUSD:   &amount,
+			OpenedAt:      now.Add(-time.Hour),
+			Token0Symbol:  "A",
+			Token1Symbol:  "B",
+			Token0Address: "0xa",
+			Token1Address: "0xb",
+			Protocol:      "pancake_v3",
+			ChainID:       56,
+			IsActive:      true,
+		},
+	}, PoolFeeHeatmapOptions{WindowSeconds: 60, Sort: "rate", Now: now})
+
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].FeePositionCount != 0 || rows[0].MissingFeeCount != 1 {
+		t.Fatalf("fee/missing counts = %d/%d, want 0/1", rows[0].FeePositionCount, rows[0].MissingFeeCount)
+	}
+	if rows[0].SampleStatus != "insufficient" {
+		t.Fatalf("SampleStatus = %s, want insufficient", rows[0].SampleStatus)
+	}
+}

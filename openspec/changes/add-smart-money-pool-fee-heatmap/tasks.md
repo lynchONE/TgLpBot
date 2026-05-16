@@ -1,7 +1,7 @@
 ## 1. Backend
 - [x] 1.1 在 smart money repository 中新增池子收益火焰图聚合查询，按活跃仓位 `opened_at -> now` 计算实时平均手续费速率。
 - [x] 1.2 返回绝对手续费、选定窗口折算手续费和归一化速率。
-- [x] 1.3 新增 `/api/sm/pool_fee_heatmap`（或兼容 `endpoint=pool_fee_heatmap`）接口，校验 `window`、`sort`、分页/limit 和过滤参数。
+- [x] 1.3 新增 `/api/sm/pool_fee_heatmap`（或兼容 `endpoint=pool_fee_heatmap`）接口，校验 `window`、`sort`、`page/size` 分页和过滤参数，默认每页 10 条。
 - [x] 1.4 保持 `/api/sm/pools` 当前响应和排序不变。
 - [x] 1.5 增加后端测试覆盖手续费排序、速率排序、数据质量状态和非法参数。
 

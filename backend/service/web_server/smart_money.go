@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -762,25 +763,34 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 	}
 	sortKey := parseSmartMoneyHeatmapSort(r.URL.Query().Get("sort"))
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 30
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	if page <= 0 {
+		page = 1
 	}
-	if limit > 100 {
-		limit = 100
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
 	}
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 	protocol := strings.TrimSpace(r.URL.Query().Get("protocol"))
+	protocolFilter := strings.ToLower(protocol)
 
-	rows, err := repo.ListPoolFeeHeatmap(ctx, sm.PoolFeeHeatmapOptions{
-		WindowSeconds: windowSeconds,
-		Sort:          sortKey,
-		Now:           time.Now(),
-	})
+	positions, err := repo.ListActivePositionsForFeeHeatmap(ctx)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	filteredPositions := filterSmartMoneyHeatmapPositions(positions, keyword, protocolFilter)
+	s.refreshSmartMoneyHeatmapFees(ctx, repo, filteredPositions)
+
+	rows := sm.BuildPoolFeeHeatmapRows(filteredPositions, sm.PoolFeeHeatmapOptions{
+		WindowSeconds: windowSeconds,
+		Sort:          sortKey,
+		Now:           time.Now(),
+	})
 	for i := range rows {
 		rows[i].TradingPair = buildSmartMoneyTradingPair(rows[i].Token0Symbol, rows[i].Token1Symbol)
 		rows[i].DisplayTokenAddress, rows[i].DisplayTokenSymbol = smartMoneyPickDisplayToken(
@@ -791,45 +801,31 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 		)
 	}
 
-	filtered := make([]sm.PoolFeeHeatmapRow, 0, len(rows))
-	for _, row := range rows {
-		if protocol != "" && protocol != "all" && row.Protocol != protocol {
-			continue
-		}
-		if keyword != "" {
-			pairText := strings.ToLower(strings.TrimSpace(row.TradingPair))
-			poolAddrText := strings.ToLower(strings.TrimSpace(row.PoolAddress))
-			token0Text := strings.ToLower(strings.TrimSpace(row.Token0Address))
-			token1Text := strings.ToLower(strings.TrimSpace(row.Token1Address))
-			if !strings.Contains(pairText, keyword) &&
-				!strings.Contains(poolAddrText, keyword) &&
-				!strings.Contains(token0Text, keyword) &&
-				!strings.Contains(token1Text, keyword) {
-				continue
-			}
-		}
-		filtered = append(filtered, row)
+	total := len(rows)
+	start := (page - 1) * size
+	if start > len(rows) {
+		start = len(rows)
 	}
-
-	total := len(filtered)
-	if limit < len(filtered) {
-		filtered = filtered[:limit]
+	end := start + size
+	if end > len(rows) {
+		end = len(rows)
 	}
+	pagedRows := rows[start:end]
 
 	addressesByChain := make(map[string][]string)
-	for i := range filtered {
-		if filtered[i].DisplayTokenAddress != "" {
-			chain := smartMoneyChainSlug(filtered[i].ChainID)
-			addressesByChain[chain] = append(addressesByChain[chain], filtered[i].DisplayTokenAddress)
+	for i := range pagedRows {
+		if pagedRows[i].DisplayTokenAddress != "" {
+			chain := smartMoneyChainSlug(pagedRows[i].ChainID)
+			addressesByChain[chain] = append(addressesByChain[chain], pagedRows[i].DisplayTokenAddress)
 		}
 	}
 	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
-	for i := range filtered {
+	for i := range pagedRows {
 		applySmartMoneyDisplayToken(
-			smartMoneyChainSlug(filtered[i].ChainID),
-			&filtered[i].DisplayTokenAddress,
-			&filtered[i].DisplayTokenSymbol,
-			&filtered[i].DisplayTokenLogoURL,
+			smartMoneyChainSlug(pagedRows[i].ChainID),
+			&pagedRows[i].DisplayTokenAddress,
+			&pagedRows[i].DisplayTokenSymbol,
+			&pagedRows[i].DisplayTokenLogoURL,
 			metaByChain,
 		)
 	}
@@ -838,10 +834,140 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 		"window":         windowKey,
 		"window_seconds": windowSeconds,
 		"sort":           sortKey,
+		"page":           page,
+		"size":           size,
 		"total":          total,
-		"list":           filtered,
+		"list":           pagedRows,
 		"updated_at":     time.Now(),
 	})
+}
+
+func filterSmartMoneyHeatmapPositions(positions []models.SmartMoneyActivePosition, keyword string, protocol string) []models.SmartMoneyActivePosition {
+	hasProtocol := protocol != "" && protocol != "all"
+	hasKeyword := keyword != ""
+	if !hasProtocol && !hasKeyword {
+		return positions
+	}
+
+	filtered := make([]models.SmartMoneyActivePosition, 0, len(positions))
+	for _, pos := range positions {
+		if hasProtocol && strings.ToLower(strings.TrimSpace(pos.Protocol)) != protocol {
+			continue
+		}
+		if hasKeyword && !smartMoneyHeatmapPositionMatchesKeyword(pos, keyword) {
+			continue
+		}
+		filtered = append(filtered, pos)
+	}
+	return filtered
+}
+
+func smartMoneyHeatmapPositionMatchesKeyword(pos models.SmartMoneyActivePosition, keyword string) bool {
+	pairText := strings.ToLower(buildSmartMoneyTradingPair(pos.Token0Symbol, pos.Token1Symbol))
+	poolAddrText := strings.ToLower(strings.TrimSpace(pos.PoolAddress))
+	token0Text := strings.ToLower(strings.TrimSpace(pos.Token0Address))
+	token1Text := strings.ToLower(strings.TrimSpace(pos.Token1Address))
+	return strings.Contains(pairText, keyword) ||
+		strings.Contains(poolAddrText, keyword) ||
+		strings.Contains(token0Text, keyword) ||
+		strings.Contains(token1Text, keyword)
+}
+
+const (
+	smartMoneyHeatmapFeeRefreshInterval = 15 * time.Second
+	smartMoneyHeatmapFeeRefreshWorkers  = 6
+)
+
+func (s *Server) refreshSmartMoneyHeatmapFees(ctx context.Context, repo *sm.Repository, positions []models.SmartMoneyActivePosition) {
+	if s == nil || s.Realtime == nil || repo == nil || len(positions) == 0 {
+		return
+	}
+
+	now := time.Now()
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+
+	for worker := 0; worker < smartMoneyHeatmapFeeRefreshWorkers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				detail, err := s.Realtime.GetSmartMoneyPositionDetail(&positions[idx])
+				if err != nil {
+					continue
+				}
+				feeUSD := detail.Totals.FeeUSD
+				if math.IsNaN(feeUSD) || math.IsInf(feeUSD, 0) || feeUSD < 0 {
+					continue
+				}
+				if smartMoneyHeatmapFeeWarningsBlockSnapshot(detail.Warnings) {
+					positions[idx].FeeStatus = "unavailable"
+					positions[idx].FeeUpdatedAt = &now
+					if updateErr := repo.UpdateActivePositionFeeSnapshot(ctx, positions[idx].ID, nil, "unavailable", now); updateErr != nil {
+						log.Printf("smart money heatmap fee status update failed: id=%d err=%v", positions[idx].ID, updateErr)
+					}
+					continue
+				}
+
+				feeText := strconv.FormatFloat(feeUSD, 'f', 4, 64)
+				positions[idx].FeeUSD = &feeText
+				positions[idx].FeeStatus = "ok"
+				positions[idx].FeeUpdatedAt = &now
+				if updateErr := repo.UpdateActivePositionFeeSnapshot(ctx, positions[idx].ID, &feeUSD, "ok", now); updateErr != nil {
+					log.Printf("smart money heatmap fee snapshot update failed: id=%d err=%v", positions[idx].ID, updateErr)
+				}
+			}
+		}()
+	}
+
+	for i := range positions {
+		if !smartMoneyHeatmapShouldRefreshFee(positions[i], now) {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		case jobs <- i:
+		}
+	}
+
+	close(jobs)
+	wg.Wait()
+}
+
+func smartMoneyHeatmapShouldRefreshFee(pos models.SmartMoneyActivePosition, now time.Time) bool {
+	if !pos.IsActive || pos.ID == 0 {
+		return false
+	}
+	if pos.FeeUpdatedAt != nil && now.Sub(*pos.FeeUpdatedAt) < smartMoneyHeatmapFeeRefreshInterval {
+		return false
+	}
+	return true
+}
+
+func smartMoneyHeatmapFeeWarningsBlockSnapshot(warnings []string) bool {
+	for _, warning := range warnings {
+		text := strings.ToLower(strings.TrimSpace(warning))
+		if text == "" {
+			continue
+		}
+		if strings.Contains(text, "fee") ||
+			strings.Contains(text, "position manager") ||
+			strings.Contains(text, "runtime metadata") ||
+			strings.Contains(text, "read v3 position") ||
+			strings.Contains(text, "read v4 position") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseSmartMoneyHeatmapWindow(raw string) (string, int, bool) {
