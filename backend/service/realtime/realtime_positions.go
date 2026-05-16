@@ -598,32 +598,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		}
 	}
 
-	sort.Slice(positions, func(i, j int) bool {
-		pi := positions[i]
-		pj := positions[j]
-
-		if pi.Title != pj.Title {
-			return pi.Title < pj.Title
-		}
-
-		// Keep UI order stable across refreshes: titles can be identical for multiple positions.
-		poolI := strings.ToLower(strings.TrimSpace(pi.PoolID))
-		poolJ := strings.ToLower(strings.TrimSpace(pj.PoolID))
-		if poolI != poolJ {
-			return poolI < poolJ
-		}
-
-		if c := compareDecimalStrings(pi.PositionID, pj.PositionID); c != 0 {
-			return c < 0
-		}
-		if pi.TaskID != pj.TaskID {
-			return pi.TaskID < pj.TaskID
-		}
-		if pi.Version != pj.Version {
-			return pi.Version < pj.Version
-		}
-		return strings.ToLower(strings.TrimSpace(pi.Exchange)) < strings.ToLower(strings.TrimSpace(pj.Exchange))
-	})
+	sortRealtimePositions(positions)
 	resp.Positions = positions
 
 	// Build a summary across all positions (dedupe wallet balances by token address).
@@ -666,6 +641,46 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		log.Printf("[Realtime] user=%d positions=%d took=%s warnings=%d", userID, len(resp.Positions), took.Truncate(10*time.Millisecond), len(resp.Warnings))
 	}
 	return resp, nil
+}
+
+func sortRealtimePositions(positions []RealtimePosition) {
+	sort.SliceStable(positions, func(i, j int) bool {
+		return realtimePositionLess(positions[i], positions[j])
+	})
+}
+
+func realtimePositionLess(pi, pj RealtimePosition) bool {
+	if pi.RunningSince != nil && pj.RunningSince != nil && !pi.RunningSince.Equal(*pj.RunningSince) {
+		return pi.RunningSince.Before(*pj.RunningSince)
+	}
+	if pi.RunningSince != nil && pj.RunningSince == nil {
+		return true
+	}
+	if pi.RunningSince == nil && pj.RunningSince != nil {
+		return false
+	}
+
+	if pi.Title != pj.Title {
+		return pi.Title < pj.Title
+	}
+
+	// Keep UI order stable across refreshes when creation time is identical or unavailable.
+	poolI := strings.ToLower(strings.TrimSpace(pi.PoolID))
+	poolJ := strings.ToLower(strings.TrimSpace(pj.PoolID))
+	if poolI != poolJ {
+		return poolI < poolJ
+	}
+
+	if c := compareDecimalStrings(pi.PositionID, pj.PositionID); c != 0 {
+		return c < 0
+	}
+	if pi.TaskID != pj.TaskID {
+		return pi.TaskID < pj.TaskID
+	}
+	if pi.Version != pj.Version {
+		return pi.Version < pj.Version
+	}
+	return strings.ToLower(strings.TrimSpace(pi.Exchange)) < strings.ToLower(strings.TrimSpace(pj.Exchange))
 }
 
 func compareDecimalStrings(a, b string) int {

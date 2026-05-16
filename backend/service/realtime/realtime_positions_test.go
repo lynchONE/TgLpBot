@@ -99,6 +99,42 @@ func TestDisplayTaskAmountUSDT(t *testing.T) {
 	}
 }
 
+func TestSortRealtimePositionsByCreationTimeAscending(t *testing.T) {
+	t.Parallel()
+
+	early := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	middle := early.Add(2 * time.Hour)
+	late := early.Add(4 * time.Hour)
+
+	positions := []RealtimePosition{
+		{Title: "late", PositionID: "3", RunningSince: &late, Totals: RealtimeTotals{TotalUSD: 10}},
+		{Title: "early", PositionID: "1", RunningSince: &early, Totals: RealtimeTotals{TotalUSD: 1000}},
+		{Title: "middle", PositionID: "2", RunningSince: &middle, Totals: RealtimeTotals{TotalUSD: 500}},
+	}
+
+	sortRealtimePositions(positions)
+
+	if got := []string{positions[0].Title, positions[1].Title, positions[2].Title}; got[0] != "early" || got[1] != "middle" || got[2] != "late" {
+		t.Fatalf("sortRealtimePositions order = %v, want [early middle late]", got)
+	}
+}
+
+func TestSortRealtimePositionsKeepsMissingCreationTimeAfterCreatedPositions(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	positions := []RealtimePosition{
+		{Title: "chain-only", PoolID: "0x1", PositionID: "1"},
+		{Title: "created", PoolID: "0x2", PositionID: "2", RunningSince: &createdAt},
+	}
+
+	sortRealtimePositions(positions)
+
+	if positions[0].Title != "created" || positions[1].Title != "chain-only" {
+		t.Fatalf("sortRealtimePositions order = [%s %s], want [created chain-only]", positions[0].Title, positions[1].Title)
+	}
+}
+
 func TestBuildRealtimeDCAStatusPending(t *testing.T) {
 	t.Parallel()
 
