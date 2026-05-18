@@ -25,7 +25,7 @@ func main() {
 	timeutil.Init()
 
 	fmt.Println("========================================")
-	fmt.Println("TgLpBot starting...")
+	fmt.Println("TgLpBot 开始...")
 	fmt.Println("========================================")
 
 	if err := config.LoadConfig(); err != nil {
