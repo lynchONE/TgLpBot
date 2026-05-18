@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"gorm.io/gorm"
@@ -65,10 +66,7 @@ func (e *irreversiblePositionMetadataError) Error() string {
 	if e == nil {
 		return ""
 	}
-	if e.err == nil {
-		return e.reason
-	}
-	return fmt.Sprintf("%s: %v", e.reason, e.err)
+	return e.reason
 }
 
 func (e *irreversiblePositionMetadataError) Unwrap() error {
@@ -103,9 +101,9 @@ func RepairPositions(ctx context.Context, repo *Repository) error {
 				if markErr := repo.MarkLPPositionMetadataInvalid(ctx, pos.ID, invalidErr.Error()); markErr != nil {
 					log.Printf("[SmartMoney] mark invalid metadata failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, markErr)
 				} else {
-					log.Printf("[SmartMoney] skipped invalid position metadata: id=%d nft=%d protocol=%s reason=%v", pos.ID, pos.NftTokenID, pos.Protocol, invalidErr)
+					log.Printf("[SmartMoney] skipped invalid position metadata: id=%d nft=%d protocol=%s reason=%s", pos.ID, pos.NftTokenID, pos.Protocol, invalidErr.reason)
 				}
-				if strings.EqualFold(strings.TrimSpace(pos.Status), "open") {
+				if strings.EqualFold(strings.TrimSpace(pos.Status), "open") && shouldCloseInvalidPosition(invalidErr) {
 					if active, activeErr := repo.EnsureActivePositionFromPosition(ctx, &pos); activeErr != nil {
 						log.Printf("[SmartMoney] load invalid active position failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, activeErr)
 					} else if active != nil {
@@ -133,6 +131,13 @@ func RepairPositions(ctx context.Context, repo *Repository) error {
 		}
 	}
 	return nil
+}
+
+func shouldCloseInvalidPosition(err *irreversiblePositionMetadataError) bool {
+	if err == nil {
+		return false
+	}
+	return !strings.Contains(strings.ToLower(strings.TrimSpace(err.reason)), "belongs to")
 }
 
 func repairRecentOpenPositionStates(ctx context.Context, repo *Repository, now time.Time) (int, error) {
@@ -436,6 +441,12 @@ func resolveV3PositionMetadata(ctx context.Context, chain string, protocol strin
 	pos, err := pm.Positions(nil, tokenID)
 	if err != nil {
 		if isInvalidTokenIDError(err) {
+			if alternateProtocol, owner, ok := findV3PositionAlternateProtocol(ctx, chain, protocol, nftTokenID, client); ok {
+				return nil, &irreversiblePositionMetadataError{
+					reason: fmt.Sprintf("v3 token id %d belongs to %s position manager owner=%s, stored protocol=%s", nftTokenID, alternateProtocol, owner.Hex(), protocol),
+					err:    err,
+				}
+			}
 			return nil, &irreversiblePositionMetadataError{
 				reason: fmt.Sprintf("v3 token id %d is not valid for protocol %s position manager", nftTokenID, protocol),
 				err:    err,
@@ -463,6 +474,31 @@ func resolveV3PositionMetadata(ctx context.Context, chain string, protocol strin
 		TickLower:     &tickLower,
 		TickUpper:     &tickUpper,
 	}, nil
+}
+
+func findV3PositionAlternateProtocol(ctx context.Context, chain string, currentProtocol string, nftTokenID uint64, client *ethclient.Client) (string, common.Address, bool) {
+	currentProtocol = strings.ToLower(strings.TrimSpace(currentProtocol))
+	tokenID := new(big.Int).SetUint64(nftTokenID)
+	for _, candidate := range []string{"pancake_v3", "uniswap_v3"} {
+		if candidate == currentProtocol {
+			continue
+		}
+		manager, err := resolveV3PositionManagerAddress(chain, candidate)
+		if err != nil {
+			continue
+		}
+		pm, err := blockchain.NewV3PositionManager(manager, client)
+		if err != nil {
+			continue
+		}
+		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		owner, err := pm.OwnerOf(&bind.CallOpts{Context: callCtx}, tokenID)
+		cancel()
+		if err == nil && owner != (common.Address{}) {
+			return candidate, owner, true
+		}
+	}
+	return "", common.Address{}, false
 }
 
 func resolveV4PositionMetadata(ctx context.Context, chain string, nftTokenID uint64, client *ethclient.Client) (*PositionMetadata, error) {

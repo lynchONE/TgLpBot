@@ -1456,10 +1456,11 @@ func (s *Service) loadSmartMoneyOpenLPState(ctx context.Context, address string,
 				COUNT(DISTINCT p.pool_address) AS active_pool_count
 			FROM sm_lp_positions p
 			LEFT JOIN sm_lp_active_positions ap
-				ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id
+				ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
 			LEFT JOIN (
 				SELECT
 					chain_id,
+					protocol,
 					nft_token_id,
 					SUM(
 						CASE
@@ -1472,9 +1473,10 @@ func (s *Service) loadSmartMoneyOpenLPState(ctx context.Context, address string,
 				WHERE wallet_address = ?
 				  AND chain_id = ?
 				  AND event_type IN ('add', 'remove')
-				GROUP BY chain_id, nft_token_id
+				GROUP BY chain_id, protocol, nft_token_id
 			) evt_net
 				ON evt_net.chain_id = p.chain_id
+				AND evt_net.protocol = p.protocol
 				AND evt_net.nft_token_id = p.nft_token_id
 			WHERE p.wallet_address = ?
 			  AND p.chain_id = ?

@@ -158,6 +158,10 @@ func autoMigrate() error {
 	ensureColumn("sm_lp_events", "liquidity_delta", "DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER token1_symbol")
 	ensureColumn("sm_lp_positions", "metadata_status", "VARCHAR(32) NOT NULL DEFAULT '' AFTER tick_upper")
 	ensureColumn("sm_lp_positions", "metadata_error", "TEXT NULL AFTER metadata_status")
+	if err := ensureUniqueIndex("sm_lp_positions", "uq_sm_nft_chain_protocol", "`chain_id`, `protocol`, `nft_token_id`"); err != nil {
+		return err
+	}
+	dropIndexIfExists("sm_lp_positions", "uq_sm_nft_chain")
 	ensureColumn("smart_money_golden_dog_configs", "wallet_min_total_amount_usd", "DOUBLE NOT NULL DEFAULT 0 AFTER cooldown_minutes")
 	ensureColumn("smart_money_golden_dog_configs", "wallet_intensity_mode", "VARCHAR(32) NOT NULL DEFAULT 'fixed' AFTER wallet_intensity")
 	ensureColumn("smart_money_golden_dog_configs", "wallet_amount_intensity_tiers", "TEXT NULL AFTER wallet_intensity_mode")
@@ -273,22 +277,47 @@ func ensureIndex(table, indexName, columns string) {
 	log.Printf("[DB] added index %s.%s", table, indexName)
 }
 
+func dropIndexIfExists(table, indexName string) {
+	if DB == nil {
+		return
+	}
+	var count int64
+	if err := DB.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = ?
+		  AND INDEX_NAME = ?
+	`, table, indexName).Scan(&count).Error; err != nil {
+		log.Printf("[DB] inspect index %s.%s failed: %v", table, indexName, err)
+		return
+	}
+	if count == 0 {
+		return
+	}
+	if err := DB.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX `%s`", quoteTableName(table), indexName)).Error; err != nil {
+		log.Printf("[DB] drop index %s.%s failed: %v", table, indexName, err)
+		return
+	}
+	log.Printf("[DB] dropped index %s.%s", table, indexName)
+}
+
 func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_time", "`wallet_address`, `chain_id`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_type_time", "`wallet_address`, `chain_id`, `event_type`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_pool_time", "`chain_id`, `pool_address`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_type_time", "`chain_id`, `event_type`, `tx_timestamp`")
-	ensureIndex("sm_lp_events", "idx_sm_evt_type_chain_nft", "`event_type`, `chain_id`, `nft_token_id`")
-	ensureIndex("sm_lp_events", "idx_sm_evt_chain_nft_time", "`chain_id`, `nft_token_id`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_type_chain_protocol_nft", "`event_type`, `chain_id`, `protocol`, `nft_token_id`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_chain_protocol_nft_time", "`chain_id`, `protocol`, `nft_token_id`, `tx_timestamp`")
 
 	ensureIndex("sm_lp_positions", "idx_sm_pos_wallet_chain_status_opened", "`wallet_address`, `chain_id`, `status`, `opened_at`")
 	ensureIndex("sm_lp_positions", "idx_sm_pos_pool_status_opened", "`pool_address`, `status`, `opened_at`")
 	ensureIndex("sm_lp_positions", "idx_sm_pos_status_opened_pool", "`status`, `opened_at`, `pool_address`")
 	ensureIndex("sm_lp_positions", "idx_sm_pos_status_closed", "`status`, `closed_at`")
-	ensureIndex("sm_lp_positions", "idx_sm_pos_chain_nft", "`chain_id`, `nft_token_id`")
+	ensureIndex("sm_lp_positions", "idx_sm_pos_chain_protocol_nft", "`chain_id`, `protocol`, `nft_token_id`")
 	ensureIndex("sm_lp_positions", "idx_sm_pos_metadata_status", "`metadata_status`")
 
-	ensureIndex("sm_lp_active_positions", "idx_sm_active_chain_nft", "`chain_id`, `nft_token_id`")
+	ensureIndex("sm_lp_active_positions", "idx_sm_active_chain_protocol_nft", "`chain_id`, `protocol`, `nft_token_id`")
 	ensureIndex("monitored_wallets", "idx_sm_wallet_active_created", "`is_active`, `created_at`")
 	ensureIndex("monitored_wallets", "idx_sm_wallet_source_active_created", "`source`, `is_active`, `created_at`")
 	ensureIndex("monitored_wallets", "idx_sm_wallet_active_address_chain", "`is_active`, `address`, `chain_id`")

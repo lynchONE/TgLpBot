@@ -42,9 +42,9 @@ func (SmartMoneyScanState) TableName() string { return "sm_scan_states" }
 type SmartMoneyLPEvent struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	WalletAddress   string    `gorm:"size:42;not null;index:idx_sm_evt_wallet_chain;index:idx_sm_evt_wallet_chain_time,priority:1;index:idx_sm_evt_wallet_chain_type_time,priority:1" json:"wallet_address"`
-	ChainID         int       `gorm:"not null;default:56;index:idx_sm_evt_wallet_chain;index:idx_sm_evt_wallet_chain_time,priority:2;index:idx_sm_evt_wallet_chain_type_time,priority:2;index:idx_sm_evt_chain_pool_time,priority:1;index:idx_sm_evt_chain_type_time,priority:1;index:idx_sm_evt_type_chain_nft,priority:2;index:idx_sm_evt_chain_nft_time,priority:1" json:"chain_id"`
-	Protocol        string    `gorm:"size:20;not null" json:"protocol"`
-	EventType       string    `gorm:"size:10;not null;index:idx_sm_evt_type;index:idx_sm_evt_wallet_chain_type_time,priority:3;index:idx_sm_evt_chain_type_time,priority:2;index:idx_sm_evt_type_chain_nft,priority:1" json:"event_type"`
+	ChainID         int       `gorm:"not null;default:56;index:idx_sm_evt_wallet_chain;index:idx_sm_evt_wallet_chain_time,priority:2;index:idx_sm_evt_wallet_chain_type_time,priority:2;index:idx_sm_evt_chain_pool_time,priority:1;index:idx_sm_evt_chain_type_time,priority:1;index:idx_sm_evt_type_chain_protocol_nft,priority:2;index:idx_sm_evt_chain_protocol_nft_time,priority:1" json:"chain_id"`
+	Protocol        string    `gorm:"size:20;not null;index:idx_sm_evt_type_chain_protocol_nft,priority:3;index:idx_sm_evt_chain_protocol_nft_time,priority:2" json:"protocol"`
+	EventType       string    `gorm:"size:10;not null;index:idx_sm_evt_type;index:idx_sm_evt_wallet_chain_type_time,priority:3;index:idx_sm_evt_chain_type_time,priority:2;index:idx_sm_evt_type_chain_protocol_nft,priority:1" json:"event_type"`
 	Token0Address   string    `gorm:"size:42;not null" json:"token0_address"`
 	Token1Address   string    `gorm:"size:42;not null" json:"token1_address"`
 	Token0Symbol    string    `gorm:"size:20" json:"token0_symbol"`
@@ -59,11 +59,11 @@ type SmartMoneyLPEvent struct {
 	FeeTier         *int      `json:"fee_tier"`
 	TickLower       *int      `json:"tick_lower"`
 	TickUpper       *int      `json:"tick_upper"`
-	NftTokenID      *uint64   `gorm:"index:idx_sm_evt_nft;index:idx_sm_evt_type_chain_nft,priority:3;index:idx_sm_evt_chain_nft_time,priority:2" json:"nft_token_id"`
+	NftTokenID      *uint64   `gorm:"index:idx_sm_evt_nft;index:idx_sm_evt_type_chain_protocol_nft,priority:4;index:idx_sm_evt_chain_protocol_nft_time,priority:3" json:"nft_token_id"`
 	TxHash          string    `gorm:"size:66;not null;uniqueIndex:uq_sm_tx_log" json:"tx_hash"`
 	BlockNumber     uint64    `gorm:"not null" json:"block_number"`
 	LogIndex        int       `gorm:"not null;uniqueIndex:uq_sm_tx_log" json:"log_index"`
-	TxTimestamp     time.Time `gorm:"not null;index:idx_sm_evt_ts;index:idx_sm_evt_wallet_chain_time,priority:3;index:idx_sm_evt_wallet_chain_type_time,priority:4;index:idx_sm_evt_chain_pool_time,priority:3;index:idx_sm_evt_chain_type_time,priority:3;index:idx_sm_evt_chain_nft_time,priority:3" json:"tx_timestamp"`
+	TxTimestamp     time.Time `gorm:"not null;index:idx_sm_evt_ts;index:idx_sm_evt_wallet_chain_time,priority:3;index:idx_sm_evt_wallet_chain_type_time,priority:4;index:idx_sm_evt_chain_pool_time,priority:3;index:idx_sm_evt_chain_type_time,priority:3;index:idx_sm_evt_chain_protocol_nft_time,priority:4" json:"tx_timestamp"`
 	CreatedAt       time.Time `gorm:"not null;autoCreateTime" json:"created_at"`
 }
 
@@ -72,9 +72,9 @@ func (SmartMoneyLPEvent) TableName() string { return "sm_lp_events" }
 type SmartMoneyLPPosition struct {
 	ID             uint       `gorm:"primaryKey" json:"id"`
 	WalletAddress  string     `gorm:"size:42;not null;index:idx_sm_pos_wallet_status;index:idx_sm_pos_wallet_chain_status_opened,priority:1" json:"wallet_address"`
-	ChainID        int        `gorm:"not null;default:56;index:idx_sm_pos_wallet_chain_status_opened,priority:2;index:idx_sm_pos_chain_nft,priority:1" json:"chain_id"`
-	Protocol       string     `gorm:"size:20;not null" json:"protocol"`
-	NftTokenID     uint64     `gorm:"not null;uniqueIndex:uq_sm_nft_chain;index:idx_sm_pos_chain_nft,priority:2" json:"nft_token_id"`
+	ChainID        int        `gorm:"not null;default:56;uniqueIndex:uq_sm_nft_chain_protocol,priority:1;index:idx_sm_pos_wallet_chain_status_opened,priority:2;index:idx_sm_pos_chain_protocol_nft,priority:1" json:"chain_id"`
+	Protocol       string     `gorm:"size:20;not null;uniqueIndex:uq_sm_nft_chain_protocol,priority:2;index:idx_sm_pos_chain_protocol_nft,priority:2" json:"protocol"`
+	NftTokenID     uint64     `gorm:"not null;uniqueIndex:uq_sm_nft_chain_protocol,priority:3;index:idx_sm_pos_chain_protocol_nft,priority:3" json:"nft_token_id"`
 	PoolAddress    string     `gorm:"size:66;not null;index:idx_sm_pos_pool_status;index:idx_sm_pos_pool_status_opened,priority:1;index:idx_sm_pos_status_opened_pool,priority:3" json:"pool_address"`
 	Token0Address  string     `gorm:"size:42;not null" json:"token0_address"`
 	Token1Address  string     `gorm:"size:42;not null" json:"token1_address"`
@@ -99,9 +99,9 @@ type SmartMoneyActivePosition struct {
 	ID                     uint       `gorm:"primaryKey" json:"id"`
 	PositionRef            string     `gorm:"size:255;not null;uniqueIndex:uq_sm_active_position_ref" json:"position_ref"`
 	WalletAddress          string     `gorm:"size:42;not null;index:idx_sm_active_wallet_status" json:"wallet_address"`
-	ChainID                int        `gorm:"not null;default:56;index:idx_sm_active_wallet_status;index:idx_sm_active_pool_status;index:idx_sm_active_chain_nft,priority:1" json:"chain_id"`
-	Protocol               string     `gorm:"size:20;not null;index:idx_sm_active_protocol" json:"protocol"`
-	NftTokenID             uint64     `gorm:"not null;default:0;index:idx_sm_active_nft;index:idx_sm_active_chain_nft,priority:2" json:"nft_token_id"`
+	ChainID                int        `gorm:"not null;default:56;index:idx_sm_active_wallet_status;index:idx_sm_active_pool_status;index:idx_sm_active_chain_protocol_nft,priority:1" json:"chain_id"`
+	Protocol               string     `gorm:"size:20;not null;index:idx_sm_active_protocol;index:idx_sm_active_chain_protocol_nft,priority:2" json:"protocol"`
+	NftTokenID             uint64     `gorm:"not null;default:0;index:idx_sm_active_nft;index:idx_sm_active_chain_protocol_nft,priority:3" json:"nft_token_id"`
 	PoolAddress            string     `gorm:"size:66;not null;index:idx_sm_active_pool_status" json:"pool_address"`
 	PositionManagerAddress string     `gorm:"size:66" json:"position_manager_address"`
 	PoolManagerAddress     string     `gorm:"size:66" json:"pool_manager_address"`

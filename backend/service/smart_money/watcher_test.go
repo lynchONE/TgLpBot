@@ -1,6 +1,7 @@
 package smart_money
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/models"
 	"math/big"
 	"strings"
@@ -10,6 +11,49 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
+
+func TestDetectProtocolUsesConfiguredManagers(t *testing.T) {
+	t.Cleanup(func() {
+		config.AppConfig = nil
+	})
+
+	pancake := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	uniswap := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	config.AppConfig = &config.Config{
+		EnabledChains: []string{"bsc"},
+		Chains: map[string]config.ChainConfig{
+			"bsc": {
+				Chain: "bsc",
+				V3Deployments: []config.V3DeploymentConfig{
+					{Name: "PancakeSwap V3", PositionManagerAddress: pancake.Hex()},
+					{Name: "Uniswap V3", PositionManagerAddress: uniswap.Hex()},
+				},
+			},
+		},
+	}
+
+	w := &Watcher{chainID: 56}
+
+	protocol, err := w.detectProtocol(pancake)
+	if err != nil {
+		t.Fatalf("detect pancake protocol: %v", err)
+	}
+	if protocol != "pancake_v3" {
+		t.Fatalf("expected pancake_v3, got %q", protocol)
+	}
+
+	protocol, err = w.detectProtocol(uniswap)
+	if err != nil {
+		t.Fatalf("detect uniswap protocol: %v", err)
+	}
+	if protocol != "uniswap_v3" {
+		t.Fatalf("expected uniswap_v3, got %q", protocol)
+	}
+
+	if _, err := w.detectProtocol(common.HexToAddress("0x3333333333333333333333333333333333333333")); err == nil {
+		t.Fatal("expected unknown position manager to return error")
+	}
+}
 
 func TestParseModifyLiquidityParsesSaltAndDefaultsAmounts(t *testing.T) {
 	t.Parallel()

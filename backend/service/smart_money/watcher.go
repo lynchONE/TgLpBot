@@ -129,14 +129,14 @@ type pollResult struct {
 
 func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uniswapV4PoolManager string, pollIntervalSec int) *Watcher {
 	var lpContracts []common.Address
-	if pancakeV3NPM != "" {
-		lpContracts = append(lpContracts, common.HexToAddress(pancakeV3NPM))
+	if common.IsHexAddress(strings.TrimSpace(pancakeV3NPM)) {
+		lpContracts = append(lpContracts, common.HexToAddress(strings.TrimSpace(pancakeV3NPM)))
 	}
-	if uniswapV3NPM != "" {
-		lpContracts = append(lpContracts, common.HexToAddress(uniswapV3NPM))
+	if common.IsHexAddress(strings.TrimSpace(uniswapV3NPM)) {
+		lpContracts = append(lpContracts, common.HexToAddress(strings.TrimSpace(uniswapV3NPM)))
 	}
-	if uniswapV4PoolManager != "" {
-		lpContracts = append(lpContracts, common.HexToAddress(uniswapV4PoolManager))
+	if common.IsHexAddress(strings.TrimSpace(uniswapV4PoolManager)) {
+		lpContracts = append(lpContracts, common.HexToAddress(strings.TrimSpace(uniswapV4PoolManager)))
 	}
 
 	if pollIntervalSec <= 0 {
@@ -1584,7 +1584,10 @@ func (w *Watcher) parseIncreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 		amount1Str = amount1.String()
 	}
 
-	protocol := detectProtocol(vlog.Address)
+	protocol, err := w.detectProtocol(vlog.Address)
+	if err != nil {
+		return nil, err
+	}
 	return &models.SmartMoneyLPEvent{
 		Protocol:       protocol,
 		EventType:      "add",
@@ -1618,7 +1621,10 @@ func (w *Watcher) parseDecreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 		amount1Str = amount1.String()
 	}
 
-	protocol := detectProtocol(vlog.Address)
+	protocol, err := w.detectProtocol(vlog.Address)
+	if err != nil {
+		return nil, err
+	}
 	return &models.SmartMoneyLPEvent{
 		Protocol:       protocol,
 		EventType:      "remove",
@@ -1709,16 +1715,40 @@ func decodeSignedInt24Word(word []byte) (int, error) {
 	return int(v), nil
 }
 
-func detectProtocol(addr common.Address) string {
+func (w *Watcher) detectProtocol(addr common.Address) (string, error) {
 	addrLower := strings.ToLower(addr.Hex())
+	chain := smartMoneyChainName(int(w.chainID))
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			for _, dep := range cc.V3Deployments {
+				pm := strings.ToLower(strings.TrimSpace(dep.PositionManagerAddress))
+				if pm == "" || pm != addrLower {
+					continue
+				}
+				name := strings.ToLower(strings.TrimSpace(dep.Name))
+				switch {
+				case strings.Contains(name, "pancake"):
+					return "pancake_v3", nil
+				case strings.Contains(name, "uniswap"):
+					return "uniswap_v3", nil
+				}
+			}
+		}
+		if pm := strings.ToLower(strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress)); pm != "" && pm == addrLower {
+			return "pancake_v3", nil
+		}
+		if pm := strings.ToLower(strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)); pm != "" && pm == addrLower {
+			return "uniswap_v3", nil
+		}
+	}
+
 	switch addrLower {
 	case "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364":
-		return "pancake_v3"
+		return "pancake_v3", nil
 	case "0x7b8a01b39d58278b5de7e48c8449c9f4f5170613":
-		return "uniswap_v3"
-	default:
-		return "uniswap_v3"
+		return "uniswap_v3", nil
 	}
+	return "", fmt.Errorf("unknown v3 position manager address: %s", addr.Hex())
 }
 
 func shortAddr(s string) string {

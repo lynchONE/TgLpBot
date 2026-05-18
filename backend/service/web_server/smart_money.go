@@ -1192,9 +1192,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 			),
 		)
 		resp.RangePercent = smartMoneyRangePercentFromTicks(p.TickLower, p.TickUpper)
-		if byNFT, ok := amountsByChain[p.ChainID]; ok {
-			resp.PositionAmountUSD = byNFT[p.NftTokenID]
-		}
+		resp.PositionAmountUSD = amountsByChain[sm.SmartMoneyPositionAmountKey(p.ChainID, p.Protocol, p.NftTokenID)]
 		resp.TradingPair = buildSmartMoneyTradingPair(p.Token0Symbol, p.Token1Symbol)
 		if resp.DisplayTokenAddress != "" {
 			chain := smartMoneyChainSlug(p.ChainID)
