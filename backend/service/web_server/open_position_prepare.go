@@ -54,7 +54,7 @@ func decodeOpenPositionPrepareRequest(w http.ResponseWriter, r *http.Request) (*
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "请求参数格式错误", http.StatusBadRequest)
+		http.Error(w, "invalid request parameters", http.StatusBadRequest)
 		return nil, false
 	}
 
@@ -67,7 +67,7 @@ func decodeOpenPositionPrepareRequest(w http.ResponseWriter, r *http.Request) (*
 		return nil, false
 	}
 	if config.AppConfig == nil {
-		http.Error(w, "系统配置未初始化", http.StatusInternalServerError)
+		http.Error(w, "system config not initialized", http.StatusInternalServerError)
 		return nil, false
 	}
 	return &req, true
@@ -119,7 +119,7 @@ func (s *Server) prepareOpenPositionCheckContext(req openPositionPrepareRequest)
 	cfgService := userSvc.NewGlobalConfigService()
 	cfg, err := cfgService.GetOrCreate(user.ID)
 	if err != nil {
-		return nil, &openPositionError{Code: "open_position_failed", Message: "加载全局配置失败"}, http.StatusInternalServerError
+		return nil, &openPositionError{Code: "open_position_failed", Message: "load global config failed"}, http.StatusInternalServerError
 	}
 
 	var chain string
@@ -133,13 +133,13 @@ func (s *Server) prepareOpenPositionCheckContext(req openPositionPrepareRequest)
 
 	chainCfg, ok := config.AppConfig.GetChainConfig(chain)
 	if !ok || strings.TrimSpace(chainCfg.Chain) == "" {
-		return nil, &openPositionError{Code: "invalid_chain", Message: "当前链不支持开仓"}, http.StatusBadRequest
+		return nil, &openPositionError{Code: "invalid_chain", Message: "chain is not supported for opening positions"}, http.StatusBadRequest
 	}
 
 	walletService := wallet.NewWalletService()
 	wallets, err := walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		return nil, &openPositionError{Code: "wallet_required", Message: "未找到可用钱包"}, http.StatusBadRequest
+		return nil, &openPositionError{Code: "wallet_required", Message: "no available execution wallet found"}, http.StatusBadRequest
 	}
 
 	selectedWallet := &wallets[0]
@@ -181,7 +181,7 @@ func (s *Server) prepareOpenPositionCheckContext(req openPositionPrepareRequest)
 		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v3", poolAddress)
 	}
 	if err != nil || poolInfo == nil {
-		message := "加载池子信息失败"
+		message := "load pool info failed"
 		if err != nil {
 			message = strings.TrimSpace(err.Error())
 		}
@@ -193,7 +193,7 @@ func (s *Server) prepareOpenPositionCheckContext(req openPositionPrepareRequest)
 
 	currentTick, err := loadOpenPositionCurrentTick(chain, poolVersion, poolAddress)
 	if err != nil {
-		return nil, &openPositionError{Code: "open_position_failed", Message: "璇诲彇褰撳墠 Tick 澶辫触"}, http.StatusInternalServerError
+		return nil, &openPositionError{Code: "open_position_failed", Message: "read current tick failed"}, http.StatusInternalServerError
 	}
 	hooksAddr := normalizeHexPrefixed(poolInfo.HooksAddress)
 	if !common.IsHexAddress(hooksAddr) {

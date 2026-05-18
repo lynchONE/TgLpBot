@@ -193,7 +193,7 @@ type Config struct {
 	PancakeRouterV2  string
 	PancakeFactoryV2 string
 
-	// V3 Swap Router (閾句笂 swap 鐢?
+	// V3 swap routers.
 	PancakeV3SwapRouter string
 	UniswapV3SwapRouter string
 
@@ -217,7 +217,7 @@ type Config struct {
 	SmartLPContractAddress     string
 	SmartLPScorePerWallet      float64
 	SmartLPMinWallets          int
-	SmartLPRecentWindowMinutes int // 自动开单所需的时间窗口（分钟），默认 10 分钟
+	SmartLPRecentWindowMinutes int // recent window in minutes for automatic smart LP opens.
 	SmartLPScanIntervalSeconds int
 	SmartLPMaxBlocksPerScan    int
 	SmartLPRPCTimeoutSeconds   int
@@ -236,14 +236,14 @@ var AppConfig *Config
 
 func LoadConfig() error {
 	log.Println("========================================")
-	log.Println("项目启动中..")
+	log.Println("[Config] Loading configuration")
 	log.Println("========================================")
 
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Println("env加载失败")
+		log.Println("[Config] .env not loaded")
 	} else {
-		log.Println("env加载成功")
+		log.Println("[Config] .env loaded")
 	}
 
 	chainID, _ := strconv.ParseInt(getEnv("BSC_CHAIN_ID", "56"), 10, 64)
@@ -443,7 +443,7 @@ func LoadConfig() error {
 		return fmt.Errorf("invalid ENCRYPTION_KEY: %w", err)
 	}
 
-	// 打印关键配置信息（隐藏敏感信息）
+	// Print key configuration with sensitive values masked.
 	log.Println("配置如下")
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
 	log.Printf("   - Telegram WebApp URL: %s", AppConfig.TelegramWebAppURL)
@@ -660,7 +660,7 @@ func pickFirstNonEmpty(values ...string) string {
 	return ""
 }
 
-// ChainToOKXChainIndex 将内部链名称转换为 OKX API 的 chainIndex
+// ChainToOKXChainIndex converts an internal chain name to the OKX chainIndex.
 func ChainToOKXChainIndex(chain string) string {
 	switch NormalizeChain(chain) {
 	case "bsc":
@@ -852,7 +852,7 @@ func normalizeTelegramMenuButtonMode(v string) string {
 	case "":
 		return "commands"
 	default:
-		log.Printf("鈿狅笍  Unknown TELEGRAM_MENU_BUTTON_MODE=%q; fallback to \"commands\"", v)
+		log.Printf("[Config] Unknown TELEGRAM_MENU_BUTTON_MODE=%q; fallback to \"commands\"", v)
 		return "commands"
 	}
 }
@@ -860,7 +860,7 @@ func normalizeTelegramMenuButtonMode(v string) string {
 // maskString masks sensitive string for logging
 func maskString(s string) string {
 	if s == "" {
-		return "<鏈缃?"
+		return "<not set>"
 	}
 	if len(s) <= 8 {
 		return "***"
@@ -871,7 +871,7 @@ func maskString(s string) string {
 func maskURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "<鏈缃?"
+		return "<not set>"
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
