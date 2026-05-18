@@ -70,6 +70,21 @@ func TestNormalizeSaveInputRejectsInvalidDelay(t *testing.T) {
 	}
 }
 
+func TestNormalizeSaveInputRejectsInvalidExecutionWalletAddress(t *testing.T) {
+	ensureTestChainConfig(t)
+	_, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:               "bsc",
+		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+		ExecutionWalletAddr: "not-wallet",
+		AmountMode:          models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:     10,
+		DelayMode:           models.SmartMoneyFollowDelayModeImmediate,
+	})
+	if err == nil {
+		t.Fatal("expected invalid execution wallet address error")
+	}
+}
+
 func TestNormalizeSaveInputAcceptsWalletGroup(t *testing.T) {
 	ensureTestChainConfig(t)
 	got, err := NormalizeSaveInput(SaveConfigInput{
@@ -97,6 +112,24 @@ func TestNormalizeSaveInputAcceptsWalletGroup(t *testing.T) {
 	}
 	if got.TriggerMode != models.SmartMoneyFollowTriggerModeThreshold {
 		t.Fatalf("trigger mode = %s", got.TriggerMode)
+	}
+}
+
+func TestNormalizeSaveInputNormalizesExecutionWalletAddress(t *testing.T) {
+	ensureTestChainConfig(t)
+	got, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:               "bsc",
+		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+		ExecutionWalletAddr: "0x00000000000000000000000000000000000000AA",
+		AmountMode:          models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:     10,
+		DelayMode:           models.SmartMoneyFollowDelayModeImmediate,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSaveInput returned error: %v", err)
+	}
+	if got.ExecutionWalletAddr != "0x00000000000000000000000000000000000000aa" {
+		t.Fatalf("execution wallet address = %s", got.ExecutionWalletAddr)
 	}
 }
 

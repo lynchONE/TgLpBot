@@ -76,6 +76,8 @@ type SmartMoneyFollowConfig struct {
 	ChainID              int         `gorm:"not null;default:56;index" json:"chain_id"`
 	TargetWalletAddress  string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
 	TargetWallets        StringArray `gorm:"column:target_wallet_addresses;type:json" json:"target_wallet_addresses"`
+	ExecutionWalletID    uint        `gorm:"not null;default:0;index" json:"execution_wallet_id"`
+	ExecutionWalletAddr  string      `gorm:"column:execution_wallet_address;size:42;not null;default:'';index" json:"execution_wallet_address"`
 	TriggerMode          string      `gorm:"size:16;not null;default:'any'" json:"trigger_mode"`
 	TriggerMinWallets    int         `gorm:"not null;default:1" json:"trigger_min_wallets"`
 	TriggerWindowSeconds int         `gorm:"not null;default:300" json:"trigger_window_seconds"`
@@ -101,6 +103,8 @@ type SmartMoneyFollowJob struct {
 	Chain               string      `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
 	ChainID             int         `gorm:"not null;default:56;index" json:"chain_id"`
 	TargetWalletAddress string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
+	ExecutionWalletID   uint        `gorm:"not null;default:0;index" json:"execution_wallet_id"`
+	ExecutionWalletAddr string      `gorm:"column:execution_wallet_address;size:42;not null;default:'';index" json:"execution_wallet_address"`
 	EventID             uint        `gorm:"not null;uniqueIndex:uq_sm_follow_job_config_event_action,priority:2;index" json:"event_id"`
 	TriggerMode         string      `gorm:"size:16;not null;default:'any'" json:"trigger_mode"`
 	TriggerWallets      StringArray `gorm:"column:trigger_wallet_addresses;type:json" json:"trigger_wallet_addresses"`
@@ -127,6 +131,8 @@ type SmartMoneyFollowTask struct {
 	Chain               string    `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
 	ChainID             int       `gorm:"not null;default:56;index" json:"chain_id"`
 	TargetWalletAddress string    `gorm:"size:42;not null;index" json:"target_wallet_address"`
+	ExecutionWalletID   uint      `gorm:"not null;default:0;index" json:"execution_wallet_id"`
+	ExecutionWalletAddr string    `gorm:"column:execution_wallet_address;size:42;not null;default:'';index" json:"execution_wallet_address"`
 	TargetPositionRef   string    `gorm:"size:255;not null;index:idx_sm_follow_task_config_ref,priority:2" json:"target_position_ref"`
 	OpenEventID         uint      `gorm:"not null;uniqueIndex:uq_sm_follow_task_open_event" json:"open_event_id"`
 	OpenJobID           uint      `gorm:"not null;index" json:"open_job_id"`

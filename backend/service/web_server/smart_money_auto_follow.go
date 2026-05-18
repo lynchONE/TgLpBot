@@ -13,6 +13,8 @@ type smartMoneyAutoFollowSaveRequest struct {
 	Chain                string   `json:"chain"`
 	TargetWalletAddress  string   `json:"target_wallet_address"`
 	TargetWallets        []string `json:"target_wallet_addresses"`
+	ExecutionWalletID    uint     `json:"execution_wallet_id"`
+	ExecutionWalletAddr  string   `json:"execution_wallet_address"`
 	TriggerMode          string   `json:"trigger_mode"`
 	TriggerMinWallets    int      `json:"trigger_min_wallets"`
 	TriggerWindowSeconds int      `json:"trigger_window_seconds"`
@@ -80,6 +82,8 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 			Chain:                firstSmartMoneyAutoFollowChain(req.Config.Chain, req.Chain),
 			TargetWalletAddress:  req.Config.TargetWalletAddress,
 			TargetWallets:        req.Config.TargetWallets,
+			ExecutionWalletID:    req.Config.ExecutionWalletID,
+			ExecutionWalletAddr:  req.Config.ExecutionWalletAddr,
 			TriggerMode:          req.Config.TriggerMode,
 			TriggerMinWallets:    req.Config.TriggerMinWallets,
 			TriggerWindowSeconds: req.Config.TriggerWindowSeconds,

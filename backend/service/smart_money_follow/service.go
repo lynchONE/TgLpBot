@@ -42,6 +42,8 @@ type SaveConfigInput struct {
 	Chain                string
 	TargetWalletAddress  string
 	TargetWallets        []string
+	ExecutionWalletID    uint
+	ExecutionWalletAddr  string
 	TriggerMode          string
 	TriggerMinWallets    int
 	TriggerWindowSeconds int
@@ -66,6 +68,14 @@ type ConfigEnvelope struct {
 	Chain   string                          `json:"chain"`
 	Configs []models.SmartMoneyFollowConfig `json:"configs"`
 	Jobs    []models.SmartMoneyFollowJob    `json:"jobs"`
+	Wallets []ExecutionWalletOption         `json:"wallets"`
+}
+
+type ExecutionWalletOption struct {
+	ID        uint   `json:"id"`
+	Address   string `json:"address"`
+	Name      string `json:"name,omitempty"`
+	IsDefault bool   `json:"is_default"`
 }
 
 func NewService() *Service {
@@ -133,12 +143,19 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 	if err != nil {
 		return nil, err
 	}
+	walletOptions, defaultWallet, err := listExecutionWalletOptions(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	var configs []models.SmartMoneyFollowConfig
 	if err := database.DB.WithContext(ctx).
 		Where("user_id = ? AND chain = ?", userID, chain).
 		Order("updated_at DESC").
 		Find(&configs).Error; err != nil {
 		return nil, fmt.Errorf("list follow configs failed: %w", err)
+	}
+	for i := range configs {
+		fillConfigExecutionWallet(&configs[i], defaultWallet)
 	}
 
 	var jobs []models.SmartMoneyFollowJob
@@ -149,12 +166,16 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 		Find(&jobs).Error; err != nil {
 		return nil, fmt.Errorf("list follow jobs failed: %w", err)
 	}
+	for i := range jobs {
+		fillJobExecutionWallet(&jobs[i], defaultWallet)
+	}
 
 	return &ConfigEnvelope{
 		OK:      true,
 		Chain:   chain,
 		Configs: configs,
 		Jobs:    jobs,
+		Wallets: walletOptions,
 	}, nil
 }
 
@@ -171,6 +192,13 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 
 	var saved models.SmartMoneyFollowConfig
 	err = database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		executionWallet, err := resolveExecutionWalletForSave(ctx, tx, userID, normalized.ExecutionWalletID, normalized.ExecutionWalletAddr)
+		if err != nil {
+			return err
+		}
+		normalized.ExecutionWalletID = executionWallet.ID
+		normalized.ExecutionWalletAddr = normalizeWalletAddress(executionWallet.Address)
+
 		var existing models.SmartMoneyFollowConfig
 		var existingFound bool
 		if normalized.ID != 0 {
@@ -205,21 +233,23 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 				cursorID = latestID
 			}
 			updates := map[string]any{
-				"chain":                   chain,
-				"chain_id":                chainID,
-				"target_wallet_address":   normalized.TargetWalletAddress,
-				"target_wallet_addresses": models.StringArray(normalized.TargetWallets),
-				"trigger_mode":            normalized.TriggerMode,
-				"trigger_min_wallets":     normalized.TriggerMinWallets,
-				"trigger_window_seconds":  normalized.TriggerWindowSeconds,
-				"enabled":                 normalized.Enabled,
-				"amount_mode":             normalized.AmountMode,
-				"fixed_amount_usdt":       normalized.FixedAmountUSDT,
-				"ratio":                   normalized.Ratio,
-				"delay_mode":              normalized.DelayMode,
-				"delay_seconds":           normalized.DelaySeconds,
-				"follow_close":            normalized.FollowClose,
-				"cursor_event_id":         cursorID,
+				"chain":                    chain,
+				"chain_id":                 chainID,
+				"target_wallet_address":    normalized.TargetWalletAddress,
+				"target_wallet_addresses":  models.StringArray(normalized.TargetWallets),
+				"execution_wallet_id":      normalized.ExecutionWalletID,
+				"execution_wallet_address": normalized.ExecutionWalletAddr,
+				"trigger_mode":             normalized.TriggerMode,
+				"trigger_min_wallets":      normalized.TriggerMinWallets,
+				"trigger_window_seconds":   normalized.TriggerWindowSeconds,
+				"enabled":                  normalized.Enabled,
+				"amount_mode":              normalized.AmountMode,
+				"fixed_amount_usdt":        normalized.FixedAmountUSDT,
+				"ratio":                    normalized.Ratio,
+				"delay_mode":               normalized.DelayMode,
+				"delay_seconds":            normalized.DelaySeconds,
+				"follow_close":             normalized.FollowClose,
+				"cursor_event_id":          cursorID,
 			}
 			if latestID > existing.LastSeenEventID {
 				updates["last_seen_event_id"] = latestID
@@ -240,6 +270,8 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			ChainID:              chainID,
 			TargetWalletAddress:  normalized.TargetWalletAddress,
 			TargetWallets:        models.StringArray(normalized.TargetWallets),
+			ExecutionWalletID:    normalized.ExecutionWalletID,
+			ExecutionWalletAddr:  normalized.ExecutionWalletAddr,
 			TriggerMode:          normalized.TriggerMode,
 			TriggerMinWallets:    normalized.TriggerMinWallets,
 			TriggerWindowSeconds: normalized.TriggerWindowSeconds,
@@ -291,6 +323,13 @@ func NormalizeSaveInput(input SaveConfigInput) (SaveConfigInput, error) {
 		return SaveConfigInput{}, err
 	}
 	address := wallets[0]
+	if strings.TrimSpace(input.ExecutionWalletAddr) != "" {
+		executionAddr := normalizeWalletAddress(input.ExecutionWalletAddr)
+		if executionAddr == "" {
+			return SaveConfigInput{}, fmt.Errorf("invalid execution wallet address")
+		}
+		input.ExecutionWalletAddr = executionAddr
+	}
 
 	amountMode := strings.ToLower(strings.TrimSpace(input.AmountMode))
 	switch amountMode {
@@ -581,6 +620,8 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		Chain:               cfg.Chain,
 		ChainID:             cfg.ChainID,
 		TargetWalletAddress: normalizeWalletAddress(event.WalletAddress),
+		ExecutionWalletID:   cfg.ExecutionWalletID,
+		ExecutionWalletAddr: cfg.ExecutionWalletAddr,
 		EventID:             trigger.PrimaryEventID,
 		TriggerMode:         trigger.Mode,
 		TriggerWallets:      models.StringArray(trigger.Wallets),
@@ -887,6 +928,8 @@ func runOpenTaskSync(ctx context.Context, cfg *models.SmartMoneyFollowConfig, jo
 			Chain:               cfg.Chain,
 			ChainID:             cfg.ChainID,
 			TargetWalletAddress: cfg.TargetWalletAddress,
+			ExecutionWalletID:   task.WalletID,
+			ExecutionWalletAddr: normalizeWalletAddress(task.WalletAddress),
 			TargetPositionRef:   job.TargetPositionRef,
 			OpenEventID:         job.EventID,
 			OpenJobID:           job.ID,
@@ -1018,7 +1061,7 @@ func loadJobConfigAndEvent(ctx context.Context, job *models.SmartMoneyFollowJob)
 	return &cfg, &event, nil
 }
 
-func buildFollowTask(_ context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, amountUSDT float64) (*models.StrategyTask, error) {
+func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, amountUSDT float64) (*models.StrategyTask, error) {
 	if cfg == nil || event == nil {
 		return nil, fmt.Errorf("config or event is nil")
 	}
@@ -1034,7 +1077,7 @@ func buildFollowTask(_ context.Context, cfg *models.SmartMoneyFollowConfig, even
 		return nil, fmt.Errorf("unsupported protocol: %s", event.Protocol)
 	}
 
-	walletRow, err := wallet.NewWalletService().GetDefaultWallet(cfg.UserID)
+	walletRow, err := resolveExecutionWalletForRun(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -1085,7 +1128,7 @@ func buildFollowTask(_ context.Context, cfg *models.SmartMoneyFollowConfig, even
 		PoolVersion:            poolVersion,
 		Exchange:               strings.TrimSpace(poolInfo.Exchange),
 		WalletID:               walletRow.ID,
-		WalletAddress:          walletRow.Address,
+		WalletAddress:          normalizeWalletAddress(walletRow.Address),
 		IsFollow:               true,
 		Token0Symbol:           token0Symbol,
 		Token1Symbol:           token1Symbol,
@@ -1220,6 +1263,156 @@ func normalizeWalletAddresses(values []string, legacy string) ([]string, error) 
 		return nil, fmt.Errorf("target wallet address is required")
 	}
 	return wallets, nil
+}
+
+func resolveExecutionWalletForSave(ctx context.Context, tx *gorm.DB, userID uint, walletID uint, walletAddress string) (*models.Wallet, error) {
+	if userID == 0 {
+		return nil, fmt.Errorf("invalid user_id")
+	}
+	if walletID == 0 && strings.TrimSpace(walletAddress) == "" {
+		return nil, fmt.Errorf("execution wallet is required")
+	}
+	db := tx.WithContext(ctx).Where("user_id = ?", userID)
+	if walletID != 0 {
+		db = db.Where("id = ?", walletID)
+	} else {
+		addr := normalizeWalletAddress(walletAddress)
+		if addr == "" {
+			return nil, fmt.Errorf("invalid execution wallet address")
+		}
+		db = db.Where("LOWER(address) = ?", addr)
+	}
+	var row models.Wallet
+	if err := db.First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("execution wallet not found")
+		}
+		return nil, fmt.Errorf("load execution wallet failed: %w", err)
+	}
+	return &row, nil
+}
+
+func resolveExecutionWalletForRun(ctx context.Context, cfg *models.SmartMoneyFollowConfig) (*models.Wallet, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("follow config is nil")
+	}
+	ws := wallet.NewWalletService()
+	if cfg.ExecutionWalletID != 0 {
+		walletRow, err := ws.GetWalletByID(cfg.UserID, cfg.ExecutionWalletID)
+		if err != nil {
+			return nil, fmt.Errorf("load execution wallet failed: %w", err)
+		}
+		return walletRow, nil
+	}
+	if strings.TrimSpace(cfg.ExecutionWalletAddr) != "" {
+		walletRow, err := ws.GetWalletByAddress(cfg.UserID, cfg.ExecutionWalletAddr)
+		if err != nil {
+			return nil, fmt.Errorf("load execution wallet failed: %w", err)
+		}
+		return walletRow, nil
+	}
+	var row models.Wallet
+	err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND is_default = ?", cfg.UserID, true).
+		First(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = database.DB.WithContext(ctx).
+				Where("user_id = ?", cfg.UserID).
+				Order("id ASC").
+				First(&row).Error
+			if err != nil {
+				return nil, fmt.Errorf("no execution wallet found: %w", err)
+			}
+			return &row, nil
+		}
+		return nil, fmt.Errorf("load default execution wallet failed: %w", err)
+	}
+	return &row, nil
+}
+
+func listExecutionWalletOptions(ctx context.Context, userID uint) ([]ExecutionWalletOption, *models.Wallet, error) {
+	var rows []models.Wallet
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("is_default DESC, id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, nil, fmt.Errorf("list execution wallets failed: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil, fmt.Errorf("no execution wallet found")
+	}
+	adminAddr := ""
+	if config.AppConfig != nil {
+		adminAddr = normalizeWalletAddress(config.AppConfig.AdminWalletAddress)
+	}
+	options := make([]ExecutionWalletOption, 0, len(rows))
+	var defaultWallet *models.Wallet
+	for i := range rows {
+		row := rows[i]
+		if adminAddr != "" && normalizeWalletAddress(row.Address) == adminAddr {
+			continue
+		}
+		if row.IsDefault {
+			defaultWallet = &rows[i]
+		}
+		options = append(options, ExecutionWalletOption{
+			ID:        row.ID,
+			Address:   normalizeWalletAddress(row.Address),
+			Name:      strings.TrimSpace(row.Name),
+			IsDefault: row.IsDefault,
+		})
+	}
+	if len(options) == 0 {
+		return nil, nil, fmt.Errorf("no execution wallet found")
+	}
+	if defaultWallet == nil {
+		for i := range rows {
+			if normalizeWalletAddress(rows[i].Address) == options[0].Address {
+				defaultWallet = &rows[i]
+				break
+			}
+		}
+	}
+	return options, defaultWallet, nil
+}
+
+func fillConfigExecutionWallet(cfg *models.SmartMoneyFollowConfig, defaultWallet *models.Wallet) {
+	if cfg == nil {
+		return
+	}
+	if cfg.ExecutionWalletID != 0 && strings.TrimSpace(cfg.ExecutionWalletAddr) != "" {
+		cfg.ExecutionWalletAddr = normalizeWalletAddress(cfg.ExecutionWalletAddr)
+		return
+	}
+	if defaultWallet == nil {
+		return
+	}
+	if cfg.ExecutionWalletID == 0 {
+		cfg.ExecutionWalletID = defaultWallet.ID
+	}
+	if strings.TrimSpace(cfg.ExecutionWalletAddr) == "" {
+		cfg.ExecutionWalletAddr = normalizeWalletAddress(defaultWallet.Address)
+	}
+}
+
+func fillJobExecutionWallet(job *models.SmartMoneyFollowJob, defaultWallet *models.Wallet) {
+	if job == nil {
+		return
+	}
+	if job.ExecutionWalletID != 0 && strings.TrimSpace(job.ExecutionWalletAddr) != "" {
+		job.ExecutionWalletAddr = normalizeWalletAddress(job.ExecutionWalletAddr)
+		return
+	}
+	if defaultWallet == nil {
+		return
+	}
+	if job.ExecutionWalletID == 0 {
+		job.ExecutionWalletID = defaultWallet.ID
+	}
+	if strings.TrimSpace(job.ExecutionWalletAddr) == "" {
+		job.ExecutionWalletAddr = normalizeWalletAddress(defaultWallet.Address)
+	}
 }
 
 func configTargetWallets(cfg *models.SmartMoneyFollowConfig) ([]string, error) {

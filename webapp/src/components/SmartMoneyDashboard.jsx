@@ -4083,6 +4083,8 @@ const AUTO_FOLLOW_DRAFT_INITIAL = Object.freeze({
     id: 0,
     target_wallet_address: '',
     target_wallet_addresses: [''],
+    execution_wallet_id: '',
+    execution_wallet_address: '',
     trigger_mode: 'any',
     trigger_min_wallets: '2',
     trigger_window_seconds: '300',
@@ -4132,6 +4134,38 @@ function autoFollowTriggerText(config) {
     return wallets.length > 1 ? `任意 1 / ${wallets.length} 钱包` : '单钱包触发';
 }
 
+function findAutoFollowExecutionWallet(wallets, id, address) {
+    const walletId = Number(id) || 0;
+    const addr = normalizeWalletAddress(address);
+    if (!Array.isArray(wallets)) return null;
+    return wallets.find((wallet) => {
+        if (walletId > 0 && Number(wallet?.id) === walletId) return true;
+        return addr && normalizeWalletAddress(wallet?.address) === addr;
+    }) || null;
+}
+
+function formatAutoFollowExecutionWallet(value, wallets) {
+    const wallet = findAutoFollowExecutionWallet(wallets, value?.execution_wallet_id, value?.execution_wallet_address);
+    if (wallet) {
+        const name = String(wallet.name || '').trim();
+        const addr = normalizeWalletAddress(wallet.address);
+        return name ? `${name} · ${shortAddr(addr)}` : shortAddr(addr);
+    }
+    return shortAddr(normalizeWalletAddress(value?.execution_wallet_address)) || '未设置';
+}
+
+function ensureAutoFollowDraftExecutionWallet(draft, wallets) {
+    if (Number(draft?.execution_wallet_id) > 0) return draft;
+    const source = Array.isArray(wallets) ? wallets : [];
+    const wallet = source.find((item) => item?.is_default) || source[0];
+    if (!wallet) return draft;
+    return {
+        ...draft,
+        execution_wallet_id: String(wallet.id),
+        execution_wallet_address: normalizeWalletAddress(wallet.address),
+    };
+}
+
 function createAutoFollowDraft(config) {
     if (!config) return { ...AUTO_FOLLOW_DRAFT_INITIAL };
     const ratioPct = Number(config.ratio || 0) * 100;
@@ -4140,6 +4174,8 @@ function createAutoFollowDraft(config) {
         id: Number(config.id) || 0,
         target_wallet_address: String(config.target_wallet_address || ''),
         target_wallet_addresses: wallets,
+        execution_wallet_id: config.execution_wallet_id ? String(config.execution_wallet_id) : '',
+        execution_wallet_address: normalizeWalletAddress(config.execution_wallet_address),
         trigger_mode: config.trigger_mode === 'threshold' ? 'threshold' : 'any',
         trigger_min_wallets: config.trigger_min_wallets != null ? String(config.trigger_min_wallets) : '2',
         trigger_window_seconds: config.trigger_window_seconds != null ? String(config.trigger_window_seconds) : '300',
@@ -4156,9 +4192,15 @@ function createAutoFollowDraft(config) {
 function autoFollowDraftReducer(state, action) {
     switch (action.type) {
         case 'reset':
-            return action.payload ? createAutoFollowDraft(action.payload) : { ...AUTO_FOLLOW_DRAFT_INITIAL };
+            return ensureAutoFollowDraftExecutionWallet(
+                action.payload ? createAutoFollowDraft(action.payload) : { ...AUTO_FOLLOW_DRAFT_INITIAL },
+                action.wallets
+            );
         case 'set':
             return { ...state, ...action.payload };
+        case 'ensureExecutionWallet': {
+            return ensureAutoFollowDraftExecutionWallet(state, action.payload);
+        }
         default:
             return state;
     }
@@ -4166,6 +4208,11 @@ function autoFollowDraftReducer(state, action) {
 
 function normalizeAutoFollowDraft(draft) {
     const wallets = parseAutoFollowWalletInputs(draft.target_wallet_addresses);
+    const executionWalletID = Number(draft.execution_wallet_id);
+    if (!Number.isFinite(executionWalletID) || executionWalletID <= 0) {
+        throw new Error('请选择执行钱包');
+    }
+    const executionWalletAddress = normalizeWalletAddress(draft.execution_wallet_address);
     const amountMode = draft.amount_mode === 'ratio' ? 'ratio' : 'fixed';
     let fixedAmount = 0;
     let ratio = 1;
@@ -4206,6 +4253,8 @@ function normalizeAutoFollowDraft(draft) {
         id: Number(draft.id) || 0,
         target_wallet_address: wallets[0],
         target_wallet_addresses: wallets,
+        execution_wallet_id: executionWalletID,
+        execution_wallet_address: executionWalletAddress,
         trigger_mode: triggerMode,
         trigger_min_wallets: triggerMinWallets,
         trigger_window_seconds: triggerWindowSeconds,
@@ -4287,7 +4336,7 @@ function AutoFollowSummaryBar({ stats }) {
     );
 }
 
-function AutoFollowForm({ draft, dispatch, saving, hasInitData, onSubmit, onReset }) {
+function AutoFollowForm({ draft, dispatch, saving, hasInitData, executionWallets, walletsLoading, onSubmit, onReset }) {
     const editing = Number(draft.id) > 0;
     const isFixed = draft.amount_mode === 'fixed';
     const isImmediate = draft.delay_mode === 'immediate';
@@ -4307,11 +4356,50 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, onSubmit, onRese
     const addWallet = () => {
         dispatch({ type: 'set', payload: { target_wallet_addresses: [...wallets, ''] } });
     };
+    const updateExecutionWallet = (value) => {
+        const wallet = findAutoFollowExecutionWallet(executionWallets, value, '');
+        dispatch({
+            type: 'set',
+            payload: {
+                execution_wallet_id: wallet ? String(wallet.id) : '',
+                execution_wallet_address: wallet ? normalizeWalletAddress(wallet.address) : '',
+            },
+        });
+    };
     return (
         <div className="af-form">
             <div className="af-form-row">
+                <label className="af-field-label">执行钱包</label>
+                {walletsLoading ? (
+                    <div className="af-wallet-loading">加载钱包中…</div>
+                ) : (
+                    <div className="af-exec-wallet-list" role="radiogroup" aria-label="执行钱包">
+                        {executionWallets.map((wallet) => {
+                            const active = Number(draft.execution_wallet_id) === Number(wallet.id);
+                            const addr = normalizeWalletAddress(wallet.address);
+                            return (
+                                <button
+                                    key={wallet.id}
+                                    type="button"
+                                    className={`af-exec-wallet-option${active ? ' active' : ''}`}
+                                    onClick={() => updateExecutionWallet(wallet.id)}
+                                    aria-pressed={active}
+                                >
+                                    <Wallet size={13} />
+                                    <span>
+                                        <strong>{String(wallet.name || '').trim() || `钱包 #${wallet.id}`}</strong>
+                                        <small>{shortAddr(addr)}{wallet.is_default ? ' · 默认' : ''}</small>
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+
+            <div className="af-form-row">
                 <div className="af-wallet-head">
-                    <label className="af-field-label">跟单钱包地址</label>
+                    <label className="af-field-label">目标钱包地址</label>
                     <button type="button" className="af-inline-btn" onClick={addWallet}>
                         <Plus size={12} /> 添加钱包
                     </button>
@@ -4522,7 +4610,7 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, onSubmit, onRese
                     type="button"
                     className="af-btn af-btn--primary"
                     onClick={onSubmit}
-                    disabled={saving || !hasInitData}
+                    disabled={saving || !hasInitData || executionWallets.length === 0}
                 >
                     {saving ? '保存中…' : editing ? '保存修改' : '新增配置'}
                 </button>
@@ -4531,7 +4619,7 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, onSubmit, onRese
     );
 }
 
-function AutoFollowConfigCard({ config, busy, onEdit, onToggle, onDelete }) {
+function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle, onDelete }) {
     const amountText = config.amount_mode === 'ratio'
         ? `${Math.round(Number(config.ratio || 0) * 100)}% 仓位`
         : `${formatUsd(config.fixed_amount_usdt)} 固定`;
@@ -4575,6 +4663,7 @@ function AutoFollowConfigCard({ config, busy, onEdit, onToggle, onDelete }) {
             </div>
             <div className="af-config-meta">
                 <span className="af-meta-tag"><Users size={11} />{autoFollowTriggerText(config)}</span>
+                <span className="af-meta-tag"><Wallet size={11} />{formatAutoFollowExecutionWallet(config, executionWallets)}</span>
                 <span className="af-meta-tag"><DollarSign size={11} />{amountText}</span>
                 <span className="af-meta-tag"><Clock size={11} />{delayText}</span>
                 <span className="af-meta-tag">
@@ -4586,7 +4675,7 @@ function AutoFollowConfigCard({ config, busy, onEdit, onToggle, onDelete }) {
     );
 }
 
-function AutoFollowJobCard({ job }) {
+function AutoFollowJobCard({ job, executionWallets }) {
     const info = autoFollowStatusInfo(job.status);
     const StatusIcon = info.Icon;
     const isOpen = job.action === 'open';
@@ -4610,6 +4699,7 @@ function AutoFollowJobCard({ job }) {
                     <span className="af-job-addr">
                         {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)}
                     </span>
+                    <span className="af-job-time">{formatAutoFollowExecutionWallet(job, executionWallets)}</span>
                     <span className="af-job-time">{formatJobTime(job.scheduled_at)}</span>
                     <span className="af-job-id">#{job.id}</span>
                 </div>
@@ -4625,6 +4715,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
     const hasInitData = Boolean(String(initData || '').trim());
     const [configs, setConfigs] = useState([]);
     const [jobs, setJobs] = useState([]);
+    const [executionWallets, setExecutionWallets] = useState([]);
     const [draft, dispatch] = useReducer(autoFollowDraftReducer, undefined, () => createAutoFollowDraft());
     const [activeTab, setActiveTab] = useState('configure');
     const [loading, setLoading] = useState(false);
@@ -4643,14 +4734,18 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         if (!hasInitData) {
             setConfigs([]);
             setJobs([]);
+            setExecutionWallets([]);
             return;
         }
         setLoading(true);
         setError('');
         try {
             const resp = await fetchSMAutoFollow({ apiBaseUrl, initData, chain, signal });
+            const wallets = Array.isArray(resp?.wallets) ? resp.wallets : [];
+            setExecutionWallets(wallets);
             setConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
             setJobs(Array.isArray(resp?.jobs) ? resp.jobs : []);
+            dispatch({ type: 'ensureExecutionWallet', payload: wallets });
         } catch (err) {
             if (err?.name === 'AbortError') return;
             setError(String(err?.message || err || '加载失败'));
@@ -4676,8 +4771,8 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
     const stats = useMemo(() => aggregateAutoFollowStats(configs, jobs), [configs, jobs]);
 
     const handleReset = useCallback(() => {
-        dispatch({ type: 'reset' });
-    }, []);
+        dispatch({ type: 'reset', wallets: executionWallets });
+    }, [executionWallets]);
 
     const handleEdit = useCallback((config) => {
         dispatch({ type: 'reset', payload: config });
@@ -4691,6 +4786,10 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             setError('缺少 Telegram initData，无法保存');
             return;
         }
+        if (executionWallets.length === 0) {
+            setError('没有可用执行钱包');
+            return;
+        }
         setSaving(true);
         setError('');
         setNotice('');
@@ -4698,14 +4797,14 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             const config = normalizeAutoFollowDraft(draft);
             await saveSMAutoFollowConfig({ apiBaseUrl, initData, chain, config });
             setNotice(draft.id ? '配置已更新' : '配置已新增');
-            dispatch({ type: 'reset' });
+            dispatch({ type: 'reset', wallets: executionWallets });
             await load();
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
         } finally {
             setSaving(false);
         }
-    }, [apiBaseUrl, chain, draft, hasInitData, initData, load]);
+    }, [apiBaseUrl, chain, draft, executionWallets, hasInitData, initData, load]);
 
     const handleToggle = useCallback(async (config) => {
         if (!config || !hasInitData) return;
@@ -4722,6 +4821,8 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                     chain: config.chain,
                     target_wallet_address: config.target_wallet_address,
                     target_wallet_addresses: normalizeAutoFollowWalletList(config).filter(Boolean),
+                    execution_wallet_id: Number(config.execution_wallet_id || 0),
+                    execution_wallet_address: config.execution_wallet_address || '',
                     trigger_mode: config.trigger_mode || 'any',
                     trigger_min_wallets: Number(config.trigger_min_wallets || 1),
                     trigger_window_seconds: Number(config.trigger_window_seconds || 300),
@@ -4753,7 +4854,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             setNotice('配置已删除');
             setConfirmTarget(null);
             if (draft.id === confirmTarget.id) {
-                dispatch({ type: 'reset' });
+                dispatch({ type: 'reset', wallets: executionWallets });
             }
             await load();
         } catch (err) {
@@ -4761,7 +4862,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         } finally {
             setSaving(false);
         }
-    }, [apiBaseUrl, chain, confirmTarget, draft.id, hasInitData, initData, load]);
+    }, [apiBaseUrl, chain, confirmTarget, draft.id, executionWallets, hasInitData, initData, load]);
 
     return (
         <div className="af-panel">
@@ -4822,6 +4923,8 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                         dispatch={dispatch}
                         saving={saving}
                         hasInitData={hasInitData}
+                        executionWallets={executionWallets}
+                        walletsLoading={loading && executionWallets.length === 0}
                         onSubmit={handleSubmit}
                         onReset={handleReset}
                     />
@@ -4844,6 +4947,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                                 <AutoFollowConfigCard
                                     key={c.id}
                                     config={c}
+                                    executionWallets={executionWallets}
                                     busy={saving}
                                     onEdit={handleEdit}
                                     onToggle={handleToggle}
@@ -4866,7 +4970,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                     ) : (
                         <div className="af-job-list">
                             {jobs.slice(0, 12).map((j) => (
-                                <AutoFollowJobCard key={j.id} job={j} />
+                                <AutoFollowJobCard key={j.id} job={j} executionWallets={executionWallets} />
                             ))}
                         </div>
                     )}
