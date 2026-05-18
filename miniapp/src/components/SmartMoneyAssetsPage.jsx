@@ -207,35 +207,71 @@ export default function SmartMoneyAssetsPage({
         if (openDetail) { setSmSubTab('wallets'); setSmDrillWalletId(id); }
     }, []);
 
+    const applySmartMoneyWalletRows = useCallback((wallets) => {
+        if (!Array.isArray(wallets)) return;
+        const current = wallets.find(i => walletKey(i) === selectedWalletId);
+        if (current) setSelectedWalletMeta(prev => ({ ...(prev || {}), ...current }));
+        else if (!selectedWalletId && wallets[0]) selectSmartMoneyWallet(wallets[0]);
+        else if (!wallets.length && !smDrillWalletId) { setSelectedWalletId(''); setSelectedWalletMeta(null); setSmartMoneyWallet(null); }
+    }, [selectSmartMoneyWallet, selectedWalletId, smDrillWalletId]);
+
+    const mergeSmartMoneyOverview = useCallback((patch) => {
+        if (!patch) return;
+        setSmartMoneyOverview(current => ({ ...(current || {}), ...patch }));
+    }, []);
+
+    const loadSmartMoneySummary = useCallback(async ({ forceRefresh = false } = {}) => {
+        if (!hasInitData || !isAdmin) return;
+        try {
+            const summary = await fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, section: 'summary', forceRefresh });
+            startTransition(() => { mergeSmartMoneyOverview(summary || {}); });
+        } catch (err) { if (!isIgnorableSmartMoneyDataError(err)) setSmartMoneyError(errorText(err)); }
+    }, [apiBaseUrl, hasInitData, initData, isAdmin, mergeSmartMoneyOverview, smartMoneyDays]);
+
+    const loadSmartMoneyWallets = useCallback(async ({ forceRefresh = false } = {}) => {
+        if (!hasInitData || !isAdmin) return;
+        try {
+            const overview = await fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, page: smWalletPage + 1, pageSize: SM_PAGE_SIZE, keyword: smWalletSearch, section: 'wallets', forceRefresh });
+            const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
+            startTransition(() => { mergeSmartMoneyOverview(overview || {}); });
+            applySmartMoneyWalletRows(wallets);
+        } catch (err) { if (!isIgnorableSmartMoneyDataError(err)) setSmartMoneyError(errorText(err)); }
+    }, [apiBaseUrl, applySmartMoneyWalletRows, hasInitData, initData, isAdmin, mergeSmartMoneyOverview, smWalletPage, smWalletSearch, smartMoneyDays]);
+
+    const loadSmartMoneyLeaderboard = useCallback(async ({ forceRefresh = false } = {}) => {
+        if (!hasInitData || !isAdmin) return;
+        try {
+            const leaderboard = await fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, page: smLeaderPage + 1, pageSize: SM_PAGE_SIZE, keyword: smLeaderSearch, forceRefresh });
+            startTransition(() => { setSmartMoneyLeaderboard(leaderboard || null); });
+        } catch (err) { if (!isIgnorableSmartMoneyDataError(err)) setSmartMoneyError(errorText(err)); }
+    }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, smLeaderPage, smLeaderSearch]);
+
     const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
         if (!hasInitData || !isAdmin) return;
         if (hasSmartMoneyDataRef.current) setSmartMoneyRefreshing(true); else setSmartMoneyLoading(true);
         setSmartMoneyError('');
         try {
-            const [overviewResult, leaderboardResult] = await Promise.allSettled([
-                fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, page: smWalletPage + 1, pageSize: SM_PAGE_SIZE, keyword: smWalletSearch, forceRefresh }),
-                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, page: smLeaderPage + 1, pageSize: SM_PAGE_SIZE, keyword: smLeaderSearch, forceRefresh }),
+            await Promise.allSettled([
+                loadSmartMoneySummary({ forceRefresh }),
+                loadSmartMoneyWallets({ forceRefresh }),
+                loadSmartMoneyLeaderboard({ forceRefresh }),
             ]);
-            const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-            const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
-            const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
-            startTransition(() => {
-                if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
-                if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
-            });
-            const current = wallets.find(i => walletKey(i) === selectedWalletId);
-            if (current) setSelectedWalletMeta(prev => ({ ...(prev || {}), ...current }));
-            else if (!selectedWalletId && wallets[0]) selectSmartMoneyWallet(wallets[0]);
-            else if (!wallets.length && !smDrillWalletId) { setSelectedWalletId(''); setSelectedWalletMeta(null); setSmartMoneyWallet(null); }
-            const rejected = [overviewResult, leaderboardResult].filter(i => i.status === 'rejected').map(i => i.reason);
-            const fatal = rejected.find(i => !isIgnorableSmartMoneyDataError(i));
-            if (fatal) setSmartMoneyError(errorText(fatal));
-        } catch (err) { setSmartMoneyError(errorText(err)); }
-        finally { setSmartMoneyLoading(false); setSmartMoneyRefreshing(false); }
-    }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, selectSmartMoneyWallet, selectedWalletId, smLeaderPage, smLeaderSearch, smDrillWalletId, smWalletPage, smWalletSearch, smartMoneyDays]);
+        } finally { setSmartMoneyLoading(false); setSmartMoneyRefreshing(false); }
+    }, [hasInitData, isAdmin, loadSmartMoneyLeaderboard, loadSmartMoneySummary, loadSmartMoneyWallets]);
 
     useEffect(() => {
-        loadSmartMoney();
+        loadSmartMoneySummary();
+    }, [loadSmartMoneySummary]);
+
+    useEffect(() => {
+        loadSmartMoneyWallets();
+    }, [loadSmartMoneyWallets]);
+
+    useEffect(() => {
+        loadSmartMoneyLeaderboard();
+    }, [loadSmartMoneyLeaderboard]);
+
+    useEffect(() => {
         if (!hasInitData || !isAdmin) return undefined;
         const timer = setInterval(() => loadSmartMoney(), Math.max(60, Number(pollIntervalSec || 15)) * 1000);
         return () => clearInterval(timer);

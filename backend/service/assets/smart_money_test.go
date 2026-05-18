@@ -389,3 +389,35 @@ func TestSmartMoneyWalletLiveCacheTTL_IsFiveMinutes(t *testing.T) {
 		t.Fatalf("smart money wallet live cache ttl = %s, want %s", got, want)
 	}
 }
+
+func TestNormalizeSmartMoneyOverviewSections_DefaultsToAll(t *testing.T) {
+	got := normalizeSmartMoneyOverviewSections(nil)
+
+	for _, section := range []smartMoneyOverviewSection{
+		smartMoneyOverviewSectionSummary,
+		smartMoneyOverviewSectionWallets,
+		smartMoneyOverviewSectionHistory,
+		smartMoneyOverviewSectionWindows,
+	} {
+		if !got[section] {
+			t.Fatalf("section %s disabled, want enabled", section)
+		}
+	}
+}
+
+func TestNormalizeSmartMoneyOverviewSections_ParsesRequestedSections(t *testing.T) {
+	got := normalizeSmartMoneyOverviewSections([]string{"summary,wallets"})
+
+	if !got[smartMoneyOverviewSectionSummary] {
+		t.Fatal("summary section disabled, want enabled")
+	}
+	if !got[smartMoneyOverviewSectionWallets] {
+		t.Fatal("wallets section disabled, want enabled")
+	}
+	if got[smartMoneyOverviewSectionHistory] {
+		t.Fatal("history section enabled, want disabled")
+	}
+	if got[smartMoneyOverviewSectionWindows] {
+		t.Fatal("windows section enabled, want disabled")
+	}
+}

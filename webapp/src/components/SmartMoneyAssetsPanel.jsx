@@ -290,74 +290,103 @@ export default function SmartMoneyAssetsPanel({
     }
   }, []);
 
+  const applyWalletRows = useCallback((rows) => {
+    if (!Array.isArray(rows)) return;
+    if (!selectedWalletId && rows[0]) {
+      selectWallet(rows[0]);
+      return;
+    }
+    const matchedWallet = rows.find((item) => walletKey(item) === selectedWalletId);
+    if (matchedWallet) setSelectedWalletMeta(matchedWallet);
+  }, [selectWallet, selectedWalletId]);
+
+  const mergeOverview = useCallback((patch) => {
+    if (!patch) return;
+    setOverview((current) => ({ ...(current || {}), ...patch }));
+  }, []);
+
+  const loadSmartMoneySummary = useCallback(async ({ forceRefresh = false } = {}) => {
+    if (!hasInitData || !isAdmin) return;
+    try {
+      const summary = await fetchAdminSmartMoneyOverview({
+        apiBaseUrl,
+        initData,
+        days,
+        section: 'summary',
+        forceRefresh,
+      });
+      startTransition(() => {
+        mergeOverview(summary || {});
+      });
+    } catch (err) {
+      if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
+    }
+  }, [apiBaseUrl, days, hasInitData, initData, isAdmin, mergeOverview]);
+
+  const loadSmartMoneyWallets = useCallback(async ({ forceRefresh = false } = {}) => {
+    if (!hasInitData || !isAdmin) return;
+    try {
+      const wallets = await fetchAdminSmartMoneyOverview({
+        apiBaseUrl,
+        initData,
+        days,
+        page: walletPage + 1,
+        pageSize: PAGE_SIZE,
+        keyword: walletKeyword,
+        section: 'wallets',
+        forceRefresh,
+      });
+      startTransition(() => {
+        mergeOverview(wallets || {});
+      });
+      applyWalletRows(Array.isArray(wallets?.wallets) ? wallets.wallets : []);
+    } catch (err) {
+      if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
+    }
+  }, [apiBaseUrl, applyWalletRows, days, hasInitData, initData, isAdmin, mergeOverview, walletKeyword, walletPage]);
+
+  const loadSmartMoneyLeaderboard = useCallback(async ({ forceRefresh = false } = {}) => {
+    if (!hasInitData || !isAdmin) return;
+    try {
+      const nextLeaderboard = await fetchAdminSmartMoneyLeaderboard({
+        apiBaseUrl,
+        initData,
+        days: 1,
+        metric: leaderboardMetric,
+        page: leaderboardPage + 1,
+        pageSize: PAGE_SIZE,
+        keyword: leaderboardKeyword,
+        forceRefresh,
+      });
+      startTransition(() => {
+        setLeaderboard(nextLeaderboard || null);
+      });
+    } catch (err) {
+      if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
+    }
+  }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardKeyword, leaderboardMetric, leaderboardPage]);
+
   const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!hasInitData || !isAdmin) return;
     if (hasDataRef.current) setRefreshing(true);
     else setLoading(true);
     setError('');
     try {
-      const [overviewResult, leaderboardResult] = await Promise.allSettled([
-        fetchAdminSmartMoneyOverview({
-          apiBaseUrl,
-          initData,
-          days,
-          page: walletPage + 1,
-          pageSize: PAGE_SIZE,
-          keyword: walletKeyword,
-          forceRefresh,
-        }),
-        fetchAdminSmartMoneyLeaderboard({
-          apiBaseUrl,
-          initData,
-          days: 1,
-          metric: leaderboardMetric,
-          page: leaderboardPage + 1,
-          pageSize: PAGE_SIZE,
-          keyword: leaderboardKeyword,
-          forceRefresh,
-        }),
+      await Promise.allSettled([
+        loadSmartMoneySummary({ forceRefresh }),
+        loadSmartMoneyWallets({ forceRefresh }),
+        loadSmartMoneyLeaderboard({ forceRefresh }),
       ]);
-
-      const nextOverview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-      const nextLeaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
-
-      startTransition(() => {
-        if (overviewResult.status === 'fulfilled') setOverview(nextOverview || null);
-        if (leaderboardResult.status === 'fulfilled') setLeaderboard(nextLeaderboard || null);
-      });
-
-      const walletRows = Array.isArray(nextOverview?.wallets) ? nextOverview.wallets : [];
-      if (!selectedWalletId && walletRows[0]) {
-        selectWallet(walletRows[0]);
-      } else {
-        const matchedWallet = walletRows.find((item) => walletKey(item) === selectedWalletId);
-        if (matchedWallet) setSelectedWalletMeta(matchedWallet);
-      }
-
-      const rejectedErrors = [overviewResult, leaderboardResult]
-        .filter((item) => item.status === 'rejected')
-        .map((item) => item.reason);
-      const fatal = rejectedErrors.find((item) => !isIgnorableSmartMoneyDataError(item));
-      if (fatal) setError(errorText(fatal));
-    } catch (err) {
-      setError(errorText(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [
-    apiBaseUrl,
-    days,
     hasInitData,
-    initData,
     isAdmin,
-    leaderboardKeyword,
-    leaderboardMetric,
-    leaderboardPage,
-    selectWallet,
-    selectedWalletId,
-    walletKeyword,
-    walletPage,
+    loadSmartMoneyLeaderboard,
+    loadSmartMoneySummary,
+    loadSmartMoneyWallets,
   ]);
 
   const selectedWallet = useMemo(() => {
@@ -391,10 +420,6 @@ export default function SmartMoneyAssetsPanel({
   }, [apiBaseUrl, days, hasInitData, initData, isAdmin, selectedWallet]);
 
   useEffect(() => {
-    loadSmartMoney();
-  }, [loadSmartMoney]);
-
-  useEffect(() => {
     if (!hasInitData || !isAdmin) return undefined;
     const timer = setInterval(() => {
       loadSmartMoney();
@@ -415,8 +440,20 @@ export default function SmartMoneyAssetsPanel({
   }, [days, walletKeyword]);
 
   useEffect(() => {
+    loadSmartMoneySummary();
+  }, [loadSmartMoneySummary]);
+
+  useEffect(() => {
+    loadSmartMoneyWallets();
+  }, [loadSmartMoneyWallets]);
+
+  useEffect(() => {
     setLeaderboardPage(0);
   }, [leaderboardKeyword, leaderboardMetric]);
+
+  useEffect(() => {
+    loadSmartMoneyLeaderboard();
+  }, [loadSmartMoneyLeaderboard]);
 
   const walletRows = useMemo(
     () => (Array.isArray(overview?.wallets) ? overview.wallets : []),

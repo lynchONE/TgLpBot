@@ -44,3 +44,12 @@ func TestDecodeAdminSmartMoneyLeaderboardRequest_CamelCaseAndUnknownFields(t *te
 		t.Fatalf("metric = %q, want %q", got.Metric, "yield_rate")
 	}
 }
+
+func TestAssetOverviewSectionsCachePart(t *testing.T) {
+	if got, want := assetOverviewSectionsCachePart("", nil), "all"; got != want {
+		t.Fatalf("empty sections cache part = %s, want %s", got, want)
+	}
+	if got, want := assetOverviewSectionsCachePart("wallets", []string{"summary,wallets"}), "wallets_summary"; got != want {
+		t.Fatalf("sections cache part = %s, want %s", got, want)
+	}
+}

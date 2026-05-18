@@ -41,12 +41,14 @@ type userLPProfitBaselineRequest struct {
 }
 
 type adminSmartMoneyOverviewRequest struct {
-	InitData     string `json:"initData"`
-	Days         int    `json:"days"`
-	Page         int    `json:"page"`
-	PageSize     int    `json:"page_size"`
-	Keyword      string `json:"keyword"`
-	ForceRefresh bool   `json:"force_refresh,omitempty"`
+	InitData     string   `json:"initData"`
+	Days         int      `json:"days"`
+	Page         int      `json:"page"`
+	PageSize     int      `json:"page_size"`
+	Keyword      string   `json:"keyword"`
+	Section      string   `json:"section,omitempty"`
+	Sections     []string `json:"sections,omitempty"`
+	ForceRefresh bool     `json:"force_refresh,omitempty"`
 }
 
 type adminSmartMoneyWalletRequest struct {
@@ -176,6 +178,36 @@ func assetResponseCacheKey(parts ...string) string {
 		out = append(out, value)
 	}
 	return strings.Join(out, ":")
+}
+
+func assetOverviewSectionsCachePart(section string, sections []string) string {
+	values := make([]string, 0, len(sections)+1)
+	if strings.TrimSpace(section) != "" {
+		values = append(values, section)
+	}
+	values = append(values, sections...)
+	if len(values) == 0 {
+		return "all"
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, item := range values {
+		for _, part := range strings.Split(item, ",") {
+			value := strings.TrimSpace(strings.ToLower(part))
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	if len(out) == 0 {
+		return "all"
+	}
+	return strings.Join(out, "_")
 }
 
 func readCachedAssetResponse(key string) ([]byte, bool) {
@@ -389,13 +421,18 @@ func (s *Server) handleAdminSmartMoneyOverview(w http.ResponseWriter, r *http.Re
 		"admin",
 		fmt.Sprintf("%d", adminUserID),
 		"smart-money-overview",
+		assetOverviewSectionsCachePart(req.Section, req.Sections),
 		fmt.Sprintf("%d", req.Days),
 		fmt.Sprintf("%d", req.Page),
 		fmt.Sprintf("%d", req.PageSize),
 		req.Keyword,
 	)
 	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
-		return s.Assets.GetSmartMoneyOverview(r.Context(), req.Days, req.Page, req.PageSize, req.Keyword, req.ForceRefresh)
+		sections := req.Sections
+		if strings.TrimSpace(req.Section) != "" {
+			sections = append([]string{req.Section}, sections...)
+		}
+		return s.Assets.GetSmartMoneyOverviewSections(r.Context(), req.Days, req.Page, req.PageSize, req.Keyword, req.ForceRefresh, sections)
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

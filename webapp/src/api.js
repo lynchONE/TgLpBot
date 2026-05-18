@@ -349,28 +349,37 @@ export async function fetchAdminSmartMoneyOverview({
   page = 1,
   pageSize = 10,
   keyword = '',
+  section = '',
+  sections,
   forceRefresh = false,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/admin?endpoint=assets_smart_money_overview`;
   const normalizedKeyword = String(keyword || '').trim().toLowerCase();
-  const cacheKey = `admin-smart-money-overview:${base}:${initData}:${days}:${page}:${pageSize}:${normalizedKeyword}`;
+  const normalizedSections = Array.isArray(sections)
+    ? sections.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  const sectionKey = [String(section || '').trim().toLowerCase(), ...normalizedSections].filter(Boolean).join(',') || 'all';
+  const cacheKey = `admin-smart-money-overview:${base}:${initData}:${sectionKey}:${days}:${page}:${pageSize}:${normalizedKeyword}`;
   return resolveAssetCachedPayload({
     cacheKey,
     forceRefresh,
     load: async () => {
+      const body = {
+        initData,
+        days,
+        page,
+        page_size: pageSize,
+        keyword: normalizedKeyword,
+        force_refresh: forceRefresh,
+      };
+      if (String(section || '').trim()) body.section = String(section || '').trim().toLowerCase();
+      if (normalizedSections.length) body.sections = normalizedSections;
       const payload = await requestJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          initData,
-          days,
-          page,
-          page_size: pageSize,
-          keyword: normalizedKeyword,
-          force_refresh: forceRefresh,
-        }),
+        body: JSON.stringify(body),
         signal,
       });
       return payload?.data ?? payload;
