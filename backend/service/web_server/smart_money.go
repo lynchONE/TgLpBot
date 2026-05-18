@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,6 +30,8 @@ var (
 	smGoldenDogSvc *smgd.Service
 	smWatchOpenSvc *smwoa.Service
 	smFollowSvc    *smfollow.Service
+
+	smPositionRepairRunning int32
 )
 
 func initSmartMoney() {
@@ -592,6 +595,7 @@ func (s *Server) handleSMContracts(w http.ResponseWriter, r *http.Request) {
 // --- Pools ---
 
 func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
+	reqStarted := time.Now()
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -667,11 +671,13 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		hasMaxFeeRate = true
 	}
 
+	sqlStarted := time.Now()
 	pools, err := repo.ListPoolsWithPositions(ctx)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	sqlElapsed := time.Since(sqlStarted)
 	for i := range pools {
 		pools[i].TradingPair = buildSmartMoneyTradingPair(pools[i].Token0Symbol, pools[i].Token1Symbol)
 		pools[i].DisplayTokenAddress, pools[i].DisplayTokenSymbol = smartMoneyPickDisplayToken(
@@ -727,7 +733,9 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			addressesByChain[chain] = append(addressesByChain[chain], pagedPools[i].DisplayTokenAddress)
 		}
 	}
+	metaStarted := time.Now()
 	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
+	metaElapsed := time.Since(metaStarted)
 	for i := range pagedPools {
 		applySmartMoneyDisplayToken(
 			smartMoneyChainSlug(pagedPools[i].ChainID),
@@ -737,10 +745,13 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			metaByChain,
 		)
 	}
+	rangeStarted := time.Now()
 	if err := attachSmartMoneyRangeGroupsToPoolList(ctx, repo, pagedPools); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	rangeElapsed := time.Since(rangeStarted)
+	logSmartMoneySlowStage("pools", reqStarted, "sql", sqlElapsed, "metadata", metaElapsed, "ranges", rangeElapsed, "total", total, "page_size", len(pagedPools))
 	jsonOK(w, map[string]interface{}{
 		"total": total,
 		"list":  pagedPools,
@@ -748,6 +759,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) {
+	reqStarted := time.Now()
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -778,19 +790,25 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 	protocol := strings.TrimSpace(r.URL.Query().Get("protocol"))
 	protocolFilter := strings.ToLower(protocol)
 
+	sqlStarted := time.Now()
 	positions, err := repo.ListActivePositionsForFeeHeatmap(ctx)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	sqlElapsed := time.Since(sqlStarted)
 	filteredPositions := filterSmartMoneyHeatmapPositions(positions, keyword, protocolFilter)
-	s.refreshSmartMoneyHeatmapFees(ctx, repo, filteredPositions)
+	refreshStarted := time.Now()
+	s.triggerSmartMoneyHeatmapFeeRefresh(repo, filteredPositions)
+	refreshElapsed := time.Since(refreshStarted)
 
+	buildStarted := time.Now()
 	rows := sm.BuildPoolFeeHeatmapRows(filteredPositions, sm.PoolFeeHeatmapOptions{
 		WindowSeconds: windowSeconds,
 		Sort:          sortKey,
 		Now:           time.Now(),
 	})
+	buildElapsed := time.Since(buildStarted)
 	for i := range rows {
 		rows[i].TradingPair = buildSmartMoneyTradingPair(rows[i].Token0Symbol, rows[i].Token1Symbol)
 		rows[i].DisplayTokenAddress, rows[i].DisplayTokenSymbol = smartMoneyPickDisplayToken(
@@ -819,7 +837,9 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 			addressesByChain[chain] = append(addressesByChain[chain], pagedRows[i].DisplayTokenAddress)
 		}
 	}
+	metaStarted := time.Now()
 	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
+	metaElapsed := time.Since(metaStarted)
 	for i := range pagedRows {
 		applySmartMoneyDisplayToken(
 			smartMoneyChainSlug(pagedRows[i].ChainID),
@@ -840,6 +860,7 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 		"list":           pagedRows,
 		"updated_at":     time.Now(),
 	})
+	logSmartMoneySlowStage("pool_fee_heatmap", reqStarted, "sql", sqlElapsed, "refresh_trigger", refreshElapsed, "build", buildElapsed, "metadata", metaElapsed, "positions", len(filteredPositions), "rows", total)
 }
 
 func filterSmartMoneyHeatmapPositions(positions []models.SmartMoneyActivePosition, keyword string, protocol string) []models.SmartMoneyActivePosition {
@@ -877,6 +898,25 @@ const (
 	smartMoneyHeatmapFeeRefreshInterval = 15 * time.Second
 	smartMoneyHeatmapFeeRefreshWorkers  = 6
 )
+
+var smartMoneyHeatmapRefresh sync.Map
+
+func logSmartMoneySlowStage(endpoint string, started time.Time, fields ...interface{}) {
+	elapsed := time.Since(started)
+	if elapsed < 2*time.Second {
+		return
+	}
+	parts := make([]string, 0, len(fields)/2+2)
+	parts = append(parts, "endpoint="+endpoint, "elapsed="+elapsed.String())
+	for i := 0; i+1 < len(fields); i += 2 {
+		key := strings.TrimSpace(fmt.Sprint(fields[i]))
+		if key == "" {
+			continue
+		}
+		parts = append(parts, key+"="+fmt.Sprint(fields[i+1]))
+	}
+	log.Printf("[SmartMoney API] slow %s", strings.Join(parts, " "))
+}
 
 func (s *Server) refreshSmartMoneyHeatmapFees(ctx context.Context, repo *sm.Repository, positions []models.SmartMoneyActivePosition) {
 	if s == nil || s.Realtime == nil || repo == nil || len(positions) == 0 {
@@ -941,6 +981,52 @@ func (s *Server) refreshSmartMoneyHeatmapFees(ctx context.Context, repo *sm.Repo
 
 	close(jobs)
 	wg.Wait()
+}
+
+func (s *Server) triggerSmartMoneyHeatmapFeeRefresh(repo *sm.Repository, positions []models.SmartMoneyActivePosition) {
+	if s == nil || s.Realtime == nil || repo == nil || len(positions) == 0 {
+		return
+	}
+
+	now := time.Now()
+	jobs := make([]models.SmartMoneyActivePosition, 0, len(positions))
+	for i := range positions {
+		if !smartMoneyHeatmapShouldRefreshFee(positions[i], now) {
+			continue
+		}
+		key := smartMoneyHeatmapRefreshKey(positions[i])
+		if key == "" {
+			continue
+		}
+		if _, loaded := smartMoneyHeatmapRefresh.LoadOrStore(key, struct{}{}); loaded {
+			continue
+		}
+		jobs = append(jobs, positions[i])
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	go func() {
+		defer func() {
+			for i := range jobs {
+				if key := smartMoneyHeatmapRefreshKey(jobs[i]); key != "" {
+					smartMoneyHeatmapRefresh.Delete(key)
+				}
+			}
+		}()
+
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		s.refreshSmartMoneyHeatmapFees(refreshCtx, repo, jobs)
+	}()
+}
+
+func smartMoneyHeatmapRefreshKey(pos models.SmartMoneyActivePosition) string {
+	if pos.ID > 0 {
+		return strconv.FormatUint(uint64(pos.ID), 10)
+	}
+	return strings.TrimSpace(pos.PositionRef)
 }
 
 func smartMoneyHeatmapShouldRefreshFee(pos models.SmartMoneyActivePosition, now time.Time) bool {
@@ -1137,6 +1223,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) {
+	reqStarted := time.Now()
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1149,13 +1236,16 @@ func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) 
 	positionRef := sm.NormalizePositionRef(q.Get("position_ref"))
 	rawPositionID := strings.TrimSpace(q.Get("position_id"))
 
+	lookupStarted := time.Now()
 	active, err := repo.GetActivePositionByRef(ctx, positionRef)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	lookupElapsed := time.Since(lookupStarted)
 
 	if active == nil && rawPositionID != "" {
+		fallbackStarted := time.Now()
 		positionID, parseErr := strconv.ParseUint(rawPositionID, 10, 64)
 		if parseErr != nil || positionID == 0 {
 			jsonError(w, "invalid position_id", http.StatusBadRequest)
@@ -1175,6 +1265,7 @@ func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) 
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		lookupElapsed += time.Since(fallbackStarted)
 	}
 
 	if active == nil {
@@ -1182,12 +1273,14 @@ func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	rpcStarted := time.Now()
 	detail, err := s.Realtime.GetSmartMoneyPositionDetail(active)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	jsonOK(w, detail)
+	logSmartMoneySlowStage("position_detail", reqStarted, "lookup", lookupElapsed, "rpc_detail", time.Since(rpcStarted), "protocol", active.Protocol, "nft", active.NftTokenID)
 }
 
 // --- Events ---
@@ -1309,9 +1402,20 @@ func extractPathParam(path, prefix string) string {
 }
 
 func repairSmartMoneyPositions(ctx context.Context, repo *sm.Repository) {
-	if err := sm.RepairPositions(ctx, repo); err != nil {
-		log.Printf("[SmartMoney API] repair position metadata failed: %v", err)
+	if repo == nil {
+		return
 	}
+	if !atomic.CompareAndSwapInt32(&smPositionRepairRunning, 0, 1) {
+		return
+	}
+	go func() {
+		defer atomic.StoreInt32(&smPositionRepairRunning, 0)
+		repairCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := sm.RepairPositions(repairCtx, repo); err != nil {
+			log.Printf("[SmartMoney API] repair position metadata failed: %v", err)
+		}
+	}()
 }
 
 func normalizeSmartMoneyProtocol(raw string) string {

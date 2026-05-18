@@ -225,6 +225,58 @@ func TestManager_EffectiveURL_FailsOverWhenCurrentUnavailable(t *testing.T) {
 	}
 }
 
+func TestManager_AvailableEndpoints_ReturnsAvailableDBEndpointsWithoutSwitchingCurrent(t *testing.T) {
+	store := &memStore{
+		eps: []models.RpcEndpoint{
+			{ID: 1, Chain: "bsc", Transport: "http", URL: "https://rpc-a.example", IsCurrent: true},
+			{ID: 2, Chain: "bsc", Transport: "http", URL: "https://rpc-b.example", IsCurrent: false},
+		},
+	}
+	m := NewManager(store, func(chain string, transport string) string { return "https://env.example" }, &fakeProber{})
+
+	got, err := m.AvailableEndpoints(context.Background(), "bsc", TransportHTTP)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(got))
+	}
+	if got[0].URL != "https://rpc-a.example" || got[1].URL != "https://rpc-b.example" {
+		t.Fatalf("unexpected endpoints: %#v", got)
+	}
+
+	list, _ := store.List(context.Background(), "bsc", "http")
+	for _, ep := range list {
+		if ep.ID == 1 && !ep.IsCurrent {
+			t.Fatalf("current endpoint was changed")
+		}
+		if ep.ID == 2 && ep.IsCurrent {
+			t.Fatalf("non-current endpoint was promoted")
+		}
+	}
+}
+
+func TestManager_AvailableEndpoints_SkipsDisabledAndFallsBackToEnvWhenNoneAvailable(t *testing.T) {
+	disableUntil := time.Now().Add(24 * time.Hour)
+	store := &memStore{
+		eps: []models.RpcEndpoint{
+			{ID: 1, Chain: "bsc", Transport: "http", URL: "https://rpc-a.example", IsCurrent: true, DisabledUntil: &disableUntil},
+		},
+	}
+	m := NewManager(store, func(chain string, transport string) string { return "https://env.example" }, &fakeProber{})
+
+	got, err := m.AvailableEndpoints(context.Background(), "bsc", TransportHTTP)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one env endpoint, got %d", len(got))
+	}
+	if got[0].Source != SourceEnv || got[0].URL != "https://env.example" {
+		t.Fatalf("expected env fallback, got %#v", got[0])
+	}
+}
+
 func TestManager_CheckAllOnce_DisablesQuotaExhaustedUntilNextMonth(t *testing.T) {
 	timeutil.Init()
 	loc := timeutil.Location()

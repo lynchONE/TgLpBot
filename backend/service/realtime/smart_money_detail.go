@@ -4,14 +4,17 @@ import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
+	"context"
 	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type SmartMoneyPositionDetail struct {
@@ -78,23 +81,62 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 	tickLower := intValue(active.TickLower)
 	tickUpper := intValue(active.TickUpper)
 	liq := parseSmartMoneyBigInt(active.CurrentLiquidity)
+	var warnings []string
+	var lastWarnings []string
+	var position *RealtimePosition
+
+	if active.NftTokenID > 0 {
+		clientErr := s.withSmartMoneyReadClient(context.Background(), chain, func(callCtx context.Context, client *ethclient.Client) error {
+			var callWarnings []string
+			var callErr error
+			position, callWarnings, callErr = s.buildSmartMoneyV3PositionWithClient(callCtx, active, chain, client, poolAddr, common.HexToAddress(positionManager), token0, token1, tickLower, tickUpper, liq)
+			if callErr == nil && len(callWarnings) > 0 {
+				warnings = append(warnings, callWarnings...)
+			} else if callErr != nil {
+				lastWarnings = callWarnings
+			}
+			return callErr
+		})
+		if clientErr != nil {
+			warnings = append(warnings, lastWarnings...)
+			warnings = appendWarning(warnings, fmt.Sprintf("v3 rpc unavailable: %v", clientErr))
+		}
+		if position != nil {
+			return position, warnings, nil
+		}
+	}
+
+	return s.buildStaticSmartMoneyPosition(active, chain, "v3", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
+}
+
+func (s *RealtimePositionsService) buildSmartMoneyV3PositionWithClient(
+	ctx context.Context,
+	active *models.SmartMoneyActivePosition,
+	chain string,
+	client *ethclient.Client,
+	poolAddr common.Address,
+	positionManager common.Address,
+	token0 common.Address,
+	token1 common.Address,
+	tickLower int,
+	tickUpper int,
+	liq *big.Int,
+) (*RealtimePosition, []string, error) {
 	owed0 := big.NewInt(0)
 	owed1 := big.NewInt(0)
 	var warnings []string
 
-	client, _, clientErr := blockchain.GetEVMClient(chain)
-	if clientErr != nil {
-		warnings = appendWarning(warnings, fmt.Sprintf("v3 rpc unavailable: %v", clientErr))
-	} else if active.NftTokenID > 0 {
-		pm, err := blockchain.NewV3PositionManager(common.HexToAddress(positionManager), client)
+	if client != nil && active.NftTokenID > 0 {
+		pm, err := blockchain.NewV3PositionManager(positionManager, client)
 		if err != nil {
 			warnings = appendWarning(warnings, fmt.Sprintf("init v3 position manager failed: %v", err))
+			return nil, warnings, err
 		} else {
 			snapshotBlock := uint64(0)
 			if blockNumber, blockErr := snapshotBlockNumber(client); blockErr == nil {
 				snapshotBlock = blockNumber
 			}
-			callOpts := &bind.CallOpts{}
+			callOpts := &bind.CallOpts{Context: ctx}
 			if snapshotBlock > 0 {
 				callOpts.BlockNumber = new(big.Int).SetUint64(snapshotBlock)
 			}
@@ -102,6 +144,7 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 			if err != nil {
 				if active.IsActive {
 					warnings = appendWarning(warnings, fmt.Sprintf("read v3 position failed: %v", err))
+					return nil, warnings, err
 				}
 			} else if info != nil {
 				if info.Token0 != (common.Address{}) {
@@ -127,21 +170,21 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 						sqrtP, currentTick, err = blockchain.GetV3PoolSlot0AtBlockWithClient(client, poolAddr, snapshotBlock)
 					}
 					if err != nil || sqrtP == nil {
-						sqrtP, currentTick, _, _, err = s.getV3Slot0(chain, poolAddr)
+						sqrtP, currentTick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
 					}
 					if err != nil && sqrtP == nil {
 						warnings = appendWarning(warnings, fmt.Sprintf("read v3 slot0 failed: %v", err))
-						return s.buildStaticSmartMoneyPosition(active, chain, "v3", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
+						return nil, warnings, err
 					}
 
 					if snapshotBlock > 0 {
-						if fee0, fee1, feeErr := pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, info, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
+						if fee0, fee1, feeErr := calcSmartMoneyV3UnclaimedFeesAtBlockWithClient(client, poolAddr, currentTick, info, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
 							owed0 = fee0
 							owed1 = fee1
 						} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
 							warnings = appendWarning(warnings, fmt.Sprintf("v3 snapshot fee calculation failed: %v", feeErr))
 						}
-					} else if fee0, fee1, _, _, feeErr := s.calcV3UnclaimedFeesLive(chain, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
+					} else if fee0, fee1, _, _, feeErr := s.calcV3UnclaimedFeesLiveWithClient(client, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
 						owed0 = fee0
 						owed1 = fee1
 						if feeErr != nil && !isTransientFeeCalcError(feeErr) {
@@ -159,6 +202,190 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 	return s.buildStaticSmartMoneyPosition(active, chain, "v3", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
 }
 
+func (s *RealtimePositionsService) calcV3UnclaimedFeesLiveWithClient(client *ethclient.Client, poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if pos == nil {
+		return nil, nil, false, 0, fmt.Errorf("position info missing")
+	}
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return cloneBig(pos.TokensOwed0), cloneBig(pos.TokensOwed1), false, 0, nil
+	}
+	if poolAddr == (common.Address{}) {
+		return nil, nil, false, 0, fmt.Errorf("pool address missing")
+	}
+	if client == nil {
+		return nil, nil, false, 0, fmt.Errorf("blockchain client not initialized")
+	}
+
+	var (
+		global0, global1 *big.Int
+		lower0, lower1   *big.Int
+		upper0, upper1   *big.Int
+		errG, errL, errU error
+	)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		global0, global1, errG = blockchain.GetV3PoolFeeGrowthGlobalsWithClient(client, poolAddr)
+	}()
+	go func() {
+		defer wg.Done()
+		lower0, lower1, _, errL = blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddr, pos.TickLower)
+	}()
+	go func() {
+		defer wg.Done()
+		upper0, upper1, _, errU = blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddr, pos.TickUpper)
+	}()
+	wg.Wait()
+
+	if errG != nil && (global0 == nil || global1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
+	}
+	if errL != nil && (lower0 == nil || lower1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
+	}
+	if errU != nil && (upper0 == nil || upper1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
+	}
+
+	fees0, fees1, calcErr := pool.CalcV3UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
+	if calcErr != nil {
+		return nil, nil, false, 0, calcErr
+	}
+
+	if errG != nil {
+		return fees0, fees1, false, 0, errG
+	}
+	if errL != nil {
+		return fees0, fees1, false, 0, errL
+	}
+	if errU != nil {
+		return fees0, fees1, false, 0, errU
+	}
+	return fees0, fees1, false, 0, nil
+}
+
+func calcSmartMoneyV3UnclaimedFeesAtBlockWithClient(client *ethclient.Client, poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo, blockNumber uint64) (*big.Int, *big.Int, error) {
+	if pos == nil {
+		return big.NewInt(0), big.NewInt(0), fmt.Errorf("position info missing")
+	}
+	owed0 := cloneBig(pos.TokensOwed0)
+	owed1 := cloneBig(pos.TokensOwed1)
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return owed0, owed1, nil
+	}
+	if poolAddr == (common.Address{}) {
+		return owed0, owed1, fmt.Errorf("pool address missing")
+	}
+	if client == nil {
+		return owed0, owed1, fmt.Errorf("blockchain client not initialized")
+	}
+
+	var (
+		global0, global1 *big.Int
+		lower0, lower1   *big.Int
+		upper0, upper1   *big.Int
+		errG, errL, errU error
+	)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		global0, global1, errG = blockchain.GetV3PoolFeeGrowthGlobalsAtBlockWithClient(client, poolAddr, blockNumber)
+	}()
+	go func() {
+		defer wg.Done()
+		lower0, lower1, _, errL = blockchain.GetV3PoolTickFeeGrowthOutsideAtBlockWithClient(client, poolAddr, pos.TickLower, blockNumber)
+	}()
+	go func() {
+		defer wg.Done()
+		upper0, upper1, _, errU = blockchain.GetV3PoolTickFeeGrowthOutsideAtBlockWithClient(client, poolAddr, pos.TickUpper, blockNumber)
+	}()
+	wg.Wait()
+	if errG != nil {
+		return owed0, owed1, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
+	}
+	if errL != nil {
+		return owed0, owed1, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
+	}
+	if errU != nil {
+		return owed0, owed1, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
+	}
+	return pool.CalcV3UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
+}
+
+func (s *RealtimePositionsService) getV4Slot0WithClient(client *ethclient.Client, stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, bool, time.Duration, error) {
+	sqrt, tick, err := blockchain.GetUniswapV4PoolSlot0ViaStateViewWithClient(client, stateView, poolManager, poolID)
+	return sqrt, tick, false, 0, err
+}
+
+func (s *RealtimePositionsService) calcV4UnclaimedFeesLiveUnifiedWithClient(client *ethclient.Client, stateView common.Address, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if pos == nil {
+		return nil, nil, false, 0, fmt.Errorf("position info missing")
+	}
+
+	owed0 := cloneBig(pos.TokensOwed0)
+	owed1 := cloneBig(pos.TokensOwed1)
+
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return owed0, owed1, false, 0, nil
+	}
+	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
+		return nil, nil, false, 0, fmt.Errorf("position feeGrowthInside last missing")
+	}
+	if client == nil {
+		return nil, nil, false, 0, fmt.Errorf("blockchain client not initialized")
+	}
+
+	var (
+		global0, global1 *big.Int
+		lower0, lower1   *big.Int
+		upper0, upper1   *big.Int
+		errG, errL, errU error
+	)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		global0, global1, errG = blockchain.GetV4PoolFeeGrowthGlobalsWithClient(client, stateView, poolManager, poolID)
+	}()
+	go func() {
+		defer wg.Done()
+		lower0, lower1, errL = blockchain.GetV4TickFeeGrowthOutsideWithClient(client, stateView, poolManager, poolID, pos.TickLower)
+	}()
+	go func() {
+		defer wg.Done()
+		upper0, upper1, errU = blockchain.GetV4TickFeeGrowthOutsideWithClient(client, stateView, poolManager, poolID, pos.TickUpper)
+	}()
+	wg.Wait()
+
+	if errG != nil && (global0 == nil || global1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
+	}
+	if errL != nil && (lower0 == nil || lower1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
+	}
+	if errU != nil && (upper0 == nil || upper1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
+	}
+
+	fees0, fees1, calcErr := pool.CalcV4UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
+	if calcErr != nil {
+		return nil, nil, false, 0, calcErr
+	}
+
+	if errG != nil {
+		return fees0, fees1, false, 0, errG
+	}
+	if errL != nil {
+		return fees0, fees1, false, 0, errL
+	}
+	if errU != nil {
+		return fees0, fees1, false, 0, errU
+	}
+	return fees0, fees1, false, 0, nil
+}
+
 func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.SmartMoneyActivePosition) (*RealtimePosition, []string, error) {
 	chain := smartMoneyDetailChain(active.ChainID)
 	poolID := strings.TrimSpace(active.PoolAddress)
@@ -170,16 +397,60 @@ func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.Smar
 	tickLower := intValue(active.TickLower)
 	tickUpper := intValue(active.TickUpper)
 	liq := parseSmartMoneyBigInt(active.CurrentLiquidity)
+	var warnings []string
+	var lastWarnings []string
+
+	if poolManager != (common.Address{}) && stateView != (common.Address{}) && poolID != "" {
+		var position *RealtimePosition
+		clientErr := s.withSmartMoneyReadClient(context.Background(), chain, func(callCtx context.Context, client *ethclient.Client) error {
+			var callWarnings []string
+			var err error
+			position, callWarnings, err = s.buildSmartMoneyV4PositionWithClient(callCtx, active, chain, client, poolID, poolManager, stateView, positionManager, token0, token1, tickLower, tickUpper, liq)
+			if err == nil && len(callWarnings) > 0 {
+				warnings = append(warnings, callWarnings...)
+			} else if err != nil {
+				lastWarnings = callWarnings
+			}
+			return err
+		})
+		if clientErr != nil {
+			warnings = append(warnings, lastWarnings...)
+			warnings = appendWarning(warnings, fmt.Sprintf("v4 rpc unavailable: %v", clientErr))
+		}
+		if position != nil {
+			return position, warnings, nil
+		}
+	}
+
+	return s.buildStaticSmartMoneyPosition(active, chain, "v4", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
+}
+
+func (s *RealtimePositionsService) buildSmartMoneyV4PositionWithClient(
+	ctx context.Context,
+	active *models.SmartMoneyActivePosition,
+	chain string,
+	client *ethclient.Client,
+	poolID string,
+	poolManager common.Address,
+	stateView common.Address,
+	positionManager common.Address,
+	token0 common.Address,
+	token1 common.Address,
+	tickLower int,
+	tickUpper int,
+	liq *big.Int,
+) (*RealtimePosition, []string, error) {
 	owed0 := big.NewInt(0)
 	owed1 := big.NewInt(0)
 	var warnings []string
-
 	var v4pos *blockchain.V4PositionInfo
+
 	if active.NftTokenID > 0 && positionManager != (common.Address{}) && poolManager != (common.Address{}) && poolID != "" {
-		pos, err := blockchain.GetV4PositionInfo(positionManager, poolManager, poolID, new(big.Int).SetUint64(active.NftTokenID))
+		pos, err := blockchain.GetV4PositionInfoCtxWithClient(ctx, client, positionManager, poolManager, poolID, new(big.Int).SetUint64(active.NftTokenID))
 		if err != nil {
 			if active.IsActive {
 				warnings = appendWarning(warnings, fmt.Sprintf("read v4 position failed: %v", err))
+				return nil, warnings, err
 			}
 		} else if pos != nil {
 			v4pos = pos
@@ -204,14 +475,14 @@ func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.Smar
 		return s.buildStaticSmartMoneyPosition(active, chain, "v4", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
 	}
 
-	sqrtP, currentTick, _, _, err := s.getV4Slot0(stateView, poolManager, poolID)
+	sqrtP, currentTick, _, _, err := s.getV4Slot0WithClient(client, stateView, poolManager, poolID)
 	if err != nil && sqrtP == nil {
 		warnings = appendWarning(warnings, fmt.Sprintf("read v4 slot0 failed: %v", err))
-		return s.buildStaticSmartMoneyPosition(active, chain, "v4", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
+		return nil, warnings, err
 	}
 
 	if v4pos != nil {
-		if fee0, fee1, _, _, feeErr := s.calcV4UnclaimedFeesLiveUnified(stateView, poolManager, poolID, currentTick, v4pos); fee0 != nil && fee1 != nil {
+		if fee0, fee1, _, _, feeErr := s.calcV4UnclaimedFeesLiveUnifiedWithClient(client, stateView, poolManager, poolID, currentTick, v4pos); fee0 != nil && fee1 != nil {
 			owed0 = fee0
 			owed1 = fee1
 			if feeErr != nil && !isTransientFeeCalcError(feeErr) {

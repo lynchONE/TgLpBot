@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const uniswapV4StateViewFeeGrowthABI = `[
@@ -56,19 +57,31 @@ const uniswapV4StateViewFeeGrowthABI = `[
 ]`
 
 func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID string) (*big.Int, *big.Int, error) {
-	return getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager, poolID, nil)
+	return GetV4PoolFeeGrowthGlobalsWithClient(Client, stateView, poolManager, poolID)
+}
+
+func GetV4PoolFeeGrowthGlobalsWithClient(client *ethclient.Client, stateView, poolManager common.Address, poolID string) (*big.Int, *big.Int, error) {
+	return getV4PoolFeeGrowthGlobalsWithClientAtBlock(client, stateView, poolManager, poolID, nil)
 }
 
 func GetV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager common.Address, poolID string, blockNumber uint64) (*big.Int, *big.Int, error) {
+	return GetV4PoolFeeGrowthGlobalsAtBlockWithClient(Client, stateView, poolManager, poolID, blockNumber)
+}
+
+func GetV4PoolFeeGrowthGlobalsAtBlockWithClient(client *ethclient.Client, stateView, poolManager common.Address, poolID string, blockNumber uint64) (*big.Int, *big.Int, error) {
 	if blockNumber == 0 {
 		return nil, nil, fmt.Errorf("block number not set")
 	}
 	block := new(big.Int).SetUint64(blockNumber)
-	return getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager, poolID, block)
+	return getV4PoolFeeGrowthGlobalsWithClientAtBlock(client, stateView, poolManager, poolID, block)
 }
 
 func getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager common.Address, poolID string, block *big.Int) (*big.Int, *big.Int, error) {
-	if Client == nil {
+	return getV4PoolFeeGrowthGlobalsWithClientAtBlock(Client, stateView, poolManager, poolID, block)
+}
+
+func getV4PoolFeeGrowthGlobalsWithClientAtBlock(client *ethclient.Client, stateView, poolManager common.Address, poolID string, block *big.Int) (*big.Int, *big.Int, error) {
+	if client == nil {
 		return nil, nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if stateView == (common.Address{}) {
@@ -96,9 +109,9 @@ func getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager common.Address, poo
 
 	var raw []byte
 	if block != nil {
-		raw, err = callContractWithRetryAtBlock(Client, callCtx, msg, block)
+		raw, err = callContractWithRetryAtBlock(client, callCtx, msg, block)
 	} else {
-		raw, err = callContractWithRetry(Client, callCtx, msg)
+		raw, err = callContractWithRetry(client, callCtx, msg)
 	}
 	if err != nil {
 		v4Debugf("getFeeGrowthGlobals failed: %v", err)
@@ -125,19 +138,31 @@ func getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager common.Address, poo
 }
 
 func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID string, tick int) (*big.Int, *big.Int, error) {
-	return getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager, poolID, tick, nil)
+	return GetV4TickFeeGrowthOutsideWithClient(Client, stateView, poolManager, poolID, tick)
+}
+
+func GetV4TickFeeGrowthOutsideWithClient(client *ethclient.Client, stateView, poolManager common.Address, poolID string, tick int) (*big.Int, *big.Int, error) {
+	return getV4TickFeeGrowthOutsideWithClientAtBlock(client, stateView, poolManager, poolID, tick, nil)
 }
 
 func GetV4TickFeeGrowthOutsideAtBlock(stateView, poolManager common.Address, poolID string, tick int, blockNumber uint64) (*big.Int, *big.Int, error) {
+	return GetV4TickFeeGrowthOutsideAtBlockWithClient(Client, stateView, poolManager, poolID, tick, blockNumber)
+}
+
+func GetV4TickFeeGrowthOutsideAtBlockWithClient(client *ethclient.Client, stateView, poolManager common.Address, poolID string, tick int, blockNumber uint64) (*big.Int, *big.Int, error) {
 	if blockNumber == 0 {
 		return nil, nil, fmt.Errorf("block number not set")
 	}
 	block := new(big.Int).SetUint64(blockNumber)
-	return getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager, poolID, tick, block)
+	return getV4TickFeeGrowthOutsideWithClientAtBlock(client, stateView, poolManager, poolID, tick, block)
 }
 
 func getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager common.Address, poolID string, tick int, block *big.Int) (*big.Int, *big.Int, error) {
-	if Client == nil {
+	return getV4TickFeeGrowthOutsideWithClientAtBlock(Client, stateView, poolManager, poolID, tick, block)
+}
+
+func getV4TickFeeGrowthOutsideWithClientAtBlock(client *ethclient.Client, stateView, poolManager common.Address, poolID string, tick int, block *big.Int) (*big.Int, *big.Int, error) {
+	if client == nil {
 		return nil, nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if stateView == (common.Address{}) {
@@ -161,9 +186,9 @@ func getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager common.Address, poo
 		var raw []byte
 		var callErr error
 		if block != nil {
-			raw, callErr = callContractWithRetryAtBlock(Client, callCtx, msg, block)
+			raw, callErr = callContractWithRetryAtBlock(client, callCtx, msg, block)
 		} else {
-			raw, callErr = callContractWithRetry(Client, callCtx, msg)
+			raw, callErr = callContractWithRetry(client, callCtx, msg)
 		}
 		cancel()
 		if callErr == nil {
@@ -193,9 +218,9 @@ func getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager common.Address, poo
 
 	var raw []byte
 	if block != nil {
-		raw, err = callContractWithRetryAtBlock(Client, callCtx, msg, block)
+		raw, err = callContractWithRetryAtBlock(client, callCtx, msg, block)
 	} else {
-		raw, err = callContractWithRetry(Client, callCtx, msg)
+		raw, err = callContractWithRetry(client, callCtx, msg)
 	}
 	if err != nil {
 		errMsg := strings.ToLower(err.Error())

@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -55,8 +56,19 @@ var (
 )
 
 func GetV4PositionInfo(positionManager common.Address, poolManager common.Address, poolID string, tokenId *big.Int) (*V4PositionInfo, error) {
-	if Client == nil {
+	return GetV4PositionInfoWithClient(Client, positionManager, poolManager, poolID, tokenId)
+}
+
+func GetV4PositionInfoWithClient(client *ethclient.Client, positionManager common.Address, poolManager common.Address, poolID string, tokenId *big.Int) (*V4PositionInfo, error) {
+	return GetV4PositionInfoCtxWithClient(context.Background(), client, positionManager, poolManager, poolID, tokenId)
+}
+
+func GetV4PositionInfoCtxWithClient(ctx context.Context, client *ethclient.Client, positionManager common.Address, poolManager common.Address, poolID string, tokenId *big.Int) (*V4PositionInfo, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if tokenId == nil || tokenId.Sign() <= 0 {
 		return nil, fmt.Errorf("invalid tokenId")
@@ -65,12 +77,12 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 		return nil, fmt.Errorf("positionManager missing")
 	}
 
-	pm, err := NewV4PositionManager(positionManager, Client)
+	pm, err := NewV4PositionManager(positionManager, client)
 	if err != nil {
 		return nil, err
 	}
 
-	raw, infoErr := pm.PositionInfoPacked(nil, tokenId)
+	raw, infoErr := pm.PositionInfoPacked(&bind.CallOpts{Context: ctx}, tokenId)
 	if infoErr != nil {
 		return nil, infoErr
 	}
@@ -96,7 +108,7 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 	if len(packed.PoolId25) == 25 {
 		var poolID25 [25]byte
 		copy(poolID25[:], packed.PoolId25)
-		if derivedID, c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManagerBytes25(positionManager, poolID25); keyErr == nil {
+		if derivedID, c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManagerBytes25CtxWithClient(ctx, client, positionManager, poolID25); keyErr == nil {
 			pos.Token0 = c0
 			pos.Token1 = c1
 			pos.Fee = fee
@@ -124,7 +136,7 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 		}
 	}
 
-	state, stErr := getV4PositionStateViaExtsload(poolManager, fullPoolID, positionManager, packed.TickLower, packed.TickUpper, tokenId)
+	state, stErr := getV4PositionStateViaExtsloadWithClient(client, poolManager, fullPoolID, positionManager, packed.TickLower, packed.TickUpper, tokenId)
 	if stErr != nil {
 		return pos, stErr
 	}
@@ -135,7 +147,11 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 }
 
 func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common.Address, poolID string, tokenId *big.Int, blockNumber uint64) (*V4PositionInfo, error) {
-	if Client == nil {
+	return GetV4PositionInfoAtBlockWithClient(Client, positionManager, poolManager, poolID, tokenId, blockNumber)
+}
+
+func GetV4PositionInfoAtBlockWithClient(client *ethclient.Client, positionManager common.Address, poolManager common.Address, poolID string, tokenId *big.Int, blockNumber uint64) (*V4PositionInfo, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if tokenId == nil || tokenId.Sign() <= 0 {
@@ -148,7 +164,7 @@ func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common
 		return nil, fmt.Errorf("block number not set")
 	}
 
-	pm, err := NewV4PositionManager(positionManager, Client)
+	pm, err := NewV4PositionManager(positionManager, client)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +196,7 @@ func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common
 	if len(packed.PoolId25) == 25 {
 		var poolID25 [25]byte
 		copy(poolID25[:], packed.PoolId25)
-		if derivedID, c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManagerBytes25(positionManager, poolID25); keyErr == nil {
+		if derivedID, c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManagerBytes25WithClient(client, positionManager, poolID25); keyErr == nil {
 			pos.Token0 = c0
 			pos.Token1 = c1
 			pos.Fee = fee
@@ -208,7 +224,7 @@ func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common
 		}
 	}
 
-	state, stErr := getV4PositionStateViaExtsloadAtBlock(poolManager, fullPoolID, positionManager, packed.TickLower, packed.TickUpper, tokenId, blockNumber)
+	state, stErr := getV4PositionStateViaExtsloadAtBlockWithClient(client, poolManager, fullPoolID, positionManager, packed.TickLower, packed.TickUpper, tokenId, blockNumber)
 	if stErr != nil {
 		return pos, stErr
 	}
@@ -259,6 +275,10 @@ func encodeSignedInt24(v int) ([]byte, error) {
 }
 
 func getV4PositionStateViaExtsload(poolManager common.Address, poolID common.Hash, owner common.Address, tickLower, tickUpper int, tokenId *big.Int) (*V4PositionState, error) {
+	return getV4PositionStateViaExtsloadWithClient(Client, poolManager, poolID, owner, tickLower, tickUpper, tokenId)
+}
+
+func getV4PositionStateViaExtsloadWithClient(client *ethclient.Client, poolManager common.Address, poolID common.Hash, owner common.Address, tickLower, tickUpper int, tokenId *big.Int) (*V4PositionState, error) {
 	if poolManager == (common.Address{}) {
 		return nil, fmt.Errorf("poolManager missing")
 	}
@@ -275,7 +295,7 @@ func getV4PositionStateViaExtsload(poolManager common.Address, poolID common.Has
 	positionMappingSlot := addUint256ToHash(stateSlot, v4PositionsOffset)
 	positionSlot := crypto.Keccak256Hash(positionKey.Bytes(), positionMappingSlot.Bytes())
 
-	slots, err := v4ExtsloadSlots(poolManager, positionSlot, 3)
+	slots, err := v4ExtsloadSlotsWithClient(client, poolManager, positionSlot, 3)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +315,10 @@ func getV4PositionStateViaExtsload(poolManager common.Address, poolID common.Has
 }
 
 func getV4PositionStateViaExtsloadAtBlock(poolManager common.Address, poolID common.Hash, owner common.Address, tickLower, tickUpper int, tokenId *big.Int, blockNumber uint64) (*V4PositionState, error) {
+	return getV4PositionStateViaExtsloadAtBlockWithClient(Client, poolManager, poolID, owner, tickLower, tickUpper, tokenId, blockNumber)
+}
+
+func getV4PositionStateViaExtsloadAtBlockWithClient(client *ethclient.Client, poolManager common.Address, poolID common.Hash, owner common.Address, tickLower, tickUpper int, tokenId *big.Int, blockNumber uint64) (*V4PositionState, error) {
 	if poolManager == (common.Address{}) {
 		return nil, fmt.Errorf("poolManager missing")
 	}
@@ -314,7 +338,7 @@ func getV4PositionStateViaExtsloadAtBlock(poolManager common.Address, poolID com
 	positionMappingSlot := addUint256ToHash(stateSlot, v4PositionsOffset)
 	positionSlot := crypto.Keccak256Hash(positionKey.Bytes(), positionMappingSlot.Bytes())
 
-	slots, err := v4ExtsloadSlotsAtBlock(poolManager, positionSlot, 3, blockNumber)
+	slots, err := v4ExtsloadSlotsAtBlockWithClient(client, poolManager, positionSlot, 3, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -386,10 +410,14 @@ func parsePoolID(poolID string) (common.Hash, error) {
 }
 
 func v4ExtsloadSlots(poolManager common.Address, startSlot common.Hash, nSlots uint64) ([]common.Hash, error) {
-	if Client == nil {
+	return v4ExtsloadSlotsWithClient(Client, poolManager, startSlot, nSlots)
+}
+
+func v4ExtsloadSlotsWithClient(client *ethclient.Client, poolManager common.Address, startSlot common.Hash, nSlots uint64) ([]common.Hash, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
-	contract, err := v4ExtsloadContract(poolManager, Client)
+	contract, err := v4ExtsloadContract(poolManager, client)
 	if err != nil {
 		return nil, err
 	}
@@ -416,13 +444,17 @@ func v4ExtsloadSlots(poolManager common.Address, startSlot common.Hash, nSlots u
 }
 
 func v4ExtsloadSlotsAtBlock(poolManager common.Address, startSlot common.Hash, nSlots uint64, blockNumber uint64) ([]common.Hash, error) {
-	if Client == nil {
+	return v4ExtsloadSlotsAtBlockWithClient(Client, poolManager, startSlot, nSlots, blockNumber)
+}
+
+func v4ExtsloadSlotsAtBlockWithClient(client *ethclient.Client, poolManager common.Address, startSlot common.Hash, nSlots uint64, blockNumber uint64) ([]common.Hash, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if blockNumber == 0 {
 		return nil, fmt.Errorf("block number not set")
 	}
-	contract, err := v4ExtsloadContract(poolManager, Client)
+	contract, err := v4ExtsloadContract(poolManager, client)
 	if err != nil {
 		return nil, err
 	}

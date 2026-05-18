@@ -35,6 +35,12 @@ type Effective struct {
 	Endpoint *models.RpcEndpoint `json:"endpoint,omitempty"`
 }
 
+type AvailableEndpoint struct {
+	Source   Source              `json:"source"`
+	URL      string              `json:"url"`
+	Endpoint *models.RpcEndpoint `json:"endpoint,omitempty"`
+}
+
 type Store interface {
 	ListAll(ctx context.Context) ([]models.RpcEndpoint, error)
 	List(ctx context.Context, chain string, transport string) ([]models.RpcEndpoint, error)
@@ -193,6 +199,56 @@ func (m *Manager) EffectiveURL(ctx context.Context, chain string, transport stri
 	// No available DB endpoints: make sure none is marked current to reflect reality.
 	_ = m.store.UnsetCurrent(ctx, chain, transport)
 	return Effective{Source: SourceEnv, URL: envURL}, nil
+}
+
+func (m *Manager) AvailableEndpoints(ctx context.Context, chain string, transport string) ([]AvailableEndpoint, error) {
+	if m == nil {
+		return nil, fmt.Errorf("rpcpool manager is nil")
+	}
+	chain = config.NormalizeChain(chain)
+	transport = NormalizeTransport(transport)
+	if err := validateChainTransport(chain, transport); err != nil {
+		return nil, err
+	}
+
+	envURL := ""
+	if m.env != nil {
+		envURL = strings.TrimSpace(m.env(chain, transport))
+	}
+
+	if m.store == nil {
+		if envURL == "" {
+			return nil, nil
+		}
+		return []AvailableEndpoint{{Source: SourceEnv, URL: envURL}}, nil
+	}
+
+	list, err := m.store.List(ctx, chain, transport)
+	if err != nil || len(list) == 0 {
+		if envURL == "" {
+			return nil, nil
+		}
+		return []AvailableEndpoint{{Source: SourceEnv, URL: envURL}}, nil
+	}
+
+	now := m.now()
+	out := make([]AvailableEndpoint, 0, len(list))
+	for i := range list {
+		ep := list[i]
+		if !isAvailable(ep, now) {
+			continue
+		}
+		url := strings.TrimSpace(ep.URL)
+		if url == "" {
+			continue
+		}
+		epCopy := ep
+		out = append(out, AvailableEndpoint{Source: SourceDB, URL: url, Endpoint: &epCopy})
+	}
+	if len(out) == 0 && envURL != "" {
+		out = append(out, AvailableEndpoint{Source: SourceEnv, URL: envURL})
+	}
+	return out, nil
 }
 
 func (m *Manager) AddEndpoint(ctx context.Context, chain string, transport string, name string, url string, setCurrent bool) (*models.RpcEndpoint, error) {

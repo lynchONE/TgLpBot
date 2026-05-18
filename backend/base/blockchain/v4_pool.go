@@ -246,7 +246,15 @@ func GetUniswapV4PoolKeyFromPositionManagerBytes25(positionManager common.Addres
 }
 
 func GetUniswapV4PoolKeyFromPositionManagerBytes25Ctx(ctx context.Context, positionManager common.Address, poolID25 [25]byte) (common.Hash, common.Address, common.Address, uint64, int, common.Address, error) {
-	if Client == nil {
+	return GetUniswapV4PoolKeyFromPositionManagerBytes25CtxWithClient(ctx, Client, positionManager, poolID25)
+}
+
+func GetUniswapV4PoolKeyFromPositionManagerBytes25WithClient(client *ethclient.Client, positionManager common.Address, poolID25 [25]byte) (common.Hash, common.Address, common.Address, uint64, int, common.Address, error) {
+	return GetUniswapV4PoolKeyFromPositionManagerBytes25CtxWithClient(context.Background(), client, positionManager, poolID25)
+}
+
+func GetUniswapV4PoolKeyFromPositionManagerBytes25CtxWithClient(ctx context.Context, client *ethclient.Client, positionManager common.Address, poolID25 [25]byte) (common.Hash, common.Address, common.Address, uint64, int, common.Address, error) {
+	if client == nil {
 		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("blockchain client not initialized")
 	}
 	if ctx == nil {
@@ -267,7 +275,7 @@ func GetUniswapV4PoolKeyFromPositionManagerBytes25Ctx(ctx context.Context, posit
 	}
 
 	msg := ethereum.CallMsg{To: &positionManager, Data: data}
-	raw, err := Client.CallContract(ctx, msg, nil)
+	raw, err := client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("call positionManager.poolKeys failed: %w", err)
 	}
@@ -607,7 +615,11 @@ func GetUniswapV4PoolCurrentTickViaStateViewAtBlock(stateView common.Address, po
 
 // GetUniswapV4PoolSlot0ViaStateViewAtBlock reads slot0 using a StateView helper contract at a specific block.
 func GetUniswapV4PoolSlot0ViaStateViewAtBlock(stateView common.Address, poolManager common.Address, poolID string, blockNumber uint64) (*big.Int, int, error) {
-	if Client == nil {
+	return GetUniswapV4PoolSlot0ViaStateViewAtBlockWithClient(Client, stateView, poolManager, poolID, blockNumber)
+}
+
+func GetUniswapV4PoolSlot0ViaStateViewAtBlockWithClient(client *ethclient.Client, stateView common.Address, poolManager common.Address, poolID string, blockNumber uint64) (*big.Int, int, error) {
+	if client == nil {
 		return nil, 0, fmt.Errorf("blockchain client not initialized")
 	}
 	if blockNumber == 0 {
@@ -640,7 +652,7 @@ func GetUniswapV4PoolSlot0ViaStateViewAtBlock(stateView common.Address, poolMana
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetryAtBlock(Client, ctx, msg, block)
+	raw, err := callContractWithRetryAtBlock(client, ctx, msg, block)
 	if err != nil {
 		return nil, 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}
@@ -666,7 +678,11 @@ func GetUniswapV4PoolSlot0ViaStateViewAtBlock(stateView common.Address, poolMana
 
 // GetUniswapV4PoolSlot0ViaStateView reads slot0 using a StateView helper contract.
 func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, error) {
-	if Client == nil {
+	return GetUniswapV4PoolSlot0ViaStateViewWithClient(Client, stateView, poolManager, poolID)
+}
+
+func GetUniswapV4PoolSlot0ViaStateViewWithClient(client *ethclient.Client, stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, error) {
+	if client == nil {
 		return nil, 0, fmt.Errorf("blockchain client not initialized")
 	}
 	if (stateView == common.Address{}) {
@@ -697,7 +713,7 @@ func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager com
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(Client, ctx, msg)
+	raw, err := callContractWithRetry(client, ctx, msg)
 	if err != nil {
 		return nil, 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}
