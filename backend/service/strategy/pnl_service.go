@@ -461,14 +461,14 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 			}
 		}
 	} else if feeErr != nil {
-		log.Printf("[PnL] V3 鎵嬬画璐硅绠楀け璐? tokenId=%s err=%v", task.V3TokenID, feeErr)
+		log.Printf("[PnL] V3 fee calculation failed: tokenId=%s err=%v", task.V3TokenID, feeErr)
 	}
 
 	// 5. Total Amounts = Position + Unclaimed Fees
 	total0 := new(big.Int).Add(amount0, fees0)
 	total1 := new(big.Int).Add(amount1, fees1)
 
-	log.Printf("[PnL] V3 鎵嬬画璐? tokenId=%s owed0=%s owed1=%s amount0=%s amount1=%s",
+	log.Printf("[PnL] V3 position value: tokenId=%s owed0=%s owed1=%s amount0=%s amount1=%s",
 		task.V3TokenID, fees0.String(), fees1.String(), amount0.String(), amount1.String())
 
 	// 6. Convert to USDT
@@ -552,7 +552,7 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 		return 0, 0, 0, nil, fmt.Errorf("get V4 slot0 failed: %w", err)
 	}
 
-	// 灏濊瘯璁＄畻瀹炴椂鎵嬬画璐癸紙濡傛灉鏈変粨浣嶄俊鎭級
+	// Try to calculate realtime fees when position state is available.
 	if v4pos != nil && v4pos.Liquidity != nil && v4pos.Liquidity.Sign() > 0 {
 		if snapshotBlock > 0 {
 			realFees0, realFees1, feeErr := pool.CalcV4UnclaimedFeesAtBlock(stateView, poolManager, task.PoolId, currentTick, v4pos, snapshotBlock)
@@ -709,7 +709,7 @@ func (s *PnLService) calculateUSDTValue(
 			totalUSDT = t0*bnbPriceUSDT + t1*priceT1InWBNB*bnbPriceUSDT
 			feesUSDT = f0*bnbPriceUSDT + f1*priceT1InWBNB*bnbPriceUSDT
 			holdUSDT = h0*bnbPriceUSDT + h1*priceT1InWBNB*bnbPriceUSDT
-			log.Printf("[PnL] 闈炵ǔ瀹氬竵瀵?%s/%s: 浣跨敤 WBNB(Token0) 浠锋牸浼扮畻, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
+			log.Printf("[PnL] Non-stable pair %s/%s: using WBNB(Token0) price estimate, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
 		} else if isWBNB1 && !isWBNB0 {
 			// Token1 is WBNB
 			// priceToken1PerToken0 = amount of WBNB per 1 T0
@@ -718,10 +718,10 @@ func (s *PnLService) calculateUSDTValue(
 			totalUSDT = t1*bnbPriceUSDT + t0*priceT0InWBNB*bnbPriceUSDT
 			feesUSDT = f1*bnbPriceUSDT + f0*priceT0InWBNB*bnbPriceUSDT
 			holdUSDT = h1*bnbPriceUSDT + h0*priceT0InWBNB*bnbPriceUSDT
-			log.Printf("[PnL] 闈炵ǔ瀹氬竵瀵?%s/%s: 浣跨敤 WBNB(Token1) 浠锋牸浼扮畻, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
+			log.Printf("[PnL] Non-stable pair %s/%s: using WBNB(Token1) price estimate, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
 		} else {
 			// Neither is WBNB or stable, cannot estimate
-			log.Printf("[PnL] 璀﹀憡: 鏃犳硶浼扮畻闈炵ǔ瀹氬竵瀵?%s/%s 鐨?USDT 浠峰€?(Task #%d)", token0Symbol, token1Symbol, task.ID)
+			log.Printf("[PnL] Warning: cannot estimate USDT value for non-stable pair %s/%s (Task #%d)", token0Symbol, token1Symbol, task.ID)
 			return 0, 0, 0
 		}
 	}
@@ -729,7 +729,7 @@ func (s *PnLService) calculateUSDTValue(
 	return totalUSDT, feesUSDT, holdUSDT
 }
 
-// GetBNBPriceUSDT 浠?PancakeSwap V3 WBNB/USDT 姹犲瓙鑾峰彇 BNB 瀹炴椂浠锋牸
+// GetBNBPriceUSDT returns the realtime BNB price from the PancakeSwap V3 WBNB/USDT pool.
 func (s *PnLService) GetBNBPriceUSDT() float64 {
 	return pricing.GetBNBPriceUSDT()
 }

@@ -1634,6 +1634,9 @@ func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEven
 	if len(vlog.Data) < 128 {
 		return nil, fmt.Errorf("ModifyLiquidity: insufficient data")
 	}
+	if len(vlog.Topics) < 2 {
+		return nil, fmt.Errorf("ModifyLiquidity: insufficient topics")
+	}
 
 	tickLower, err := decodeSignedInt24Word(vlog.Data[0:32])
 	if err != nil {
@@ -1657,7 +1660,7 @@ func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEven
 	}
 
 	var nftID *uint64
-	if salt.Sign() > 0 && salt.IsUint64() {
+	if w.isV4PositionManagerSender(vlog) && salt.Sign() > 0 && salt.IsUint64() {
 		parsed := salt.Uint64()
 		nftID = &parsed
 	}
@@ -1665,7 +1668,7 @@ func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEven
 	return &models.SmartMoneyLPEvent{
 		Protocol:       "uniswap_v4",
 		EventType:      eventType,
-		PoolAddress:    strings.ToLower(vlog.Address.Hex()),
+		PoolAddress:    strings.ToLower(vlog.Topics[1].Hex()),
 		TickLower:      &tickLower,
 		TickUpper:      &tickUpper,
 		NftTokenID:     nftID,
@@ -1673,6 +1676,26 @@ func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEven
 		Token0Amount:   "0",
 		Token1Amount:   "0",
 	}, nil
+}
+
+func (w *Watcher) isV4PositionManagerSender(vlog types.Log) bool {
+	if len(vlog.Topics) < 3 || w == nil || config.AppConfig == nil {
+		return false
+	}
+
+	sender := common.BytesToAddress(vlog.Topics[2].Bytes())
+	if sender == (common.Address{}) {
+		return false
+	}
+
+	chain := smartMoneyChainName(int(w.chainID))
+	if cc, ok := config.AppConfig.GetChainConfig(chain); ok && common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
+		return sender == common.HexToAddress(cc.UniswapV4PositionManagerAddress)
+	}
+	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+		return sender == common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+	}
+	return false
 }
 
 func decodeSignedInt24Word(word []byte) (int, error) {

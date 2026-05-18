@@ -636,7 +636,7 @@ func (r *Repository) UpsertActivePosition(tx *gorm.DB, event *models.SmartMoneyL
 	liquidityDelta := parseSignedBigInt(event.LiquidityDelta)
 	currentLiquidity := parseSignedBigInt(active.CurrentLiquidity)
 	if !exists {
-		if liveLiquidity := r.loadCurrentLiquiditySnapshot(event, &active); liveLiquidity != nil {
+		if liveLiquidity, _ := r.loadCurrentLiquiditySnapshot(event, &active); liveLiquidity != nil {
 			currentLiquidity = liveLiquidity
 		} else {
 			currentLiquidity.Add(currentLiquidity, liquidityDelta)
@@ -792,6 +792,19 @@ func (r *Repository) UpdateLPPositionMetadata(ctx context.Context, id uint, upda
 		Updates(updates).Error
 }
 
+func (r *Repository) MarkLPPositionMetadataInvalid(ctx context.Context, id uint, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil
+	}
+	return database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"metadata_status": "invalid",
+			"metadata_error":  reason,
+		}).Error
+}
+
 func (r *Repository) ListPositionsNeedingMetadataRepair(ctx context.Context, poolIdentifiers []string) ([]models.SmartMoneyLPPosition, error) {
 	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{})
 
@@ -811,6 +824,7 @@ func (r *Repository) ListPositionsNeedingMetadataRepair(ctx context.Context, poo
 	var positions []models.SmartMoneyLPPosition
 	err := db.
 		Where(strings.Join(conditions, " OR "), args...).
+		Where("COALESCE(metadata_status, '') <> ?", "invalid").
 		Order("opened_at DESC").
 		Find(&positions).Error
 	return positions, err
@@ -904,7 +918,7 @@ func (r *Repository) EnsureActivePositionFromPosition(ctx context.Context, pos *
 		applyManagerSnapshotToActive(active)
 		r.hydrateActivePositionFromHistory(tx, active)
 		if active.IsActive {
-			if liveLiquidity := r.loadCurrentLiquiditySnapshot(nil, active); liveLiquidity != nil {
+			if liveLiquidity, _ := r.loadCurrentLiquiditySnapshot(nil, active); liveLiquidity != nil {
 				active.CurrentLiquidity = liveLiquidity.String()
 				active.IsActive = liveLiquidity.Sign() > 0
 				if active.IsActive {
@@ -1083,9 +1097,9 @@ func applyManagerSnapshotToActive(active *models.SmartMoneyActivePosition) {
 	}
 }
 
-func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEvent, active *models.SmartMoneyActivePosition) *big.Int {
+func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEvent, active *models.SmartMoneyActivePosition) (*big.Int, error) {
 	if active == nil || active.NftTokenID == 0 {
-		return nil
+		return nil, nil
 	}
 
 	chainID := active.ChainID
@@ -1095,7 +1109,7 @@ func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEven
 	chain := smartMoneyChainSlugFromID(chainID)
 	client, _, err := blockchain.GetEVMClient(chain)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	tokenID := new(big.Int).SetUint64(active.NftTokenID)
@@ -1103,24 +1117,24 @@ func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEven
 	case "pancake_v3", "uniswap_v3":
 		managerAddress := strings.TrimSpace(active.PositionManagerAddress)
 		if !common.IsHexAddress(managerAddress) {
-			return nil
+			return nil, nil
 		}
 		pm, err := blockchain.NewV3PositionManager(common.HexToAddress(managerAddress), client)
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		info, err := pm.Positions(nil, tokenID)
 		if err != nil || info == nil || info.Liquidity == nil {
-			return nil
+			return nil, err
 		}
-		return new(big.Int).Set(info.Liquidity)
+		return new(big.Int).Set(info.Liquidity), nil
 	case "uniswap_v4":
 		managerAddress := strings.TrimSpace(active.PositionManagerAddress)
 		if !common.IsHexAddress(managerAddress) {
-			return nil
+			return nil, nil
 		}
 		if !common.IsHexAddress(strings.TrimSpace(active.PoolManagerAddress)) || strings.TrimSpace(active.PoolAddress) == "" {
-			return nil
+			return nil, nil
 		}
 		info, err := blockchain.GetV4PositionInfo(
 			common.HexToAddress(managerAddress),
@@ -1129,11 +1143,11 @@ func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEven
 			tokenID,
 		)
 		if err != nil || info == nil || info.Liquidity == nil {
-			return nil
+			return nil, err
 		}
-		return new(big.Int).Set(info.Liquidity)
+		return new(big.Int).Set(info.Liquidity), nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 
@@ -1417,7 +1431,7 @@ func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]flo
 		) evt_net
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE p.status = 'open' AND p.opened_at >= ?
+		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
 		GROUP BY p.pool_address
 	`, recentCutoff).Scan(&rows).Error
 	if err != nil {
@@ -1468,7 +1482,7 @@ func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddre
 		) evt_net
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE p.status = 'open' AND p.opened_at >= ?
+		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
 	`
 	args := []interface{}{recentCutoff}
 	if len(normalizedPools) > 0 {
@@ -1866,7 +1880,7 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 		) evt_net
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE p.status = 'open' AND p.opened_at >= ?
+		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
 		GROUP BY p.pool_address, p.token0_symbol, p.token1_symbol, p.token0_address, p.token1_address, p.fee_tier, p.protocol, p.chain_id
 		ORDER BY total_position_amount_usd DESC, latest_event_at DESC
 	`, cutoff).Scan(&rows).Error
@@ -1944,10 +1958,10 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 			MAX(p.fee_tier) AS fee_tier,
 			MAX(p.protocol) AS protocol,
 			MAX(p.chain_id) AS chain_id,
-			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? THEN p.wallet_address END) AS wallet_count,
+			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN 1 ELSE 0 END) AS open_position_count,
+			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN p.wallet_address END) AS wallet_count,
 			SUM(CASE WHEN p.status='closed' AND p.closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count,
-			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
+			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
 		FROM sm_lp_positions p
 		LEFT JOIN sm_lp_active_positions ap
 			ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id
@@ -2002,8 +2016,11 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	stats.MonitoredWalletCount = int(walletCount)
 
 	var openCount int64
-	database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-		Where("status = 'open' AND opened_at >= ?", recentCutoff).Count(&openCount)
+	database.DB.WithContext(ctx).
+		Table("sm_lp_positions p").
+		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id").
+		Where("p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", recentCutoff).
+		Count(&openCount)
 	stats.OpenPositionCount = int(openCount)
 
 	var closedToday int64
@@ -2012,9 +2029,12 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	stats.ClosedTodayCount = int(closedToday)
 
 	var poolCount int64
-	database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-		Where("status = 'open' AND opened_at >= ?", recentCutoff).
-		Distinct("pool_address").Count(&poolCount)
+	database.DB.WithContext(ctx).
+		Table("sm_lp_positions p").
+		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id").
+		Where("p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", recentCutoff).
+		Distinct("p.pool_address").
+		Count(&poolCount)
 	stats.ActivePoolCount = int(poolCount)
 
 	var contractCount int64
@@ -2089,7 +2109,7 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 		`).
 		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id").
 		Joins("LEFT JOIN (?) evt_net ON evt_net.chain_id = p.chain_id AND evt_net.nft_token_id = p.nft_token_id", eventNetSubQuery).
-		Where("p.status = ? AND p.opened_at >= ?", "open", recentCutoff).
+		Where("p.status = ? AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", "open", recentCutoff).
 		Group("p.wallet_address, p.chain_id")
 
 	walletEventSubQuery := database.DB.WithContext(ctx).

@@ -16,11 +16,12 @@ func TestParseModifyLiquidityParsesSaltAndDefaultsAmounts(t *testing.T) {
 
 	w := &Watcher{}
 	tokenID := uint64(42)
+	poolID := common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	vlog := types.Log{
 		Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		Topics: []common.Hash{
 			TopicModifyLiquidity,
-			common.HexToHash("0x1234"),
+			poolID,
 			common.BytesToHash(common.LeftPadBytes(common.HexToAddress("0x2222222222222222222222222222222222222222").Bytes(), 32)),
 		},
 		Data: joinWords(
@@ -44,8 +45,8 @@ func TestParseModifyLiquidityParsesSaltAndDefaultsAmounts(t *testing.T) {
 	if event.EventType != "add" {
 		t.Fatalf("expected add event, got %q", event.EventType)
 	}
-	if event.NftTokenID == nil || *event.NftTokenID != tokenID {
-		t.Fatalf("expected nft token id %d, got %v", tokenID, event.NftTokenID)
+	if event.NftTokenID != nil {
+		t.Fatalf("expected nil nft token id for non-position-manager sender, got %v", event.NftTokenID)
 	}
 	if event.TickLower == nil || *event.TickLower != -120 {
 		t.Fatalf("expected tick lower -120, got %v", event.TickLower)
@@ -56,8 +57,8 @@ func TestParseModifyLiquidityParsesSaltAndDefaultsAmounts(t *testing.T) {
 	if event.Token0Amount != "0" || event.Token1Amount != "0" {
 		t.Fatalf("expected zero default amounts, got token0=%q token1=%q", event.Token0Amount, event.Token1Amount)
 	}
-	if want := strings.ToLower(vlog.Address.Hex()); event.PoolAddress != want {
-		t.Fatalf("expected pool address %q, got %q", want, event.PoolAddress)
+	if want := strings.ToLower(poolID.Hex()); event.PoolAddress != want {
+		t.Fatalf("expected pool id %q, got %q", want, event.PoolAddress)
 	}
 }
 
@@ -66,11 +67,12 @@ func TestParseModifyLiquidityDetectsRemove(t *testing.T) {
 
 	w := &Watcher{}
 	tokenID := uint64(7)
+	poolID := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	vlog := types.Log{
 		Address: common.HexToAddress("0x3333333333333333333333333333333333333333"),
 		Topics: []common.Hash{
 			TopicModifyLiquidity,
-			common.HexToHash("0x4567"),
+			poolID,
 			common.BytesToHash(common.LeftPadBytes(common.HexToAddress("0x4444444444444444444444444444444444444444").Bytes(), 32)),
 		},
 		Data: joinWords(
@@ -88,8 +90,11 @@ func TestParseModifyLiquidityDetectsRemove(t *testing.T) {
 	if event.EventType != "remove" {
 		t.Fatalf("expected remove event, got %q", event.EventType)
 	}
-	if event.NftTokenID == nil || *event.NftTokenID != tokenID {
-		t.Fatalf("expected nft token id %d, got %v", tokenID, event.NftTokenID)
+	if event.NftTokenID != nil {
+		t.Fatalf("expected nil nft token id for non-position-manager sender, got %v", event.NftTokenID)
+	}
+	if event.PoolAddress != strings.ToLower(poolID.Hex()) {
+		t.Fatalf("expected pool id %q, got %q", strings.ToLower(poolID.Hex()), event.PoolAddress)
 	}
 }
 

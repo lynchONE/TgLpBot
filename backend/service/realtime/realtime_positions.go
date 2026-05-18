@@ -845,7 +845,7 @@ func (s *RealtimePositionsService) buildV3Position(
 				return nil, ""
 			}
 		}
-		return nil, fmt.Sprintf("闁荤姴娲╅褑銇?V3 positions() 婵犮垺鍎肩划鍓ф喆? chain=%s npm=%s tokenId=%s err=%v", chain, npmAddr.Hex(), tokenId.String(), err)
+		return nil, fmt.Sprintf("read V3 positions() failed: chain=%s npm=%s tokenId=%s err=%v", chain, npmAddr.Hex(), tokenId.String(), err)
 	}
 
 	token0 := info.Token0

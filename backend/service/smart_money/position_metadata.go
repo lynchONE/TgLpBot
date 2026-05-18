@@ -7,6 +7,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/service/pricing"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -55,6 +56,28 @@ var (
 	lastStateRepairAt     time.Time
 )
 
+type irreversiblePositionMetadataError struct {
+	reason string
+	err    error
+}
+
+func (e *irreversiblePositionMetadataError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.err == nil {
+		return e.reason
+	}
+	return fmt.Sprintf("%s: %v", e.reason, e.err)
+}
+
+func (e *irreversiblePositionMetadataError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
 const (
 	smartMoneyStateRepairInterval = 30 * time.Second
 	smartMoneyStateRepairLookback = 6 * time.Hour
@@ -75,6 +98,26 @@ func RepairPositions(ctx context.Context, repo *Repository) error {
 
 	for _, pos := range positions {
 		if _, err := RepairPositionMetadata(ctx, repo, pos); err != nil {
+			var invalidErr *irreversiblePositionMetadataError
+			if errors.As(err, &invalidErr) {
+				if markErr := repo.MarkLPPositionMetadataInvalid(ctx, pos.ID, invalidErr.Error()); markErr != nil {
+					log.Printf("[SmartMoney] mark invalid metadata failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, markErr)
+				} else {
+					log.Printf("[SmartMoney] skipped invalid position metadata: id=%d nft=%d protocol=%s reason=%v", pos.ID, pos.NftTokenID, pos.Protocol, invalidErr)
+				}
+				if strings.EqualFold(strings.TrimSpace(pos.Status), "open") {
+					if active, activeErr := repo.EnsureActivePositionFromPosition(ctx, &pos); activeErr != nil {
+						log.Printf("[SmartMoney] load invalid active position failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, activeErr)
+					} else if active != nil {
+						if changed, closeErr := closeSmartMoneyPosition(ctx, repo, active, &pos, time.Now()); closeErr != nil {
+							log.Printf("[SmartMoney] close invalid position failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, closeErr)
+						} else if changed {
+							log.Printf("[SmartMoney] closed invalid position: id=%d nft=%d protocol=%s", pos.ID, pos.NftTokenID, pos.Protocol)
+						}
+					}
+				}
+				continue
+			}
 			log.Printf("[SmartMoney] repair position metadata failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, err)
 		}
 	}
@@ -141,7 +184,13 @@ func repairOpenPositionState(ctx context.Context, repo *Repository, pos *models.
 	}
 
 	applyManagerSnapshotToActive(active)
-	liveLiquidity := repo.loadCurrentLiquiditySnapshot(nil, active)
+	liveLiquidity, liveErr := repo.loadCurrentLiquiditySnapshot(nil, active)
+	if liveErr != nil {
+		if isInvalidTokenIDError(liveErr) || isV4PoolKeyNotSetError(liveErr) {
+			return closeSmartMoneyPosition(ctx, repo, active, pos, now)
+		}
+		return false, liveErr
+	}
 	if liveLiquidity == nil {
 		return false, nil
 	}
@@ -158,14 +207,16 @@ func repairOpenPositionState(ctx context.Context, repo *Repository, pos *models.
 			Updates(updates).Error
 	}
 
-	closedAt := now
-	if active.LastRemoveAt != nil && !active.LastRemoveAt.IsZero() {
-		closedAt = *active.LastRemoveAt
-	} else if pos.ClosedAt != nil && !pos.ClosedAt.IsZero() {
-		closedAt = *pos.ClosedAt
-	}
+	return closeSmartMoneyPosition(ctx, repo, active, pos, now)
+}
 
-	err = repo.WithTx(ctx, func(tx *gorm.DB) error {
+func closeSmartMoneyPosition(ctx context.Context, repo *Repository, active *models.SmartMoneyActivePosition, pos *models.SmartMoneyLPPosition, now time.Time) (bool, error) {
+	if repo == nil || active == nil || pos == nil {
+		return false, nil
+	}
+	closedAt := smartMoneyClosedAt(active, pos, now)
+
+	err := repo.WithTx(ctx, func(tx *gorm.DB) error {
 		activeUpdates := map[string]interface{}{
 			"current_liquidity": "0",
 			"is_active":         false,
@@ -191,6 +242,16 @@ func repairOpenPositionState(ctx context.Context, repo *Repository, pos *models.
 	return true, nil
 }
 
+func smartMoneyClosedAt(active *models.SmartMoneyActivePosition, pos *models.SmartMoneyLPPosition, fallback time.Time) time.Time {
+	if active != nil && active.LastRemoveAt != nil && !active.LastRemoveAt.IsZero() {
+		return *active.LastRemoveAt
+	}
+	if pos != nil && pos.ClosedAt != nil && !pos.ClosedAt.IsZero() {
+		return *pos.ClosedAt
+	}
+	return fallback
+}
+
 func RepairPositionMetadata(ctx context.Context, repo *Repository, pos models.SmartMoneyLPPosition) (models.SmartMoneyLPPosition, error) {
 	if !shouldRepairPositionMetadata(pos) {
 		return pos, nil
@@ -202,6 +263,8 @@ func RepairPositionMetadata(ctx context.Context, repo *Repository, pos models.Sm
 
 	patched, updates := applyPositionMetadata(pos, meta)
 	if repo != nil && len(updates) > 0 {
+		updates["metadata_status"] = ""
+		updates["metadata_error"] = ""
 		if err := repo.UpdateLPPositionMetadata(ctx, pos.ID, updates); err != nil {
 			return pos, err
 		}
@@ -372,6 +435,12 @@ func resolveV3PositionMetadata(ctx context.Context, chain string, protocol strin
 	tokenID := new(big.Int).SetUint64(nftTokenID)
 	pos, err := pm.Positions(nil, tokenID)
 	if err != nil {
+		if isInvalidTokenIDError(err) {
+			return nil, &irreversiblePositionMetadataError{
+				reason: fmt.Sprintf("v3 token id %d is not valid for protocol %s position manager", nftTokenID, protocol),
+				err:    err,
+			}
+		}
 		return nil, fmt.Errorf("read v3 position %d: %w", nftTokenID, err)
 	}
 
@@ -409,6 +478,12 @@ func resolveV4PositionMetadata(ctx context.Context, chain string, nftTokenID uin
 	tokenID := new(big.Int).SetUint64(nftTokenID)
 	raw, rawErr := pm.PositionInfoPacked(nil, tokenID)
 	if rawErr != nil {
+		if isInvalidTokenIDError(rawErr) {
+			return nil, &irreversiblePositionMetadataError{
+				reason: fmt.Sprintf("v4 token id %d is not valid for position manager", nftTokenID),
+				err:    rawErr,
+			}
+		}
 		return nil, fmt.Errorf("read v4 positionInfo for %d: %w", nftTokenID, rawErr)
 	}
 
@@ -416,9 +491,20 @@ func resolveV4PositionMetadata(ctx context.Context, chain string, nftTokenID uin
 	if err != nil {
 		return nil, err
 	}
+	if isZeroV4PoolID25(poolID25) {
+		return nil, &irreversiblePositionMetadataError{
+			reason: fmt.Sprintf("v4 token id %d has empty pool id", nftTokenID),
+		}
+	}
 
 	fullPoolID, token0, token1, fee, _, _, err := blockchain.GetUniswapV4PoolKeyFromPositionManagerBytes25Ctx(ctx, positionManager, poolID25)
 	if err != nil {
+		if isV4PoolKeyNotSetError(err) {
+			return nil, &irreversiblePositionMetadataError{
+				reason: fmt.Sprintf("v4 token id %d pool key is not registered", nftTokenID),
+				err:    err,
+			}
+		}
 		return nil, err
 	}
 
@@ -571,6 +657,29 @@ func decodeSignedInt24(v int64) int {
 	return int(v)
 }
 
+func isZeroV4PoolID25(poolID25 [25]byte) bool {
+	for _, b := range poolID25 {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func isInvalidTokenIDError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalid token id")
+}
+
+func isV4PoolKeyNotSetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "positionmanager.poolkeys not set")
+}
+
 func applyPositionMetadata(pos models.SmartMoneyLPPosition, meta *PositionMetadata) (models.SmartMoneyLPPosition, map[string]interface{}) {
 	patched := pos
 	updates := make(map[string]interface{})
@@ -642,6 +751,9 @@ func applyEventMetadata(event *models.SmartMoneyLPEvent, meta *PositionMetadata)
 
 func shouldRepairPositionMetadata(pos models.SmartMoneyLPPosition) bool {
 	if pos.NftTokenID == 0 {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(pos.MetadataStatus), "invalid") {
 		return false
 	}
 	if isKnownSmartMoneyPoolIdentifier(pos.PoolAddress) {

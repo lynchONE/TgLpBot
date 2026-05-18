@@ -131,7 +131,7 @@ type Config struct {
 	OKXSecretKey              string
 	OKXPassphrase             string
 	OKXSwapRouter             string
-	OKXTokenApproveAddress    string // OKX DEX 鐨?TokenApprove 鍚堢害鍦板潃
+	OKXTokenApproveAddress    string // OKX DEX TokenApprove contract address
 	OKXDebug                  bool
 	OKXSwapFeeRecipient       string
 	OKXSwapFeePercent         string
@@ -524,7 +524,7 @@ func LoadConfig() error {
 	log.Printf("   - SmartMoney Enabled: %v", AppConfig.SmartMoneyEnabled)
 	log.Printf("   - SmartMoney BSC HTTP RPC: %s", maskURL(AppConfig.BSCRpcURL))
 	log.Printf("   - SmartMoney Poll Interval: %d seconds", AppConfig.SmartMoneyPollInterval)
-	log.Println("鉁?閰嶇疆鍔犺浇瀹屾垚")
+	log.Println("[Config] Configuration loaded")
 	log.Println("========================================")
 
 	return nil

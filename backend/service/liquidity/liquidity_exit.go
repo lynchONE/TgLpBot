@@ -454,7 +454,7 @@ func (s *LiquidityService) waitTokenBalanceAtLeast(client *ethclient.Client, tok
 			bal = big.NewInt(0)
 		}
 		if err == nil && bal.Cmp(min) >= 0 {
-			log.Printf("[Liquidity] RPC 鍚屾瀹屾垚 %s 浣欓 (%s): %s", label, token.Hex(), bal.String())
+			log.Printf("[Liquidity] RPC balance synced for %s (%s): %s", label, token.Hex(), bal.String())
 			return bal, nil
 		}
 	}

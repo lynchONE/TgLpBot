@@ -99,7 +99,13 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 		})
 		if clientErr != nil {
 			warnings = append(warnings, lastWarnings...)
-			warnings = appendWarning(warnings, fmt.Sprintf("v3 rpc unavailable: %v", clientErr))
+			if isSmartMoneyInvalidTokenIDError(clientErr) {
+				if len(lastWarnings) == 0 {
+					warnings = appendWarning(warnings, fmt.Sprintf("v3 position token id is invalid: %v", clientErr))
+				}
+			} else {
+				warnings = appendWarning(warnings, fmt.Sprintf("v3 rpc unavailable: %v", clientErr))
+			}
 		}
 		if position != nil {
 			return position, warnings, nil
@@ -143,6 +149,10 @@ func (s *RealtimePositionsService) buildSmartMoneyV3PositionWithClient(
 			info, err := pm.Positions(callOpts, new(big.Int).SetUint64(active.NftTokenID))
 			if err != nil {
 				if active.IsActive {
+					if isSmartMoneyInvalidTokenIDError(err) {
+						warnings = appendWarning(warnings, fmt.Sprintf("v3 position token id %d is invalid for position manager %s", active.NftTokenID, positionManager.Hex()))
+						return nil, warnings, nonRetryableSmartMoneyRead(err)
+					}
 					warnings = appendWarning(warnings, fmt.Sprintf("read v3 position failed: %v", err))
 					return nil, warnings, err
 				}
@@ -415,7 +425,13 @@ func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.Smar
 		})
 		if clientErr != nil {
 			warnings = append(warnings, lastWarnings...)
-			warnings = appendWarning(warnings, fmt.Sprintf("v4 rpc unavailable: %v", clientErr))
+			if isSmartMoneyInvalidTokenIDError(clientErr) || isSmartMoneyV4PoolKeyNotSetError(clientErr) {
+				if len(lastWarnings) == 0 {
+					warnings = appendWarning(warnings, fmt.Sprintf("v4 position metadata is invalid: %v", clientErr))
+				}
+			} else {
+				warnings = appendWarning(warnings, fmt.Sprintf("v4 rpc unavailable: %v", clientErr))
+			}
 		}
 		if position != nil {
 			return position, warnings, nil
@@ -449,6 +465,10 @@ func (s *RealtimePositionsService) buildSmartMoneyV4PositionWithClient(
 		pos, err := blockchain.GetV4PositionInfoCtxWithClient(ctx, client, positionManager, poolManager, poolID, new(big.Int).SetUint64(active.NftTokenID))
 		if err != nil {
 			if active.IsActive {
+				if isSmartMoneyInvalidTokenIDError(err) || isSmartMoneyV4PoolKeyNotSetError(err) {
+					warnings = appendWarning(warnings, fmt.Sprintf("v4 position token id %d metadata is invalid: %v", active.NftTokenID, err))
+					return nil, warnings, nonRetryableSmartMoneyRead(err)
+				}
 				warnings = appendWarning(warnings, fmt.Sprintf("read v4 position failed: %v", err))
 				return nil, warnings, err
 			}
@@ -789,6 +809,20 @@ func intValue(value *int) int {
 		return 0
 	}
 	return *value
+}
+
+func isSmartMoneyInvalidTokenIDError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalid token id")
+}
+
+func isSmartMoneyV4PoolKeyNotSetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "positionmanager.poolkeys not set")
 }
 
 func appendWarning(warnings []string, message string) []string {

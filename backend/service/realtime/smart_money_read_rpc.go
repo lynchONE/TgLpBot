@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/base/rpcpool"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -30,6 +31,28 @@ type smartMoneyReadRPCPool struct {
 	mu      sync.Mutex
 	clients map[string]*ethclient.Client
 	next    map[string]int
+}
+
+type nonRetryableSmartMoneyReadError struct {
+	err error
+}
+
+func (e nonRetryableSmartMoneyReadError) Error() string {
+	if e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e nonRetryableSmartMoneyReadError) Unwrap() error {
+	return e.err
+}
+
+func nonRetryableSmartMoneyRead(err error) error {
+	if err == nil {
+		return nil
+	}
+	return nonRetryableSmartMoneyReadError{err: err}
 }
 
 var defaultSmartMoneyReadRPCPool = &smartMoneyReadRPCPool{
@@ -152,6 +175,10 @@ func (s *RealtimePositionsService) withSmartMoneyReadClient(ctx context.Context,
 			return nil
 		}
 		lastErr = err
+		var nonRetryable nonRetryableSmartMoneyReadError
+		if errors.As(err, &nonRetryable) {
+			return nonRetryable.err
+		}
 		if rpcpool.IsQuotaExhaustedError(err) && endpoint.endpointID > 0 {
 			_ = rpcpool.Default().DisableUntilNextMonth(context.Background(), endpoint.endpointID)
 		}

@@ -70,25 +70,27 @@ type SmartMoneyLPEvent struct {
 func (SmartMoneyLPEvent) TableName() string { return "sm_lp_events" }
 
 type SmartMoneyLPPosition struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
-	WalletAddress string     `gorm:"size:42;not null;index:idx_sm_pos_wallet_status;index:idx_sm_pos_wallet_chain_status_opened,priority:1" json:"wallet_address"`
-	ChainID       int        `gorm:"not null;default:56;index:idx_sm_pos_wallet_chain_status_opened,priority:2;index:idx_sm_pos_chain_nft,priority:1" json:"chain_id"`
-	Protocol      string     `gorm:"size:20;not null" json:"protocol"`
-	NftTokenID    uint64     `gorm:"not null;uniqueIndex:uq_sm_nft_chain;index:idx_sm_pos_chain_nft,priority:2" json:"nft_token_id"`
-	PoolAddress   string     `gorm:"size:66;not null;index:idx_sm_pos_pool_status;index:idx_sm_pos_pool_status_opened,priority:1;index:idx_sm_pos_status_opened_pool,priority:3" json:"pool_address"`
-	Token0Address string     `gorm:"size:42;not null" json:"token0_address"`
-	Token1Address string     `gorm:"size:42;not null" json:"token1_address"`
-	Token0Symbol  string     `gorm:"size:20" json:"token0_symbol"`
-	Token1Symbol  string     `gorm:"size:20" json:"token1_symbol"`
-	FeeTier       *int       `json:"fee_tier"`
-	TickLower     *int       `json:"tick_lower"`
-	TickUpper     *int       `json:"tick_upper"`
-	Status        string     `gorm:"size:10;not null;default:open;index:idx_sm_pos_wallet_status;index:idx_sm_pos_pool_status;index:idx_sm_pos_status;index:idx_sm_pos_wallet_chain_status_opened,priority:3;index:idx_sm_pos_pool_status_opened,priority:2;index:idx_sm_pos_status_opened_pool,priority:1;index:idx_sm_pos_status_closed,priority:1" json:"status"`
-	OpenTxHash    string     `gorm:"size:66;not null" json:"open_tx_hash"`
-	CloseTxHash   *string    `gorm:"size:66" json:"close_tx_hash"`
-	OpenedAt      time.Time  `gorm:"not null;index:idx_sm_pos_opened;index:idx_sm_pos_wallet_chain_status_opened,priority:4;index:idx_sm_pos_pool_status_opened,priority:3;index:idx_sm_pos_status_opened_pool,priority:2" json:"opened_at"`
-	ClosedAt      *time.Time `gorm:"index:idx_sm_pos_status_closed,priority:2" json:"closed_at"`
-	UpdatedAt     time.Time  `gorm:"not null;autoUpdateTime" json:"updated_at"`
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	WalletAddress  string     `gorm:"size:42;not null;index:idx_sm_pos_wallet_status;index:idx_sm_pos_wallet_chain_status_opened,priority:1" json:"wallet_address"`
+	ChainID        int        `gorm:"not null;default:56;index:idx_sm_pos_wallet_chain_status_opened,priority:2;index:idx_sm_pos_chain_nft,priority:1" json:"chain_id"`
+	Protocol       string     `gorm:"size:20;not null" json:"protocol"`
+	NftTokenID     uint64     `gorm:"not null;uniqueIndex:uq_sm_nft_chain;index:idx_sm_pos_chain_nft,priority:2" json:"nft_token_id"`
+	PoolAddress    string     `gorm:"size:66;not null;index:idx_sm_pos_pool_status;index:idx_sm_pos_pool_status_opened,priority:1;index:idx_sm_pos_status_opened_pool,priority:3" json:"pool_address"`
+	Token0Address  string     `gorm:"size:42;not null" json:"token0_address"`
+	Token1Address  string     `gorm:"size:42;not null" json:"token1_address"`
+	Token0Symbol   string     `gorm:"size:20" json:"token0_symbol"`
+	Token1Symbol   string     `gorm:"size:20" json:"token1_symbol"`
+	FeeTier        *int       `json:"fee_tier"`
+	TickLower      *int       `json:"tick_lower"`
+	TickUpper      *int       `json:"tick_upper"`
+	MetadataStatus string     `gorm:"size:32;not null;default:'';index:idx_sm_pos_metadata_status" json:"metadata_status"`
+	MetadataError  string     `gorm:"type:text" json:"metadata_error"`
+	Status         string     `gorm:"size:10;not null;default:open;index:idx_sm_pos_wallet_status;index:idx_sm_pos_pool_status;index:idx_sm_pos_status;index:idx_sm_pos_wallet_chain_status_opened,priority:3;index:idx_sm_pos_pool_status_opened,priority:2;index:idx_sm_pos_status_opened_pool,priority:1;index:idx_sm_pos_status_closed,priority:1" json:"status"`
+	OpenTxHash     string     `gorm:"size:66;not null" json:"open_tx_hash"`
+	CloseTxHash    *string    `gorm:"size:66" json:"close_tx_hash"`
+	OpenedAt       time.Time  `gorm:"not null;index:idx_sm_pos_opened;index:idx_sm_pos_wallet_chain_status_opened,priority:4;index:idx_sm_pos_pool_status_opened,priority:3;index:idx_sm_pos_status_opened_pool,priority:2" json:"opened_at"`
+	ClosedAt       *time.Time `gorm:"index:idx_sm_pos_status_closed,priority:2" json:"closed_at"`
+	UpdatedAt      time.Time  `gorm:"not null;autoUpdateTime" json:"updated_at"`
 }
 
 func (SmartMoneyLPPosition) TableName() string { return "sm_lp_positions" }

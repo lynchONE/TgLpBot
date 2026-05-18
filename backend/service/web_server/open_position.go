@@ -356,12 +356,12 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 	switch req.RangeInputMode {
 	case openPositionRangeInputPercentage:
 		if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
-			http.Error(w, "鍖洪棿鍙傛暟鏃犳晥", http.StatusBadRequest)
+			http.Error(w, "invalid range parameters", http.StatusBadRequest)
 			return nil, false
 		}
 	case openPositionRangeInputTick, openPositionRangeInputGrid:
 		if req.TickLower == nil || req.TickUpper == nil {
-			http.Error(w, "鍖洪棿鍙傛暟鏃犳晥", http.StatusBadRequest)
+			http.Error(w, "invalid range parameters", http.StatusBadRequest)
 			return nil, false
 		}
 	}
