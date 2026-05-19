@@ -7024,10 +7024,20 @@ body {
   gap: 6px;
   min-width: 0;
 }
+.smd-wallet-info-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
 .smd-wallet-info-name {
   font-family: 'Space Mono', 'Courier New', monospace;
   color: var(--text-muted);
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .smd-wallet-btn {
   background: none;

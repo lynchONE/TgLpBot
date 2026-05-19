@@ -82,6 +82,20 @@ function formatChinaDay(value = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+function monthStart(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function calendarHistoryDaysForMonth(value = new Date()) {
+  const start = monthStart(value);
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diffDays = Math.ceil((todayStart.getTime() - start.getTime()) / 86400000) + 32;
+  return Math.max(30, Math.min(365, diffDays));
+}
+
 function formatChain(chainId) {
   return Number(chainId) === 8453 ? 'Base' : 'BSC';
 }
@@ -95,6 +109,19 @@ function walletLabel(wallet) {
   if (label) return label;
   const address = String(wallet?.address || '').trim();
   return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '--';
+}
+
+function walletSourceLabel(wallet) {
+  const source = String(wallet?.source ?? wallet?.wallet_source ?? '').trim();
+  if (source === 'manual') return '手动添加';
+  if (source === 'contract_interaction') return '合约发现';
+  return source || '未标记来源';
+}
+
+function walletSourceContractLabel(wallet) {
+  const raw = String(wallet?.source_contract ?? wallet?.wallet_source_contract ?? '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
+  return `来源合约 ${raw.slice(0, 6)}...${raw.slice(-4)}`;
 }
 
 function walletAvatarIdx(address) {
@@ -161,10 +188,16 @@ function RankBadge({ rank }) {
 
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
-function PnLCalendar({ data, loading = false }) {
-  const [viewDate, setViewDate] = useState(() => new Date());
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
+function PnLCalendar({ data, loading = false, viewDate, onMonthChange }) {
+  const currentViewDate = viewDate instanceof Date ? viewDate : new Date();
+  const changeMonth = useCallback((delta) => {
+    const next = new Date(currentViewDate.getFullYear(), currentViewDate.getMonth() + delta, 1);
+    if (typeof onMonthChange === 'function') {
+      onMonthChange(next);
+    }
+  }, [currentViewDate, onMonthChange]);
+  const year = currentViewDate.getFullYear();
+  const month = currentViewDate.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayJS = new Date(year, month, 1).getDay();
   const startOffset = firstDayJS === 0 ? 6 : firstDayJS - 1;
@@ -233,8 +266,8 @@ function PnLCalendar({ data, loading = false }) {
           </svg>
         </div>
         <div className="pnl-cal-nav">
-          <button type="button" onClick={() => setViewDate(new Date(year, month - 1, 1))}><ChevronLeft size={14} /></button>
-          <button type="button" onClick={() => setViewDate(new Date(year, month + 1, 1))}><ChevronRight size={14} /></button>
+          <button type="button" onClick={() => changeMonth(-1)}><ChevronLeft size={14} /></button>
+          <button type="button" onClick={() => changeMonth(1)}><ChevronRight size={14} /></button>
         </div>
       </div>
       <div className="pnl-cal-grid">
@@ -267,6 +300,7 @@ export default function SmartMoneyAssetsPanel({
   const [overview, setOverview] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
   const [walletDetail, setWalletDetail] = useState(null);
+  const [detailCalendarMonth, setDetailCalendarMonth] = useState(() => monthStart(new Date()));
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -287,6 +321,7 @@ export default function SmartMoneyAssetsPanel({
     if (openDetail) {
       setView('wallets');
       setDetailWalletId(id);
+      setDetailCalendarMonth(monthStart(new Date()));
     }
   }, []);
 
@@ -397,13 +432,14 @@ export default function SmartMoneyAssetsPanel({
   const loadWalletDetail = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!selectedWallet || !hasInitData || !isAdmin) return;
     setDetailLoading(true);
+    const detailDays = Math.max(days, calendarHistoryDaysForMonth(detailCalendarMonth));
     try {
       const detail = await fetchAdminSmartMoneyWallet({
         apiBaseUrl,
         initData,
         address: selectedWallet.address,
         chainId: selectedWallet.chain_id,
-        days,
+        days: detailDays,
         forceRefresh,
       });
       startTransition(() => {
@@ -417,7 +453,7 @@ export default function SmartMoneyAssetsPanel({
     } finally {
       setDetailLoading(false);
     }
-  }, [apiBaseUrl, days, hasInitData, initData, isAdmin, selectedWallet]);
+  }, [apiBaseUrl, days, detailCalendarMonth, hasInitData, initData, isAdmin, selectedWallet]);
 
   useEffect(() => {
     if (!hasInitData || !isAdmin) return undefined;
@@ -593,7 +629,8 @@ export default function SmartMoneyAssetsPanel({
                     <div style={{ minWidth: 0 }}>
                       <div className="am-item-title">{walletLabel(wallet)}</div>
                       <div className="am-item-sub">
-                        {formatChain(wallet.chain_id)} / {Number(wallet.active_pool_count || 0)} 池 / {Number(wallet.today_event_count || 0)} 事件
+                        {formatChain(wallet.chain_id)} / {walletSourceLabel(wallet)} / {Number(wallet.active_pool_count || 0)} 池 / {Number(wallet.today_event_count || 0)} 事件
+                        {walletSourceContractLabel(wallet) ? ` / ${walletSourceContractLabel(wallet)}` : ''}
                       </div>
                     </div>
                   </div>
@@ -654,7 +691,8 @@ export default function SmartMoneyAssetsPanel({
                 <div style={{ minWidth: 0 }}>
                   <div className="am-item-title">{walletLabel(selectedWallet)}</div>
                   <div className="am-item-sub">
-                    {formatChain(selectedWallet?.chain_id)} / {selectedWallet?.address || '--'}
+                    {formatChain(selectedWallet?.chain_id)} / {walletSourceLabel(walletDetail?.wallet || selectedWallet)} / {selectedWallet?.address || '--'}
+                    {walletSourceContractLabel(walletDetail?.wallet || selectedWallet) ? ` / ${walletSourceContractLabel(walletDetail?.wallet || selectedWallet)}` : ''}
                   </div>
                 </div>
               </div>
@@ -686,7 +724,12 @@ export default function SmartMoneyAssetsPanel({
               <div className="am-item-sub">{detailLoading ? '加载中...' : `${historyCount} 天`}</div>
             </div>
             {pnlCalendarData.length > 0 ? (
-              <PnLCalendar data={pnlCalendarData} loading={detailLoading} />
+              <PnLCalendar
+                data={pnlCalendarData}
+                loading={detailLoading}
+                viewDate={detailCalendarMonth}
+                onMonthChange={setDetailCalendarMonth}
+              />
             ) : <EmptyState text={detailLoading ? '正在加载钱包详情...' : '暂无盈亏日历'} />}
           </div>
         </div>
@@ -765,7 +808,8 @@ export default function SmartMoneyAssetsPanel({
                     <div style={{ minWidth: 0 }}>
                       <div className="am-item-title">{walletLabel(item)}</div>
                       <div className="am-item-sub">
-                        {formatChain(item.chain_id)} / 参与 {Number(item.participation_count || 0)} 次
+                        {formatChain(item.chain_id)} / {walletSourceLabel(item)} / 参与 {Number(item.participation_count || 0)} 次
+                        {walletSourceContractLabel(item) ? ` / ${walletSourceContractLabel(item)}` : ''}
                       </div>
                     </div>
                   </div>

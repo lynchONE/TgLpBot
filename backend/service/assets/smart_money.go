@@ -28,6 +28,7 @@ const (
 	smartMoneyWalletLiveRefreshInterval = 5 * time.Minute
 	smartMoneyWalletLiveRefreshTimeout  = 4 * time.Minute
 	smartMoneyWalletLiveRefreshWorkers  = 3
+	smartMoneyWalletMaxHistoryDays      = 365
 	smartMoneyLeaderboardCacheTTL       = 72 * time.Hour
 	smartMoneyDefaultPageSize           = 10
 	smartMoneyMaxPageSize               = 50
@@ -385,12 +386,23 @@ func applySmartMoneyLeaderboardWalletMeta(resp *SmartMoneyLeaderboardResponse, w
 		if wallet.AvatarURL != nil {
 			entry.AvatarURL = strings.TrimSpace(*wallet.AvatarURL)
 		}
+		entry.Source = strings.TrimSpace(wallet.Source)
+		entry.SourceContract = smartMoneySourceContractValue(wallet)
 	}
+}
+
+func smartMoneySourceContractValue(walletRow models.MonitoredWallet) string {
+	if walletRow.SourceContract == nil {
+		return ""
+	}
+	return strings.TrimSpace(*walletRow.SourceContract)
 }
 
 func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smartMoneyWalletLiveState) SmartMoneyWalletSummary {
 	summary := SmartMoneyWalletSummary{
 		Address:         walletRow.Address,
+		Source:          strings.TrimSpace(walletRow.Source),
+		SourceContract:  smartMoneySourceContractValue(walletRow),
 		ChainID:         walletRow.ChainID,
 		Assets:          live.assets,
 		ActivePoolCount: live.activePoolCount,
@@ -410,6 +422,8 @@ func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smar
 func smartMoneyWalletSummaryFromSnapshot(walletRow models.MonitoredWallet, snapshot *models.SmartMoneyWalletDailySnapshot, dailyStat *models.SmartMoneyLPDailyStat) SmartMoneyWalletSummary {
 	summary := SmartMoneyWalletSummary{
 		Address:         walletRow.Address,
+		Source:          strings.TrimSpace(walletRow.Source),
+		SourceContract:  smartMoneySourceContractValue(walletRow),
 		ChainID:         walletRow.ChainID,
 		RecognizedBasis: recognizedAssetBasis,
 	}
@@ -775,7 +789,7 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	if address == "" {
 		return nil, fmt.Errorf("invalid wallet address")
 	}
-	days = clampHistoryDays(days)
+	days = clampSmartMoneyWalletHistoryDays(days)
 	if chainID <= 0 {
 		chainID = 56
 	}
@@ -889,6 +903,16 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	}, nil
 }
 
+func clampSmartMoneyWalletHistoryDays(days int) int {
+	if days <= 0 {
+		return defaultHistoryDays
+	}
+	if days > smartMoneyWalletMaxHistoryDays {
+		return smartMoneyWalletMaxHistoryDays
+	}
+	return days
+}
+
 func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, days int, page int, pageSize int, keyword string, forceRefresh bool) (*SmartMoneyLeaderboardResponse, error) {
 	metric = normalizeLeaderboardMetric(metric)
 	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
@@ -924,10 +948,12 @@ func (s *Service) deleteCachedSmartMoneyLeaderboards(snapshotDay time.Time) {
 func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, snapshotDay time.Time) ([]smartMoneyLeaderboardSnapshotInput, error) {
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 	type row struct {
-		WalletAddress string         `gorm:"column:wallet_address"`
-		ChainID       int            `gorm:"column:chain_id"`
-		Label         sql.NullString `gorm:"column:label"`
-		AvatarURL     sql.NullString `gorm:"column:avatar_url"`
+		WalletAddress  string         `gorm:"column:wallet_address"`
+		ChainID        int            `gorm:"column:chain_id"`
+		Label          sql.NullString `gorm:"column:label"`
+		AvatarURL      sql.NullString `gorm:"column:avatar_url"`
+		Source         string         `gorm:"column:source"`
+		SourceContract sql.NullString `gorm:"column:source_contract"`
 
 		CurrentTotalUSD         float64 `gorm:"column:current_total_usd"`
 		CurrentHasTransferIn    bool    `gorm:"column:current_has_transfer_in"`
@@ -953,6 +979,8 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 				w.chain_id AS chain_id,
 				w.label AS label,
 				w.avatar_url AS avatar_url,
+				w.source AS source,
+				w.source_contract AS source_contract,
 				cur.total_usd AS current_total_usd,
 				cur.has_transfer_in AS current_has_transfer_in,
 				cur.has_transfer_out AS current_has_transfer_out,
@@ -990,6 +1018,7 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 		walletRow := models.MonitoredWallet{
 			Address: normalizeAddress(item.WalletAddress),
 			ChainID: item.ChainID,
+			Source:  strings.TrimSpace(item.Source),
 		}
 		if walletRow.Address == "" {
 			continue
@@ -1001,6 +1030,10 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 		if item.AvatarURL.Valid {
 			avatarURL := strings.TrimSpace(item.AvatarURL.String)
 			walletRow.AvatarURL = &avatarURL
+		}
+		if item.SourceContract.Valid {
+			sourceContract := strings.TrimSpace(item.SourceContract.String)
+			walletRow.SourceContract = &sourceContract
 		}
 		current := &models.SmartMoneyWalletDailySnapshot{
 			TotalUSD:         item.CurrentTotalUSD,
@@ -1194,6 +1227,8 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 		}
 		entry := SmartMoneyLeaderboardEntry{
 			Address:                 input.Wallet.Address,
+			Source:                  strings.TrimSpace(input.Wallet.Source),
+			SourceContract:          smartMoneySourceContractValue(input.Wallet),
 			ChainID:                 input.Wallet.ChainID,
 			EstimatedRealizedPnLUSD: estimatedPnL,
 			YieldRate:               yieldRate,

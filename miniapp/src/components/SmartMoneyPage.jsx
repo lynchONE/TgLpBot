@@ -913,6 +913,24 @@ function isHexAddressValue(value) {
     return /^0x[a-fA-F0-9]{40}$/.test(String(value || '').trim());
 }
 
+function walletSourceLabel(source) {
+    const value = String(source || '').trim();
+    if (value === 'manual') return '手动添加';
+    if (value === 'contract_interaction') return '合约发现';
+    return value || '未标记来源';
+}
+
+function walletSourceBadgeClass(source) {
+    return String(source || '').trim() === 'manual'
+        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+        : 'border-white/10 bg-zinc-800/80 text-zinc-300';
+}
+
+function walletSourceContractLabel(value) {
+    const address = normalizeWalletAddress(value);
+    return address ? `来源合约 ${shortAddr(address)}` : '';
+}
+
 function getPairLabel(value) {
     const pair = String(value?.trading_pair || '').trim();
     if (pair && pair !== '/') return pair;
@@ -1331,13 +1349,20 @@ function CompactIdentifier({ value, label = 'ID' }) {
     );
 }
 
-function WalletIdentity({ address, color, label, avatarUrl, size = 40, onClick, showCopy = false }) {
+function WalletIdentity({ address, color, label, avatarUrl, source, sourceContract, size = 40, onClick, showCopy = false, showSource = false }) {
+    const sourceText = walletSourceLabel(source);
+    const sourceContractText = walletSourceContractLabel(sourceContract);
     const inner = (
         <>
             <WalletAvatar address={address} color={color} avatarUrl={avatarUrl} size={size} />
             <span className="truncate text-left text-sm text-zinc-100">
                 {label && label !== address ? label : shortAddr(address)}
             </span>
+            {showSource ? (
+                <Badge className={walletSourceBadgeClass(source)} title={sourceContractText || sourceText}>
+                    {sourceText}
+                </Badge>
+            ) : null}
             {showCopy ? <CopyButton text={address} small className="shrink-0" /> : null}
         </>
     );
@@ -1625,14 +1650,24 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
                     allowTaskActions={false}
                     showAbsolutePnl={false}
                     headerAccessory={(
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            aria-label="收起详情"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-black/20 text-zinc-400 transition hover:bg-black/30 hover:text-zinc-200"
-                        >
-                            <X size={15} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                            <Badge className={walletSourceBadgeClass(detail.wallet_source)}>
+                                {walletSourceLabel(detail.wallet_source)}
+                            </Badge>
+                            {walletSourceContractLabel(detail.wallet_source_contract) ? (
+                                <Badge className="hidden border-white/10 bg-zinc-800/80 text-zinc-400 sm:inline-flex">
+                                    {walletSourceContractLabel(detail.wallet_source_contract)}
+                                </Badge>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                aria-label="收起详情"
+                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-black/20 text-zinc-400 transition hover:bg-black/30 hover:text-zinc-200"
+                            >
+                                <X size={15} />
+                            </button>
+                        </div>
                     )}
                 />
             ) : null}
@@ -1738,14 +1773,22 @@ function PriceRangeChart({ positions, currentPrice }) {
                 {Object.entries(
                     validPositions.reduce((acc, p) => {
                         if (!acc[p.wallet_address]) {
-                            acc[p.wallet_address] = { color: p.wallet_color, label: p.wallet_label };
+                            acc[p.wallet_address] = {
+                                color: p.wallet_color,
+                                label: p.wallet_label,
+                                source: p.wallet_source,
+                                sourceContract: p.wallet_source_contract,
+                            };
                         }
                         return acc;
                     }, {})
-                ).map(([addr, { color, label }]) => (
+                ).map(([addr, { color, label, source, sourceContract }]) => (
                     <span key={addr} className="flex items-center gap-1 text-zinc-400">
                         <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
                         {label || shortAddr(addr)}
+                        <Badge className={walletSourceBadgeClass(source)} title={walletSourceContractLabel(sourceContract) || walletSourceLabel(source)}>
+                            {walletSourceLabel(source)}
+                        </Badge>
                     </span>
                 ))}
             </div>
@@ -2531,6 +2574,9 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                                                 color={pos.wallet_color}
                                                 label={pos.wallet_label || pos.wallet_address}
                                                 avatarUrl={pos.wallet_avatar_url}
+                                                source={pos.wallet_source}
+                                                sourceContract={pos.wallet_source_contract}
+                                                showSource
                                                 onClick={() => onSelectWallet(pos.wallet_address)}
                                             />
                                         </div>
@@ -2723,13 +2769,21 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                         color={w.color}
                                         label={w.label || w.address}
                                         avatarUrl={w.avatar_url}
+                                        source={w.source}
+                                        sourceContract={w.source_contract}
                                         size={44}
                                         showCopy
+                                        showSource
                                     />
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                         <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                                            {w.source === 'manual' ? '手动' : '合约'}
+                                            {walletSourceLabel(w.source)}
                                         </Badge>
+                                        {walletSourceContractLabel(w.source_contract) ? (
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
+                                                {walletSourceContractLabel(w.source_contract)}
+                                            </Badge>
+                                        ) : null}
                                         <Badge className={w.is_active
                                             ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
                                             : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
@@ -2924,8 +2978,13 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 <CompactIdentifier value={walletAddress} label="钱包" />
                                 <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                                    {walletInfo.source === 'manual' ? '手动' : '合约'}
+                                    {walletSourceLabel(walletInfo.source)}
                                 </Badge>
+                                {walletSourceContractLabel(walletInfo.source_contract) ? (
+                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
+                                        {walletSourceContractLabel(walletInfo.source_contract)}
+                                    </Badge>
+                                ) : null}
                                 <Badge className={walletInfo.is_active
                                     ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
                                     : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
@@ -4269,9 +4328,14 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
                                 <div className="text-sm text-zinc-200">{w.label || shortAddr(w.address)}</div>
                                 <div className="text-[10px] text-zinc-500 font-mono">{shortAddr(w.address)}</div>
                                 <div className="flex gap-1 mt-1 text-[10px]">
-                                    <span className={`px-1.5 py-0.5 rounded ${w.source === 'manual' ? brand.selectionClass : 'bg-zinc-700 text-zinc-400'}`}>
-                                        {w.source === 'manual' ? '手动' : '合约'}
+                                    <span className={`px-1.5 py-0.5 rounded border ${walletSourceBadgeClass(w.source)}`}>
+                                        {walletSourceLabel(w.source)}
                                     </span>
+                                    {walletSourceContractLabel(w.source_contract) ? (
+                                        <span className="px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400">
+                                            {walletSourceContractLabel(w.source_contract)}
+                                        </span>
+                                    ) : null}
                                     <span className={`px-1.5 py-0.5 rounded ${w.is_active ? 'bg-green-600/20 text-green-400' : 'bg-zinc-700 text-zinc-500'}`}>
                                         {w.is_active ? '监控中' : '已暂停'}
                                     </span>

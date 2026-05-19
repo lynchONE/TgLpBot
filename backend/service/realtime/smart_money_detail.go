@@ -19,10 +19,14 @@ import (
 
 type SmartMoneyPositionDetail struct {
 	RealtimePosition
-	PositionRef     string    `json:"position_ref"`
-	PollIntervalSec int       `json:"poll_interval_sec"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Warnings        []string  `json:"warnings,omitempty"`
+	PositionRef          string    `json:"position_ref"`
+	WalletLabel          *string   `json:"wallet_label,omitempty"`
+	WalletAvatarURL      *string   `json:"wallet_avatar_url,omitempty"`
+	WalletSource         string    `json:"wallet_source,omitempty"`
+	WalletSourceContract string    `json:"wallet_source_contract,omitempty"`
+	PollIntervalSec      int       `json:"poll_interval_sec"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	Warnings             []string  `json:"warnings,omitempty"`
 }
 
 func (s *RealtimePositionsService) GetSmartMoneyPositionDetail(active *models.SmartMoneyActivePosition) (*SmartMoneyPositionDetail, error) {

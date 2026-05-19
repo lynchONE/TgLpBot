@@ -459,6 +459,22 @@ function heatmapSampleText(row) {
     return '样本不足';
 }
 
+function walletSourceLabel(source) {
+    const value = String(source || '').trim();
+    if (value === 'manual') return '手动添加';
+    if (value === 'contract_interaction') return '合约发现';
+    return value || '未标记来源';
+}
+
+function walletSourceBadgeClass(source) {
+    return String(source || '').trim() === 'manual' ? 'source-manual' : 'source-contract';
+}
+
+function walletSourceContractLabel(value) {
+    const address = normalizeWalletAddress(value);
+    return address ? `来源合约 ${shortAddr(address)}` : '';
+}
+
 function CopyBtn({ text }) {
     const [copied, setCopied] = useState(false);
     return (
@@ -524,11 +540,20 @@ function CompactIdentifier({ value, label = 'ID' }) {
     );
 }
 
-function WalletIdentity({ address, color, label, avatarUrl, size = 16, onClick, showCopy = false }) {
+function WalletIdentity({ address, color, label, avatarUrl, source, sourceContract, size = 16, onClick, showCopy = false, showSource = false }) {
+    const sourceText = walletSourceLabel(source);
+    const sourceContractText = walletSourceContractLabel(sourceContract);
     const content = (
         <>
             <WalletAvatar address={address} color={color} avatarUrl={avatarUrl} size={size} />
-            <span className="smd-wallet-info-name">{label && label !== address ? label : tailAddr(address)}</span>
+            <span className="smd-wallet-info-main">
+                <span className="smd-wallet-info-name">{label && label !== address ? label : tailAddr(address)}</span>
+                {showSource ? (
+                    <span className={`smd-badge ${walletSourceBadgeClass(source)}`} title={sourceContractText || sourceText}>
+                        {sourceText}
+                    </span>
+                ) : null}
+            </span>
             {showCopy ? <CopyTinyBtn text={address} /> : null}
         </>
     );
@@ -652,12 +677,22 @@ function PriceRangeChart({ positions, currentPrice }) {
             </div>
             <div className="smd-legend">
                 {Object.entries(valid.reduce((a, p) => {
-                    if (!a[p.wallet_address]) a[p.wallet_address] = { color: p.wallet_color, label: p.wallet_label };
+                    if (!a[p.wallet_address]) {
+                        a[p.wallet_address] = {
+                            color: p.wallet_color,
+                            label: p.wallet_label,
+                            source: p.wallet_source,
+                            sourceContract: p.wallet_source_contract,
+                        };
+                    }
                     return a;
-                }, {})).map(([addr, { color, label }]) => (
+                }, {})).map(([addr, { color, label, source, sourceContract }]) => (
                     <span key={addr}>
                         <span className="smd-legend-dot" style={{ backgroundColor: color }} />
                         {label || shortAddr(addr)}
+                        <span className={`smd-badge ${walletSourceBadgeClass(source)}`} title={walletSourceContractLabel(sourceContract) || walletSourceLabel(source)}>
+                            {walletSourceLabel(source)}
+                        </span>
                     </span>
                 ))}
             </div>
@@ -860,6 +895,9 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                         {statusLabel}
                                     </span>
                                     <span className="pos-wallet-chip">钱包 {shortAddress(detail?.wallet_address || '')}</span>
+                                    <span className={`smd-badge ${walletSourceBadgeClass(detail?.wallet_source)}`} title={walletSourceContractLabel(detail?.wallet_source_contract) || walletSourceLabel(detail?.wallet_source)}>
+                                        {walletSourceLabel(detail?.wallet_source)}
+                                    </span>
                                     <span className={`range-pill ${detailRangeStatus?.tone === 'positive' ? 'in' : 'out'}`}>
                                         {detailRangeStatus?.text || '已离开区间'}
                                     </span>
@@ -1684,7 +1722,10 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                             color={pos.wallet_color}
                                             label={pos.wallet_label || pos.wallet_address}
                                             avatarUrl={pos.wallet_avatar_url}
+                                            source={pos.wallet_source}
+                                            sourceContract={pos.wallet_source_contract}
                                             size={28}
+                                            showSource
                                             onClick={() => onSelectWallet(pos.wallet_address)}
                                         />
                                         <div className="smd-pos-card-top-right">
@@ -1865,7 +1906,17 @@ function WalletList({
                                 return (
                                 <tr key={w.address} className="clickable" onClick={() => onSelect(w.address)}>
                                     <td>
-                                        <WalletIdentity address={w.address} color={w.color} label={w.label || w.address} avatarUrl={w.avatar_url} size={20} showCopy />
+                                        <WalletIdentity
+                                            address={w.address}
+                                            color={w.color}
+                                            label={w.label || w.address}
+                                            avatarUrl={w.avatar_url}
+                                            source={w.source}
+                                            sourceContract={w.source_contract}
+                                            size={20}
+                                            showCopy
+                                            showSource
+                                        />
                                     </td>
                                     <td className="center">
                                         <span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>
@@ -2054,6 +2105,14 @@ function WalletDetail({
                         <div className="smd-detail-copy">
                             <h3 className="smd-detail-title">{info.label || `钱包 ${tailAddr(addr)}`}</h3>
                             <CompactIdentifier value={addr} label="钱包" />
+                            <div className="smd-pool-card-badges" style={{ marginTop: 8 }}>
+                                <Badge cls={walletSourceBadgeClass(info.source)} title={walletSourceContractLabel(info.source_contract) || walletSourceLabel(info.source)}>
+                                    {walletSourceLabel(info.source)}
+                                </Badge>
+                                {walletSourceContractLabel(info.source_contract) ? (
+                                    <Badge>{walletSourceContractLabel(info.source_contract)}</Badge>
+                                ) : null}
+                            </div>
                             <div style={{ marginTop: 10 }}>
                                 <button
                                     type="button"

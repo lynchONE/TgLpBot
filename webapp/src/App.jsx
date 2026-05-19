@@ -610,6 +610,18 @@ function markerWalletDisplayName(marker) {
   return address ? address.slice(-4) : '--';
 }
 
+function markerWalletSourceLabel(source) {
+  const value = String(source || '').trim();
+  if (value === 'manual') return '手动添加';
+  if (value === 'contract_interaction') return '合约发现';
+  return value || '未标记来源';
+}
+
+function markerWalletSourceContractLabel(value) {
+  const address = normalizeWalletAddress(value);
+  return address ? `来源合约 ${shortAddress(address, 6, 4)}` : '';
+}
+
 function parseLoginUser(raw) {
   if (!raw) return null;
   try {
@@ -1075,6 +1087,8 @@ export default function App() {
         byWallet.set(address, {
           address,
           label: nextLabel,
+          source: String(marker?.wallet_source || '').trim(),
+          sourceContract: String(marker?.wallet_source_contract || '').trim(),
           latestTs,
           markerCount: 1,
           maxEstimatedUsd: Number.isFinite(estimatedUsd) && estimatedUsd > 0 ? estimatedUsd : 0,
@@ -1089,6 +1103,8 @@ export default function App() {
       if (latestTs >= current.latestTs) {
         current.latestTs = latestTs;
         current.label = nextLabel;
+        current.source = String(marker?.wallet_source || '').trim();
+        current.sourceContract = String(marker?.wallet_source_contract || '').trim();
       }
     });
     return Array.from(byWallet.values()).sort((a, b) => {
@@ -2810,7 +2826,8 @@ export default function App() {
                                 <span className="kline-filter-wallet-main">
                                   <span className="kline-filter-wallet-name">{wallet.label}</span>
                                   <span className="kline-filter-wallet-meta">
-                                    {shortAddress(wallet.address, 6, 4)} · {wallet.markerCount} 个气泡 · 最高 {formatUsdCompact(wallet.maxEstimatedUsd)}
+                                    {shortAddress(wallet.address, 6, 4)} · {markerWalletSourceLabel(wallet.source)} · {wallet.markerCount} 个气泡 · 最高 {formatUsdCompact(wallet.maxEstimatedUsd)}
+                                    {markerWalletSourceContractLabel(wallet.sourceContract) ? ` · ${markerWalletSourceContractLabel(wallet.sourceContract)}` : ''}
                                   </span>
                                 </span>
                               </label>

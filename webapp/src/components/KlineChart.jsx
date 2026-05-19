@@ -41,6 +41,18 @@ function walletTailLabel(value) {
   return address ? address.slice(-4) : '';
 }
 
+function markerWalletSourceLabel(source) {
+  const value = String(source || '').trim();
+  if (value === 'manual') return '手动添加';
+  if (value === 'contract_interaction') return '合约发现';
+  return value || '未标记来源';
+}
+
+function markerWalletSourceContractLabel(value) {
+  const address = normalizeWalletAddress(value);
+  return address ? `来源合约 ${shortAddress(address, 6, 4)}` : '';
+}
+
 function isClusterHighlighted(cluster, walletAddress) {
   const target = normalizeWalletAddress(walletAddress);
   if (!target) return false;
@@ -948,6 +960,8 @@ export default function KlineChart({
     const walletAddress = normalizeWalletAddress(primary.wallet_address || '');
     const walletLabelRaw = c.isMyTrade ? '' : String(primary.wallet_label || '').trim();
     const walletName = c.isMyTrade ? '我的交易' : (walletLabelRaw || walletTailLabel(walletAddress));
+    const walletSource = c.isMyTrade ? '' : String(primary.wallet_source || '').trim();
+    const walletSourceContract = c.isMyTrade ? '' : String(primary.wallet_source_contract || '').trim();
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
@@ -966,6 +980,8 @@ export default function KlineChart({
       walletAddress,
       walletName,
       walletLabelRaw,
+      walletSourceLabel: markerWalletSourceLabel(walletSource),
+      walletSourceContractLabel: markerWalletSourceContractLabel(walletSourceContract),
       walletAvatarUrl: c.isMyTrade ? String(tooltipCluster.label || '').trim() : markerWalletAvatarUrl(primary),
       lower,
       upper,
@@ -1225,6 +1241,12 @@ export default function KlineChart({
                   <div className="kmt-hint">留空后保存可清除标签</div>
                 )}
               </form>
+            ) : null}
+            {!tooltipData.isMyTrade ? (
+              <div className="kmt-meta-row">
+                钱包来源: {tooltipData.walletSourceLabel}
+                {tooltipData.walletSourceContractLabel ? ` / ${tooltipData.walletSourceContractLabel}` : ''}
+              </div>
             ) : null}
             <div className="kmt-row">
               <span className={`kmt-action ${tooltipCluster.action}`}>

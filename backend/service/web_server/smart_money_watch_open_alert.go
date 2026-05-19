@@ -12,10 +12,12 @@ import (
 )
 
 type smartMoneyWatchWalletItem struct {
-	WalletAddress string  `json:"wallet_address"`
-	WalletLabel   *string `json:"wallet_label,omitempty"`
-	WalletAvatar  *string `json:"wallet_avatar_url,omitempty"`
-	WalletColor   string  `json:"wallet_color"`
+	WalletAddress        string  `json:"wallet_address"`
+	WalletLabel          *string `json:"wallet_label,omitempty"`
+	WalletAvatar         *string `json:"wallet_avatar_url,omitempty"`
+	WalletSource         string  `json:"wallet_source,omitempty"`
+	WalletSourceContract string  `json:"wallet_source_contract,omitempty"`
+	WalletColor          string  `json:"wallet_color"`
 }
 
 type smartMoneyWatchWalletsEnvelope struct {
@@ -155,6 +157,8 @@ func (s *Server) writeSmartMoneyWatchWalletsEnvelope(w http.ResponseWriter, r *h
 		if walletErr == nil && wallet != nil {
 			item.WalletLabel = wallet.Label
 			item.WalletAvatar = wallet.AvatarURL
+			item.WalletSource = smartMoneyWalletSourceValue(wallet)
+			item.WalletSourceContract = smartMoneyWalletSourceContractValue(wallet)
 		}
 		items = append(items, item)
 	}

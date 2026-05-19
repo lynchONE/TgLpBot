@@ -130,6 +130,7 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesTransferAdjustedBalanceDelta(t *
 func TestApplySmartMoneyLeaderboardWalletMeta_UsesCurrentWalletMetadata(t *testing.T) {
 	label := "Updated Alpha"
 	avatarURL := "http://minio.example/avatar/smart-money/current.jpg"
+	sourceContract := "0x00000000000000000000000000000000000000cc"
 	resp := &SmartMoneyLeaderboardResponse{
 		List: []SmartMoneyLeaderboardEntry{
 			{
@@ -137,16 +138,19 @@ func TestApplySmartMoneyLeaderboardWalletMeta_UsesCurrentWalletMetadata(t *testi
 				ChainID:   56,
 				Label:     "Old Alpha",
 				AvatarURL: "http://minio.example/avatar/smart-money/old.jpg",
+				Source:    "manual",
 			},
 		},
 	}
 
 	applySmartMoneyLeaderboardWalletMeta(resp, []models.MonitoredWallet{
 		{
-			Address:   "0x00000000000000000000000000000000000000a1",
-			ChainID:   56,
-			Label:     &label,
-			AvatarURL: &avatarURL,
+			Address:        "0x00000000000000000000000000000000000000a1",
+			ChainID:        56,
+			Source:         "contract_interaction",
+			SourceContract: &sourceContract,
+			Label:          &label,
+			AvatarURL:      &avatarURL,
 		},
 	})
 
@@ -156,35 +160,59 @@ func TestApplySmartMoneyLeaderboardWalletMeta_UsesCurrentWalletMetadata(t *testi
 	if got, want := resp.List[0].AvatarURL, avatarURL; got != want {
 		t.Fatalf("avatar url = %s, want %s", got, want)
 	}
+	if got, want := resp.List[0].Source, "contract_interaction"; got != want {
+		t.Fatalf("source = %s, want %s", got, want)
+	}
+	if got, want := resp.List[0].SourceContract, sourceContract; got != want {
+		t.Fatalf("source contract = %s, want %s", got, want)
+	}
 }
 
-func TestSmartMoneyWalletSummaryFromLive_IncludesAvatarURL(t *testing.T) {
+func TestSmartMoneyWalletSummaryFromLive_IncludesWalletMetadata(t *testing.T) {
 	avatarURL := "http://minio.example/avatar/smart-money/live.jpg"
+	sourceContract := "0x00000000000000000000000000000000000000dd"
 	label := "Alpha"
 
 	got := smartMoneyWalletSummaryFromLive(models.MonitoredWallet{
-		Address:   "0x00000000000000000000000000000000000000a1",
-		ChainID:   56,
-		Label:     &label,
-		AvatarURL: &avatarURL,
+		Address:        "0x00000000000000000000000000000000000000a1",
+		ChainID:        56,
+		Source:         "contract_interaction",
+		SourceContract: &sourceContract,
+		Label:          &label,
+		AvatarURL:      &avatarURL,
 	}, smartMoneyWalletLiveState{})
 
 	if got.AvatarURL != avatarURL {
 		t.Fatalf("avatar url = %s, want %s", got.AvatarURL, avatarURL)
 	}
+	if got.Source != "contract_interaction" {
+		t.Fatalf("source = %s, want %s", got.Source, "contract_interaction")
+	}
+	if got.SourceContract != sourceContract {
+		t.Fatalf("source contract = %s, want %s", got.SourceContract, sourceContract)
+	}
 }
 
-func TestSmartMoneyWalletSummaryFromSnapshot_IncludesAvatarURL(t *testing.T) {
+func TestSmartMoneyWalletSummaryFromSnapshot_IncludesWalletMetadata(t *testing.T) {
 	avatarURL := "http://minio.example/avatar/smart-money/snapshot.jpg"
+	sourceContract := "0x00000000000000000000000000000000000000ee"
 
 	got := smartMoneyWalletSummaryFromSnapshot(models.MonitoredWallet{
-		Address:   "0x00000000000000000000000000000000000000a1",
-		ChainID:   56,
-		AvatarURL: &avatarURL,
+		Address:        "0x00000000000000000000000000000000000000a1",
+		ChainID:        56,
+		Source:         "contract_interaction",
+		SourceContract: &sourceContract,
+		AvatarURL:      &avatarURL,
 	}, nil, nil)
 
 	if got.AvatarURL != avatarURL {
 		t.Fatalf("avatar url = %s, want %s", got.AvatarURL, avatarURL)
+	}
+	if got.Source != "contract_interaction" {
+		t.Fatalf("source = %s, want %s", got.Source, "contract_interaction")
+	}
+	if got.SourceContract != sourceContract {
+		t.Fatalf("source contract = %s, want %s", got.SourceContract, sourceContract)
 	}
 }
 
@@ -419,5 +447,14 @@ func TestNormalizeSmartMoneyOverviewSections_ParsesRequestedSections(t *testing.
 	}
 	if got[smartMoneyOverviewSectionWindows] {
 		t.Fatal("windows section enabled, want disabled")
+	}
+}
+
+func TestClampSmartMoneyWalletHistoryDays_AllowsCalendarMonths(t *testing.T) {
+	if got, want := clampSmartMoneyWalletHistoryDays(120), 120; got != want {
+		t.Fatalf("history days = %d, want %d", got, want)
+	}
+	if got, want := clampSmartMoneyWalletHistoryDays(999), smartMoneyWalletMaxHistoryDays; got != want {
+		t.Fatalf("history days cap = %d, want %d", got, want)
 	}
 }

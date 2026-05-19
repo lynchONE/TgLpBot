@@ -41,14 +41,20 @@ func initSmartMoney() {
 	smFollowSvc = smfollow.NewService()
 
 	smService.SetNotifier(func(event *models.SmartMoneyLPEvent) {
-		// Lookup wallet label
 		repo := smService.Repo()
-		w, _ := repo.GetMonitoredWalletByAddress(context.Background(), event.WalletAddress, event.ChainID)
+		w, err := repo.GetMonitoredWalletByAddress(context.Background(), event.WalletAddress, event.ChainID)
+		if err != nil {
+			log.Printf("[SmartMoney WS] load wallet metadata failed wallet=%s chain=%d err=%v", event.WalletAddress, event.ChainID, err)
+		}
 		var label *string
+		source := ""
+		sourceContract := ""
 		if w != nil {
 			label = w.Label
+			source = smartMoneyWalletSourceValue(w)
+			sourceContract = smartMoneyWalletSourceContractValue(w)
 		}
-		smWSHub.BroadcastLPEvent(event, label)
+		smWSHub.BroadcastLPEvent(event, label, source, sourceContract)
 		if smWatchOpenSvc != nil {
 			go smWatchOpenSvc.HandleEvent(context.Background(), event, label)
 		}
@@ -1123,19 +1129,21 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 	// Enrich with wallet color, label, price_lower, price_upper
 	type posResp struct {
 		models.SmartMoneyLPPosition
-		PositionRef         string  `json:"position_ref"`
-		WalletLabel         *string `json:"wallet_label"`
-		WalletAvatarURL     *string `json:"wallet_avatar_url"`
-		WalletColor         string  `json:"wallet_color"`
-		PriceLower          string  `json:"price_lower"`
-		PriceUpper          string  `json:"price_upper"`
-		RangePercent        float64 `json:"range_percent"`
-		PositionAmountUSD   float64 `json:"position_amount_usd"`
-		BscscanURL          string  `json:"bscscan_url"`
-		TradingPair         string  `json:"trading_pair"`
-		DisplayTokenAddress string  `json:"display_token_address,omitempty"`
-		DisplayTokenSymbol  string  `json:"display_token_symbol,omitempty"`
-		DisplayTokenLogoURL string  `json:"display_token_logo_url,omitempty"`
+		PositionRef          string  `json:"position_ref"`
+		WalletLabel          *string `json:"wallet_label"`
+		WalletAvatarURL      *string `json:"wallet_avatar_url"`
+		WalletSource         string  `json:"wallet_source,omitempty"`
+		WalletSourceContract string  `json:"wallet_source_contract,omitempty"`
+		WalletColor          string  `json:"wallet_color"`
+		PriceLower           string  `json:"price_lower"`
+		PriceUpper           string  `json:"price_upper"`
+		RangePercent         float64 `json:"range_percent"`
+		PositionAmountUSD    float64 `json:"position_amount_usd"`
+		BscscanURL           string  `json:"bscscan_url"`
+		TradingPair          string  `json:"trading_pair"`
+		DisplayTokenAddress  string  `json:"display_token_address,omitempty"`
+		DisplayTokenSymbol   string  `json:"display_token_symbol,omitempty"`
+		DisplayTokenLogoURL  string  `json:"display_token_logo_url,omitempty"`
 	}
 
 	list := make([]posResp, 0, len(positions))
@@ -1162,17 +1170,26 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		)
 
 		// Wallet label
-		if w, ok := walletCache[p.WalletAddress]; ok {
-			if w != nil {
-				resp.WalletLabel = w.Label
-				resp.WalletAvatarURL = w.AvatarURL
+		walletCacheKey := strconv.Itoa(p.ChainID) + "|" + strings.ToLower(strings.TrimSpace(p.WalletAddress))
+		if cachedWallet, ok := walletCache[walletCacheKey]; ok {
+			if cachedWallet != nil {
+				resp.WalletLabel = cachedWallet.Label
+				resp.WalletAvatarURL = cachedWallet.AvatarURL
+				resp.WalletSource = smartMoneyWalletSourceValue(cachedWallet)
+				resp.WalletSourceContract = smartMoneyWalletSourceContractValue(cachedWallet)
 			}
 		} else {
-			w, _ := repo.GetMonitoredWalletByAddress(ctx, p.WalletAddress, p.ChainID)
-			walletCache[p.WalletAddress] = w
-			if w != nil {
-				resp.WalletLabel = w.Label
-				resp.WalletAvatarURL = w.AvatarURL
+			walletRow, err := repo.GetMonitoredWalletByAddress(ctx, p.WalletAddress, p.ChainID)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			walletCache[walletCacheKey] = walletRow
+			if walletRow != nil {
+				resp.WalletLabel = walletRow.Label
+				resp.WalletAvatarURL = walletRow.AvatarURL
+				resp.WalletSource = smartMoneyWalletSourceValue(walletRow)
+				resp.WalletSourceContract = smartMoneyWalletSourceContractValue(walletRow)
 			}
 		}
 
@@ -1277,6 +1294,17 @@ func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	walletRow, walletErr := repo.GetMonitoredWalletByAddress(ctx, active.WalletAddress, active.ChainID)
+	if walletErr != nil {
+		jsonError(w, walletErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if walletRow != nil {
+		detail.WalletLabel = walletRow.Label
+		detail.WalletAvatarURL = walletRow.AvatarURL
+		detail.WalletSource = smartMoneyWalletSourceValue(walletRow)
+		detail.WalletSourceContract = smartMoneyWalletSourceContractValue(walletRow)
+	}
 	jsonOK(w, detail)
 	logSmartMoneySlowStage("position_detail", reqStarted, "lookup", lookupElapsed, "rpc_detail", time.Since(rpcStarted), "protocol", active.Protocol, "nft", active.NftTokenID)
 }
@@ -1308,11 +1336,42 @@ func (s *Server) handleSMEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type eventResp struct {
+		models.SmartMoneyLPEvent
+		WalletLabel          *string `json:"wallet_label,omitempty"`
+		WalletAvatarURL      *string `json:"wallet_avatar_url,omitempty"`
+		WalletSource         string  `json:"wallet_source,omitempty"`
+		WalletSourceContract string  `json:"wallet_source_contract,omitempty"`
+	}
+	list := make([]eventResp, 0, len(events))
+	walletCache := make(map[string]*models.MonitoredWallet)
+	for _, event := range events {
+		resp := eventResp{SmartMoneyLPEvent: event}
+		walletCacheKey := strconv.Itoa(event.ChainID) + "|" + strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		walletRow, ok := walletCache[walletCacheKey]
+		if !ok {
+			var walletErr error
+			walletRow, walletErr = repo.GetMonitoredWalletByAddress(ctx, event.WalletAddress, event.ChainID)
+			if walletErr != nil {
+				jsonError(w, walletErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			walletCache[walletCacheKey] = walletRow
+		}
+		if walletRow != nil {
+			resp.WalletLabel = walletRow.Label
+			resp.WalletAvatarURL = walletRow.AvatarURL
+			resp.WalletSource = smartMoneyWalletSourceValue(walletRow)
+			resp.WalletSourceContract = smartMoneyWalletSourceContractValue(walletRow)
+		}
+		list = append(list, resp)
+	}
+
 	jsonOK(w, map[string]interface{}{
 		"total": total,
 		"page":  page,
 		"size":  size,
-		"list":  events,
+		"list":  list,
 	})
 }
 
@@ -1397,6 +1456,20 @@ func extractPathParam(path, prefix string) string {
 		return strings.TrimPrefix(path, prefix)
 	}
 	return ""
+}
+
+func smartMoneyWalletSourceValue(wallet *models.MonitoredWallet) string {
+	if wallet == nil {
+		return ""
+	}
+	return strings.TrimSpace(wallet.Source)
+}
+
+func smartMoneyWalletSourceContractValue(wallet *models.MonitoredWallet) string {
+	if wallet == nil || wallet.SourceContract == nil {
+		return ""
+	}
+	return strings.TrimSpace(*wallet.SourceContract)
 }
 
 func repairSmartMoneyPositions(ctx context.Context, repo *sm.Repository) {

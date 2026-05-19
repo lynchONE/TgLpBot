@@ -43,6 +43,17 @@ function formatPct(v, d=2) { const n=Number(v||0); return Number.isFinite(n)?`${
 function formatChain(cid) { return Number(cid) === 8453 ? 'Base' : 'BSC'; }
 function walletKey(w) { return `${Number(w?.chain_id||0)}:${String(w?.address||'').toLowerCase()}`; }
 function walletLabel(w) { const l=String(w?.label||'').trim(); if(l) return l; const a=String(w?.address||'').trim(); return a?`${a.slice(0,6)}...${a.slice(-4)}`:'--'; }
+function walletSourceLabel(w) {
+    const s=String(w?.source??w?.wallet_source??'').trim();
+    if(s==='manual') return '手动添加';
+    if(s==='contract_interaction') return '合约发现';
+    return s||'未标记来源';
+}
+function walletSourceContractLabel(w) {
+    const a=String(w?.source_contract??w?.wallet_source_contract??'').trim();
+    if(!/^0x[0-9a-fA-F]{40}$/.test(a)) return '';
+    return `来源合约 ${a.slice(0,6)}...${a.slice(-4)}`;
+}
 function errorText(e) { return String(e?.message||e||'').trim(); }
 function isIgnorableSmartMoneyDataError(err) { const m=errorText(err).toLowerCase(); return m.includes("unknown column 'open_lp_usd'")||m.includes("unknown column `open_lp_usd`"); }
 function chinaDateParts(v=new Date()) {
@@ -51,6 +62,14 @@ function chinaDateParts(v=new Date()) {
     const m={}; parts.forEach(p=>{if(p.type!=='literal')m[p.type]=p.value;}); return m.year&&m.month&&m.day?m:null;
 }
 function formatChinaDay(v=new Date()) { const p=chinaDateParts(v); return p?`${p.year}-${p.month}-${p.day}`:''; }
+function monthStart(v=new Date()) { const d=v instanceof Date?v:new Date(v); return Number.isNaN(d.getTime())?new Date():new Date(d.getFullYear(),d.getMonth(),1); }
+function calendarHistoryDaysForMonth(v=new Date()) {
+    const start=monthStart(v);
+    const now=new Date();
+    const todayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    const diffDays=Math.ceil((todayStart.getTime()-start.getTime())/86400000)+32;
+    return Math.max(30,Math.min(365,diffDays));
+}
 
 /* ─── Pill ─── */
 function Pill({ active, brand, onClick, children }) {
@@ -124,9 +143,13 @@ function RankBadge({ rank }) {
 
 /* ─── PnL Calendar ─── */
 const PNL_CAL_WEEKDAYS = ['一','二','三','四','五','六','日'];
-function PnLCalendar({ data, loading=false }) {
-    const [viewDate,setViewDate]=useState(()=>new Date());
-    const year=viewDate.getFullYear(), month=viewDate.getMonth();
+function PnLCalendar({ data, loading=false, viewDate, onMonthChange }) {
+    const currentViewDate=viewDate instanceof Date?viewDate:new Date();
+    const changeMonth=useCallback((delta)=>{
+        const next=new Date(currentViewDate.getFullYear(),currentViewDate.getMonth()+delta,1);
+        if(typeof onMonthChange==='function') onMonthChange(next);
+    },[currentViewDate,onMonthChange]);
+    const year=currentViewDate.getFullYear(), month=currentViewDate.getMonth();
     const daysInMonth=new Date(year,month+1,0).getDate();
     const firstDayJS=new Date(year,month,1).getDay();
     const startOffset=firstDayJS===0?6:firstDayJS-1;
@@ -158,8 +181,8 @@ function PnLCalendar({ data, loading=false }) {
             <div className="flex items-center justify-between mb-2">
                 <span className="text-[13px] font-bold text-zinc-900 dark:text-white/90">{monthLabel}</span>
                 <div className="flex items-center gap-0.5">
-                    <button onClick={()=>setViewDate(new Date(year,month-1,1))} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronLeft size={14} /></button>
-                    <button onClick={()=>setViewDate(new Date(year,month+1,1))} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronRight size={14} /></button>
+                    <button type="button" onClick={()=>changeMonth(-1)} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronLeft size={14} /></button>
+                    <button type="button" onClick={()=>changeMonth(1)} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronRight size={14} /></button>
                 </div>
             </div>
             <div className="grid grid-cols-7 gap-1">
@@ -193,6 +216,7 @@ export default function SmartMoneyAssetsPage({
     const [smLeaderSearch, setSmLeaderSearch] = useState('');
     const [smLeaderPage, setSmLeaderPage] = useState(0);
     const [smDrillWalletId, setSmDrillWalletId] = useState('');
+    const [smDetailCalendarMonth, setSmDetailCalendarMonth] = useState(()=>monthStart(new Date()));
 
     const hasSmartMoneyData = Boolean(smartMoneyOverview || smartMoneyLeaderboard || smartMoneyWallet);
     const hasSmartMoneyDataRef = useRef(false);
@@ -200,11 +224,11 @@ export default function SmartMoneyAssetsPage({
 
     const selectSmartMoneyWallet = useCallback((wallet, { openDetail = false } = {}) => {
         if (!wallet) return;
-        const next = { address: wallet.address, chain_id: wallet.chain_id, label: wallet.label, assets: wallet.assets, active_pool_count: wallet.active_pool_count, today_event_count: wallet.today_event_count, last_active_at: wallet.last_active_at };
+        const next = { address: wallet.address, chain_id: wallet.chain_id, label: wallet.label, avatar_url: wallet.avatar_url, source: wallet.source, source_contract: wallet.source_contract, assets: wallet.assets, active_pool_count: wallet.active_pool_count, today_event_count: wallet.today_event_count, last_active_at: wallet.last_active_at };
         const id = walletKey(next);
         setSelectedWalletId(id);
         setSelectedWalletMeta(next);
-        if (openDetail) { setSmSubTab('wallets'); setSmDrillWalletId(id); }
+        if (openDetail) { setSmSubTab('wallets'); setSmDrillWalletId(id); setSmDetailCalendarMonth(monthStart(new Date())); }
     }, []);
 
     const applySmartMoneyWalletRows = useCallback((wallets) => {
@@ -284,12 +308,13 @@ export default function SmartMoneyAssetsPage({
 
     const loadSmartMoneyWallet = useCallback(async ({ wallet, forceRefresh = false } = {}) => {
         if (!wallet || !hasInitData || !isAdmin) return;
+        const detailDays = Math.max(smartMoneyDays, calendarHistoryDaysForMonth(smDetailCalendarMonth));
         try {
-            const detail = await fetchAdminSmartMoneyWallet({ apiBaseUrl, initData, address: wallet.address, chainId: wallet.chain_id, days: smartMoneyDays, forceRefresh });
+            const detail = await fetchAdminSmartMoneyWallet({ apiBaseUrl, initData, address: wallet.address, chainId: wallet.chain_id, days: detailDays, forceRefresh });
             startTransition(() => { setSmartMoneyWallet(detail || null); });
             setSmartMoneyError('');
         } catch (err) { if (!isIgnorableSmartMoneyDataError(err)) setSmartMoneyError(errorText(err)); }
-    }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
+    }, [apiBaseUrl, hasInitData, initData, isAdmin, smDetailCalendarMonth, smartMoneyDays]);
 
     useEffect(() => {
         if (smSubTab !== 'wallets' || !smDrillWalletId || !selectedWallet || !hasInitData || !isAdmin) return undefined;
@@ -378,7 +403,10 @@ export default function SmartMoneyAssetsPage({
                                             <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
                                             <div className="min-w-0">
                                                 <div className="truncate text-[12px] font-semibold">{walletLabel(wallet)}</div>
-                                                <div className="mt-0.5 text-[10px] opacity-60">{formatChain(wallet.chain_id)} · {Number(wallet.today_event_count||0)} 事件 · {Number(wallet.active_pool_count||0)} 池</div>
+                                                <div className="mt-0.5 text-[10px] opacity-60">
+                                                    {formatChain(wallet.chain_id)} · {walletSourceLabel(wallet)} · {Number(wallet.today_event_count||0)} 事件 · {Number(wallet.active_pool_count||0)} 池
+                                                    {walletSourceContractLabel(wallet) ? ` · ${walletSourceContractLabel(wallet)}` : ''}
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-1.5 shrink-0">
@@ -418,7 +446,10 @@ export default function SmartMoneyAssetsPage({
                                 <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
                                 <div className="flex-1 min-w-0">
                                     <div className="text-[12px] font-bold text-zinc-900 dark:text-white/95 truncate">{walletLabel(selectedWallet)}</div>
-                                    <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{formatChain(selectedWallet.chain_id)} · 总资产 <span className="font-bold text-zinc-900 dark:text-white/90">{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</span></div>
+                                    <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                        {formatChain(selectedWallet.chain_id)} · {walletSourceLabel(smartMoneyWallet.wallet || selectedWallet)} · 总资产 <span className="font-bold text-zinc-900 dark:text-white/90">{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</span>
+                                        {walletSourceContractLabel(smartMoneyWallet.wallet || selectedWallet) ? ` · ${walletSourceContractLabel(smartMoneyWallet.wallet || selectedWallet)}` : ''}
+                                    </div>
                                 </div>
                             </div>
                             <div className="grid grid-cols-3 gap-1.5">
@@ -427,7 +458,7 @@ export default function SmartMoneyAssetsPage({
                                 <StatBlock label="撤仓次数" value={`${Number(smartMoneyWallet.today?.remove_count||0)} 次`} />
                             </div>
                             {smartMoneyRows.length > 1 && <MiniChart data={smartMoneyRows} color="#10b981" height={120} />}
-                            <PnLCalendar data={smartMoneyPnlCalData} loading={smartMoneyLoading} />
+                            <PnLCalendar data={smartMoneyPnlCalData} loading={smartMoneyLoading} viewDate={smDetailCalendarMonth} onMonthChange={setSmDetailCalendarMonth} />
                         </div>
                     ) : <Empty text={smartMoneyLoading ? '加载钱包详情中...' : '暂无数据'} />}
                 </Card>
@@ -454,7 +485,10 @@ export default function SmartMoneyAssetsPage({
                                     <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={28} />
                                     <div className="flex-1 min-w-0">
                                         <div className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">{walletLabel(item)}</div>
-                                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{formatChain(item.chain_id)} · {Number(item.participation_count||0)} 笔</div>
+                                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                            {formatChain(item.chain_id)} · {walletSourceLabel(item)} · {Number(item.participation_count||0)} 笔
+                                            {walletSourceContractLabel(item) ? ` · ${walletSourceContractLabel(item)}` : ''}
+                                        </div>
                                     </div>
                                     <div className="text-right shrink-0">
                                         {(() => {
