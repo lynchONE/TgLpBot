@@ -337,17 +337,9 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 	fromDecimals := tokenDecimals(client, fromToken)
 	toDecimals := tokenDecimals(client, toToken)
 
-	amountFloat, ok := new(big.Float).SetString(amountStr)
-	if !ok {
-		http.Error(w, "invalid amount", http.StatusBadRequest)
-		return
-	}
-	multiplier := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(fromDecimals)), nil))
-	amountFloat.Mul(amountFloat, multiplier)
-	amount := new(big.Int)
-	amountFloat.Int(amount)
-	if amount.Sign() <= 0 {
-		http.Error(w, "amount must be greater than 0", http.StatusBadRequest)
+	amount, err := parseWalletSwapDecimalAmount(amountStr, fromDecimals)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -367,6 +359,15 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	walletAddr := common.HexToAddress(wlt.Address)
+	fromBalance, err := walletSwapAssetBalance(client, fromToken, walletAddr)
+	if err != nil {
+		http.Error(w, "check balance failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if fromBalance == nil || fromBalance.Cmp(amount) < 0 {
+		http.Error(w, fmt.Sprintf("insufficient balance: have %s, need %s", formatWalletSwapRawAmount(fromBalance, int(fromDecimals)), formatWalletSwapRawAmount(amount, int(fromDecimals))), http.StatusBadRequest)
+		return
+	}
 
 	slippage := req.SlippagePercent
 	if slippage <= 0 {

@@ -8,12 +8,16 @@ import (
 	"strconv"
 	"strings"
 
+	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const nativePseudoTokenAddress = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -30,6 +34,8 @@ type walletSwapTokenRow struct {
 	Symbol         string  `json:"symbol"`
 	Name           string  `json:"name,omitempty"`
 	Balance        string  `json:"balance"`
+	BalanceRaw     string  `json:"balance_raw,omitempty"`
+	Decimals       int     `json:"decimals,omitempty"`
 	ValueUSDT      float64 `json:"value_usdt"`
 	LogoURL        string  `json:"logo_url,omitempty"`
 	CanSwap        bool    `json:"can_swap"`
@@ -124,6 +130,15 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 	if !ok || strings.TrimSpace(cc.Chain) == "" {
 		return nil, fmt.Errorf("invalid chain: %s", chain)
 	}
+	exec, err := chainexec.GetEVM(chain)
+	if err != nil {
+		return nil, fmt.Errorf("chain init failed: %w", err)
+	}
+	client := exec.Client()
+	if client == nil {
+		return nil, fmt.Errorf("rpc client unavailable")
+	}
+	walletAddr := common.HexToAddress(wlt.Address)
 
 	chainIndex := config.ChainToOKXChainIndex(chain)
 	if chainIndex == "" {
@@ -154,9 +169,6 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 		balanceFloat, _ := strconv.ParseFloat(balance, 64)
 		priceFloat, _ := strconv.ParseFloat(priceStr, 64)
 		valueUSD := balanceFloat * priceFloat
-		if valueUSD < minValueUSD {
-			continue
-		}
 
 		symbol := strings.TrimSpace(token.Symbol)
 		name := symbol
@@ -164,10 +176,25 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 		isNative := tokenAddr == ""
 		canSwap := true
 		disabledReason := ""
+		decimals := 18
+		balanceRaw := ""
+		displayBalance := balance
 
 		if isNative {
 			tokenAddr = nativePseudoTokenAddress
 			canSwap = true
+			if rawBalance, berr := walletSwapAssetBalance(client, common.HexToAddress(nativePseudoTokenAddress), walletAddr); berr == nil && rawBalance != nil {
+				if rawBalance.Sign() == 0 {
+					continue
+				}
+				balanceRaw = rawBalance.String()
+				displayBalance = formatWalletSwapRawAmount(rawBalance, decimals)
+				balanceFloat, _ = strconv.ParseFloat(displayBalance, 64)
+				valueUSD = balanceFloat * priceFloat
+			}
+			if valueUSD < minValueUSD {
+				continue
+			}
 			if symbol == "" {
 				symbol = nativeSymbol
 			}
@@ -189,6 +216,23 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 			if tokenAddr == "" {
 				continue
 			}
+			tokenAddress := common.HexToAddress(tokenAddr)
+			decimals = int(tokenDecimals(client, tokenAddress))
+			if rawBalance, berr := blockchain.GetTokenBalanceWithClient(client, tokenAddress, walletAddr); berr == nil && rawBalance != nil {
+				if rawBalance.Sign() == 0 {
+					continue
+				}
+				balanceRaw = rawBalance.String()
+				displayBalance = formatWalletSwapRawAmount(rawBalance, decimals)
+				balanceFloat, _ = strconv.ParseFloat(displayBalance, 64)
+				valueUSD = balanceFloat * priceFloat
+				if valueUSD < minValueUSD {
+					continue
+				}
+			}
+			if valueUSD < minValueUSD {
+				continue
+			}
 			tokenRequests = append(tokenRequests, exchange.MarketTokenBasicInfoRequest{
 				ChainIndex:           chainIndex,
 				TokenContractAddress: tokenAddr,
@@ -199,7 +243,9 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 			Address:        tokenAddr,
 			Symbol:         symbol,
 			Name:           name,
-			Balance:        balance,
+			Balance:        displayBalance,
+			BalanceRaw:     balanceRaw,
+			Decimals:       decimals,
 			ValueUSDT:      valueUSD,
 			CanSwap:        canSwap,
 			IsNative:       isNative,

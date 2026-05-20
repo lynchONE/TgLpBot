@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 export default function AdminDrawer({
@@ -26,7 +27,9 @@ export default function AdminDrawer({
     };
   }, [open, onClose]);
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  const node = (
     <div className={`am-drawer ${open ? 'is-open' : ''}`} aria-hidden={!open}>
       <div className="am-drawer-backdrop" onClick={onClose} />
       <aside
@@ -52,4 +55,6 @@ export default function AdminDrawer({
       </aside>
     </div>
   );
+
+  return createPortal(node, document.body);
 }

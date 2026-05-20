@@ -133,22 +133,7 @@ func limitOrderProviderLabel(provider string) string {
 }
 
 func parseDecimalAmountToBigInt(amountStr string, decimals uint8) (*big.Int, error) {
-	amountStr = strings.TrimSpace(amountStr)
-	if amountStr == "" {
-		return nil, fmt.Errorf("missing amount")
-	}
-	amountFloat, ok := new(big.Float).SetString(amountStr)
-	if !ok {
-		return nil, fmt.Errorf("invalid amount")
-	}
-	multiplier := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil))
-	amountFloat.Mul(amountFloat, multiplier)
-	amount := new(big.Int)
-	amountFloat.Int(amount)
-	if amount.Sign() <= 0 {
-		return nil, fmt.Errorf("amount must be greater than 0")
-	}
-	return amount, nil
+	return parseWalletSwapDecimalAmount(amountStr, decimals)
 }
 
 func targetToAmountFromPrice(fromAmount *big.Int, targetPrice string, toDecimals uint8, fromDecimals uint8) (*big.Int, error) {
@@ -869,6 +854,16 @@ func (w *WalletSwapLimitOrderWorker) executeOrder(ctx context.Context, order *mo
 	walletAddr := common.HexToAddress(order.WalletAddress)
 	fromToken := common.HexToAddress(order.FromTokenAddress)
 	toToken := common.HexToAddress(order.ToTokenAddress)
+	balance, err := walletSwapAssetBalance(exec.Client(), fromToken, walletAddr)
+	if err != nil {
+		w.markFailed(ctx, order.ID, fmt.Errorf("check balance failed: %w", err))
+		return err
+	}
+	if balance == nil || balance.Cmp(amount) < 0 {
+		err = fmt.Errorf("insufficient balance: have %s, need %s", balanceString(balance), amount.String())
+		w.markFailed(ctx, order.ID, err)
+		return err
+	}
 	swapResult, err := lpService.SwapSingleTokenDetailedByProvider(provider, exec, privateKey, walletAddr, fromToken, toToken, amount, order.SlippagePercent)
 	if err != nil {
 		w.markFailed(ctx, order.ID, err)

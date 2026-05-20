@@ -14930,3 +14930,295 @@ img.swap-token-glyph {
 }
 .am-drawer-meta-row-2 { grid-column: span 2; }
 
+
+/* ═══════════════════════════════════════
+   Admin Module — narrow-slot compact mode (2/3/4 column layouts)
+   ═══════════════════════════════════════ */
+
+/* layout-2: ~50% panel width — collapse ops-grid, keep stat row 4-wide */
+.workbench.layout-2 .module-admin_panel .am-ops-grid,
+.workbench.layout-work-2 .module-admin_panel .am-ops-grid {
+  grid-template-columns: 1fr;
+}
+.workbench.layout-2 .module-admin_panel .aaw-split,
+.workbench.layout-work-2 .module-admin_panel .aaw-split {
+  grid-template-columns: 1fr;
+}
+.workbench.layout-2 .module-admin_panel .am-stat-row,
+.workbench.layout-work-2 .module-admin_panel .am-stat-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* layout-3 and layout-4: compress to single column + smaller typography */
+.workbench.layout-3 .module-admin_panel,
+.workbench.layout-4 .module-admin_panel,
+.workbench.layout-work-3 .module-admin_panel,
+.workbench.layout-work-4 .module-admin_panel {
+  /* nothing on the slot itself */
+}
+
+.workbench.layout-3 .module-admin_panel .am-stat-row,
+.workbench.layout-4 .module-admin_panel .am-stat-row,
+.workbench.layout-work-3 .module-admin_panel .am-stat-row,
+.workbench.layout-work-4 .module-admin_panel .am-stat-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-stat-chip,
+.workbench.layout-4 .module-admin_panel .am-stat-chip,
+.workbench.layout-work-3 .module-admin_panel .am-stat-chip,
+.workbench.layout-work-4 .module-admin_panel .am-stat-chip {
+  padding: 8px 9px 8px 11px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-stat-chip-label,
+.workbench.layout-4 .module-admin_panel .am-stat-chip-label,
+.workbench.layout-work-3 .module-admin_panel .am-stat-chip-label,
+.workbench.layout-work-4 .module-admin_panel .am-stat-chip-label {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+}
+
+.workbench.layout-3 .module-admin_panel .am-stat-chip-value,
+.workbench.layout-4 .module-admin_panel .am-stat-chip-value,
+.workbench.layout-work-3 .module-admin_panel .am-stat-chip-value,
+.workbench.layout-work-4 .module-admin_panel .am-stat-chip-value {
+  font-size: 15px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-stat-chip-hint,
+.workbench.layout-4 .module-admin_panel .am-stat-chip-hint,
+.workbench.layout-work-3 .module-admin_panel .am-stat-chip-hint,
+.workbench.layout-work-4 .module-admin_panel .am-stat-chip-hint {
+  font-size: 9px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-ops-grid,
+.workbench.layout-4 .module-admin_panel .am-ops-grid,
+.workbench.layout-work-3 .module-admin_panel .am-ops-grid,
+.workbench.layout-work-4 .module-admin_panel .am-ops-grid {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.workbench.layout-3 .module-admin_panel .aaw-split,
+.workbench.layout-4 .module-admin_panel .aaw-split,
+.workbench.layout-work-3 .module-admin_panel .aaw-split,
+.workbench.layout-work-4 .module-admin_panel .aaw-split {
+  grid-template-columns: 1fr;
+}
+
+.workbench.layout-3 .module-admin_panel .aaw-form-grid,
+.workbench.layout-4 .module-admin_panel .aaw-form-grid,
+.workbench.layout-3 .module-admin_panel .aaw-module-grid,
+.workbench.layout-4 .module-admin_panel .aaw-module-grid,
+.workbench.layout-work-3 .module-admin_panel .aaw-form-grid,
+.workbench.layout-work-4 .module-admin_panel .aaw-form-grid,
+.workbench.layout-work-3 .module-admin_panel .aaw-module-grid,
+.workbench.layout-work-4 .module-admin_panel .aaw-module-grid {
+  grid-template-columns: 1fr;
+}
+
+.workbench.layout-3 .module-admin_panel .am-dense-row,
+.workbench.layout-4 .module-admin_panel .am-dense-row,
+.workbench.layout-work-3 .module-admin_panel .am-dense-row,
+.workbench.layout-work-4 .module-admin_panel .am-dense-row {
+  padding: 7px 9px;
+  gap: 7px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-dense-title,
+.workbench.layout-4 .module-admin_panel .am-dense-title,
+.workbench.layout-work-3 .module-admin_panel .am-dense-title,
+.workbench.layout-work-4 .module-admin_panel .am-dense-title {
+  font-size: 11.5px;
+  gap: 4px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-dense-sub,
+.workbench.layout-4 .module-admin_panel .am-dense-sub,
+.workbench.layout-work-3 .module-admin_panel .am-dense-sub,
+.workbench.layout-work-4 .module-admin_panel .am-dense-sub {
+  font-size: 9.5px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-dense-end-value,
+.workbench.layout-4 .module-admin_panel .am-dense-end-value,
+.workbench.layout-work-3 .module-admin_panel .am-dense-end-value,
+.workbench.layout-work-4 .module-admin_panel .am-dense-end-value {
+  font-size: 11.5px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-dense-end-label,
+.workbench.layout-4 .module-admin_panel .am-dense-end-label,
+.workbench.layout-work-3 .module-admin_panel .am-dense-end-label,
+.workbench.layout-work-4 .module-admin_panel .am-dense-end-label {
+  font-size: 8px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-search-bar input,
+.workbench.layout-4 .module-admin_panel .am-search-bar input,
+.workbench.layout-work-3 .module-admin_panel .am-search-bar input,
+.workbench.layout-work-4 .module-admin_panel .am-search-bar input {
+  font-size: 11px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-filter-pill,
+.workbench.layout-4 .module-admin_panel .am-filter-pill,
+.workbench.layout-work-3 .module-admin_panel .am-filter-pill,
+.workbench.layout-work-4 .module-admin_panel .am-filter-pill {
+  padding: 3px 8px;
+  font-size: 9.5px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-tab-btn,
+.workbench.layout-4 .module-admin_panel .am-tab-btn,
+.workbench.layout-work-3 .module-admin_panel .am-tab-btn,
+.workbench.layout-work-4 .module-admin_panel .am-tab-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+/* compress system-tab subsections: form/list density */
+.workbench.layout-3 .module-admin_panel .am-form,
+.workbench.layout-4 .module-admin_panel .am-form,
+.workbench.layout-work-3 .module-admin_panel .am-form,
+.workbench.layout-work-4 .module-admin_panel .am-form {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-card,
+.workbench.layout-4 .module-admin_panel .am-card,
+.workbench.layout-work-3 .module-admin_panel .am-card,
+.workbench.layout-work-4 .module-admin_panel .am-card {
+  padding: 11px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-card-title,
+.workbench.layout-4 .module-admin_panel .am-card-title,
+.workbench.layout-work-3 .module-admin_panel .am-card-title,
+.workbench.layout-work-4 .module-admin_panel .am-card-title {
+  font-size: 12px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-list-item,
+.workbench.layout-4 .module-admin_panel .am-list-item,
+.workbench.layout-work-3 .module-admin_panel .am-list-item,
+.workbench.layout-work-4 .module-admin_panel .am-list-item {
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-item-title,
+.workbench.layout-4 .module-admin_panel .am-item-title,
+.workbench.layout-work-3 .module-admin_panel .am-item-title,
+.workbench.layout-work-4 .module-admin_panel .am-item-title {
+  font-size: 11px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-item-sub,
+.workbench.layout-4 .module-admin_panel .am-item-sub,
+.workbench.layout-work-3 .module-admin_panel .am-item-sub,
+.workbench.layout-work-4 .module-admin_panel .am-item-sub {
+  font-size: 9.5px;
+  word-break: break-all;
+}
+
+.workbench.layout-3 .module-admin_panel .am-action-btn,
+.workbench.layout-4 .module-admin_panel .am-action-btn,
+.workbench.layout-work-3 .module-admin_panel .am-action-btn,
+.workbench.layout-work-4 .module-admin_panel .am-action-btn {
+  padding: 4px 9px;
+  font-size: 10px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-btn-group,
+.workbench.layout-4 .module-admin_panel .am-btn-group,
+.workbench.layout-work-3 .module-admin_panel .am-btn-group,
+.workbench.layout-work-4 .module-admin_panel .am-btn-group {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.workbench.layout-3 .module-admin_panel .am-list-end strong,
+.workbench.layout-4 .module-admin_panel .am-list-end strong,
+.workbench.layout-work-3 .module-admin_panel .am-list-end strong,
+.workbench.layout-work-4 .module-admin_panel .am-list-end strong {
+  font-size: 11px;
+}
+
+.workbench.layout-3 .module-admin_panel .am-rename,
+.workbench.layout-4 .module-admin_panel .am-rename,
+.workbench.layout-work-3 .module-admin_panel .am-rename,
+.workbench.layout-work-4 .module-admin_panel .am-rename {
+  flex-wrap: wrap;
+}
+
+/* aaw rows compression in narrow slots */
+.workbench.layout-3 .module-admin_panel .aaw-user-row,
+.workbench.layout-4 .module-admin_panel .aaw-user-row,
+.workbench.layout-work-3 .module-admin_panel .aaw-user-row,
+.workbench.layout-work-4 .module-admin_panel .aaw-user-row {
+  padding: 9px 11px;
+  gap: 9px;
+}
+
+.workbench.layout-3 .module-admin_panel .aaw-panel,
+.workbench.layout-4 .module-admin_panel .aaw-panel,
+.workbench.layout-work-3 .module-admin_panel .aaw-panel,
+.workbench.layout-work-4 .module-admin_panel .aaw-panel {
+  padding: 12px;
+}
+
+.workbench.layout-3 .module-admin_panel .aaw-search input,
+.workbench.layout-4 .module-admin_panel .aaw-search input,
+.workbench.layout-work-3 .module-admin_panel .aaw-search input,
+.workbench.layout-work-4 .module-admin_panel .aaw-search input {
+  font-size: 11px;
+}
+
+.workbench.layout-3 .module-admin_panel .aaw-row-main strong,
+.workbench.layout-4 .module-admin_panel .aaw-row-main strong,
+.workbench.layout-work-3 .module-admin_panel .aaw-row-main strong,
+.workbench.layout-work-4 .module-admin_panel .aaw-row-main strong {
+  font-size: 11.5px;
+}
+
+.workbench.layout-3 .module-admin_panel .aaw-row-main small,
+.workbench.layout-4 .module-admin_panel .aaw-row-main small,
+.workbench.layout-work-3 .module-admin_panel .aaw-row-main small,
+.workbench.layout-work-4 .module-admin_panel .aaw-row-main small {
+  font-size: 9.5px;
+}
+
+/* layout-4 only: tightest typography */
+.workbench.layout-4 .module-admin_panel .am-stat-chip-value,
+.workbench.layout-work-4 .module-admin_panel .am-stat-chip-value {
+  font-size: 14px;
+}
+
+.workbench.layout-4 .module-admin_panel .am-card-header,
+.workbench.layout-work-4 .module-admin_panel .am-card-header {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.workbench.layout-4 .module-admin_panel .am-tab-btn,
+.workbench.layout-work-4 .module-admin_panel .am-tab-btn {
+  padding: 3px 6px;
+  font-size: 9.5px;
+}
+
+/* hide overly long URL hints in tightest layout */
+.workbench.layout-4 .module-admin_panel .am-dense-sub,
+.workbench.layout-work-4 .module-admin_panel .am-dense-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+}
+

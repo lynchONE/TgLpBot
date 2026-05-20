@@ -51,11 +51,55 @@ func TestParseDecimalAmountToBigInt(t *testing.T) {
 		t.Fatalf("amount = %s, want 1234567", got.String())
 	}
 
+	got, err = parseDecimalAmountToBigInt("198.160099413555617348", 18)
+	if err != nil {
+		t.Fatalf("unexpected high precision error: %v", err)
+	}
+	if got.String() != "198160099413555617348" {
+		t.Fatalf("high precision amount = %s, want 198160099413555617348", got.String())
+	}
+
+	got, err = parseDecimalAmountToBigInt("1.230000", 2)
+	if err != nil {
+		t.Fatalf("unexpected trailing zero precision error: %v", err)
+	}
+	if got.String() != "123" {
+		t.Fatalf("trimmed precision amount = %s, want 123", got.String())
+	}
+
 	if _, err := parseDecimalAmountToBigInt("0", 18); err == nil {
 		t.Fatalf("expected zero amount error")
 	}
 	if _, err := parseDecimalAmountToBigInt("bad", 18); err == nil {
 		t.Fatalf("expected invalid amount error")
+	}
+	if _, err := parseDecimalAmountToBigInt("1.001", 2); err == nil {
+		t.Fatalf("expected excess precision error")
+	}
+}
+
+func TestFormatWalletSwapRawAmount(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		decimals int
+		expected string
+	}{
+		{name: "eighteen decimals", raw: "198160099413555617348", decimals: 18, expected: "198.160099413555617348"},
+		{name: "small", raw: "12", decimals: 18, expected: "0.000000000000000012"},
+		{name: "whole", raw: "123000000", decimals: 6, expected: "123"},
+		{name: "zero", raw: "0", decimals: 18, expected: "0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, ok := new(big.Int).SetString(tt.raw, 10)
+			if !ok {
+				t.Fatalf("invalid raw test amount")
+			}
+			if got := formatWalletSwapRawAmount(raw, tt.decimals); got != tt.expected {
+				t.Fatalf("format = %q, want %q", got, tt.expected)
+			}
+		})
 	}
 }
 

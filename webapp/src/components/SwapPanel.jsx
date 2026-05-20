@@ -246,6 +246,22 @@ function formatTokenAmount(value) {
   return num.toLocaleString('en-US', { maximumFractionDigits: 8 });
 }
 
+function formatRawTokenAmount(rawValue, decimalsValue) {
+  const raw = String(rawValue ?? '').trim();
+  const decimals = Number(decimalsValue);
+  if (!/^\d+$/.test(raw) || !Number.isInteger(decimals) || decimals < 0) return '';
+  const trimmedRaw = raw.replace(/^0+/, '') || '0';
+  if (trimmedRaw === '0') return '0';
+  if (decimals === 0) return trimmedRaw;
+  if (trimmedRaw.length <= decimals) {
+    const frac = `${'0'.repeat(decimals - trimmedRaw.length)}${trimmedRaw}`.replace(/0+$/, '');
+    return frac ? `0.${frac}` : '0';
+  }
+  const intPart = trimmedRaw.slice(0, trimmedRaw.length - decimals);
+  const fracPart = trimmedRaw.slice(trimmedRaw.length - decimals).replace(/0+$/, '');
+  return fracPart ? `${intPart}.${fracPart}` : intPart;
+}
+
 function formatGasUnits(value) {
   const raw = String(value ?? '').trim();
   const num = raw.startsWith('0x') ? Number.parseInt(raw, 16) : Number(raw);
@@ -932,6 +948,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
           symbol: t.symbol,
           name: t.name || t.symbol,
           balance: t.balance,
+          balanceRaw: t.balance_raw || '',
+          decimals: Number.isFinite(Number(t.decimals)) ? Number(t.decimals) : null,
           valueUSDT: t.value_usdt || 0,
           logoUrl: t.logo_url || (t.is_native ? getChainConfig(chain).nativeLogoUrl || '' : ''),
           native: Boolean(t.is_native),
@@ -1366,7 +1384,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     const walletToken = walletTokens.find((t) => t.address === normalizedFromToken);
     if (walletToken && walletToken.balance) {
       clearExecutionFeedback();
-      setAmount(walletToken.balance);
+      const preciseBalance = formatRawTokenAmount(walletToken.balanceRaw, walletToken.decimals);
+      if (preciseBalance) {
+        setAmount(preciseBalance);
+      }
     }
   };
 
@@ -1566,9 +1587,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
               <div className="swap-card-body">
                 <input
-                  type="number"
-                  min="0"
-                  step="any"
+                  type="text"
+                  inputMode="decimal"
                   className="swap-amount-input"
                   value={amount}
                   onChange={(event) => { clearExecutionFeedback(); setAmount(event.target.value); }}
