@@ -58,6 +58,32 @@ async function readErrorDetails(resp) {
     return { message: text, payload: null };
 }
 
+async function requestJson(url, options) {
+    const resp = await fetch(url, options);
+    if (!resp.ok) {
+        const detail = await readErrorDetails(resp);
+        const err = new Error(detail.message);
+        err.status = resp.status;
+        if (detail.payload && typeof detail.payload === 'object') {
+            err.payload = detail.payload;
+            Object.assign(err, detail.payload);
+        }
+        throw err;
+    }
+    return resp.json();
+}
+
+async function adminWorkbenchRequest({ apiBaseUrl, endpoint, payload, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=${endpoint}`;
+    return requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+        signal,
+    });
+}
+
 export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/positions?endpoint=realtime_positions`;
@@ -675,17 +701,111 @@ export async function fetchAdminActiveTasks({ apiBaseUrl, initData, limit, signa
 }
 
 export async function fetchAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const params = new URLSearchParams({ endpoint: 'user_access' });
-    if (initData) params.set('initData', String(initData));
-    if (userId) params.set('userId', String(userId));
-    const url = `${base}/api/admin?${params.toString()}`;
-    const resp = await fetch(url, { method: 'GET', signal });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
-    }
-    return resp.json();
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_access',
+        payload: { initData, action: 'get', user_id: Number(userId) },
+        signal,
+    });
+}
+
+export async function fetchAdminAccessList({ apiBaseUrl, initData, page = 1, pageSize = 20, query = '', signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_access',
+        payload: { initData, action: 'list', page, page_size: pageSize, query },
+        signal,
+    });
+}
+
+export async function updateAdminUserAccess({ apiBaseUrl, initData, userId, patch, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_access',
+        payload: { initData, action: 'update', user_id: Number(userId), ...(patch || {}) },
+        signal,
+    });
+}
+
+export async function revokeAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_access',
+        payload: { initData, action: 'revoke', user_id: Number(userId) },
+        signal,
+    });
+}
+
+export async function restoreAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_access',
+        payload: { initData, action: 'restore', user_id: Number(userId) },
+        signal,
+    });
+}
+
+export async function fetchAdminAuthCodes({ apiBaseUrl, initData, page = 1, pageSize = 20, query = '', signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_auth_codes',
+        payload: { initData, action: 'list', page, page_size: pageSize, query },
+        signal,
+    });
+}
+
+export async function createAdminAuthCode({ apiBaseUrl, initData, payload, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_auth_codes',
+        payload: { initData, action: 'create', ...(payload || {}) },
+        signal,
+    });
+}
+
+export async function updateAdminAuthCode({ apiBaseUrl, initData, codeId, patch, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_auth_codes',
+        payload: { initData, action: 'update', code_id: Number(codeId), ...(patch || {}) },
+        signal,
+    });
+}
+
+export async function disableAdminAuthCode({ apiBaseUrl, initData, codeId, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_auth_codes',
+        payload: { initData, action: 'disable', code_id: Number(codeId) },
+        signal,
+    });
+}
+
+export async function enableAdminAuthCode({ apiBaseUrl, initData, codeId, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_auth_codes',
+        payload: { initData, action: 'enable', code_id: Number(codeId) },
+        signal,
+    });
+}
+
+export async function fetchAdminAnnouncements({ apiBaseUrl, initData, page = 1, pageSize = 20, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_announcements',
+        payload: { initData, action: 'list', page, page_size: pageSize },
+        signal,
+    });
+}
+
+export async function publishAdminAnnouncement({ apiBaseUrl, initData, title, content, signal }) {
+    return adminWorkbenchRequest({
+        apiBaseUrl,
+        endpoint: 'admin_announcements',
+        payload: { initData, action: 'publish', title, content },
+        signal,
+    });
 }
 
 export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {

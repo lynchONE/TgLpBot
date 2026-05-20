@@ -480,6 +480,125 @@ export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId
   });
 }
 
+async function adminAccessRequest({ apiBaseUrl, endpoint, payload, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=${endpoint}`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+    signal,
+  });
+}
+
+export async function fetchAdminAccessList({ apiBaseUrl, initData, page = 1, pageSize = 20, query = '', signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_access',
+    payload: { initData, action: 'list', page, page_size: pageSize, query },
+    signal,
+  });
+}
+
+export async function fetchAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_access',
+    payload: { initData, action: 'get', user_id: Number(userId) },
+    signal,
+  });
+}
+
+export async function updateAdminUserAccess({ apiBaseUrl, initData, userId, patch, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_access',
+    payload: { initData, action: 'update', user_id: Number(userId), ...(patch || {}) },
+    signal,
+  });
+}
+
+export async function revokeAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_access',
+    payload: { initData, action: 'revoke', user_id: Number(userId) },
+    signal,
+  });
+}
+
+export async function restoreAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_access',
+    payload: { initData, action: 'restore', user_id: Number(userId) },
+    signal,
+  });
+}
+
+export async function fetchAdminAuthCodes({ apiBaseUrl, initData, page = 1, pageSize = 20, query = '', signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_auth_codes',
+    payload: { initData, action: 'list', page, page_size: pageSize, query },
+    signal,
+  });
+}
+
+export async function createAdminAuthCode({ apiBaseUrl, initData, payload, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_auth_codes',
+    payload: { initData, action: 'create', ...(payload || {}) },
+    signal,
+  });
+}
+
+export async function updateAdminAuthCode({ apiBaseUrl, initData, codeId, patch, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_auth_codes',
+    payload: { initData, action: 'update', code_id: Number(codeId), ...(patch || {}) },
+    signal,
+  });
+}
+
+export async function disableAdminAuthCode({ apiBaseUrl, initData, codeId, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_auth_codes',
+    payload: { initData, action: 'disable', code_id: Number(codeId) },
+    signal,
+  });
+}
+
+export async function enableAdminAuthCode({ apiBaseUrl, initData, codeId, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_auth_codes',
+    payload: { initData, action: 'enable', code_id: Number(codeId) },
+    signal,
+  });
+}
+
+export async function fetchAdminAnnouncements({ apiBaseUrl, initData, page = 1, pageSize = 20, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_announcements',
+    payload: { initData, action: 'list', page, page_size: pageSize },
+    signal,
+  });
+}
+
+export async function publishAdminAnnouncement({ apiBaseUrl, initData, title, content, signal }) {
+  return adminAccessRequest({
+    apiBaseUrl,
+    endpoint: 'admin_announcements',
+    payload: { initData, action: 'publish', title, content },
+    signal,
+  });
+}
+
 export async function fetchSystemConfig({ apiBaseUrl, initData, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/admin?endpoint=system_config`;

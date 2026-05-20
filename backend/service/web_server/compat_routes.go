@@ -100,6 +100,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminOnlineUsers(w, r)
 	case "active_tasks":
 		s.handleAdminActiveTasks(w, r)
+	case "admin_access", "access", "user_access":
+		s.handleAdminAccess(w, r)
+	case "admin_auth_codes", "auth_codes":
+		s.handleAdminAuthCodes(w, r)
+	case "admin_announcements", "announcements":
+		s.handleAdminAnnouncements(w, r)
 	case "rpc_pool":
 		s.handleAdminRPCPool(w, r)
 	case "pool_data_sources":

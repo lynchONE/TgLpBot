@@ -9120,7 +9120,8 @@ body {
 }
 
 .am-field input,
-.am-field select {
+.am-field select,
+.am-field textarea {
   width: 100%;
   border: 1px solid rgba(136, 157, 191, 0.16);
   border-radius: 8px;
@@ -9133,7 +9134,8 @@ body {
 }
 
 .am-field input:focus,
-.am-field select:focus {
+.am-field select:focus,
+.am-field textarea:focus {
   outline: none;
   border-color: rgba(var(--accent-rgb), 0.5);
 }

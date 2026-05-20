@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  KeyRound,
   RefreshCw,
   Settings2,
   Shield,
@@ -31,6 +32,7 @@ import {
 } from '../api';
 import { formatUsd, shortAddress } from '../utils';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
+import AdminAccessWorkbench from './AdminAccessWorkbench';
 import ConfirmDialog from './ConfirmDialog';
 import CustomSelect from './CustomSelect';
 
@@ -792,7 +794,7 @@ export default function AdminPanel({
   return (
     <PanelShell
       title="管理员"
-      subtitle={activeTab === 'operations' ? '运行管理' : '系统'}
+      subtitle={activeTab === 'operations' ? '运行管理' : activeTab === 'access' ? '授权公告' : '系统'}
       icon={Shield}
       actions={<button type="button" className="panel-action-btn" onClick={refreshCurrentTab}>刷新</button>}
     >
@@ -813,6 +815,14 @@ export default function AdminPanel({
             </button>
             <button
               type="button"
+              className={`am-tab-btn ${activeTab === 'access' ? 'active' : ''}`}
+              onClick={() => setActiveTab('access')}
+            >
+              <KeyRound size={12} />
+              授权公告
+            </button>
+            <button
+              type="button"
               className={`am-tab-btn ${activeTab === 'system' ? 'active' : ''}`}
               onClick={() => setActiveTab('system')}
             >
@@ -820,6 +830,15 @@ export default function AdminPanel({
               系统
             </button>
           </div>
+
+          {activeTab === 'access' ? (
+            <AdminAccessWorkbench
+              apiBaseUrl={apiBaseUrl}
+              initData={initData}
+              hasInitData={hasInitData}
+              onNotice={showNotice}
+            />
+          ) : null}
 
           {activeTab === 'operations' ? (
             <>

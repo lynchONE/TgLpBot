@@ -4,6 +4,7 @@ import AdminActiveTasks from './AdminActiveTasks.jsx';
 import AdminRPCPool from './AdminRPCPool.jsx';
 import AdminPoolDataSources from './AdminPoolDataSources.jsx';
 import AdminPrivateZapCard from './AdminPrivateZapCard.jsx';
+import AdminAccessWorkbench from './AdminAccessWorkbench.jsx';
 import SystemConfigCard from './SystemConfigCard.jsx';
 import PositionCard from './PositionCard.jsx';
 import { getBrandTheme } from '../lib/brand';
@@ -30,6 +31,7 @@ const ADMIN_TABS = [
     { key: 'online_users', label: '在线用户' },
     { key: 'active_tasks', label: '活跃任务' },
     { key: 'user_detail', label: '用户详情' },
+    { key: 'access_workbench', label: '授权公告' },
     { key: 'system_config', label: '系统配置' },
     { key: 'rpc_pool', label: 'RPC' },
     { key: 'pool_data_sources', label: '池子源' },
@@ -292,6 +294,10 @@ export default function AdminPage({
                     <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} onNotice={onNotice} />
                     <AdminPrivateZapCard apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} onNotice={onNotice} />
                 </div>
+            )}
+
+            {activeTab === 'access_workbench' && (
+                <AdminAccessWorkbench apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} onNotice={onNotice} />
             )}
 
             {activeTab === 'rpc_pool' && (

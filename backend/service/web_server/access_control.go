@@ -78,3 +78,17 @@ func requireMiniAppPermission(check userSvc.AccessCheck) (int, string) {
 	}
 	return 0, ""
 }
+
+func authenticateAdminWebAppUser(initData string) (*models.User, int, string) {
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		return nil, status, msg
+	}
+	accessService := userSvc.NewAccessService()
+	if !accessService.IsAdminUser(user.ID) {
+		return nil, http.StatusForbidden, "forbidden"
+	}
+	return user, 0, ""
+}
+
+var authenticateAdminWebAppUserForAdminHandlers = authenticateAdminWebAppUser

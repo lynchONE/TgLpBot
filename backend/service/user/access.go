@@ -29,6 +29,13 @@ type AccessCheck struct {
 	Reason  string
 }
 
+type UserAccessAdminRow struct {
+	User            models.User
+	Access          *models.UserAccess
+	WalletCount     int64
+	ActiveTaskCount int64
+}
+
 func normalizeHexAddress(addr string) string {
 	return strings.ToLower(strings.TrimSpace(addr))
 }
@@ -170,6 +177,7 @@ func (s *AccessService) GetAuthCode(codeID uint) (*models.AuthCode, error) {
 // UpdateAuthCodeInput 更新授权码的输入参数
 type UpdateAuthCodeInput struct {
 	ActiveTo       *time.Time
+	ClearActiveTo  bool
 	MaxWallets     *int
 	MaxActiveTasks *int
 	MaxRedemptions *int
@@ -182,9 +190,20 @@ func (s *AccessService) UpdateAuthCode(codeID uint, in UpdateAuthCodeInput) (*mo
 	if database.DB == nil {
 		return nil, errors.New("database not initialized")
 	}
+	if in.MaxWallets != nil && *in.MaxWallets < 0 {
+		return nil, errors.New("invalid max wallets")
+	}
+	if in.MaxActiveTasks != nil && *in.MaxActiveTasks < 0 {
+		return nil, errors.New("invalid max active tasks")
+	}
+	if in.MaxRedemptions != nil && *in.MaxRedemptions <= 0 {
+		return nil, errors.New("invalid max redemptions")
+	}
 
 	updates := map[string]interface{}{}
-	if in.ActiveTo != nil {
+	if in.ClearActiveTo {
+		updates["active_to"] = nil
+	} else if in.ActiveTo != nil {
 		updates["active_to"] = in.ActiveTo
 	}
 	if in.MaxWallets != nil {
@@ -228,6 +247,37 @@ func (s *AccessService) EnableAuthCode(codeID uint) error {
 		return errors.New("database not initialized")
 	}
 	return database.DB.Model(&models.AuthCode{}).Where("id = ?", codeID).Update("disabled_at", nil).Error
+}
+
+func (s *AccessService) ListAuthCodesPaged(page, pageSize int, query string) ([]models.AuthCode, int64, error) {
+	if database.DB == nil {
+		return nil, 0, errors.New("database not initialized")
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	db := database.DB.Model(&models.AuthCode{})
+	query = strings.TrimSpace(query)
+	if query != "" {
+		like := "%" + query + "%"
+		db = db.Where("code LIKE ? OR note LIKE ?", like, like)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var codes []models.AuthCode
+	offset := (page - 1) * pageSize
+	if err := db.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&codes).Error; err != nil {
+		return nil, 0, err
+	}
+	return codes, total, nil
 }
 
 func (s *AccessService) RedeemAuthCode(userID uint, rawCode string) (*models.UserAccess, *models.AuthCode, error) {
@@ -373,6 +423,83 @@ func (s *AccessService) ListUserAccessesPaged(page, pageSize int) ([]models.User
 	return accesses, total, nil
 }
 
+func (s *AccessService) ListUserAccessAdminRows(page, pageSize int, query string) ([]UserAccessAdminRow, int64, error) {
+	if database.DB == nil {
+		return nil, 0, errors.New("database not initialized")
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	db := database.DB.Model(&models.User{})
+	query = strings.TrimSpace(query)
+	if query != "" {
+		needle := strings.TrimPrefix(query, "@")
+		like := "%" + needle + "%"
+		if id, err := strconv.ParseInt(needle, 10, 64); err == nil {
+			db = db.Where("id = ? OR telegram_id = ? OR username LIKE ? OR first_name LIKE ? OR last_name LIKE ?", id, id, like, like, like)
+		} else {
+			db = db.Where("username LIKE ? OR first_name LIKE ? OR last_name LIKE ?", like, like, like)
+		}
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var users []models.User
+	offset := (page - 1) * pageSize
+	if err := db.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(users) == 0 {
+		return nil, total, nil
+	}
+
+	userIDs := make([]uint, 0, len(users))
+	for _, u := range users {
+		userIDs = append(userIDs, u.ID)
+	}
+
+	var accesses []models.UserAccess
+	if err := database.DB.Where("user_id IN ?", userIDs).Find(&accesses).Error; err != nil {
+		return nil, 0, err
+	}
+	accessByUser := make(map[uint]*models.UserAccess, len(accesses))
+	for i := range accesses {
+		accesses[i].User = models.User{}
+		accessByUser[accesses[i].UserID] = &accesses[i]
+	}
+
+	rows := make([]UserAccessAdminRow, 0, len(users))
+	for _, u := range users {
+		row := UserAccessAdminRow{
+			User: u,
+		}
+		if access := accessByUser[u.ID]; access != nil {
+			access.User = u
+			row.Access = access
+		}
+		walletCount, err := s.CountUserWallets(u.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		taskCount, err := s.CountUserActiveTasks(u.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		row.WalletCount = walletCount
+		row.ActiveTaskCount = taskCount
+		rows = append(rows, row)
+	}
+
+	return rows, total, nil
+}
+
 // SearchUserAccess 按用户名或ID搜索用户
 func (s *AccessService) SearchUserAccess(query string) ([]models.UserAccess, error) {
 	if database.DB == nil {
@@ -458,12 +585,14 @@ func (s *AccessService) GetUserAccessWithUser(userID uint) (*models.UserAccess, 
 }
 
 type UpdateUserAccessInput struct {
-	ActiveFrom     *time.Time
-	ActiveTo       *time.Time
-	MaxWallets     *int
-	MaxActiveTasks *int
-	MiniAppEnabled *bool
-	Note           *string
+	ActiveFrom      *time.Time
+	ActiveTo        *time.Time
+	ClearActiveFrom bool
+	ClearActiveTo   bool
+	MaxWallets      *int
+	MaxActiveTasks  *int
+	MiniAppEnabled  *bool
+	Note            *string
 }
 
 func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in UpdateUserAccessInput) (*models.UserAccess, error) {
@@ -473,14 +602,46 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 	if in.ActiveFrom != nil && in.ActiveTo != nil && in.ActiveFrom.After(*in.ActiveTo) {
 		return nil, errors.New("invalid time range")
 	}
+	if in.ActiveFrom != nil && in.ClearActiveTo {
+		// active_to is intentionally open-ended, so only active_from needs validation.
+	} else if in.ActiveFrom != nil {
+		current, err := s.GetUserAccess(userID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if err == nil && current.ActiveTo != nil && in.ActiveFrom.After(*current.ActiveTo) {
+			return nil, errors.New("invalid time range")
+		}
+	}
+	if in.ActiveTo != nil && in.ClearActiveFrom {
+		// active_from is intentionally cleared; no lower-bound validation is needed.
+	} else if in.ActiveTo != nil {
+		current, err := s.GetUserAccess(userID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if err == nil && current.ActiveFrom != nil && current.ActiveFrom.After(*in.ActiveTo) {
+			return nil, errors.New("invalid time range")
+		}
+	}
+	if in.MaxWallets != nil && *in.MaxWallets < 0 {
+		return nil, errors.New("invalid max wallets")
+	}
+	if in.MaxActiveTasks != nil && *in.MaxActiveTasks < 0 {
+		return nil, errors.New("invalid max active tasks")
+	}
 
 	updates := map[string]interface{}{
 		"granted_by_user_id": adminUserID,
 	}
-	if in.ActiveFrom != nil {
+	if in.ClearActiveFrom {
+		updates["active_from"] = nil
+	} else if in.ActiveFrom != nil {
 		updates["active_from"] = in.ActiveFrom
 	}
-	if in.ActiveTo != nil {
+	if in.ClearActiveTo {
+		updates["active_to"] = nil
+	} else if in.ActiveTo != nil {
 		updates["active_to"] = in.ActiveTo
 	}
 	if in.MaxWallets != nil {
@@ -496,7 +657,26 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 		updates["note"] = strings.TrimSpace(*in.Note)
 	}
 
-	if err := database.DB.Model(&models.UserAccess{}).Where("user_id = ?", userID).Updates(updates).Error; err != nil {
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var access models.UserAccess
+		err := tx.Where("user_id = ?", userID).First(&access).Error
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			access = models.UserAccess{
+				UserID:          userID,
+				GrantedByUserID: adminUserID,
+				MaxWallets:      1,
+				MaxActiveTasks:  1,
+			}
+			if err := tx.Create(&access).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&access).Updates(updates).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	return s.GetUserAccessWithUser(userID)
@@ -507,25 +687,39 @@ func (s *AccessService) RevokeUserAccess(adminUserID uint, userID uint) error {
 		return errors.New("database not initialized")
 	}
 	now := time.Now()
-	return database.DB.Model(&models.UserAccess{}).
+	res := database.DB.Model(&models.UserAccess{}).
 		Where("user_id = ?", userID).
 		Updates(map[string]interface{}{
 			"revoked_at":         &now,
 			"revoked_by_user_id": adminUserID,
-		}).Error
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (s *AccessService) RestoreUserAccess(adminUserID uint, userID uint) error {
 	if database.DB == nil {
 		return errors.New("database not initialized")
 	}
-	return database.DB.Model(&models.UserAccess{}).
+	res := database.DB.Model(&models.UserAccess{}).
 		Where("user_id = ?", userID).
 		Updates(map[string]interface{}{
 			"revoked_at":         nil,
 			"revoked_by_user_id": nil,
 			"granted_by_user_id": adminUserID,
-		}).Error
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // CheckMiniAppAccess 检查用户是否有 MiniApp 权限
