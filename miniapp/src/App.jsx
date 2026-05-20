@@ -12,7 +12,7 @@ import GlobalConfigPage from './components/GlobalConfigPage.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
-import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet } from 'lucide-react';
+import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet, ArrowLeftRight } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -47,6 +47,7 @@ import {
 import { TASK_MODE_OPTIONS, getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary, normalizeTaskMode } from './lib/taskModes';
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
+const LazySwapModule = lazy(() => import('./components/SwapModule.jsx'));
 const LazyAssetManagementPage = lazy(() => import('./components/AssetManagementPage.jsx'));
 
 const CHAIN_SELECT_OPTIONS = [
@@ -218,6 +219,7 @@ const MODULE_POLL_CONFIG = [
     { key: 'smart_money', label: '聪明钱', defaultSec: 15, minSec: 2 },
     { key: 'admin_page', label: '管理页', defaultSec: 15, minSec: 5 },
     { key: 'admin', label: '管理工作台', defaultSec: 10, minSec: 3 },
+    { key: 'swap', label: '兑换', defaultSec: 8, minSec: 5 },
 ];
 
 function getModulePollConfig(key) {
@@ -1016,6 +1018,7 @@ const icons = {
     fire: Flame,
     eye: Eye,
     wallet: Wallet,
+    swap: ArrowLeftRight,
 };
 
 const Icon = ({ path: IconCmp, className = '' }) => {
@@ -1028,6 +1031,7 @@ const VIEW_MODULE_MAP = {
     positions: 'positions',
     assets: 'assets',
     smart_money: 'smart_money',
+    swap: 'swap',
     admin_page: 'admin_panel',
     admin: 'admin_panel',
 };
@@ -1064,6 +1068,7 @@ function buildTopNavItems({ me, isAdmin }) {
         { key: 'positions', label: '仓位' },
         { key: 'assets', label: '我的' },
         { key: 'smart_money', label: '聪明钱' },
+        { key: 'swap', label: '兑换' },
     ];
     const items = me ? baseItems.filter((item) => canAccessView(me, item.key)) : [...baseItems];
     if (isAdmin) {
@@ -1502,6 +1507,7 @@ export default function App() {
     const smartMoneyPollIntervalSec = getModulePollSec('smart_money', 15, modulePollOverrides);
     const adminPagePollIntervalSec = getModulePollSec('admin_page', 15, modulePollOverrides);
     const adminPollIntervalSec = getModulePollSec('admin', adminServerPollIntervalSec, modulePollOverrides);
+    const swapPollIntervalSec = getModulePollSec('swap', 8, modulePollOverrides);
     const adminListPollSec = Math.max(3, adminPollIntervalSec);
     const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
@@ -1510,6 +1516,7 @@ export default function App() {
     const isAssets = viewMode === 'assets';
     const isSmartMoney = viewMode === 'smart_money';
     const isAdminPage = isAdmin && viewMode === 'admin_page';
+    const isSwap = viewMode === 'swap';
     const topNavItems = useMemo(
         () => buildTopNavItems({ me, isAdmin }),
         [isAdmin, me],
@@ -1517,7 +1524,7 @@ export default function App() {
     const hasKlineAccess = hasModuleAccess(me, 'gmgn_kline');
     const hasCreatePoolAccess = hasModuleAccess(me, 'create_pool');
     const hasAssetsAccess = hasModuleAccess(me, 'assets');
-    const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage;
+    const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage && !isSwap;
     const activePollIntervalSec = showAdmin
         ? adminPollIntervalSec
         : isHotPools
@@ -4061,6 +4068,11 @@ export default function App() {
             icon: icons.eye,
             subtitle: '钱包追踪 / 监控提醒',
         },
+        swap: {
+            title: '兑换',
+            icon: icons.swap,
+            subtitle: '一键兑换 · 市价/限价',
+        },
         admin_page: {
             title: '管理页',
             icon: icons.gear,
@@ -4256,6 +4268,20 @@ export default function App() {
                                 tick={tick}
                                 pollIntervalSec={adminPagePollIntervalSec}
                                 accentTheme={accentTheme}
+                                onNotice={showNotice}
+                            />
+                        </Suspense>
+                    </div>
+                ) : isSwap ? (
+                    <div className="mb-2">
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载兑换模块...</div>}>
+                            <LazySwapModule
+                                apiBaseUrl={apiBaseUrl}
+                                initData={initData}
+                                hasInitData={hasInitData}
+                                accentTheme={accentTheme}
+                                pollIntervalSec={swapPollIntervalSec}
+                                multiChainEnabled={multiChainEnabled}
                                 onNotice={showNotice}
                             />
                         </Suspense>
