@@ -12,7 +12,6 @@ import {
   RotateCcw,
   Save,
   Search,
-  ShieldCheck,
   UsersRound,
 } from 'lucide-react';
 import {
@@ -30,6 +29,7 @@ import {
 } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import { EmptyState } from './PanelShell';
+import AdminStatChip from './admin/AdminStatChip';
 
 const SECTIONS = [
   { key: 'users', label: '用户授权', icon: UsersRound },
@@ -593,20 +593,29 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
   return (
     <div className="aaw-shell">
       {notice ? <div className="aaw-notice">{notice}</div> : null}
-      <div className="aaw-hero">
-        <div>
-          <div className="aaw-kicker">
-            <ShieldCheck size={16} />
-            Admin Access
-          </div>
-          <h2>授权工作台</h2>
-        </div>
-        <div className="aaw-hero-stats">
-          <div><span>用户</span><strong>{usersTotal || users.length}</strong></div>
-          <div><span>生效授权</span><strong>{activeUsers}</strong></div>
-          <div><span>授权码</span><strong>{codesTotal || codes.length}</strong></div>
-          <div><span>可授权模块</span><strong>{grantableModules.length}</strong></div>
-        </div>
+      <div className="am-stat-row" style={{ marginBottom: 12 }}>
+        <AdminStatChip
+          label="用户总数"
+          value={usersTotal || users.length}
+          tone="accent"
+          hint={`${activeUsers} 生效中`}
+        />
+        <AdminStatChip
+          label="生效用户"
+          value={activeUsers}
+          tone={activeUsers > 0 ? 'ok' : 'idle'}
+        />
+        <AdminStatChip
+          label="授权码"
+          value={codesTotal || codes.length}
+          tone={activeCodes > 0 ? 'ok' : 'idle'}
+          hint={`${activeCodes} 生效中`}
+        />
+        <AdminStatChip
+          label="可授权模块"
+          value={grantableModules.length}
+          tone="idle"
+        />
       </div>
 
       <SectionTabs section={section} onChange={setSection} />

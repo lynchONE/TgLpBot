@@ -68,6 +68,9 @@ func main() {
 
 	webServer := web_server.NewServer()
 	webServer.Start("8080")
+	if webServer.SwapLimitOrders != nil {
+		defer webServer.SwapLimitOrders.Stop()
+	}
 
 	telegramBot, err := bot.NewBot()
 	if err != nil {
@@ -81,6 +84,9 @@ func main() {
 
 		log.Println("shutting down...")
 		poolSyncService.Stop()
+		if webServer.SwapLimitOrders != nil {
+			webServer.SwapLimitOrders.Stop()
+		}
 		telegramBot.Stop()
 		rpcpool.StopDefaultHealthChecker()
 		database.CloseMySQL()

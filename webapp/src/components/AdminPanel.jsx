@@ -3,6 +3,7 @@ import {
   Activity,
   KeyRound,
   RefreshCw,
+  Search,
   Settings2,
   Shield,
 } from 'lucide-react';
@@ -31,10 +32,13 @@ import {
   updateSystemConfig,
 } from '../api';
 import { formatUsd, shortAddress } from '../utils';
-import PanelShell, { EmptyState, MetricCard } from './PanelShell';
+import PanelShell, { EmptyState } from './PanelShell';
 import AdminAccessWorkbench from './AdminAccessWorkbench';
 import ConfirmDialog from './ConfirmDialog';
 import CustomSelect from './CustomSelect';
+import AdminStatChip from './admin/AdminStatChip';
+import AdminStatusDot from './admin/AdminStatusDot';
+import AdminDrawer from './admin/AdminDrawer';
 
 const CHAIN_OPTIONS = [
   { value: 'bsc', label: 'BSC' },
@@ -57,6 +61,79 @@ const ADMIN_SYSTEM_SECTIONS = [
   { key: 'pool_sources', label: '池子数据源' },
   { key: 'private_zap', label: 'Private Zap' },
 ];
+
+const TASK_STATUS_FILTERS = [
+  { key: 'all', label: '全部' },
+  { key: 'running', label: '运行中' },
+  { key: 'opening', label: '开仓中' },
+  { key: 'waiting', label: '等待中' },
+  { key: 'stopping', label: '退出中' },
+  { key: 'paused', label: '已暂停' },
+];
+
+function statusTone(status) {
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'running': return 'ok';
+    case 'opening': return 'accent';
+    case 'waiting': return 'warn';
+    case 'stopping':
+    case 'error': return 'danger';
+    default: return 'idle';
+  }
+}
+
+function deriveRpcHealthSummary(rpcData) {
+  const groups = Array.isArray(rpcData?.groups) ? rpcData.groups : [];
+  let total = 0;
+  let available = 0;
+  let latencySum = 0;
+  let latencyCount = 0;
+  for (const group of groups) {
+    const eps = Array.isArray(group?.endpoints) ? group.endpoints : [];
+    for (const ep of eps) {
+      total += 1;
+      if (String(ep?.status || '').toLowerCase() !== 'unavailable') {
+        available += 1;
+        const lat = Number(ep?.last_latency_ms || 0);
+        if (Number.isFinite(lat) && lat > 0) {
+          latencySum += lat;
+          latencyCount += 1;
+        }
+      }
+    }
+  }
+  if (total === 0) return { tone: 'idle', value: '--', hint: '无节点' };
+  const ratio = available / total;
+  const tone = ratio >= 0.8 ? 'ok' : ratio >= 0.4 ? 'warn' : 'danger';
+  const avg = latencyCount > 0 ? Math.round(latencySum / latencyCount) : 0;
+  return {
+    tone,
+    value: `${available}/${total}`,
+    hint: avg > 0 ? `均 ${avg}ms` : '可用 / 总数',
+  };
+}
+
+function derivePoolSourceHealthSummary(poolData) {
+  const groups = Array.isArray(poolData?.groups) ? poolData.groups : [];
+  let total = 0;
+  let enabled = 0;
+  let withError = 0;
+  for (const group of groups) {
+    const sources = Array.isArray(group?.sources) ? group.sources : [];
+    for (const src of sources) {
+      total += 1;
+      if (src?.is_enabled) enabled += 1;
+      if (src?.last_error) withError += 1;
+    }
+  }
+  if (total === 0) return { tone: 'idle', value: '--', hint: '无来源' };
+  const tone = withError === 0 ? (enabled === total ? 'ok' : 'warn') : 'danger';
+  return {
+    tone,
+    value: `${enabled}/${total}`,
+    hint: withError > 0 ? `${withError} 错误` : '启用 / 总数',
+  };
+}
 
 function errorText(err) {
   return String(err?.message || err || '').trim();
@@ -366,6 +443,9 @@ export default function AdminPanel({
   const [userPositions, setUserPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [taskStatusFilter, setTaskStatusFilter] = useState('all');
 
   const [systemConfig, setSystemConfig] = useState(null);
   const [systemDefaults, setSystemDefaults] = useState(null);
@@ -423,6 +503,66 @@ export default function AdminPanel({
     [userPositions?.positions]
   );
   const isReady = hasInitData && isAdmin;
+
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+
+  const filteredOnlineUsers = useMemo(() => {
+    if (!normalizedQuery) return onlineUsers;
+    return onlineUsers.filter((user) => {
+      const hay = [
+        user?.username,
+        user?.first_name,
+        user?.last_name,
+        user?.telegram_id,
+        user?.user_id,
+      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(normalizedQuery);
+    });
+  }, [onlineUsers, normalizedQuery]);
+
+  const filteredActiveTasks = useMemo(() => {
+    return activeTasks.filter((task) => {
+      if (taskStatusFilter !== 'all') {
+        if (taskStatusFilter === 'paused') {
+          if (!task?.paused) return false;
+        } else if (String(task?.status || '').toLowerCase() !== taskStatusFilter) {
+          return false;
+        }
+      }
+      if (!normalizedQuery) return true;
+      const hay = [
+        task?.username,
+        task?.first_name,
+        task?.last_name,
+        task?.telegram_id,
+        task?.user_id,
+        task?.task_id,
+        task?.token0_symbol,
+        task?.token1_symbol,
+      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(normalizedQuery);
+    });
+  }, [activeTasks, normalizedQuery, taskStatusFilter]);
+
+  const rpcHealthSummary = useMemo(() => deriveRpcHealthSummary(rpcData), [rpcData]);
+  const poolSourceHealthSummary = useMemo(() => derivePoolSourceHealthSummary(poolSourceData), [poolSourceData]);
+
+  const openUserDrawer = useCallback((user) => {
+    if (!user) return;
+    setSelectedUser({
+      user_id: user.user_id,
+      telegram_id: user.telegram_id,
+      username: user.username,
+      first_name: user.first_name,
+      last_name: user.last_name,
+    });
+    setUserPositions(null);
+    setDrawerOpen(true);
+  }, []);
+
+  const closeUserDrawer = useCallback(() => {
+    setDrawerOpen(false);
+  }, []);
 
   const showNotice = useCallback((message) => {
     setNotice(message);
@@ -842,158 +982,187 @@ export default function AdminPanel({
 
           {activeTab === 'operations' ? (
             <>
-              <div className="am-metric-row">
-                <MetricCard label="在线用户" value={String(onlineUsers.length)} tone="strong" />
-                <MetricCard label="活跃任务" value={String(activeTasks.length)} />
-                <MetricCard label="当前用户" value={selectedUser?.user_id ? `#${selectedUser.user_id}` : '--'} />
-                <MetricCard label="用户仓位" value={String(userPositionsList.length)} />
+              <div className="am-stat-row">
+                <AdminStatChip
+                  label="在线用户"
+                  value={onlineUsers.length}
+                  tone={onlineUsers.length > 0 ? 'ok' : 'idle'}
+                  pulse={onlineUsers.length > 0}
+                  hint={onlineLoading ? '同步中…' : `${filteredOnlineUsers.length} 命中`}
+                />
+                <AdminStatChip
+                  label="活跃任务"
+                  value={activeTasks.length}
+                  tone={activeTasks.length > 0 ? 'accent' : 'idle'}
+                  hint={taskLoading ? '同步中…' : `${filteredActiveTasks.length} 命中`}
+                />
+                <AdminStatChip
+                  label="RPC 节点"
+                  value={rpcHealthSummary.value}
+                  tone={rpcHealthSummary.tone}
+                  hint={rpcHealthSummary.hint}
+                  onClick={() => { setActiveTab('system'); setSystemSection('rpc'); }}
+                />
+                <AdminStatChip
+                  label="池子源"
+                  value={poolSourceHealthSummary.value}
+                  tone={poolSourceHealthSummary.tone}
+                  hint={poolSourceHealthSummary.hint}
+                  onClick={() => { setActiveTab('system'); setSystemSection('pool_sources'); }}
+                />
               </div>
 
-              <div className="am-two-col">
-                <div className="am-card">
-                  <div className="am-card-header">
-                    <div className="am-card-title">在线用户</div>
-                    <span className="am-item-sub">{onlineLoading ? '加载中...' : `${onlineUsers.length} 个`}</span>
+              <div className="am-search-bar">
+                <Search size={14} />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索 @username / TG ID / 任务 / 交易对"
+                />
+                {query ? (
+                  <button type="button" className="am-action-btn" onClick={() => setQuery('')} style={{ padding: '4px 9px', fontSize: 10.5 }}>清空</button>
+                ) : null}
+              </div>
+
+              <div className="am-filter-pills">
+                {TASK_STATUS_FILTERS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`am-filter-pill ${taskStatusFilter === item.key ? 'active' : ''}`}
+                    onClick={() => setTaskStatusFilter(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="am-ops-grid">
+                <section>
+                  <div className="am-section-cap">
+                    <span>在线用户 · {filteredOnlineUsers.length}</span>
+                    <button type="button" disabled={onlineLoading} onClick={loadOnlineUsers}>
+                      {onlineLoading ? '刷新中…' : '刷新'}
+                    </button>
                   </div>
                   {onlineError ? <div className="am-error">{onlineError}</div> : null}
-                  <div className="am-list">
-                    {onlineUsers.length > 0 ? onlineUsers.map((user) => (
-                      <button
-                        type="button"
-                        key={user.user_id || user.telegram_id}
-                        className={`am-list-item am-list-btn ${Number(user?.user_id) === Number(selectedUser?.user_id) ? 'selected' : ''}`}
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setUserPositions(null);
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div className="am-item-title">{formatUserLabel(user)}</div>
-                          <div className="am-item-sub">
-                            TG {user?.telegram_id || '--'} / 更新时间 {formatDateTime(user?.updated_at)}
-                          </div>
-                        </div>
-                        <div className="am-list-end">
-                          <strong>{Number(user?.total_tasks || 0)}</strong>
-                        </div>
-                      </button>
-                    )) : <EmptyState text={onlineLoading ? '正在加载在线用户...' : '暂无在线用户'} />}
-                  </div>
-                </div>
+                  {filteredOnlineUsers.length > 0 ? (
+                    <div className="am-dense-list">
+                      {filteredOnlineUsers.map((user) => {
+                        const selected = Number(user?.user_id) === Number(selectedUser?.user_id);
+                        return (
+                          <button
+                            type="button"
+                            key={user.user_id || user.telegram_id}
+                            className={`am-dense-row ${selected ? 'selected' : ''}`}
+                            onClick={() => openUserDrawer(user)}
+                          >
+                            <AdminStatusDot tone="ok" pulse size="sm" />
+                            <div className="am-dense-main">
+                              <div className="am-dense-title">{formatUserLabel(user)}</div>
+                              <div className="am-dense-sub">
+                                TG {user?.telegram_id || '--'} · ID {user?.user_id || '--'} · {formatDateTime(user?.updated_at)}
+                              </div>
+                            </div>
+                            <div className="am-dense-end">
+                              <div className="am-dense-end-value">{Number(user?.total_tasks || 0)}</div>
+                              <div className="am-dense-end-label">任务</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyState text={onlineLoading
+                      ? '正在加载在线用户...'
+                      : (onlineUsers.length > 0 ? '没有匹配的在线用户' : '暂无在线用户')}
+                    />
+                  )}
+                </section>
 
-                <div className="am-card">
-                  <div className="am-card-header">
-                    <div className="am-card-title">活跃任务</div>
-                    <span className="am-item-sub">{taskLoading ? '加载中...' : `${activeTasks.length} 个`}</span>
+                <section>
+                  <div className="am-section-cap">
+                    <span>活跃任务 · {filteredActiveTasks.length}</span>
+                    <button type="button" disabled={taskLoading} onClick={loadActiveTasks}>
+                      {taskLoading ? '刷新中…' : '刷新'}
+                    </button>
                   </div>
                   {taskError ? <div className="am-error">{taskError}</div> : null}
-                  <div className="am-list">
-                    {activeTasks.length > 0 ? activeTasks.map((task) => (
-                      <button
-                        type="button"
-                        key={task.task_id || `${task.user_id}:${task.pool_id}`}
-                        className="am-list-item am-list-btn"
-                        onClick={() => {
-                          setSelectedUser({
-                            user_id: task.user_id,
-                            telegram_id: task.telegram_id,
-                            username: task.username,
-                            first_name: task.first_name,
-                            last_name: task.last_name,
-                          });
-                          setUserPositions(null);
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div className="am-item-title">{formatTaskPair(task)}</div>
-                          <div className="am-item-sub">
-                            {formatUserLabel(task)} / Task #{task.task_id || '--'}
-                          </div>
-                        </div>
-                        <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                          <span className={statusClass(task.status)}>{formatStatus(task.status)}</span>
-                          <strong>{Number.isFinite(Number(task?.amount_usdt)) ? `$${Number(task.amount_usdt).toFixed(2)}` : '--'}</strong>
-                        </div>
-                      </button>
-                    )) : <EmptyState text={taskLoading ? '正在加载活跃任务...' : '暂无活跃任务'} />}
-                  </div>
-                </div>
-              </div>
-
-              <div className="am-card">
-                <div className="am-card-header">
-                  <div className="am-card-title">用户详情</div>
-                  {selectedUser?.user_id ? (
-                    <button
-                      type="button"
-                      className="am-action-btn"
-                      disabled={positionsLoading}
-                      onClick={() => loadUserPositions(selectedUser.user_id)}
-                    >
-                      <RefreshCw size={12} className={positionsLoading ? 'animate-spin' : undefined} />
-                      刷新仓位
-                    </button>
-                  ) : null}
-                </div>
-
-                {selectedUser ? (
-                  <>
-                    <div className="am-wallet-item">
-                      <div className="am-wallet-head">
-                        <div>
-                          <div className="am-item-title">{formatUserLabel(selectedUser)}</div>
-                          <div className="am-item-sub">
-                            TG {selectedUser?.telegram_id || '--'} / 用户 ID {selectedUser?.user_id || '--'}
-                          </div>
-                        </div>
-                        <div className="am-wallet-total">
-                          <div className="am-item-sub">钱包</div>
-                          <strong>{shortAddress(userPositions?.wallet?.address || '')}</strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    {positionsError ? <div className="am-error">{positionsError}</div> : null}
-                    {positionsLoading && userPositionsList.length === 0 ? <div className="panel-loading">正在加载用户仓位...</div> : null}
-                    {!positionsLoading && userPositionsList.length === 0 ? <EmptyState text="当前用户没有活跃仓位。" /> : null}
-                    <div className="am-list">
-                      {userPositionsList.map((position) => (
-                        <div
-                          key={[
-                            position?.chain,
-                            position?.pool_id,
-                            position?.position_id,
-                            position?.task_id,
-                          ].join(':')}
-                          className="am-list-item"
-                        >
-                          <div style={{ minWidth: 0 }}>
-                            <div className="am-item-title">{formatPositionPair(position)}</div>
-                            <div className="am-item-sub">
-                              {formatChain(position?.chain)} / Task #{position?.task_id || '--'} / 钱包 {shortAddress(position?.wallet_address || '')}
+                  {filteredActiveTasks.length > 0 ? (
+                    <div className="am-dense-list">
+                      {filteredActiveTasks.map((task) => {
+                        const tone = statusTone(task.status);
+                        return (
+                          <button
+                            type="button"
+                            key={task.task_id || `${task.user_id}:${task.pool_id}`}
+                            className="am-dense-row"
+                            onClick={() => openUserDrawer({
+                              user_id: task.user_id,
+                              telegram_id: task.telegram_id,
+                              username: task.username,
+                              first_name: task.first_name,
+                              last_name: task.last_name,
+                            })}
+                          >
+                            <AdminStatusDot tone={tone} pulse={tone === 'ok' || tone === 'accent'} size="sm" />
+                            <div className="am-dense-main">
+                              <div className="am-dense-title">
+                                {formatTaskPair(task)}
+                                <span className={`am-tag tone-${tone}`}>{formatStatus(task.status)}</span>
+                                {task.paused ? <span className="am-tag tone-warn">暂停</span> : null}
+                              </div>
+                              <div className="am-dense-sub">
+                                {formatUserLabel(task)} · #{task.task_id || '--'}
+                              </div>
                             </div>
-                          </div>
-                          <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                            <span className={statusClass(position?.status)}>{formatStatus(position?.status)}</span>
-                            <strong>{formatUsd(position?.totals?.wallet_usd || position?.position_amount_usd || 0)}</strong>
-                          </div>
-                        </div>
-                      ))}
+                            <div className="am-dense-end">
+                              <div className="am-dense-end-value">{Number.isFinite(Number(task?.amount_usdt)) ? `$${Number(task.amount_usdt).toFixed(2)}` : '--'}</div>
+                              <div className="am-dense-end-label">持仓</div>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
-                  </>
-                ) : <EmptyState text="从在线用户或活跃任务中选择一个用户查看详情。" />}
+                  ) : (
+                    <EmptyState text={taskLoading
+                      ? '正在加载活跃任务...'
+                      : (activeTasks.length > 0 ? '没有匹配的活跃任务' : '暂无活跃任务')}
+                    />
+                  )}
+                </section>
               </div>
             </>
           ) : null}
 
           {activeTab === 'system' ? (
             <>
-              <div className="am-metric-row">
-                <MetricCard label="系统配置" value={systemConfig ? '已加载' : '--'} tone="strong" />
-                <MetricCard label="RPC 分组" value={String(rpcGroups.length)} />
-                <MetricCard label="池子源分组" value={String(poolSourceGroups.length)} />
-                <MetricCard label="Private Zap 链" value={String(privateZapChains.length)} />
-                <MetricCard label="当前时间" value={formatDateTime(new Date())} />
+              <div className="am-stat-row">
+                <AdminStatChip
+                  label="基础配置"
+                  value={systemConfig ? '已加载' : '--'}
+                  tone={systemConfig ? 'ok' : 'idle'}
+                  hint={systemConfig ? '可调整' : '尚未加载'}
+                />
+                <AdminStatChip
+                  label="RPC 节点"
+                  value={rpcHealthSummary.value}
+                  tone={rpcHealthSummary.tone}
+                  hint={rpcHealthSummary.hint}
+                />
+                <AdminStatChip
+                  label="池子源"
+                  value={poolSourceHealthSummary.value}
+                  tone={poolSourceHealthSummary.tone}
+                  hint={poolSourceHealthSummary.hint}
+                />
+                <AdminStatChip
+                  label="Private Zap"
+                  value={privateZapChains.length}
+                  tone={privateZapChains.length > 0 ? 'accent' : 'idle'}
+                  hint={`${privateZapChains.length} 条链`}
+                />
               </div>
 
               <div className="am-system-tabs" role="tablist" aria-label="系统配置分类">
@@ -1436,6 +1605,91 @@ export default function AdminPanel({
         onConfirm={runConfirmAction}
         onCancel={closeConfirmAction}
       />
+      <AdminDrawer
+        open={drawerOpen}
+        title={selectedUser ? formatUserLabel(selectedUser) : '用户详情'}
+        subtitle={selectedUser ? `TG ${selectedUser?.telegram_id || '--'} · 用户 ID ${selectedUser?.user_id || '--'}` : ''}
+        headerExtra={selectedUser?.user_id ? (
+          <button
+            type="button"
+            className="am-action-btn"
+            disabled={positionsLoading}
+            onClick={() => loadUserPositions(selectedUser.user_id)}
+            style={{ padding: '6px 10px' }}
+          >
+            <RefreshCw size={12} className={positionsLoading ? 'animate-spin' : undefined} />
+            刷新
+          </button>
+        ) : null}
+        onClose={closeUserDrawer}
+      >
+        {selectedUser ? (
+          <>
+            <div className="am-drawer-meta">
+              <div>
+                <div className="am-drawer-meta-key">TG ID</div>
+                <div className="am-drawer-meta-val">{selectedUser?.telegram_id || '--'}</div>
+              </div>
+              <div>
+                <div className="am-drawer-meta-key">用户 ID</div>
+                <div className="am-drawer-meta-val">{selectedUser?.user_id || '--'}</div>
+              </div>
+              <div className="am-drawer-meta-row-2">
+                <div className="am-drawer-meta-key">钱包</div>
+                <div className="am-drawer-meta-val">{userPositions?.wallet?.address || '--'}</div>
+              </div>
+              <div>
+                <div className="am-drawer-meta-key">BNB 余额</div>
+                <div className="am-drawer-meta-val">{userPositions?.wallet?.bnb_balance || '--'}</div>
+              </div>
+              <div>
+                <div className="am-drawer-meta-key">活跃仓位</div>
+                <div className="am-drawer-meta-val">{userPositionsList.length}</div>
+              </div>
+            </div>
+
+            {positionsError ? <div className="am-error">{positionsError}</div> : null}
+            {positionsLoading && userPositionsList.length === 0 ? (
+              <div className="panel-loading">正在加载用户仓位...</div>
+            ) : null}
+            {!positionsLoading && userPositionsList.length === 0 && !positionsError ? (
+              <EmptyState text="当前用户没有活跃仓位。" />
+            ) : null}
+
+            {userPositionsList.length > 0 ? (
+              <div className="am-dense-list">
+                {userPositionsList.map((position) => {
+                  const tone = statusTone(position?.status);
+                  return (
+                    <div
+                      key={[position?.chain, position?.pool_id, position?.position_id, position?.task_id].join(':')}
+                      className="am-dense-row"
+                      style={{ cursor: 'default' }}
+                    >
+                      <AdminStatusDot tone={tone} size="sm" />
+                      <div className="am-dense-main">
+                        <div className="am-dense-title">
+                          {formatPositionPair(position)}
+                          <span className={`am-tag tone-${tone}`}>{formatStatus(position?.status)}</span>
+                        </div>
+                        <div className="am-dense-sub">
+                          {formatChain(position?.chain)} · Task #{position?.task_id || '--'} · {shortAddress(position?.wallet_address || '')}
+                        </div>
+                      </div>
+                      <div className="am-dense-end">
+                        <div className="am-dense-end-value">{formatUsd(position?.totals?.wallet_usd || position?.position_amount_usd || 0)}</div>
+                        <div className="am-dense-end-label">仓位</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <EmptyState text="未选择用户。" />
+        )}
+      </AdminDrawer>
     </PanelShell>
   );
 }

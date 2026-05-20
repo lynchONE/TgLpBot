@@ -9,6 +9,7 @@
 ## Goals / Non-Goals
 - Goals:
   - 在 `webapp` 同链单币兑换中同时展示 OKX、0x、LI.FI 报价。
+  - 页面仅展示 OKX 的兑换路径，不展示 0x 与 LI.FI 的兑换路径。
   - 使用“净到手”而不是“裸路由返回值”作为前端比较与默认排序口径。
   - 支持在确认弹窗中选定 provider，并按该 provider 执行最终兑换。
 - Non-Goals:
@@ -35,10 +36,11 @@
   - `webapp` 当前的一键兑换交互是链内 token-to-token swap。
   - LI.FI 在本次改动中固定使用 `fromChain == toChain` 的同链 quote，不开放 bridge 路径。
 
-- Decision: 路径展示做统一归一化
+- Decision: 路径展示做统一归一化，但按 provider 控制可见性
   - OKX 路径来自 `routerResult.dexRouterList/subRouterList/dexProtocol`。
   - 0x 路径来自 `route.fills`，前端展示为 hop/source/proportion 摘要。
   - LI.FI 路径来自 `includedSteps` 与 `estimate.data.protocols`。
+  - `webapp` 仅展示 OKX 的路径摘要；0x 与 LI.FI 报价即使后端保留归一化路径字段，也 MUST NOT 在报价卡片、详情区或确认弹窗中展示。
 
 - Decision: 部分 provider 失败不阻断整体报价
   - 只要至少一个 provider 报价成功，接口就返回成功响应。

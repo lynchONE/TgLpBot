@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatRelativeTime } from '../lib/time';
 import NumberFlowValue from './NumberFlowValue.jsx';
+import StatusDot from './admin/StatusDot.jsx';
 import { getBrandTheme } from '../lib/brand';
 
 function formatUserLabel(user) {
@@ -23,20 +24,12 @@ export default function AdminOnlineUsers({
     accentTheme = 'lime',
     onSelectUser,
     selectedUserId,
+    totalCount,
 }) {
     const brand = getBrandTheme(accentTheme);
-    const selectedPanelClass = brand.key === 'emerald'
-        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
-        : 'border-[#bcff2f]/40 bg-[#bcff2f]/10 text-[#2f3d0c] dark:text-[#f1ffcf]';
-    const selectedSubtleTextClass = brand.key === 'emerald'
-        ? 'text-emerald-700/80 dark:text-emerald-200/80'
-        : 'text-[#6f9616] dark:text-[#dfff8b]';
-    const selectedTextClass = brand.key === 'emerald'
-        ? 'text-emerald-700 dark:text-emerald-200'
-        : 'text-[#5f8313] dark:text-[#e9ffad]';
-    const selectedMutedTextClass = brand.key === 'emerald'
-        ? 'text-emerald-700/60 dark:text-emerald-200/60'
-        : 'text-[#6f9616]/80 dark:text-[#dfff8b]/75';
+    const selectedTone = brand.key === 'emerald'
+        ? 'border-emerald-500/40 bg-emerald-500/10'
+        : 'border-[#bcff2f]/45 bg-[#bcff2f]/10';
 
     if (error) {
         return (
@@ -48,63 +41,61 @@ export default function AdminOnlineUsers({
 
     if (loading && users.length === 0) {
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white/40 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                加载中...
+            <div className="rounded-xl border border-zinc-200/70 bg-white/50 p-4 text-center text-xs text-zinc-500 dark:border-white/10 dark:bg-[#0f1116]/70 dark:text-white/55">
+                加载中…
             </div>
         );
     }
 
     if (users.length === 0) {
+        const isFiltered = typeof totalCount === 'number' && totalCount > 0;
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white/40 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                暂无在线用户
+            <div className="rounded-xl border border-dashed border-zinc-200 p-5 text-center text-xs text-zinc-400 dark:border-white/10 dark:text-white/35">
+                {isFiltered ? '没有匹配的在线用户' : '暂无在线用户'}
             </div>
         );
     }
 
     return (
-        <div className="space-y-2">
-            {users.map((user) => {
-                const selected = Number(user?.user_id) === Number(selectedUserId);
-                const updatedText = formatRelativeTime(user?.updated_at, tick) || '--';
-                const totalTasks = Number(user?.total_tasks) || 0;
-
-                return (
-                    <button
-                        key={user.user_id}
-                        type="button"
-                        onClick={() => onSelectUser?.(user)}
-                        className={`w-full rounded-xl border p-3 text-left transition ${
-                            selected
-                                ? selectedPanelClass
-                                : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
-                        }`}
-                    >
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold">{formatUserLabel(user)}</div>
-                                <div className={`mt-0.5 text-[11px] ${
-                                    selected ? selectedSubtleTextClass : 'text-zinc-500 dark:text-white/40'
-                                }`}>
-                                    {user.telegram_id ? `TG ${user.telegram_id}` : 'TG --'} | ID {user.user_id}
+        <div className="overflow-hidden rounded-2xl border border-zinc-200/70 bg-white/65 backdrop-blur-sm dark:border-white/10 dark:bg-[#0f1116]/80">
+            <ul className="divide-y divide-zinc-200/60 dark:divide-white/5">
+                {users.map((user) => {
+                    const selected = Number(user?.user_id) === Number(selectedUserId);
+                    const updatedText = formatRelativeTime(user?.updated_at, tick) || '--';
+                    const totalTasks = Number(user?.total_tasks) || 0;
+                    return (
+                        <li key={user.user_id}>
+                            <button
+                                type="button"
+                                onClick={() => onSelectUser?.(user)}
+                                className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition ${
+                                    selected
+                                        ? selectedTone
+                                        : 'hover:bg-zinc-100/60 dark:hover:bg-white/5'
+                                }`}
+                            >
+                                <StatusDot tone="ok" pulse size="sm" />
+                                <div className="min-w-0 flex-1">
+                                    <div className="truncate text-[13px] font-semibold text-zinc-900 dark:text-white/90">
+                                        {formatUserLabel(user)}
+                                    </div>
+                                    <div className="mt-0.5 truncate text-[10px] text-zinc-500 dark:text-white/40">
+                                        TG {user.telegram_id || '--'} · ID {user.user_id} · {updatedText}
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="shrink-0 text-right">
-                                <div className={`text-xs font-semibold ${
-                                    selected ? selectedTextClass : 'text-zinc-700 dark:text-white/70'
-                                }`}>
-                                    <NumberFlowValue value={totalTasks} formatOptions={{ maximumFractionDigits: 0 }} /> 个任务
+                                <div className="shrink-0 text-right">
+                                    <div className="text-[13px] font-bold tabular-nums text-zinc-900 dark:text-white/85">
+                                        <NumberFlowValue value={totalTasks} formatOptions={{ maximumFractionDigits: 0 }} />
+                                    </div>
+                                    <div className="text-[9px] uppercase tracking-wider text-zinc-400 dark:text-white/30">
+                                        任务
+                                    </div>
                                 </div>
-                                <div className={`mt-0.5 text-[10px] ${
-                                    selected ? selectedMutedTextClass : 'text-zinc-400 dark:text-white/30'
-                                }`}>
-                                    <NumberFlowValue value={updatedText} formatter={() => updatedText} />
-                                </div>
-                            </div>
-                        </div>
-                    </button>
-                );
-            })}
+                            </button>
+                        </li>
+                    );
+                })}
+            </ul>
         </div>
     );
 }

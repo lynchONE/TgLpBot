@@ -85,10 +85,11 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
     const kindList = useMemo(() => Array.isArray(kinds) && kinds.length > 0 ? kinds : DEFAULT_KINDS, [kinds]);
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white/40 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5 dark:shadow-none">
+        <div className="rounded-2xl border border-zinc-200/70 bg-white/65 p-4 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-[#0f1116]/80 dark:shadow-none">
             <div className="flex items-center justify-between gap-3">
                 <div>
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">Private Zap</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/45">PRIVATE ZAP</div>
+                    <div className="mt-0.5 text-[15px] font-black text-zinc-900 dark:text-white">合约绑定</div>
                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
                         Invalidate bindings by chain and contract kind. The selected kind will redeploy on next use.
                     </div>

@@ -306,25 +306,44 @@ export default function AdminPoolDataSources({ apiBaseUrl, initData, hasInitData
 
     return (
         <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <div>
-                    <div className="text-base font-bold text-zinc-900 dark:text-white">池子数据源</div>
-                    <div className="mt-0.5 text-[11px] text-zinc-400 dark:text-white/30">
-                        {groups.reduce((sum, group) => sum + (group?.sources?.length || 0), 0)} 个来源
+            <div className="rounded-2xl border border-zinc-200/70 bg-white/65 px-3 py-3 backdrop-blur-sm dark:border-white/10 dark:bg-[#0f1116]/80">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/45">POOL DATA</div>
+                        <div className="mt-0.5 text-[15px] font-black text-zinc-900 dark:text-white">池子数据源</div>
+                        <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
+                            {groups.reduce((sum, group) => sum + (group?.sources?.length || 0), 0)} 个来源 · {groups.length} 个分组
+                        </div>
                     </div>
+                    <button type="button" onClick={load} disabled={loading}
+                        className="rounded-xl px-3 py-1.5 text-[11px] font-semibold ring-1 ring-zinc-200 transition hover:bg-zinc-100 disabled:opacity-40 dark:ring-white/10 dark:hover:bg-white/10">
+                        {loading ? '刷新中' : '刷新'}
+                    </button>
                 </div>
-                <button type="button" onClick={load} disabled={loading}
-                    className="rounded-xl px-3 py-1.5 text-xs font-medium ring-1 ring-zinc-200 transition hover:bg-zinc-100 disabled:opacity-40 dark:ring-white/10 dark:hover:bg-white/10">
-                    {loading ? '刷新中' : '刷新'}
-                </button>
             </div>
             {error && <div className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
             <AddSourceForm onAdd={handleAdd} adding={adding} error={addError} brand={brand} />
-            {groups.map((group) => (
+            {groups.map((group) => {
+                const sources = Array.isArray(group?.sources) ? group.sources : [];
+                const enabledCount = sources.filter((s) => s?.is_enabled).length;
+                const errorCount = sources.filter((s) => s?.last_error).length;
+                const hasCurrent = sources.some((s) => s?.is_current);
+                const dotClass = errorCount > 0
+                    ? 'bg-red-500'
+                    : hasCurrent
+                        ? 'bg-emerald-500'
+                        : 'bg-zinc-400 dark:bg-zinc-500';
+                return (
                 <div key={`${group.chain}:${group.timeframe_minutes}`} className="rounded-2xl border border-zinc-200 bg-white/60 p-4 dark:border-white/10 dark:bg-white/[0.03]">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-sm font-bold text-zinc-900 dark:text-white/90">
-                            {(group.chain || 'bsc').toUpperCase()} · {group.timeframe_minutes || 5}m
+                        <div className="flex items-center gap-2">
+                            <span className={`inline-block h-2 w-2 rounded-full ring-2 ring-white/70 dark:ring-[#0c0e12] ${dotClass}`} />
+                            <div className="text-sm font-bold text-zinc-900 dark:text-white/90">
+                                {(group.chain || 'bsc').toUpperCase()} · {group.timeframe_minutes || 5}m
+                            </div>
+                            <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-zinc-500 dark:bg-white/5 dark:text-white/45">
+                                {enabledCount}/{sources.length}
+                            </span>
                         </div>
                         <div className="truncate text-right text-[11px] text-zinc-500 dark:text-white/45">
                             当前 {group.effective_source?.name || group.env_fallback?.name || '--'}
@@ -350,7 +369,8 @@ export default function AdminPoolDataSources({ apiBaseUrl, initData, hasInitData
                         </div>
                     )}
                 </div>
-            ))}
+                );
+            })}
         </div>
     );
 }

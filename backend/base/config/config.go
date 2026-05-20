@@ -185,6 +185,12 @@ type Config struct {
 	WorkerMaxParallelUsers int // max concurrent per-user jobs (strategy monitor)
 	WalletTxMaxParallel    int // max concurrent wallets doing on-chain tx (per-wallet is still serialized)
 
+	// Wallet swap limit orders
+	WalletSwapLimitOrdersEnabled        bool
+	WalletSwapLimitOrderIntervalSeconds int
+	WalletSwapLimitOrderBatchSize       int
+	WalletSwapLimitOrderMaxParallel     int
+
 	// Token Addresses
 	USDTAddress      string
 	USDCAddress      string
@@ -273,6 +279,9 @@ func LoadConfig() error {
 	zapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MAX", "0")), 10, 64)
 	workerMaxParallelUsers, _ := strconv.Atoi(strings.TrimSpace(getEnv("WORKER_MAX_PARALLEL_USERS", "16")))
 	walletTxMaxParallel, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_TX_MAX_PARALLEL", "8")))
+	walletSwapLimitOrderInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_SWAP_LIMIT_ORDER_INTERVAL_SECONDS", "15")))
+	walletSwapLimitOrderBatchSize, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_SWAP_LIMIT_ORDER_BATCH_SIZE", "20")))
+	walletSwapLimitOrderMaxParallel, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_SWAP_LIMIT_ORDER_MAX_PARALLEL", "2")))
 	webAppDebugUserID, _ := strconv.ParseInt(strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USER_ID", "0")), 10, 64)
 	webAppDebugUsername := strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USERNAME", "local_debug"))
 	bscRPCURL := strings.TrimSpace(getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"))
@@ -284,6 +293,15 @@ func LoadConfig() error {
 	}
 	if walletTxMaxParallel <= 0 {
 		walletTxMaxParallel = 1
+	}
+	if walletSwapLimitOrderInterval <= 0 {
+		walletSwapLimitOrderInterval = 15
+	}
+	if walletSwapLimitOrderBatchSize <= 0 {
+		walletSwapLimitOrderBatchSize = 20
+	}
+	if walletSwapLimitOrderMaxParallel <= 0 {
+		walletSwapLimitOrderMaxParallel = 1
 	}
 	if poolsSyncIntervalSeconds <= 0 {
 		poolsSyncIntervalSeconds = 60
@@ -395,6 +413,11 @@ func LoadConfig() error {
 		WorkerMaxParallelUsers: workerMaxParallelUsers,
 		WalletTxMaxParallel:    walletTxMaxParallel,
 
+		WalletSwapLimitOrdersEnabled:        getEnvBool("WALLET_SWAP_LIMIT_ORDERS_ENABLED", true),
+		WalletSwapLimitOrderIntervalSeconds: walletSwapLimitOrderInterval,
+		WalletSwapLimitOrderBatchSize:       walletSwapLimitOrderBatchSize,
+		WalletSwapLimitOrderMaxParallel:     walletSwapLimitOrderMaxParallel,
+
 		// Token Addresses
 		USDTAddress:      getEnv("USDT_ADDRESS", "0x55d398326f99059fF775485246999027B3197955"),
 		USDCAddress:      getEnv("USDC_ADDRESS", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"),
@@ -500,6 +523,11 @@ func LoadConfig() error {
 	}
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
+	log.Printf("   - Wallet Swap Limit Orders Enabled: %v", AppConfig.WalletSwapLimitOrdersEnabled)
+	log.Printf("   - Wallet Swap Limit Order Interval/Batch/Parallel: %d/%d/%d",
+		AppConfig.WalletSwapLimitOrderIntervalSeconds,
+		AppConfig.WalletSwapLimitOrderBatchSize,
+		AppConfig.WalletSwapLimitOrderMaxParallel)
 	log.Printf("   - MinIO Endpoint: %s", maskURL(AppConfig.MinIOEndpoint))
 	log.Printf("   - MinIO Use SSL: %v", AppConfig.MinIOUseSSL)
 	log.Printf("   - MinIO Public Base URL: %s", maskURL(AppConfig.MinIOPublicBaseURL))

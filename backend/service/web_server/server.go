@@ -17,23 +17,28 @@ import (
 )
 
 type Server struct {
-	Realtime   *realtime.RealtimePositionsService
-	TokenPrice *pricing.TokenPriceService
-	TokenMeta  *token_metadata.Service
-	Assets     *assets.Service
+	Realtime        *realtime.RealtimePositionsService
+	TokenPrice      *pricing.TokenPriceService
+	TokenMeta       *token_metadata.Service
+	Assets          *assets.Service
+	SwapLimitOrders *WalletSwapLimitOrderWorker
 }
 
 func NewServer() *Server {
 	return &Server{
-		Realtime:   realtime.NewRealtimePositionsService(),
-		TokenPrice: pricing.NewTokenPriceService(),
-		TokenMeta:  token_metadata.NewService(),
-		Assets:     assets.NewService(),
+		Realtime:        realtime.NewRealtimePositionsService(),
+		TokenPrice:      pricing.NewTokenPriceService(),
+		TokenMeta:       token_metadata.NewService(),
+		Assets:          assets.NewService(),
+		SwapLimitOrders: NewWalletSwapLimitOrderWorker(),
 	}
 }
 
 func (s *Server) Start(port string) {
 	initSmartMoney()
+	if s.SwapLimitOrders != nil {
+		s.SwapLimitOrders.Start()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/pools", s.handleGetPools)
@@ -89,6 +94,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/wallet_swap_execute", s.handleWalletSwapExecute)
 	mux.HandleFunc("/api/wallet_swap_token_metadata", s.handleWalletSwapTokenMetadata)
 	mux.HandleFunc("/api/wallet_swap_history", s.handleWalletSwapHistory)
+	mux.HandleFunc("/api/wallet_swap_limit_order", s.handleWalletSwapLimitOrder)
 	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)
 	mux.HandleFunc("/api/admin/realtime_positions", s.handleAdminRealtimePositions)
 	mux.HandleFunc("/api/admin/system_config", s.handleAdminSystemConfig)

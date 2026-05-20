@@ -593,31 +593,56 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
     /* total stats */
     const totalEndpoints = groups.reduce((s, g) => s + (g?.endpoints?.length || 0), 0);
     const totalAvailable = groups.reduce((s, g) => s + (g?.endpoints || []).filter(ep => !isUnavailable(ep)).length, 0);
+    const totalUnavailable = totalEndpoints - totalAvailable;
+    const latencySamples = groups.flatMap(g => (g?.endpoints || [])
+        .filter(ep => !isUnavailable(ep) && Number(ep?.last_latency_ms || 0) > 0)
+        .map(ep => Number(ep.last_latency_ms)));
+    const avgLatency = latencySamples.length > 0
+        ? Math.round(latencySamples.reduce((s, v) => s + v, 0) / latencySamples.length)
+        : 0;
+    const availableRatio = totalEndpoints > 0 ? Math.round((totalAvailable / totalEndpoints) * 100) : 0;
 
     return (
         <div className="space-y-3">
             {/* header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <div className="text-base font-bold text-zinc-900 dark:text-white">RPC 节点池</div>
-                    <div className="text-[11px] text-zinc-400 dark:text-white/30 mt-0.5">
-                        {totalEndpoints > 0 ? (
-                            <>{totalAvailable}<span className={getBrandToneClass(brand)}> 可用</span> / {totalEndpoints} 总计</>
-                        ) : '额度/频控触发时自动切换'}
+            <div className="rounded-2xl border border-zinc-200/70 bg-white/65 px-3 py-3 backdrop-blur-sm dark:border-white/10 dark:bg-[#0f1116]/80">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/45">RPC POOL</div>
+                        <div className="mt-0.5 text-[15px] font-black text-zinc-900 dark:text-white">节点池</div>
+                    </div>
+                    <button type="button" onClick={load} disabled={loading}
+                        className={`rounded-xl px-3 py-1.5 text-[11px] font-semibold ring-1 ring-zinc-200 dark:ring-white/10 transition ${loading ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-100 dark:hover:bg-white/10 active:scale-95'}`}>
+                        {loading ? (
+                            <span className="inline-flex items-center gap-1">
+                                <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                                刷新中
+                            </span>
+                        ) : '刷新'}
+                    </button>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl bg-zinc-100/60 px-2.5 py-2 dark:bg-white/5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-white/40">节点</div>
+                        <div className="mt-0.5 text-[15px] font-black tabular-nums text-zinc-900 dark:text-white/90">{totalEndpoints}</div>
+                        <div className={`mt-0.5 text-[10px] tabular-nums ${getBrandToneClass(brand)}`}>{availableRatio}% 可用</div>
+                    </div>
+                    <div className="rounded-xl bg-zinc-100/60 px-2.5 py-2 dark:bg-white/5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-white/40">不可用</div>
+                        <div className={`mt-0.5 text-[15px] font-black tabular-nums ${totalUnavailable > 0 ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white/90'}`}>{totalUnavailable}</div>
+                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/35">个节点</div>
+                    </div>
+                    <div className="rounded-xl bg-zinc-100/60 px-2.5 py-2 dark:bg-white/5">
+                        <div className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-white/40">平均延迟</div>
+                        <div className={`mt-0.5 text-[15px] font-black tabular-nums ${avgLatency === 0 ? 'text-zinc-400' : avgLatency < 300 ? 'text-emerald-600 dark:text-emerald-400' : avgLatency < 1000 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {avgLatency > 0 ? avgLatency : '--'}
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/35">ms</div>
                     </div>
                 </div>
-                <button type="button" onClick={load} disabled={loading}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-medium ring-1 ring-zinc-200 dark:ring-white/10 transition ${loading ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-100 dark:hover:bg-white/10 active:scale-95'}`}>
-                    {loading ? (
-                        <span className="inline-flex items-center gap-1">
-                            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            刷新中
-                        </span>
-                    ) : '刷新'}
-                </button>
             </div>
 
             {error && (

@@ -6,7 +6,8 @@
 - **WHEN** 用户在 `webapp` 为某个钱包发起一笔同链单币兑换报价
 - **THEN** 后端 MUST 在单次响应中返回 OKX、0x 和 LI.FI 的报价集合
 - **AND** 每个报价 MUST 包含 provider 标识、预估到账、最小到账、预估 Gas、可执行状态和更新时间
-- **AND** 每个报价 MUST 包含可供页面展示的交易路径摘要
+- **AND** OKX 报价 MUST 包含可供页面展示的交易路径摘要
+- **AND** 前端 MUST NOT 展示 0x 与 LI.FI 的兑换路径
 
 #### Scenario: 仅部分 provider 可用
 - **WHEN** 某个 provider 因链不支持、无流动性或接口失败而无法生成报价
@@ -41,3 +42,15 @@
 - **WHEN** 用户确认提交时所选 provider 的报价已过期或重新取价失败
 - **THEN** 后端 MUST 返回明确失败原因
 - **AND** 前端 MUST 保留用户输入并提示重新获取报价
+
+### Requirement: 钱包一键兑换 MUST 按 provider 控制路径展示
+系统 MUST 允许页面比较 OKX、0x 与 LI.FI 的报价，但路径展示 MUST 按 provider 控制：OKX 可以展示兑换路径，0x 与 LI.FI 不得展示兑换路径。
+
+#### Scenario: 页面展示 OKX 报价路径
+- **WHEN** OKX 报价返回可展示路径
+- **THEN** `webapp` 可以在报价卡片、详情区或确认弹窗中展示 OKX 的路径摘要
+
+#### Scenario: 页面隐藏 0x 与 LI.FI 报价路径
+- **WHEN** 0x 或 LI.FI 报价返回路径字段
+- **THEN** `webapp` MUST NOT 在报价卡片、详情区或确认弹窗中展示该 provider 的路径摘要
+- **AND** 页面 MUST 继续展示该 provider 的到账金额、手续费、Gas 与可执行状态

@@ -1503,6 +1503,76 @@ export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, wal
   });
 }
 
+export async function createWalletSwapLimitOrder({
+  apiBaseUrl,
+  initData,
+  chain,
+  walletId,
+  fromToken,
+  toToken,
+  amount,
+  targetToAmount,
+  targetPrice,
+  slippagePercent,
+  provider,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_limit_order`;
+  const payload = {
+    initData,
+    action: 'create',
+    from_token: fromToken,
+    to_token: toToken,
+    amount,
+  };
+  if (chain) payload.chain = String(chain);
+  if (walletId) payload.wallet_id = Number(walletId);
+  if (targetToAmount !== undefined && targetToAmount !== null && String(targetToAmount).trim()) {
+    payload.target_to_amount = String(targetToAmount).trim();
+  }
+  if (targetPrice !== undefined && targetPrice !== null && String(targetPrice).trim()) {
+    payload.target_price = String(targetPrice).trim();
+  }
+  if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+  if (provider) payload.provider = String(provider);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function fetchWalletSwapLimitOrders({ apiBaseUrl, initData, chain, walletId, limit, offset, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_limit_order`;
+  const payload = { initData, action: 'list' };
+  if (chain) payload.chain = String(chain);
+  if (walletId) payload.wallet_id = Number(walletId);
+  if (Number.isFinite(limit)) payload.limit = Number(limit);
+  if (Number.isFinite(offset)) payload.offset = Number(offset);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function cancelWalletSwapLimitOrder({ apiBaseUrl, initData, chain, orderId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_limit_order`;
+  const payload = { initData, action: 'cancel', order_id: Number(orderId) };
+  if (chain) payload.chain = String(chain);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
 export async function fetchWalletSwapHistory({ apiBaseUrl, initData, chain, walletId, limit, offset, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/settings?endpoint=wallet_swap_history`;

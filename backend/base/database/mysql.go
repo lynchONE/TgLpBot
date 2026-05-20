@@ -72,6 +72,7 @@ func autoMigrate() error {
 		&models.Position{},
 		&models.Pool{},
 		&models.Transaction{},
+		&models.WalletSwapLimitOrder{},
 		&models.AuthCode{},
 		&models.UserAccess{},
 		&models.Announcement{},

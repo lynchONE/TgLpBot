@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  cancelWalletSwapLimitOrder,
+  createWalletSwapLimitOrder,
   fetchWalletSwapHistory,
+  fetchWalletSwapLimitOrders,
   fetchGlobalConfig,
   fetchWallets,
   fetchWalletSwapTokenMetadata,
@@ -414,6 +417,11 @@ function getProviderIcon(provider) {
   return PROVIDER_ICON_MAP[key] || null;
 }
 
+function shouldShowSwapRoute(provider) {
+  const key = String(provider || '').toLowerCase().trim();
+  return key !== '0x' && key !== 'li.fi' && key !== 'lifi';
+}
+
 function DexIconBadge({ name, size = 16 }) {
   const info = getDexIconInfo(name);
   const versionMatch = String(name || '').match(/[vV](\d+)/);
@@ -497,6 +505,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [slippage, setSlippage] = useState('1.0');
   const [slippageDirty, setSlippageDirty] = useState(false);
   const [walletDropdownOpen, setWalletDropdownOpen] = useState(false);
+  const [swapMode, setSwapMode] = useState('market');
+  const [limitTargetMode, setLimitTargetMode] = useState('to_amount');
+  const [limitTargetToAmount, setLimitTargetToAmount] = useState('');
+  const [limitTargetPrice, setLimitTargetPrice] = useState('');
 
   const [quoteInfo, setQuoteInfo] = useState(null);
   const [selectedProvider, setSelectedProvider] = useState('');
@@ -524,6 +536,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [swapHistory, setSwapHistory] = useState([]);
   const [loadingSwapHistory, setLoadingSwapHistory] = useState(false);
   const [swapHistoryError, setSwapHistoryError] = useState('');
+  const [limitOrders, setLimitOrders] = useState([]);
+  const [loadingLimitOrders, setLoadingLimitOrders] = useState(false);
+  const [limitOrdersError, setLimitOrdersError] = useState('');
+  const [limitOrderBusyId, setLimitOrderBusyId] = useState('');
   const [tokenMetaMap, setTokenMetaMap] = useState({});
 
   const quoteTimeout = useRef(null);
@@ -535,6 +551,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const walletTokensSeqRef = useRef(0);
   const swapHistoryAbortRef = useRef(null);
   const swapHistorySeqRef = useRef(0);
+  const limitOrdersAbortRef = useRef(null);
+  const limitOrdersSeqRef = useRef(0);
 
   const normalizedFromToken = normalizeHexAddress(fromToken);
   const normalizedToToken = normalizeHexAddress(toToken);
@@ -662,6 +680,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     () => selectedQuote?.route_summary || '--',
     [selectedQuote]
   );
+  const showSelectedQuoteRoute = useMemo(
+    () => selectedQuote?.status === 'available' && shouldShowSwapRoute(selectedQuote?.provider),
+    [selectedQuote]
+  );
   const minReceived = useMemo(() => {
     const fromQuote = Number(selectedQuote?.min_to_amount_float);
     if (Number.isFinite(fromQuote) && fromQuote > 0) return formatTokenAmount(fromQuote);
@@ -670,6 +692,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     if (!Number.isFinite(out) || out <= 0 || !Number.isFinite(slip) || slip < 0) return '--';
     return formatTokenAmount(out * (1 - slip / 100));
   }, [quoteInfo, selectedQuote, slippage]);
+  const limitTargetToAmountNumber = useMemo(() => Number(limitTargetToAmount), [limitTargetToAmount]);
+  const limitTargetPriceNumber = useMemo(() => Number(limitTargetPrice), [limitTargetPrice]);
   const quoteRequestKey = useMemo(
     () => [chain, selectedWalletId, normalizedFromToken, normalizedToToken, amount, slippage].join('|'),
     [amount, chain, normalizedFromToken, normalizedToToken, selectedWalletId, slippage]
@@ -769,6 +793,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setWalletTokensKey('');
     setSwapHistory([]);
     setSwapHistoryError('');
+    setLimitOrders([]);
+    setLimitOrdersError('');
+    setLimitTargetToAmount('');
+    setLimitTargetPrice('');
     setTokenMetaMap({});
     lastRequestedQuoteKeyRef.current = '';
   }, [chainConfig.stable.address]);
@@ -967,6 +995,43 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   }, [apiBaseUrl, initData, chain, selectedWalletId]);
 
+  const loadLimitOrders = useCallback(async () => {
+    if (!initData || !selectedWalletId) return;
+    const seq = limitOrdersSeqRef.current + 1;
+    limitOrdersSeqRef.current = seq;
+    if (limitOrdersAbortRef.current) {
+      limitOrdersAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    limitOrdersAbortRef.current = controller;
+    setLoadingLimitOrders(true);
+    setLimitOrdersError('');
+    try {
+      const resp = await fetchWalletSwapLimitOrders({
+        apiBaseUrl,
+        initData,
+        chain,
+        walletId: selectedWalletId,
+        limit: 20,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || limitOrdersSeqRef.current !== seq) return;
+      setLimitOrders(Array.isArray(resp?.orders) ? resp.orders : []);
+    } catch (error) {
+      if (controller.signal.aborted || limitOrdersSeqRef.current !== seq) return;
+      console.error('loadLimitOrders failed', error);
+      setLimitOrders([]);
+      setLimitOrdersError(String(error?.message || error || '加载限价单失败'));
+    } finally {
+      if (limitOrdersAbortRef.current === controller) {
+        limitOrdersAbortRef.current = null;
+      }
+      if (limitOrdersSeqRef.current === seq) {
+        setLoadingLimitOrders(false);
+      }
+    }
+  }, [apiBaseUrl, initData, chain, selectedWalletId]);
+
   useEffect(() => {
     if (!hasInitData) return;
     loadWallets();
@@ -984,6 +1049,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setWalletTokensError('');
     setSwapHistory([]);
     setSwapHistoryError('');
+    setLimitOrders([]);
+    setLimitOrdersError('');
     clearExecutionFeedback();
   }, [clearExecutionFeedback, currentWalletTokenKey]);
 
@@ -996,7 +1063,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   useEffect(() => {
     if (!hasInitData || !currentWalletTokenKey) return;
     loadSwapHistory();
-  }, [currentWalletTokenKey, hasInitData, loadSwapHistory]);
+    loadLimitOrders();
+  }, [currentWalletTokenKey, hasInitData, loadLimitOrders, loadSwapHistory]);
 
   useEffect(() => () => {
     if (walletTokensAbortRef.current) {
@@ -1004,6 +1072,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
     if (swapHistoryAbortRef.current) {
       swapHistoryAbortRef.current.abort();
+    }
+    if (limitOrdersAbortRef.current) {
+      limitOrdersAbortRef.current.abort();
     }
   }, []);
 
@@ -1237,6 +1308,59 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   };
 
+  const handleCreateLimitOrder = async () => {
+    if (!initData || !normalizedFromToken || !normalizedToToken) return;
+    setExecuting(true);
+    setExecError('');
+    setExecSuccess('');
+    setExecResult(null);
+    try {
+      const targetToAmount = limitTargetMode === 'to_amount' ? limitTargetToAmount : '';
+      const targetPrice = limitTargetMode === 'price' ? limitTargetPrice : '';
+      const resp = await createWalletSwapLimitOrder({
+        apiBaseUrl,
+        initData,
+        chain,
+        walletId: selectedWalletId,
+        fromToken: normalizedFromToken,
+        toToken: normalizedToToken,
+        amount,
+        targetToAmount,
+        targetPrice,
+        slippagePercent: Number.parseFloat(slippage),
+        provider: selectedQuote?.provider || quoteInfo?.best_provider || 'best',
+      });
+      setExecSuccess(resp?.message || '限价单已创建');
+      setExecResult(resp?.order || null);
+      setLimitTargetToAmount('');
+      setLimitTargetPrice('');
+      await loadLimitOrders();
+    } catch (error) {
+      setExecError(String(error?.message || error));
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const handleCancelLimitOrder = async (orderId) => {
+    if (!initData || !orderId) return;
+    setLimitOrderBusyId(String(orderId));
+    setLimitOrdersError('');
+    try {
+      await cancelWalletSwapLimitOrder({
+        apiBaseUrl,
+        initData,
+        chain,
+        orderId,
+      });
+      await loadLimitOrders();
+    } catch (error) {
+      setLimitOrdersError(String(error?.message || error || '取消限价单失败'));
+    } finally {
+      setLimitOrderBusyId('');
+    }
+  };
+
   const handleMaxAmount = () => {
     if (!normalizedFromToken) return;
     const walletToken = walletTokens.find((t) => t.address === normalizedFromToken);
@@ -1273,7 +1397,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   }, [chain, onChainChange]);
 
-  const isReadyToSwap = Boolean(
+  const baseSwapReady = Boolean(
     selectedWalletId &&
     normalizedFromToken &&
     normalizedToToken &&
@@ -1287,8 +1411,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     !quoting &&
     !executing
   );
+  const isLimitTargetReady = limitTargetMode === 'price'
+    ? Number.isFinite(limitTargetPriceNumber) && limitTargetPriceNumber > 0
+    : Number.isFinite(limitTargetToAmountNumber) && limitTargetToAmountNumber > 0;
+  const isReadyToSwap = swapMode === 'limit'
+    ? Boolean(baseSwapReady && isLimitTargetReady)
+    : baseSwapReady;
 
-  let submitLabel = '\u9884\u89c8\u5151\u6362';
+  let submitLabel = swapMode === 'limit' ? '创建限价单' : '\u9884\u89c8\u5151\u6362';
   if (!selectedWalletId) submitLabel = walletLoading ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...' : '\u8bf7\u5148\u9009\u62e9\u94b1\u5305';
   else if (!normalizedFromToken) submitLabel = '\u9009\u62e9\u5356\u51fa\u4ee3\u5e01';
   else if (!amount || Number(amount) <= 0) submitLabel = '\u8f93\u5165\u5356\u51fa\u6570\u91cf';
@@ -1299,6 +1429,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   else if (!quoteInfo) submitLabel = '\u7b49\u5f85\u62a5\u4ef7';
   else if (!availableProviderCount) submitLabel = '\u6682\u65e0\u53ef\u7528\u62a5\u4ef7';
   else if (!selectedQuote || selectedQuote?.status !== 'available') submitLabel = '\u9009\u62e9\u53ef\u7528\u62a5\u4ef7';
+  else if (swapMode === 'limit' && !isLimitTargetReady) submitLabel = limitTargetMode === 'price' ? '输入目标价格' : '输入目标到账';
 
   return (
     <PanelShell
@@ -1308,6 +1439,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     >
       <div className="swap-panel">
         <div className="swap-panel-shell">
+
+          <div className="swap-mode-tabs" role="tablist" aria-label="兑换模式">
+            <button type="button" className={swapMode === 'market' ? 'active' : ''} onClick={() => setSwapMode('market')}>市价兑换</button>
+            <button type="button" className={swapMode === 'limit' ? 'active' : ''} onClick={() => setSwapMode('limit')}>限价单</button>
+          </div>
 
           {/* ─── Top Strip: Chain pills + Slippage ─── */}
           <div className="swap-top-strip">
@@ -1349,6 +1485,36 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
             </div>
           </div>
+
+          {swapMode === 'limit' ? (
+            <div className="swap-limit-card">
+              <div className="swap-limit-head">
+                <div>
+                  <strong>触发条件</strong>
+                  <span>{selectedQuote?.status === 'available' ? `当前预估 ${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim() : '先选择代币并获取当前报价'}</span>
+                </div>
+                <div className="swap-limit-toggle">
+                  <button type="button" className={limitTargetMode === 'to_amount' ? 'active' : ''} onClick={() => setLimitTargetMode('to_amount')}>到账</button>
+                  <button type="button" className={limitTargetMode === 'price' ? 'active' : ''} onClick={() => setLimitTargetMode('price')}>价格</button>
+                </div>
+              </div>
+              <div className="swap-limit-input-row">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={limitTargetMode === 'price' ? limitTargetPrice : limitTargetToAmount}
+                  onChange={(event) => {
+                    clearExecutionFeedback();
+                    if (limitTargetMode === 'price') setLimitTargetPrice(event.target.value);
+                    else setLimitTargetToAmount(event.target.value);
+                  }}
+                  placeholder={limitTargetMode === 'price' ? '目标价格' : '目标到账数量'}
+                />
+                <span>{limitTargetMode === 'price' ? `${toTokenMeta?.symbol || 'To'} / ${fromTokenMeta?.symbol || 'From'}` : (toTokenMeta?.symbol || 'To')}</span>
+              </div>
+            </div>
+          ) : null}
 
           {/* ─── Wallet Selector ─── */}
           <div className="swap-wallet-bar" ref={walletSelectRef}>
@@ -1485,7 +1651,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         </div>
                         {quote?.status === 'available' ? (
                           <div className="swap-prov-row-bottom">
-                            {quote?.route?.length || quote?.route_summary ? (
+                            {shouldShowSwapRoute(quote?.provider) && (quote?.route?.length || quote?.route_summary) ? (
                               <RouteDexIcons routeSummary={quote?.route_summary} route={quote?.route} />
                             ) : <span />}
                             <span className="swap-prov-gas-text">{gasCostText}</span>
@@ -1509,7 +1675,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                       <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeDisplay} />
                       <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                       <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                      {selectedQuote?.route?.length ? (
+                      {showSelectedQuoteRoute && (selectedQuote?.route?.length || selectedQuote?.route_summary) ? (
                         <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
                       ) : null}
                       <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
@@ -1549,9 +1715,50 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
           ) : null}
 
           {/* ─── Submit ─── */}
-          <button type="button" className="swap-submit-button" disabled={!isReadyToSwap} onClick={() => setShowConfirm(true)}>
+          <button type="button" className="swap-submit-button" disabled={!isReadyToSwap} onClick={() => (swapMode === 'limit' ? handleCreateLimitOrder() : setShowConfirm(true))}>
             {executing ? '\u6267\u884c\u4e2d...' : submitLabel}
           </button>
+
+          {swapMode === 'limit' ? (
+            <div className="swap-history-card">
+              <div className="swap-history-head">
+                <div>
+                  <strong>限价单</strong>
+                  <span>{selectedWallet ? shortAddress(selectedWallet.address, 8, 6) : '当前钱包'}</span>
+                </div>
+                <button type="button" className="swap-history-refresh" onClick={() => loadLimitOrders()} disabled={loadingLimitOrders || !selectedWalletId}>
+                  {loadingLimitOrders ? '刷新中...' : '刷新'}
+                </button>
+              </div>
+              {limitOrdersError ? <div className="swap-history-empty">{limitOrdersError}</div> : null}
+              {!limitOrdersError && loadingLimitOrders && limitOrders.length === 0 ? <div className="swap-history-empty">正在加载限价单...</div> : null}
+              {!limitOrdersError && !loadingLimitOrders && limitOrders.length === 0 ? <div className="swap-history-empty">当前钱包暂无限价单</div> : null}
+              {limitOrders.map((order) => {
+                const fromOT = buildHistoryTokenMeta(order.from_token, tokenMetaMap, chain);
+                const toOT = buildHistoryTokenMeta(order.to_token, tokenMetaMap, chain);
+                const open = order.status === 'open';
+                return (
+                  <div key={order.id} className="swap-limit-order-row">
+                    <div className="swap-limit-order-main">
+                      <strong>{`${order.from_amount_float || '--'} ${fromOT?.symbol || order?.from_token?.symbol || ''} -> ${order.target_to_amount_float || '--'} ${toOT?.symbol || order?.to_token?.symbol || ''}`}</strong>
+                      <span>{`Provider ${order.provider_label || '--'} · ${order.status || '--'}`}</span>
+                      {order.last_quote_to_amount_float ? <small>{`最近报价 ${order.last_quote_to_amount_float} ${toOT?.symbol || ''} · ${order.last_checked_at || '--'}`}</small> : null}
+                      {order.tx_url ? <a href={order.tx_url} target="_blank" rel="noreferrer">{shortAddress(order.tx_hash, 8, 6)}</a> : null}
+                      {order.last_error ? <small className="error">{order.last_error}</small> : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="swap-limit-cancel"
+                      disabled={!open || limitOrderBusyId === String(order.id)}
+                      onClick={() => handleCancelLimitOrder(order.id)}
+                    >
+                      {limitOrderBusyId === String(order.id) ? '处理中' : open ? '取消' : '已结束'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
 
           {/* ─── History ─── */}
           <div className="swap-history-card">
@@ -1734,7 +1941,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 <DetailRow label={'\u6ed1\u70b9\u5bb9\u5fcd'} value={`${slippage || '1.0'}%`} />
                 <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                 <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                {selectedQuote?.route?.length ? (
+                {showSelectedQuoteRoute && (selectedQuote?.route?.length || selectedQuote?.route_summary) ? (
                   <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
                 ) : null}
               </div>
