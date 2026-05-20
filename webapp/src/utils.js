@@ -5,11 +5,63 @@ export const WIDGETS = [
   { key: 'positions', label: '仓位' },
   { key: 'assets', label: '我的' },
   { key: 'smart_money', label: '聪明钱' },
+  { key: 'wallet_manage', label: '钱包管理' },
+  { key: 'global_config', label: '全局配置' },
   { key: 'swap', label: '一键兑换' },
+  { key: 'trade_history', label: '交易记录' },
   { key: 'admin_panel', label: '管理员' },
 ];
 
 export const DEFAULT_WIDGETS = WIDGETS.map((item) => item.key);
+
+export const WIDGET_MODULE_MAP = {
+  create_pool: 'create_pool',
+  hot_pools: 'hot_pools',
+  gmgn_kline: 'gmgn_kline',
+  positions: 'positions',
+  assets: 'assets',
+  smart_money: 'smart_money',
+  wallet_manage: 'wallet_manage',
+  global_config: 'global_config',
+  swap: 'swap',
+  trade_history: 'positions',
+  admin_panel: 'admin_panel',
+};
+
+export function normalizeEnabledModules(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const modules = [];
+  value.forEach((item) => {
+    const key = String(item || '').trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    modules.push(key);
+  });
+  return modules;
+}
+
+export function normalizeAccessInfo(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    allowed: Boolean(value.allowed),
+    is_admin: Boolean(value.is_admin),
+    mini_app_enabled: Boolean(value.mini_app_enabled),
+    enabled_modules: normalizeEnabledModules(value.enabled_modules),
+    module_catalog: Array.isArray(value.module_catalog) ? value.module_catalog : [],
+  };
+}
+
+export function canAccessWidget(widgetKey, accessInfo) {
+  const key = String(widgetKey || '').trim();
+  if (!key || !accessInfo) return false;
+  if (key === 'admin_panel') return Boolean(accessInfo.is_admin);
+  if (accessInfo.is_admin) return true;
+  if (!accessInfo.mini_app_enabled) return false;
+  const moduleKey = WIDGET_MODULE_MAP[key];
+  if (!moduleKey || moduleKey === 'admin_panel') return false;
+  return normalizeEnabledModules(accessInfo.enabled_modules).includes(moduleKey);
+}
 
 const usdFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',

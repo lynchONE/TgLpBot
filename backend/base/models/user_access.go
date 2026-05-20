@@ -19,9 +19,10 @@ type UserAccess struct {
 	ActiveFrom *time.Time `gorm:"index" json:"active_from"`
 	ActiveTo   *time.Time `gorm:"index" json:"active_to"`
 
-	MaxWallets     int  `gorm:"default:1" json:"max_wallets"`
-	MaxActiveTasks int  `gorm:"default:1" json:"max_active_tasks"`
-	MiniAppEnabled bool `gorm:"default:false" json:"mini_app_enabled"`
+	MaxWallets     int    `gorm:"default:1" json:"max_wallets"`
+	MaxActiveTasks int    `gorm:"default:1" json:"max_active_tasks"`
+	MiniAppEnabled bool   `gorm:"default:false" json:"mini_app_enabled"`
+	EnabledModules string `gorm:"type:text" json:"-"`
 
 	RevokedAt       *time.Time `gorm:"index" json:"revoked_at"`
 	RevokedByUserID *uint      `gorm:"index" json:"revoked_by_user_id"`

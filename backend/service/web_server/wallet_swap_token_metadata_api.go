@@ -58,7 +58,7 @@ func (s *Server) handleWalletSwapTokenMetadata(w http.ResponseWriter, r *http.Re
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleSwap); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}

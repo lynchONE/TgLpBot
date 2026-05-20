@@ -1,4 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Ban,
+  Check,
+  Copy,
+  KeyRound,
+  Megaphone,
+  Plus,
+  Power,
+  PowerOff,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Search,
+  ShieldCheck,
+  UsersRound,
+} from 'lucide-react';
 import {
   createAdminAuthCode,
   disableAdminAuthCode,
@@ -13,13 +29,16 @@ import {
   updateAdminUserAccess,
 } from '../api';
 import ConfirmDialog from './ConfirmDialog';
-import { EmptyState, MetricCard } from './PanelShell';
+import { EmptyState } from './PanelShell';
 
 const SECTIONS = [
-  { key: 'users', label: '用户授权' },
-  { key: 'codes', label: '授权码' },
-  { key: 'announcements', label: '公告' },
+  { key: 'users', label: '用户授权', icon: UsersRound },
+  { key: 'codes', label: '授权码', icon: KeyRound },
+  { key: 'announcements', label: '公告', icon: Megaphone },
 ];
+
+const USERS_PAGE_SIZE = 24;
+const CODES_PAGE_SIZE = 24;
 
 function errorText(err) {
   return String(err?.message || err || '').trim();
@@ -51,35 +70,70 @@ function formatUserLabel(user) {
   return `用户 #${user?.user_id || '--'}`;
 }
 
-function accessStatusLabel(status) {
+function statusText(status) {
   switch (String(status || '').toLowerCase()) {
     case 'active':
-      return '已授权';
+      return '生效中';
     case 'revoked':
       return '已停用';
     case 'expired':
       return '已过期';
     case 'pending':
       return '未生效';
+    case 'disabled':
+      return '已停用';
+    case 'exhausted':
+      return '已用完';
     default:
-      return '未授权';
+      return status || '未授权';
   }
 }
 
-function codeStatusLabel(status) {
-  switch (String(status || '').toLowerCase()) {
-    case 'active':
-      return '可用';
-    case 'disabled':
-      return '已停用';
-    case 'expired':
-      return '已过期';
-    case 'exhausted':
-      return '已用完';
-    case 'pending':
-      return '未生效';
-    default:
-      return status || '--';
+function statusTone(status) {
+  const value = String(status || '').toLowerCase();
+  if (value === 'active') return 'ok';
+  if (value === 'revoked' || value === 'disabled' || value === 'expired' || value === 'exhausted') return 'danger';
+  return 'warn';
+}
+
+function normalizeModuleKeys(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const keys = [];
+  value.forEach((item) => {
+    const key = String(item || '').trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    keys.push(key);
+  });
+  return keys;
+}
+
+function positiveInt(value, min) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.trunc(n));
+}
+
+function moduleMap(modules) {
+  return new Map((modules || []).map((item) => [String(item.key || '').trim(), item]));
+}
+
+function moduleSummary(keys, modules) {
+  const normalized = normalizeModuleKeys(keys);
+  if (!normalized.length) return '未授权模块';
+  const byKey = moduleMap(modules);
+  const labels = normalized.slice(0, 3).map((key) => byKey.get(key)?.label || key);
+  const rest = normalized.length - labels.length;
+  return rest > 0 ? `${labels.join('、')} +${rest}` : labels.join('、');
+}
+
+function applyModulePayload(data, setModuleCatalog, setGrantableModules) {
+  if (Array.isArray(data?.module_catalog)) {
+    setModuleCatalog(data.module_catalog);
+  }
+  if (Array.isArray(data?.grantable_modules)) {
+    setGrantableModules(data.grantable_modules);
   }
 }
 
@@ -90,24 +144,204 @@ function makeAccessDraft(user) {
     maxWallets: String(Number(user?.max_wallets || 1)),
     maxActiveTasks: String(Number(user?.max_active_tasks || 1)),
     miniAppEnabled: Boolean(user?.mini_app_enabled),
+    enabledModules: normalizeModuleKeys(user?.enabled_modules),
     note: String(user?.note || ''),
   };
 }
 
-const defaultCodeDraft = {
-  activeTo: '',
-  maxRedemptions: '1',
-  maxWallets: '1',
-  maxActiveTasks: '1',
-  miniAppEnabled: true,
-  note: '',
-};
+function makeCodeDraft(moduleKeys) {
+  return {
+    activeTo: '',
+    maxRedemptions: '1',
+    maxWallets: '1',
+    maxActiveTasks: '1',
+    miniAppEnabled: true,
+    enabledModules: normalizeModuleKeys(moduleKeys),
+    note: '',
+  };
+}
+
+function SectionTabs({ section, onChange }) {
+  return (
+    <div className="aaw-tabs" role="tablist" aria-label="管理员模块">
+      {SECTIONS.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            className={`aaw-tab ${section === item.key ? 'active' : ''}`}
+            aria-selected={section === item.key}
+            onClick={() => onChange(item.key)}
+          >
+            <Icon size={16} />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ModulePermissionEditor({ modules, value, onChange, dense = false }) {
+  const selected = useMemo(() => new Set(normalizeModuleKeys(value)), [value]);
+  const moduleKeys = useMemo(() => modules.map((item) => String(item.key || '').trim()).filter(Boolean), [modules]);
+  const groups = useMemo(() => {
+    const map = new Map();
+    modules.forEach((item) => {
+      const group = String(item.group || '其他').trim() || '其他';
+      if (!map.has(group)) map.set(group, []);
+      map.get(group).push(item);
+    });
+    return Array.from(map.entries()).map(([group, items]) => ({ group, items }));
+  }, [modules]);
+
+  const emit = useCallback((keys) => {
+    onChange(normalizeModuleKeys(keys).filter((key) => moduleKeys.includes(key)));
+  }, [moduleKeys, onChange]);
+
+  const toggleKey = useCallback((key) => {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    emit(Array.from(next));
+  }, [emit, selected]);
+
+  const toggleGroup = useCallback((items) => {
+    const keys = items.map((item) => String(item.key || '').trim()).filter(Boolean);
+    const allSelected = keys.every((key) => selected.has(key));
+    const next = new Set(selected);
+    keys.forEach((key) => {
+      if (allSelected) next.delete(key);
+      else next.add(key);
+    });
+    emit(Array.from(next));
+  }, [emit, selected]);
+
+  if (!modules.length) {
+    return <div className="aaw-empty-line">模块目录为空</div>;
+  }
+
+  return (
+    <div className={`aaw-module-editor ${dense ? 'dense' : ''}`}>
+      <div className="aaw-module-toolbar">
+        <div>
+          <strong>功能模块</strong>
+          <span>{selected.size}/{modules.length}</span>
+        </div>
+        <div className="aaw-inline-actions">
+          <button type="button" className="aaw-mini-btn" onClick={() => emit(moduleKeys)}>全部授权</button>
+          <button type="button" className="aaw-mini-btn ghost" onClick={() => emit([])}>清空</button>
+        </div>
+      </div>
+      <div className="aaw-module-groups">
+        {groups.map(({ group, items }) => {
+          const groupKeys = items.map((item) => String(item.key || '').trim()).filter(Boolean);
+          const groupSelected = groupKeys.filter((key) => selected.has(key)).length;
+          return (
+            <section key={group} className="aaw-module-group">
+              <div className="aaw-module-group-head">
+                <span>{group}</span>
+                <button type="button" onClick={() => toggleGroup(items)}>
+                  {groupSelected === groupKeys.length ? '取消本组' : '选择本组'}
+                </button>
+              </div>
+              <div className="aaw-module-grid">
+                {items.map((item) => {
+                  const key = String(item.key || '').trim();
+                  const checked = selected.has(key);
+                  return (
+                    <label key={key} className={`aaw-module-check ${checked ? 'checked' : ''}`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleKey(key)} />
+                      <span className="aaw-checkmark">{checked ? <Check size={14} /> : null}</span>
+                      <span className="aaw-module-copy">
+                        <strong>{item.label || key}</strong>
+                        <small>{key}</small>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LimitFields({ draft, onChange, includeRedemptions = false }) {
+  return (
+    <div className="aaw-form-grid">
+      <label className="aaw-field">
+        <span>有效期</span>
+        <input
+          type="date"
+          value={draft.activeTo}
+          disabled={Boolean(draft.clearActiveTo)}
+          onChange={(event) => onChange({ activeTo: event.target.value })}
+        />
+      </label>
+      {'clearActiveTo' in draft ? (
+        <label className="aaw-check-row">
+          <input
+            type="checkbox"
+            checked={Boolean(draft.clearActiveTo)}
+            onChange={(event) => onChange({ clearActiveTo: event.target.checked })}
+          />
+          <span>长期有效</span>
+        </label>
+      ) : null}
+      {includeRedemptions ? (
+        <label className="aaw-field">
+          <span>兑换次数</span>
+          <input
+            type="number"
+            min="1"
+            value={draft.maxRedemptions}
+            onChange={(event) => onChange({ maxRedemptions: event.target.value })}
+          />
+        </label>
+      ) : null}
+      <label className="aaw-field">
+        <span>钱包数</span>
+        <input
+          type="number"
+          min="0"
+          value={draft.maxWallets}
+          onChange={(event) => onChange({ maxWallets: event.target.value })}
+        />
+      </label>
+      <label className="aaw-field">
+        <span>任务数</span>
+        <input
+          type="number"
+          min="0"
+          value={draft.maxActiveTasks}
+          onChange={(event) => onChange({ maxActiveTasks: event.target.value })}
+        />
+      </label>
+      <label className="aaw-check-row">
+        <input
+          type="checkbox"
+          checked={Boolean(draft.miniAppEnabled)}
+          onChange={(event) => onChange({ miniAppEnabled: event.target.checked })}
+        />
+        <span>MiniApp</span>
+      </label>
+    </div>
+  );
+}
 
 export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData, onNotice }) {
   const [section, setSection] = useState('users');
   const [notice, setNotice] = useState('');
   const [confirmAction, setConfirmAction] = useState(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+
+  const [moduleCatalog, setModuleCatalog] = useState([]);
+  const [grantableModules, setGrantableModules] = useState([]);
 
   const [users, setUsers] = useState([]);
   const [usersTotal, setUsersTotal] = useState(0);
@@ -122,7 +356,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
   const [codesTotal, setCodesTotal] = useState(0);
   const [codesLoading, setCodesLoading] = useState(false);
   const [codesError, setCodesError] = useState('');
-  const [codeDraft, setCodeDraft] = useState(defaultCodeDraft);
+  const [codeDraft, setCodeDraft] = useState(makeCodeDraft([]));
   const [createdCode, setCreatedCode] = useState('');
   const [editingCodeId, setEditingCodeId] = useState(null);
 
@@ -131,6 +365,18 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
   const [annError, setAnnError] = useState('');
   const [announcementDraft, setAnnouncementDraft] = useState({ title: '系统公告', content: '' });
   const [publishing, setPublishing] = useState(false);
+
+  const initializedCodeModulesRef = useRef(false);
+  const moduleKeys = useMemo(
+    () => grantableModules.map((item) => String(item.key || '').trim()).filter(Boolean),
+    [grantableModules]
+  );
+
+  useEffect(() => {
+    if (initializedCodeModulesRef.current || moduleKeys.length === 0) return;
+    initializedCodeModulesRef.current = true;
+    setCodeDraft((prev) => ({ ...prev, enabledModules: moduleKeys }));
+  }, [moduleKeys]);
 
   const showNotice = useCallback((message) => {
     const text = String(message || '').trim();
@@ -145,7 +391,13 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     setUsersLoading(true);
     setUsersError('');
     try {
-      const data = await fetchAdminAccessList({ apiBaseUrl, initData, pageSize: 20, query: usersQuery });
+      const data = await fetchAdminAccessList({
+        apiBaseUrl,
+        initData,
+        pageSize: USERS_PAGE_SIZE,
+        query: usersQuery,
+      });
+      applyModulePayload(data, setModuleCatalog, setGrantableModules);
       const items = Array.isArray(data?.items) ? data.items : [];
       setUsers(items);
       setUsersTotal(Number(data?.total || items.length));
@@ -168,7 +420,12 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     setCodesLoading(true);
     setCodesError('');
     try {
-      const data = await fetchAdminAuthCodes({ apiBaseUrl, initData, pageSize: 20 });
+      const data = await fetchAdminAuthCodes({
+        apiBaseUrl,
+        initData,
+        pageSize: CODES_PAGE_SIZE,
+      });
+      applyModulePayload(data, setModuleCatalog, setGrantableModules);
       const items = Array.isArray(data?.items) ? data.items : [];
       setCodes(items);
       setCodesTotal(Number(data?.total || items.length));
@@ -202,20 +459,36 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
   const selectedAccess = useMemo(() => selectedUser || users[0] || null, [selectedUser, users]);
 
   useEffect(() => {
-    if (selectedAccess && (!selectedUser || Number(selectedUser.user_id) !== Number(selectedAccess.user_id))) {
-      setSelectedUser(selectedAccess);
-      setAccessDraft(makeAccessDraft(selectedAccess));
-    }
+    if (!selectedAccess) return;
+    if (selectedUser && Number(selectedUser.user_id) === Number(selectedAccess.user_id)) return;
+    setSelectedUser(selectedAccess);
+    setAccessDraft(makeAccessDraft(selectedAccess));
   }, [selectedAccess, selectedUser]);
+
+  const patchAccessDraft = useCallback((patch) => {
+    setAccessDraft((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const patchCodeDraft = useCallback((patch) => {
+    setCodeDraft((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const updateCodeRow = useCallback((codeId, patch) => {
+    setCodes((prev) => prev.map((item) => (
+      Number(item.id) === Number(codeId) ? { ...item, ...patch } : item
+    )));
+  }, []);
 
   const saveSelectedAccess = useCallback(async () => {
     if (!selectedUser?.user_id) return;
     setAccessSaving(true);
+    setUsersError('');
     try {
       const payload = {
-        max_wallets: Number(accessDraft.maxWallets),
-        max_active_tasks: Number(accessDraft.maxActiveTasks),
+        max_wallets: positiveInt(accessDraft.maxWallets, 0),
+        max_active_tasks: positiveInt(accessDraft.maxActiveTasks, 0),
         mini_app_enabled: Boolean(accessDraft.miniAppEnabled),
+        enabled_modules: normalizeModuleKeys(accessDraft.enabledModules),
         note: accessDraft.note,
       };
       if (accessDraft.clearActiveTo) {
@@ -223,7 +496,12 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       } else if (String(accessDraft.activeTo || '').trim()) {
         payload.active_to = String(accessDraft.activeTo).trim();
       }
-      const data = await updateAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id, patch: payload });
+      const data = await updateAdminUserAccess({
+        apiBaseUrl,
+        initData,
+        userId: selectedUser.user_id,
+        patch: payload,
+      });
       setSelectedUser(data);
       setAccessDraft(makeAccessDraft(data));
       showNotice('用户授权已更新');
@@ -252,16 +530,17 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     setCodesError('');
     try {
       const payload = {
-        max_redemptions: Number(codeDraft.maxRedemptions),
-        max_wallets: Number(codeDraft.maxWallets),
-        max_active_tasks: Number(codeDraft.maxActiveTasks),
+        max_redemptions: positiveInt(codeDraft.maxRedemptions, 1),
+        max_wallets: positiveInt(codeDraft.maxWallets, 0),
+        max_active_tasks: positiveInt(codeDraft.maxActiveTasks, 0),
         mini_app_enabled: Boolean(codeDraft.miniAppEnabled),
+        enabled_modules: normalizeModuleKeys(codeDraft.enabledModules),
         note: codeDraft.note,
       };
       if (String(codeDraft.activeTo || '').trim()) payload.active_to = String(codeDraft.activeTo).trim();
       const data = await createAdminAuthCode({ apiBaseUrl, initData, payload });
       setCreatedCode(String(data?.code?.code || ''));
-      setCodeDraft(defaultCodeDraft);
+      setCodeDraft(makeCodeDraft(moduleKeys));
       showNotice('授权码已生成');
       await loadCodes();
     } catch (err) {
@@ -269,14 +548,15 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     } finally {
       setCodesLoading(false);
     }
-  }, [apiBaseUrl, codeDraft, initData, loadCodes, showNotice]);
+  }, [apiBaseUrl, codeDraft, initData, loadCodes, moduleKeys, showNotice]);
 
   const saveCode = useCallback(async (code) => {
     const payload = {
-      max_redemptions: Number(code.max_redemptions || 1),
-      max_wallets: Number(code.max_wallets || 1),
-      max_active_tasks: Number(code.max_active_tasks || 1),
+      max_redemptions: positiveInt(code.max_redemptions, 1),
+      max_wallets: positiveInt(code.max_wallets, 0),
+      max_active_tasks: positiveInt(code.max_active_tasks, 0),
       mini_app_enabled: Boolean(code.mini_app_enabled),
+      enabled_modules: normalizeModuleKeys(code.enabled_modules),
       note: String(code.note || ''),
     };
     if (code.active_to) payload.active_to = formatDateInput(code.active_to);
@@ -307,101 +587,124 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     }
   }, [announcementDraft, apiBaseUrl, initData, loadAnnouncements, showNotice]);
 
+  const activeUsers = users.filter((item) => String(item.status || '').toLowerCase() === 'active').length;
+  const activeCodes = codes.filter((item) => String(item.status || '').toLowerCase() === 'active').length;
+
   return (
-    <div className="am-stack">
-      {notice ? <div className="panel-success">{notice}</div> : null}
-      <div className="am-actions">
-        {SECTIONS.map((item) => (
-          <button key={item.key} type="button" className={`am-tab-btn ${section === item.key ? 'active' : ''}`} onClick={() => setSection(item.key)}>
-            {item.label}
-          </button>
-        ))}
+    <div className="aaw-shell">
+      {notice ? <div className="aaw-notice">{notice}</div> : null}
+      <div className="aaw-hero">
+        <div>
+          <div className="aaw-kicker">
+            <ShieldCheck size={16} />
+            Admin Access
+          </div>
+          <h2>授权工作台</h2>
+        </div>
+        <div className="aaw-hero-stats">
+          <div><span>用户</span><strong>{usersTotal || users.length}</strong></div>
+          <div><span>生效授权</span><strong>{activeUsers}</strong></div>
+          <div><span>授权码</span><strong>{codesTotal || codes.length}</strong></div>
+          <div><span>可授权模块</span><strong>{grantableModules.length}</strong></div>
+        </div>
       </div>
 
+      <SectionTabs section={section} onChange={setSection} />
+
       {section === 'users' ? (
-        <>
-          <div className="am-metric-row">
-            <MetricCard label="用户数" value={String(usersTotal)} tone="strong" />
-            <MetricCard label="当前用户" value={selectedUser?.user_id ? `#${selectedUser.user_id}` : '--'} />
-            <MetricCard label="授权状态" value={accessStatusLabel(selectedUser?.status)} />
-            <MetricCard label="MiniApp" value={selectedUser?.mini_app_enabled ? '开' : '关'} />
-          </div>
-          <div className="am-two-col">
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title">用户授权</div>
-                <button type="button" className="am-action-btn" disabled={usersLoading} onClick={loadUsers}>刷新</button>
+        <div className="aaw-split">
+          <section className="aaw-panel aaw-list-panel">
+            <div className="aaw-panel-head">
+              <div>
+                <h3>用户</h3>
+                <span>{usersTotal || users.length} 条记录</span>
               </div>
-              <div className="am-form">
-                <label className="am-field am-field-grow">
-                  <span>搜索</span>
-                  <input value={usersQuery} onChange={(event) => setUsersQuery(event.target.value)} placeholder="@username / Telegram ID" />
-                </label>
-                <button type="button" className="am-action-btn" disabled={usersLoading} onClick={loadUsers}>查询</button>
-              </div>
-              {usersError ? <div className="am-error">{usersError}</div> : null}
-              <div className="am-list">
-                {users.length > 0 ? users.map((user) => (
-                  <button
-                    type="button"
-                    key={user.user_id}
-                    className={`am-list-item am-list-btn ${Number(user.user_id) === Number(selectedUser?.user_id) ? 'selected' : ''}`}
-                    onClick={() => {
-                      setSelectedUser(user);
-                      setAccessDraft(makeAccessDraft(user));
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div className="am-item-title">{formatUserLabel(user)}</div>
-                      <div className="am-item-sub">TG {user.telegram_id || '--'} / {accessStatusLabel(user.status)}</div>
-                    </div>
-                    <span className={user.status === 'active' ? 'am-badge am-badge-ok' : 'am-badge am-badge-warn'}>{user.mini_app_enabled ? 'Mini' : 'No Mini'}</span>
-                  </button>
-                )) : <EmptyState text={usersLoading ? '正在加载用户...' : '暂无用户'} />}
-              </div>
+              <button type="button" className="aaw-icon-btn" disabled={usersLoading} onClick={loadUsers} title="刷新">
+                <RefreshCw size={15} />
+              </button>
             </div>
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title">编辑授权</div>
-                <span className="am-item-sub">{selectedUser ? formatUserLabel(selectedUser) : '未选择'}</span>
+            <div className="aaw-search">
+              <Search size={15} />
+              <input
+                value={usersQuery}
+                onChange={(event) => setUsersQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') loadUsers();
+                }}
+                placeholder="@username / Telegram ID"
+              />
+              <button type="button" onClick={loadUsers} disabled={usersLoading}>查询</button>
+            </div>
+            {usersError ? <div className="aaw-error">{usersError}</div> : null}
+            <div className="aaw-rows">
+              {users.length > 0 ? users.map((user) => (
+                <button
+                  type="button"
+                  key={user.user_id}
+                  className={`aaw-user-row ${Number(user.user_id) === Number(selectedUser?.user_id) ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedUser(user);
+                    setAccessDraft(makeAccessDraft(user));
+                  }}
+                >
+                  <span className="aaw-avatar">{String(formatUserLabel(user)).slice(0, 1).toUpperCase()}</span>
+                  <span className="aaw-row-main">
+                    <strong>{formatUserLabel(user)}</strong>
+                    <small>TG {user.telegram_id || '--'} · {moduleSummary(user.enabled_modules, moduleCatalog)}</small>
+                  </span>
+                  <span className={`aaw-badge ${statusTone(user.status)}`}>{statusText(user.status)}</span>
+                </button>
+              )) : <EmptyState text={usersLoading ? '正在加载用户...' : '暂无用户'} />}
+            </div>
+          </section>
+
+          <section className="aaw-panel aaw-editor-panel">
+            <div className="aaw-panel-head">
+              <div>
+                <h3>编辑授权</h3>
+                <span>{selectedUser ? formatUserLabel(selectedUser) : '未选择用户'}</span>
               </div>
-              {selectedUser ? (
-                <>
-                  <div className="am-form">
-                    <label className="am-field">
-                      <span>到期时间</span>
-                      <input type="date" value={accessDraft.activeTo} disabled={accessDraft.clearActiveTo} onChange={(event) => setAccessDraft((prev) => ({ ...prev, activeTo: event.target.value }))} />
-                    </label>
-                    <label className="am-field am-field-check">
-                      <input type="checkbox" checked={accessDraft.clearActiveTo} onChange={(event) => setAccessDraft((prev) => ({ ...prev, clearActiveTo: event.target.checked }))} />
-                      <span>永久有效</span>
-                    </label>
-                    <label className="am-field">
-                      <span>钱包数</span>
-                      <input type="number" min="0" value={accessDraft.maxWallets} onChange={(event) => setAccessDraft((prev) => ({ ...prev, maxWallets: event.target.value }))} />
-                    </label>
-                    <label className="am-field">
-                      <span>任务数</span>
-                      <input type="number" min="0" value={accessDraft.maxActiveTasks} onChange={(event) => setAccessDraft((prev) => ({ ...prev, maxActiveTasks: event.target.value }))} />
-                    </label>
-                    <label className="am-field am-field-check">
-                      <input type="checkbox" checked={accessDraft.miniAppEnabled} onChange={(event) => setAccessDraft((prev) => ({ ...prev, miniAppEnabled: event.target.checked }))} />
-                      <span>MiniApp 权限</span>
-                    </label>
-                    <label className="am-field am-field-grow">
-                      <span>备注</span>
-                      <input value={accessDraft.note} onChange={(event) => setAccessDraft((prev) => ({ ...prev, note: event.target.value }))} />
-                    </label>
-                  </div>
-                  <div className="am-actions">
-                    <span className="am-item-sub">
-                      钱包 {Number(selectedUser.wallet_count || 0)} / {Number(accessDraft.maxWallets || 0)}，任务 {Number(selectedUser.active_task_count || 0)} / {Number(accessDraft.maxActiveTasks || 0)}
-                    </span>
-                    <button type="button" className="am-action-btn" disabled={accessSaving} onClick={saveSelectedAccess}>{accessSaving ? '保存中...' : '保存授权'}</button>
-                    {selectedUser.status === 'revoked' ? (
-                      <button type="button" className="am-action-btn" onClick={async () => { await restoreAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id }); showNotice('授权已恢复'); await loadUsers(); }}>恢复授权</button>
-                    ) : (
-                      <button type="button" className="am-action-btn" onClick={() => setConfirmAction({
+              {selectedUser ? <span className={`aaw-badge ${statusTone(selectedUser.status)}`}>{statusText(selectedUser.status)}</span> : null}
+            </div>
+            {selectedUser ? (
+              <>
+                <LimitFields draft={accessDraft} onChange={patchAccessDraft} />
+                <label className="aaw-field full">
+                  <span>备注</span>
+                  <input value={accessDraft.note} onChange={(event) => patchAccessDraft({ note: event.target.value })} />
+                </label>
+                <ModulePermissionEditor
+                  modules={grantableModules}
+                  value={accessDraft.enabledModules}
+                  onChange={(enabledModules) => patchAccessDraft({ enabledModules })}
+                />
+                <div className="aaw-quota-line">
+                  <span>钱包 {Number(selectedUser.wallet_count || 0)} / {positiveInt(accessDraft.maxWallets, 0)}</span>
+                  <span>任务 {Number(selectedUser.active_task_count || 0)} / {positiveInt(accessDraft.maxActiveTasks, 0)}</span>
+                </div>
+                <div className="aaw-actions">
+                  <button type="button" className="aaw-primary-btn" disabled={accessSaving} onClick={saveSelectedAccess}>
+                    <Save size={15} />
+                    {accessSaving ? '保存中...' : '保存授权'}
+                  </button>
+                  {selectedUser.status === 'revoked' ? (
+                    <button
+                      type="button"
+                      className="aaw-secondary-btn"
+                      onClick={async () => {
+                        await restoreAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id });
+                        showNotice('授权已恢复');
+                        await loadUsers();
+                      }}
+                    >
+                      <RotateCcw size={15} />
+                      恢复授权
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="aaw-danger-btn"
+                      onClick={() => setConfirmAction({
                         title: '停用用户授权',
                         message: `确认停用 ${formatUserLabel(selectedUser)} 的授权？`,
                         confirmText: '停用',
@@ -411,148 +714,199 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
                           showNotice('授权已停用');
                           await loadUsers();
                         },
-                      })}>停用授权</button>
-                    )}
-                  </div>
-                </>
-              ) : <EmptyState text="请选择一个用户" />}
-            </div>
-          </div>
-        </>
+                      })}
+                    >
+                      <Ban size={15} />
+                      停用授权
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : <EmptyState text="请选择一个用户" />}
+          </section>
+        </div>
       ) : null}
 
       {section === 'codes' ? (
-        <div className="am-two-col">
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title">生成授权码</div>
-              <span className="am-item-sub">共 {codesTotal} 个</span>
+        <div className="aaw-split">
+          <section className="aaw-panel">
+            <div className="aaw-panel-head">
+              <div>
+                <h3>生成授权码</h3>
+                <span>{activeCodes} 个可用</span>
+              </div>
+              <button type="button" className="aaw-icon-btn" disabled={codesLoading} onClick={loadCodes} title="刷新">
+                <RefreshCw size={15} />
+              </button>
             </div>
-            {createdCode ? <div className="panel-success">新授权码：{createdCode}</div> : null}
-            {codesError ? <div className="am-error">{codesError}</div> : null}
-            <div className="am-form">
-              <label className="am-field">
-                <span>有效期</span>
-                <input type="date" value={codeDraft.activeTo} onChange={(event) => setCodeDraft((prev) => ({ ...prev, activeTo: event.target.value }))} />
-              </label>
-              <label className="am-field">
-                <span>兑换次数</span>
-                <input type="number" min="1" value={codeDraft.maxRedemptions} onChange={(event) => setCodeDraft((prev) => ({ ...prev, maxRedemptions: event.target.value }))} />
-              </label>
-              <label className="am-field">
-                <span>钱包数</span>
-                <input type="number" min="0" value={codeDraft.maxWallets} onChange={(event) => setCodeDraft((prev) => ({ ...prev, maxWallets: event.target.value }))} />
-              </label>
-              <label className="am-field">
-                <span>任务数</span>
-                <input type="number" min="0" value={codeDraft.maxActiveTasks} onChange={(event) => setCodeDraft((prev) => ({ ...prev, maxActiveTasks: event.target.value }))} />
-              </label>
-              <label className="am-field am-field-check">
-                <input type="checkbox" checked={codeDraft.miniAppEnabled} onChange={(event) => setCodeDraft((prev) => ({ ...prev, miniAppEnabled: event.target.checked }))} />
-                <span>MiniApp 权限</span>
-              </label>
-              <label className="am-field am-field-grow">
-                <span>备注</span>
-                <input value={codeDraft.note} onChange={(event) => setCodeDraft((prev) => ({ ...prev, note: event.target.value }))} />
-              </label>
+            {createdCode ? (
+              <div className="aaw-created-code">
+                <span>{createdCode}</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(createdCode);
+                    showNotice('授权码已复制');
+                  }}
+                >
+                  <Copy size={14} />
+                  复制
+                </button>
+              </div>
+            ) : null}
+            {codesError ? <div className="aaw-error">{codesError}</div> : null}
+            <LimitFields draft={codeDraft} onChange={patchCodeDraft} includeRedemptions />
+            <label className="aaw-field full">
+              <span>备注</span>
+              <input value={codeDraft.note} onChange={(event) => patchCodeDraft({ note: event.target.value })} />
+            </label>
+            <ModulePermissionEditor
+              modules={grantableModules}
+              value={codeDraft.enabledModules}
+              onChange={(enabledModules) => patchCodeDraft({ enabledModules })}
+            />
+            <div className="aaw-actions">
+              <button type="button" className="aaw-primary-btn" disabled={codesLoading} onClick={createCode}>
+                <Plus size={15} />
+                {codesLoading ? '处理中...' : '生成授权码'}
+              </button>
             </div>
-            <div className="am-actions">
-              <button type="button" className="am-action-btn" disabled={codesLoading} onClick={createCode}>{codesLoading ? '处理中...' : '生成授权码'}</button>
-              <button type="button" className="am-action-btn" disabled={codesLoading} onClick={loadCodes}>刷新</button>
+          </section>
+
+          <section className="aaw-panel aaw-code-panel">
+            <div className="aaw-panel-head">
+              <div>
+                <h3>授权码列表</h3>
+                <span>{codesTotal || codes.length} 条记录</span>
+              </div>
             </div>
-          </div>
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title">授权码列表</div>
-            </div>
-            <div className="am-list">
+            <div className="aaw-code-list">
               {codes.length > 0 ? codes.map((code) => {
                 const editing = Number(editingCodeId) === Number(code.id);
                 return (
-                  <div key={code.id} className="am-list-item am-list-item-wrap">
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div className="am-item-title">{code.code}</div>
-                      <div className="am-item-sub">{codeStatusLabel(code.status)} / {code.redeemed_count}/{code.max_redemptions} / 到期 {formatDateTime(code.active_to)}</div>
-                      {editing ? (
-                        <div className="am-form">
-                          <label className="am-field">
-                            <span>兑换</span>
-                            <input type="number" min="1" value={code.max_redemptions} onChange={(event) => setCodes((prev) => prev.map((item) => item.id === code.id ? { ...item, max_redemptions: event.target.value } : item))} />
-                          </label>
-                          <label className="am-field">
-                            <span>钱包</span>
-                            <input type="number" min="0" value={code.max_wallets} onChange={(event) => setCodes((prev) => prev.map((item) => item.id === code.id ? { ...item, max_wallets: event.target.value } : item))} />
-                          </label>
-                          <label className="am-field">
-                            <span>任务</span>
-                            <input type="number" min="0" value={code.max_active_tasks} onChange={(event) => setCodes((prev) => prev.map((item) => item.id === code.id ? { ...item, max_active_tasks: event.target.value } : item))} />
-                          </label>
-                          <label className="am-field">
-                            <span>到期</span>
-                            <input type="date" value={formatDateInput(code.active_to)} onChange={(event) => setCodes((prev) => prev.map((item) => item.id === code.id ? { ...item, active_to: event.target.value || null } : item))} />
-                          </label>
-                          <label className="am-field am-field-check">
-                            <input type="checkbox" checked={Boolean(code.mini_app_enabled)} onChange={(event) => setCodes((prev) => prev.map((item) => item.id === code.id ? { ...item, mini_app_enabled: event.target.checked } : item))} />
-                            <span>MiniApp</span>
-                          </label>
-                          <label className="am-field am-field-grow">
-                            <span>备注</span>
-                            <input value={code.note || ''} onChange={(event) => setCodes((prev) => prev.map((item) => item.id === code.id ? { ...item, note: event.target.value } : item))} />
-                          </label>
-                        </div>
-                      ) : null}
+                  <article key={code.id} className="aaw-code-card">
+                    <div className="aaw-code-top">
+                      <div>
+                        <strong>{code.code}</strong>
+                        <span>{statusText(code.status)} · {code.redeemed_count}/{code.max_redemptions} · 到期 {formatDateTime(code.active_to)}</span>
+                      </div>
+                      <span className={`aaw-badge ${statusTone(code.status)}`}>{statusText(code.status)}</span>
                     </div>
-                    <div className="am-btn-group">
+                    {editing ? (
+                      <div className="aaw-code-edit">
+                        <LimitFields
+                          draft={{
+                            activeTo: formatDateInput(code.active_to),
+                            maxRedemptions: String(code.max_redemptions || 1),
+                            maxWallets: String(code.max_wallets || 0),
+                            maxActiveTasks: String(code.max_active_tasks || 0),
+                            miniAppEnabled: Boolean(code.mini_app_enabled),
+                          }}
+                          onChange={(patch) => {
+                            const next = {};
+                            if (Object.prototype.hasOwnProperty.call(patch, 'activeTo')) next.active_to = patch.activeTo || null;
+                            if (Object.prototype.hasOwnProperty.call(patch, 'maxRedemptions')) next.max_redemptions = patch.maxRedemptions;
+                            if (Object.prototype.hasOwnProperty.call(patch, 'maxWallets')) next.max_wallets = patch.maxWallets;
+                            if (Object.prototype.hasOwnProperty.call(patch, 'maxActiveTasks')) next.max_active_tasks = patch.maxActiveTasks;
+                            if (Object.prototype.hasOwnProperty.call(patch, 'miniAppEnabled')) next.mini_app_enabled = patch.miniAppEnabled;
+                            updateCodeRow(code.id, next);
+                          }}
+                          includeRedemptions
+                        />
+                        <label className="aaw-field full">
+                          <span>备注</span>
+                          <input value={code.note || ''} onChange={(event) => updateCodeRow(code.id, { note: event.target.value })} />
+                        </label>
+                        <ModulePermissionEditor
+                          modules={grantableModules}
+                          value={code.enabled_modules}
+                          onChange={(enabledModules) => updateCodeRow(code.id, { enabled_modules: enabledModules })}
+                          dense
+                        />
+                      </div>
+                    ) : (
+                      <div className="aaw-code-meta">
+                        <span>钱包 {code.max_wallets}</span>
+                        <span>任务 {code.max_active_tasks}</span>
+                        <span>{code.mini_app_enabled ? 'MiniApp 开' : 'MiniApp 关'}</span>
+                        <span>{moduleSummary(code.enabled_modules, moduleCatalog)}</span>
+                      </div>
+                    )}
+                    <div className="aaw-actions compact">
                       {editing ? (
-                        <button type="button" className="am-action-btn" onClick={() => saveCode(code)}>保存</button>
+                        <button type="button" className="aaw-primary-btn" onClick={() => saveCode(code)}>
+                          <Save size={15} />
+                          保存
+                        </button>
                       ) : (
-                        <button type="button" className="am-action-btn" onClick={() => setEditingCodeId(code.id)}>编辑</button>
+                        <button type="button" className="aaw-secondary-btn" onClick={() => setEditingCodeId(code.id)}>
+                          编辑
+                        </button>
                       )}
                       {code.status === 'disabled' ? (
-                        <button type="button" className="am-action-btn" onClick={async () => { await enableAdminAuthCode({ apiBaseUrl, initData, codeId: code.id }); showNotice('授权码已启用'); await loadCodes(); }}>启用</button>
-                      ) : (
-                        <button type="button" className="am-action-btn" onClick={() => setConfirmAction({
-                          title: '停用授权码',
-                          message: `确认停用授权码 ${code.code}？`,
-                          confirmText: '停用',
-                          danger: true,
-                          action: async () => {
-                            await disableAdminAuthCode({ apiBaseUrl, initData, codeId: code.id });
-                            showNotice('授权码已停用');
+                        <button
+                          type="button"
+                          className="aaw-secondary-btn"
+                          onClick={async () => {
+                            await enableAdminAuthCode({ apiBaseUrl, initData, codeId: code.id });
+                            showNotice('授权码已启用');
                             await loadCodes();
-                          },
-                        })}>停用</button>
+                          }}
+                        >
+                          <Power size={15} />
+                          启用
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="aaw-danger-btn"
+                          onClick={() => setConfirmAction({
+                            title: '停用授权码',
+                            message: `确认停用授权码 ${code.code}？`,
+                            confirmText: '停用',
+                            danger: true,
+                            action: async () => {
+                              await disableAdminAuthCode({ apiBaseUrl, initData, codeId: code.id });
+                              showNotice('授权码已停用');
+                              await loadCodes();
+                            },
+                          })}
+                        >
+                          <PowerOff size={15} />
+                          停用
+                        </button>
                       )}
                     </div>
-                  </div>
+                  </article>
                 );
               }) : <EmptyState text={codesLoading ? '正在加载授权码...' : '暂无授权码'} />}
             </div>
-          </div>
+          </section>
         </div>
       ) : null}
 
       {section === 'announcements' ? (
-        <div className="am-two-col">
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title">发布公告</div>
+        <div className="aaw-split">
+          <section className="aaw-panel">
+            <div className="aaw-panel-head">
+              <div>
+                <h3>发布公告</h3>
+                <span>Telegram 广播</span>
+              </div>
             </div>
-            {annError ? <div className="am-error">{annError}</div> : null}
-            <div className="am-form">
-              <label className="am-field am-field-grow">
-                <span>标题</span>
-                <input value={announcementDraft.title} onChange={(event) => setAnnouncementDraft((prev) => ({ ...prev, title: event.target.value }))} />
-              </label>
-              <label className="am-field am-field-grow" style={{ flexBasis: '100%' }}>
-                <span>正文</span>
-                <textarea value={announcementDraft.content} onChange={(event) => setAnnouncementDraft((prev) => ({ ...prev, content: event.target.value }))} rows={7} />
-              </label>
-            </div>
-            <div className="am-actions">
+            {annError ? <div className="aaw-error">{annError}</div> : null}
+            <label className="aaw-field full">
+              <span>标题</span>
+              <input value={announcementDraft.title} onChange={(event) => setAnnouncementDraft((prev) => ({ ...prev, title: event.target.value }))} />
+            </label>
+            <label className="aaw-field full">
+              <span>正文</span>
+              <textarea rows={8} value={announcementDraft.content} onChange={(event) => setAnnouncementDraft((prev) => ({ ...prev, content: event.target.value }))} />
+            </label>
+            <div className="aaw-actions">
               <button
                 type="button"
-                className="am-action-btn"
+                className="aaw-primary-btn"
                 disabled={publishing || !announcementDraft.content.trim()}
                 onClick={() => setConfirmAction({
                   title: '发布公告',
@@ -561,27 +915,37 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
                   action: publishAnnouncement,
                 })}
               >
+                <Megaphone size={15} />
                 {publishing ? '发布中...' : '发布公告'}
               </button>
-              <button type="button" className="am-action-btn" disabled={annLoading} onClick={loadAnnouncements}>刷新记录</button>
+              <button type="button" className="aaw-secondary-btn" disabled={annLoading} onClick={loadAnnouncements}>
+                <RefreshCw size={15} />
+                刷新记录
+              </button>
             </div>
-          </div>
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title">公告记录</div>
+          </section>
+
+          <section className="aaw-panel">
+            <div className="aaw-panel-head">
+              <div>
+                <h3>公告记录</h3>
+                <span>{announcements.length} 条记录</span>
+              </div>
             </div>
-            <div className="am-list">
+            <div className="aaw-code-list">
               {announcements.length > 0 ? announcements.map((item) => (
-                <div key={item.id} className="am-list-item am-list-item-wrap">
-                  <div style={{ minWidth: 0 }}>
-                    <div className="am-item-title">{item.title || '系统公告'}</div>
-                    <div className="am-item-sub">{formatDateTime(item.created_at)} / 成功 {Number(item.sent_count || 0)} / 失败 {Number(item.failed_count || 0)}</div>
-                    <div className="am-item-sub">{String(item.content || '').slice(0, 120)}</div>
+                <article key={item.id} className="aaw-code-card">
+                  <div className="aaw-code-top">
+                    <div>
+                      <strong>{item.title || '系统公告'}</strong>
+                      <span>{formatDateTime(item.created_at)} · 成功 {Number(item.sent_count || 0)} · 失败 {Number(item.failed_count || 0)}</span>
+                    </div>
                   </div>
-                </div>
+                  <p className="aaw-ann-content">{String(item.content || '').slice(0, 160)}</p>
+                </article>
               )) : <EmptyState text={annLoading ? '正在加载公告...' : '暂无公告'} />}
             </div>
-          </div>
+          </section>
         </div>
       ) : null}
 

@@ -1,12 +1,12 @@
 package web_server
 
 import (
+	"TgLpBot/base/models"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
-	"TgLpBot/base/models"
 	"TgLpBot/service/strategy"
 )
 
@@ -58,7 +58,7 @@ func (s *Server) handleTaskToggleRebalance(w http.ResponseWriter, r *http.Reques
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModulePositions); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}

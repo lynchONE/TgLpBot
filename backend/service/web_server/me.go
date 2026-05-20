@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"TgLpBot/base/models"
 	userSvc "TgLpBot/service/user"
 )
 
@@ -13,8 +14,11 @@ type meRequest struct {
 }
 
 type meResponse struct {
-	UserID  uint `json:"user_id"`
-	IsAdmin bool `json:"is_admin"`
+	UserID         uint                  `json:"user_id"`
+	IsAdmin        bool                  `json:"is_admin"`
+	MiniAppEnabled bool                  `json:"mini_app_enabled"`
+	EnabledModules []string              `json:"enabled_modules"`
+	ModuleCatalog  []models.AccessModule `json:"module_catalog"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -61,9 +65,23 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accessService := userSvc.NewAccessService()
+	enabledModules := []string{}
+	if check.IsAdmin {
+		enabledModules = models.DefaultAccessModuleKeys()
+	} else if check.Access != nil {
+		var err error
+		enabledModules, err = models.AccessModuleKeysFromJSON(check.Access.EnabledModules)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	resp := meResponse{
-		UserID:  user.ID,
-		IsAdmin: accessService.IsAdminUser(user.ID),
+		UserID:         user.ID,
+		IsAdmin:        accessService.IsAdminUser(user.ID),
+		MiniAppEnabled: check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
+		EnabledModules: enabledModules,
+		ModuleCatalog:  models.AccessModuleCatalog(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -44,12 +44,12 @@ export default async function handler(req, res) {
 
     // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['open_position', 'open_position_preview'];
+    const validEndpoints = ['open_position', 'open_position_preview', 'open_position_prepare', 'create_pool_preview', 'create_pool_execute'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: open_position, open_position_preview' }));
+        res.end(JSON.stringify({ error: '无效的端点' }));
         return;
     }
 
@@ -107,5 +107,29 @@ export default async function handler(req, res) {
             res.end(String(err?.message || err || 'upstream fetch failed'));
         }
         return;
+    }
+
+    if (method !== 'POST') {
+        res.statusCode = 405;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('method not allowed');
+        return;
+    }
+
+    const url = `${backendBaseUrl}/api/trading?endpoint=${encodeURIComponent(endpoint)}`;
+    const headers = { 'content-type': 'application/json' };
+    const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {});
+    try {
+        const upstream = await fetch(url, { method, headers, body });
+        const text = await upstream.text();
+        res.statusCode = upstream.status;
+        const contentType = upstream.headers.get('content-type');
+        if (contentType) res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(text);
+    } catch (err) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(String(err?.message || err || 'upstream fetch failed'));
     }
 }

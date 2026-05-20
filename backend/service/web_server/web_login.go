@@ -47,10 +47,12 @@ type webLoginUser struct {
 }
 
 type webLoginAccess struct {
-	Allowed        bool   `json:"allowed"`
-	IsAdmin        bool   `json:"is_admin"`
-	MiniAppEnabled bool   `json:"mini_app_enabled"`
-	Reason         string `json:"reason,omitempty"`
+	Allowed        bool                  `json:"allowed"`
+	IsAdmin        bool                  `json:"is_admin"`
+	MiniAppEnabled bool                  `json:"mini_app_enabled"`
+	EnabledModules []string              `json:"enabled_modules"`
+	ModuleCatalog  []models.AccessModule `json:"module_catalog"`
+	Reason         string                `json:"reason,omitempty"`
 }
 
 type webLoginMeta struct {
@@ -126,6 +128,11 @@ func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
+	enabledModules, err := enabledModulesForAccessCheck(check)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	initData, err := buildWebInitDataForUser(user, botToken)
 	if err != nil {
@@ -147,6 +154,8 @@ func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
 			Allowed:        true,
 			IsAdmin:        check.IsAdmin,
 			MiniAppEnabled: check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
+			EnabledModules: enabledModules,
+			ModuleCatalog:  models.AccessModuleCatalog(),
 			Reason:         strings.TrimSpace(check.Reason),
 		},
 		Meta: &webLoginMeta{

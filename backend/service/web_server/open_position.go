@@ -431,7 +431,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if status != 0 {
 		return nil, &openPositionError{Code: "forbidden", Message: msg}, http.StatusForbidden
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModulePositions); status != 0 {
 		return nil, &openPositionError{Code: "miniapp_forbidden", Message: msg}, status
 	}
 

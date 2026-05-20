@@ -10,6 +10,7 @@ import (
 
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
 
@@ -99,7 +100,7 @@ func (s *Server) handleWallets(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleWalletManage); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}

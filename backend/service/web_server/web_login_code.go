@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 	"TgLpBot/base/webloginstore"
 )
 
@@ -88,6 +89,11 @@ func (s *Server) handleCheckLoginCode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
+	enabledModules, err := enabledModulesForAccessCheck(check)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	initData, err := buildWebInitDataForUser(user, botToken)
 	if err != nil {
@@ -110,6 +116,8 @@ func (s *Server) handleCheckLoginCode(w http.ResponseWriter, r *http.Request) {
 			Allowed:        true,
 			IsAdmin:        check.IsAdmin,
 			MiniAppEnabled: check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
+			EnabledModules: enabledModules,
+			ModuleCatalog:  models.AccessModuleCatalog(),
 			Reason:         strings.TrimSpace(check.Reason),
 		},
 		Meta: &webLoginMeta{

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -254,7 +255,7 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleHotPools); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}

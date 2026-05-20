@@ -169,6 +169,8 @@ func autoMigrate() error {
 	ensureColumn("trade_records", "open_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER open_usdt_spent")
 	ensureColumn("trade_records", "open_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER open_stable_before")
 	ensureColumn("trade_records", "open_extra_dust", "TEXT NULL AFTER open_dust1")
+	ensureColumn("user_accesses", "enabled_modules", "TEXT NULL AFTER mini_app_enabled")
+	ensureColumn("auth_codes", "enabled_modules", "TEXT NULL AFTER mini_app_enabled")
 	ensureColumn("trade_records", "close_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_usdt_received")
 	ensureColumn("trade_records", "close_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_stable_before")
 	ensureColumn("global_configs", "open_position_target_share_min", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER multi_wallet_enabled")
@@ -201,7 +203,44 @@ func autoMigrate() error {
 		WHERE COALESCE(TRIM(out_of_range_mode), '') <> ''
 	`)
 	normalizeTradeRecordProfitFormula()
+	if err := backfillAccessModulePermissions(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func backfillAccessModulePermissions() error {
+	if DB == nil {
+		return nil
+	}
+	fullModules, err := models.AccessModuleKeysToJSON(models.DefaultAccessModuleKeys())
+	if err != nil {
+		return err
+	}
+	emptyModules, err := models.AccessModuleKeysToJSON([]string{})
+	if err != nil {
+		return err
+	}
+	for _, table := range []string{"user_accesses", "auth_codes"} {
+		hasColumn, err := tableColumnExists(table, "enabled_modules")
+		if err != nil {
+			return fmt.Errorf("inspect %s.enabled_modules: %w", table, err)
+		}
+		if !hasColumn {
+			continue
+		}
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET enabled_modules = CASE
+				WHEN mini_app_enabled = 1 THEN ?
+				ELSE ?
+			END
+			WHERE enabled_modules IS NULL OR TRIM(enabled_modules) = ''
+		`, quoteTableName(table)), fullModules, emptyModules).Error; err != nil {
+			return fmt.Errorf("backfill %s.enabled_modules: %w", table, err)
+		}
+	}
 	return nil
 }
 

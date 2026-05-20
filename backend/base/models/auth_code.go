@@ -21,9 +21,10 @@ type AuthCode struct {
 	MaxRedemptions int `gorm:"default:1" json:"max_redemptions"`
 	RedeemedCount  int `gorm:"default:0" json:"redeemed_count"`
 
-	MaxWallets     int  `gorm:"default:1" json:"max_wallets"`
-	MaxActiveTasks int  `gorm:"default:1" json:"max_active_tasks"`
-	MiniAppEnabled bool `gorm:"default:false" json:"mini_app_enabled"`
+	MaxWallets     int    `gorm:"default:1" json:"max_wallets"`
+	MaxActiveTasks int    `gorm:"default:1" json:"max_active_tasks"`
+	MiniAppEnabled bool   `gorm:"default:false" json:"mini_app_enabled"`
+	EnabledModules string `gorm:"type:text" json:"-"`
 
 	DisabledAt *time.Time     `gorm:"index" json:"disabled_at"`
 	CreatedAt  time.Time      `json:"created_at"`

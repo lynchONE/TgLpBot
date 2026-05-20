@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 	"TgLpBot/service/assets"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/realtime"
@@ -203,7 +204,7 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleHotPools); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}
@@ -264,7 +265,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleGlobalConfig); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}

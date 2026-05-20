@@ -102,7 +102,7 @@ export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
 
 export async function fetchMe({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/positions?endpoint=me`;
+    const url = `${base}/api/me`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

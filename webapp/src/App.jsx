@@ -24,6 +24,7 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
+  fetchMe,
   fetchMyTradeMarkers,
   fetchRealtimePositions,
   fetchSmartMoneyPoolMarkers,
@@ -72,6 +73,7 @@ import {
   DEFAULT_WIDGETS,
   WIDGETS,
   buildGmgnUrl,
+  canAccessWidget,
   compactPrice,
   formatNumber,
   formatPct,
@@ -81,6 +83,7 @@ import {
   computeHotPoolActiveFeeRate,
   normalizePoolAddress,
   normalizeHexAddress,
+  normalizeAccessInfo,
   normalizeWidgetSelection,
   parseHotPoolBadges,
   pickNonStableTokenAddress,
@@ -345,6 +348,7 @@ function findNearestCandleClose(rows, targetTs) {
 const STORAGE = {
   initData: 'tglp_web_init_data',
   loginUser: 'tglp_web_login_user',
+  loginAccess: 'tglp_web_login_access',
   chain: 'tglp_web_chain',
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
@@ -632,6 +636,15 @@ function parseLoginUser(raw) {
   }
 }
 
+function parseAccessInfo(raw) {
+  if (!raw) return null;
+  try {
+    return normalizeAccessInfo(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
 function openExternal(url) {
   if (!url) return;
   window.open(url, '_blank', 'noopener,noreferrer');
@@ -669,6 +682,7 @@ export default function App() {
 
   const [initData, setInitData] = useState(() => String(storageGet(STORAGE.initData) || '').trim());
   const [loginUser, setLoginUser] = useState(() => parseLoginUser(storageGet(STORAGE.loginUser)));
+  const [accessInfo, setAccessInfo] = useState(() => parseAccessInfo(storageGet(STORAGE.loginAccess)));
 
   const [chain, setChain] = useState(() =>
     normalizeChain(storageGet(STORAGE.chain) || WEBAPP_CONFIG.defaultChain)
@@ -773,15 +787,29 @@ export default function App() {
   const hotPoolsFilterRef = useRef(null);
 
   const hasInitData = Boolean(initData);
-  const isAdminUser = Boolean(positions?.is_admin);
-  const availableWidgets = useMemo(
-    () => WIDGETS.filter((item) => item.key !== 'admin_panel' || isAdminUser),
-    [isAdminUser]
-  );
+  const isAdminUser = Boolean(accessInfo?.is_admin || positions?.is_admin);
+  const widgetAccessInfo = useMemo(() => {
+    if (!accessInfo) return null;
+    return normalizeAccessInfo({ ...accessInfo, is_admin: isAdminUser });
+  }, [accessInfo, isAdminUser]);
+  const availableWidgets = useMemo(() => {
+    if (!hasInitData) return WIDGETS.filter((item) => item.key !== 'admin_panel');
+    if (!widgetAccessInfo) return WIDGETS.filter((item) => item.key !== 'admin_panel');
+    return WIDGETS.filter((item) => canAccessWidget(item.key, widgetAccessInfo));
+  }, [hasInitData, widgetAccessInfo]);
   const activeWidgets = useMemo(() => {
     const map = Object.fromEntries(availableWidgets.map((w) => [w.key, w]));
     return widgets.map((k) => map[k]).filter(Boolean);
   }, [availableWidgets, widgets]);
+  useEffect(() => {
+    if (!hasInitData || !accessInfo) return;
+    const allowed = new Set(availableWidgets.map((item) => item.key));
+    setWidgets((prev) => {
+      const next = prev.filter((key) => allowed.has(key));
+      if (next.length === prev.length) return prev;
+      return next.length ? next : availableWidgets.slice(0, 1).map((item) => item.key);
+    });
+  }, [accessInfo, availableWidgets, hasInitData]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
   const workLayoutClass = workMode ? `work-mode layout-work-${Math.min(activeWidgets.length, 4)}` : layoutClass;
   const hasTrackedPositions = Array.isArray(positions?.positions) && positions.positions.length > 0;
@@ -1294,7 +1322,33 @@ export default function App() {
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [accentTheme, chain, hotPoolsPanelHeight, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshIntervals, widgets]);
+    if (accessInfo) {
+      storageSet(STORAGE.loginAccess, JSON.stringify(accessInfo));
+    } else {
+      storageRemove(STORAGE.loginAccess);
+    }
+  }, [accentTheme, accessInfo, chain, hotPoolsPanelHeight, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshIntervals, widgets]);
+
+  useEffect(() => {
+    if (!hasInitData) return undefined;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const data = await fetchMe({ apiBaseUrl, initData, signal: controller.signal });
+        setAccessInfo(normalizeAccessInfo({
+          allowed: true,
+          is_admin: data?.is_admin,
+          mini_app_enabled: data?.mini_app_enabled,
+          enabled_modules: data?.enabled_modules,
+          module_catalog: data?.module_catalog,
+        }));
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setLoginError(String(err?.message || err || '刷新权限失败'));
+      }
+    })();
+    return () => controller.abort();
+  }, [apiBaseUrl, hasInitData, initData]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -1660,6 +1714,7 @@ export default function App() {
     if (!nextInitData) throw new Error('后端未返回 initData');
     setInitData(nextInitData);
     setLoginUser(resp?.user || null);
+    setAccessInfo(normalizeAccessInfo(resp?.access));
     setLoginCode('');
   }, []);
 
@@ -1717,8 +1772,10 @@ export default function App() {
   const logout = useCallback(() => {
     setInitData('');
     setLoginUser(null);
+    setAccessInfo(null);
     storageRemove(STORAGE.initData);
     storageRemove(STORAGE.loginUser);
+    storageRemove(STORAGE.loginAccess);
     setHotPools([]);
     setPositions(null);
     setKlineMarkers([]);

@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
 
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['config', 'global_config', 'wallets', 'wallet_swap_preview', 'wallet_swap_execute'];
+    const validEndpoints = ['config', 'global_config', 'wallets', 'wallet_swap_preview', 'wallet_swap_execute', 'wallet_swap_token_metadata', 'wallet_swap_history', 'wallet_crud', 'wallet_swap_single'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
@@ -66,9 +66,7 @@ export default async function handler(req, res) {
         return;
     }
 
-    const url = endpoint === 'wallets'
-        ? `${backendBaseUrl}/api/settings?endpoint=wallets`
-        : `${backendBaseUrl}/api/${endpoint}`;
+    const url = `${backendBaseUrl}/api/settings?endpoint=${encodeURIComponent(endpoint)}`;
     const headers = { 'content-type': 'application/json' };
     const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {});
 

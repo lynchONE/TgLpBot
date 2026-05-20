@@ -406,7 +406,7 @@ func authenticateSmartMoneyGoldenDogUser(w http.ResponseWriter, initData string)
 		http.Error(w, msg, status)
 		return nil, userSvc.AccessCheck{}, false
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleSmartMoney); status != 0 {
 		http.Error(w, msg, status)
 		return nil, userSvc.AccessCheck{}, false
 	}

@@ -925,16 +925,25 @@ export default function AssetManagementPage({
     tick,
     pollIntervalSec = 15,
     accentTheme = 'lime',
+    moduleAccess,
     onNotice,
 }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
-    const tabs = useMemo(() => [
-        { key: 'my_assets', label: '我的资产', icon: Wallet },
-        { key: 'global_config', label: '全局配置', icon: Settings2 },
-        { key: 'wallet_manage', label: '钱包管理', icon: Wallet },
-        { key: 'trade_history', label: '交易记录', icon: History },
-    ], []);
+    const tabs = useMemo(() => {
+        const access = moduleAccess && typeof moduleAccess === 'object' ? moduleAccess : {};
+        return [
+            { key: 'my_assets', label: '我的资产', icon: Wallet, allowed: access.assets !== false },
+            { key: 'global_config', label: '全局配置', icon: Settings2, allowed: Boolean(access.global_config) },
+            { key: 'wallet_manage', label: '钱包管理', icon: Wallet, allowed: Boolean(access.wallet_manage) },
+            { key: 'trade_history', label: '交易记录', icon: History, allowed: access.trade_history !== false },
+        ].filter((tab) => tab.allowed);
+    }, [moduleAccess]);
     const [activeTab, setActiveTab] = useState('my_assets');
+
+    useEffect(() => {
+        if (tabs.some((tab) => tab.key === activeTab)) return;
+        setActiveTab(tabs[0]?.key || 'my_assets');
+    }, [activeTab, tabs]);
 
     const [historyDays, setHistoryDays] = useState(30);
     const [trendMode, setTrendMode] = useState('assets');
@@ -1165,7 +1174,7 @@ export default function AssetManagementPage({
                         <div className="min-w-0">
                             <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">我的</div>
                             <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                {hasInitData ? '我的资产 / 全局配置 / 钱包管理 / 交易记录' : '需要有效的 Telegram initData'}
+                                {hasInitData ? tabs.map((tab) => tab.label).join(' / ') : '需要有效的 Telegram initData'}
                             </div>
                         </div>
                         {activeTab === 'my_assets' ? (
@@ -1180,7 +1189,10 @@ export default function AssetManagementPage({
                         ) : null}
                     </div>
                 </div>
-                <div className="flex border-t border-zinc-100 dark:border-white/[0.04]">
+                <div
+                    className="grid border-t border-zinc-100 dark:border-white/[0.04]"
+                    style={{ gridTemplateColumns: `repeat(${Math.max(tabs.length, 1)}, minmax(0, 1fr))` }}
+                >
                     {tabs.map((tab) => {
                         const Icon = tab.icon;
                         const active = activeTab === tab.key;

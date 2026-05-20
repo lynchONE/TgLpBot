@@ -1023,13 +1023,49 @@ const Icon = ({ path: IconCmp, className = '' }) => {
     return <IconCmp className={className} strokeWidth={2} />;
 };
 
-function buildTopNavItems({ isAdmin }) {
-    const items = [
+const VIEW_MODULE_MAP = {
+    hot_pools: 'hot_pools',
+    positions: 'positions',
+    assets: 'assets',
+    smart_money: 'smart_money',
+    admin_page: 'admin_panel',
+    admin: 'admin_panel',
+};
+
+function normalizeEnabledModules(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const keys = [];
+    value.forEach((item) => {
+        const key = String(item || '').trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        keys.push(key);
+    });
+    return keys;
+}
+
+function hasModuleAccess(me, moduleKey) {
+    const key = String(moduleKey || '').trim();
+    if (!key) return false;
+    if (Boolean(me?.is_admin)) return true;
+    if (!Boolean(me?.mini_app_enabled)) return false;
+    return normalizeEnabledModules(me?.enabled_modules).includes(key);
+}
+
+function canAccessView(me, viewMode) {
+    const moduleKey = VIEW_MODULE_MAP[String(viewMode || '').trim()];
+    return moduleKey ? hasModuleAccess(me, moduleKey) : false;
+}
+
+function buildTopNavItems({ me, isAdmin }) {
+    const baseItems = [
         { key: 'hot_pools', label: '热门池' },
         { key: 'positions', label: '仓位' },
         { key: 'assets', label: '我的' },
         { key: 'smart_money', label: '聪明钱' },
     ];
+    const items = me ? baseItems.filter((item) => canAccessView(me, item.key)) : [...baseItems];
     if (isAdmin) {
         items.push({ key: 'admin_page', label: '管理页' });
     }
@@ -1475,9 +1511,14 @@ export default function App() {
     const isSmartMoney = viewMode === 'smart_money';
     const isAdminPage = isAdmin && viewMode === 'admin_page';
     const topNavItems = useMemo(
-        () => buildTopNavItems({ isAdmin }),
-        [isAdmin],
+        () => buildTopNavItems({ me, isAdmin }),
+        [isAdmin, me],
     );
+    const hasKlineAccess = hasModuleAccess(me, 'gmgn_kline');
+    const hasCreatePoolAccess = hasModuleAccess(me, 'create_pool');
+    const hasGlobalConfigAccess = hasModuleAccess(me, 'global_config');
+    const hasWalletManageAccess = hasModuleAccess(me, 'wallet_manage');
+    const hasTradeHistoryAccess = hasModuleAccess(me, 'positions');
     const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage;
     const activePollIntervalSec = showAdmin
         ? adminPollIntervalSec
@@ -1893,6 +1934,11 @@ export default function App() {
         if (viewMode !== 'admin') return;
         setViewMode(isAdmin ? 'assets' : 'positions');
     }, [isAdmin, viewMode]);
+
+    useEffect(() => {
+        if (!me || topNavItems.some((item) => item.key === viewMode)) return;
+        setViewMode(topNavItems[0]?.key || 'hot_pools');
+    }, [me, topNavItems, viewMode]);
 
     useEffect(() => {
         const tg = getTelegramWebApp();
@@ -3550,6 +3596,7 @@ export default function App() {
     }, [apiBaseUrl, initData, hasInitData]);
 
     const openGlobalConfig = () => {
+        if (!hasGlobalConfigAccess) return;
         setGlobalConfigOpen(true);
     };
 
@@ -4183,6 +4230,12 @@ export default function App() {
                                 tick={tick}
                                 pollIntervalSec={assetsPollIntervalSec}
                                 accentTheme={accentTheme}
+                                moduleAccess={{
+                                    assets: hasModuleAccess(me, 'assets'),
+                                    global_config: hasGlobalConfigAccess,
+                                    wallet_manage: hasWalletManageAccess,
+                                    trade_history: hasTradeHistoryAccess,
+                                }}
                                 onNotice={showNotice}
                             />
                         </Suspense>
@@ -4296,8 +4349,8 @@ export default function App() {
                                     <button
                                         type="button"
                                         onClick={openGlobalConfig}
-                                        disabled={!hasInitData}
-                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
+                                        disabled={!hasInitData || !hasGlobalConfigAccess}
+                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData && hasGlobalConfigAccess
                                             ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
                                             : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
                                             }`}
@@ -4460,8 +4513,8 @@ export default function App() {
                                 metric={hotPoolsSort}
                                 previousData={prevData}
                                 accentTheme={accentTheme}
-                                onOpenKline={setKlinePool}
-                                onOpenPosition={openPositionModal}
+                                onOpenKline={hasKlineAccess ? setKlinePool : undefined}
+                                onOpenPosition={hasCreatePoolAccess ? openPositionModal : undefined}
                                 apiBaseUrl={apiBaseUrl}
                                 chain={hotPoolsData?.chain || 'bsc'}
                             />
@@ -4631,8 +4684,8 @@ export default function App() {
                                                     previousData={null}
                                                     accentTheme={accentTheme}
                                                     apiBaseUrl={apiBaseUrl}
-                                                    onOpenKline={setKlinePool}
-                                                    onOpenPosition={selectPoolFromSearch}
+                                                    onOpenKline={hasKlineAccess ? setKlinePool : undefined}
+                                                    onOpenPosition={hasCreatePoolAccess ? selectPoolFromSearch : undefined}
                                                     chain={poolSearchChain}
                                                 />
                                             );

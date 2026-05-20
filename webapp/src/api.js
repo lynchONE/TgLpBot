@@ -329,6 +329,17 @@ export async function checkLoginCode({ apiBaseUrl, code, signal }) {
   });
 }
 
+export async function fetchMe({ apiBaseUrl, initData, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/me`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData }),
+    signal,
+  });
+}
+
 export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/settings?endpoint=wallets`;

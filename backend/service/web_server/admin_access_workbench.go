@@ -35,11 +35,13 @@ type adminAccessRequest struct {
 	ClearActiveFrom bool    `json:"clear_active_from"`
 	ClearActiveTo   bool    `json:"clear_active_to"`
 
-	MaxWallets     *int    `json:"max_wallets"`
-	MaxActiveTasks *int    `json:"max_active_tasks"`
-	MiniAppEnabled *bool   `json:"mini_app_enabled"`
-	MiniAppCamel   *bool   `json:"miniAppEnabled"`
-	Note           *string `json:"note"`
+	MaxWallets        *int      `json:"max_wallets"`
+	MaxActiveTasks    *int      `json:"max_active_tasks"`
+	MiniAppEnabled    *bool     `json:"mini_app_enabled"`
+	MiniAppCamel      *bool     `json:"miniAppEnabled"`
+	EnabledModules    *[]string `json:"enabled_modules"`
+	ModulePermissions *[]string `json:"module_permissions"`
+	Note              *string   `json:"note"`
 }
 
 type adminAuthCodesRequest struct {
@@ -51,14 +53,16 @@ type adminAuthCodesRequest struct {
 	Query    string `json:"query"`
 	CodeID   uint   `json:"code_id"`
 
-	ActiveFrom     *string `json:"active_from"`
-	ActiveTo       *string `json:"active_to"`
-	ClearActiveTo  bool    `json:"clear_active_to"`
-	MaxWallets     *int    `json:"max_wallets"`
-	MaxActiveTasks *int    `json:"max_active_tasks"`
-	MaxRedemptions *int    `json:"max_redemptions"`
-	MiniAppEnabled *bool   `json:"mini_app_enabled"`
-	Note           *string `json:"note"`
+	ActiveFrom        *string   `json:"active_from"`
+	ActiveTo          *string   `json:"active_to"`
+	ClearActiveTo     bool      `json:"clear_active_to"`
+	MaxWallets        *int      `json:"max_wallets"`
+	MaxActiveTasks    *int      `json:"max_active_tasks"`
+	MaxRedemptions    *int      `json:"max_redemptions"`
+	MiniAppEnabled    *bool     `json:"mini_app_enabled"`
+	EnabledModules    *[]string `json:"enabled_modules"`
+	ModulePermissions *[]string `json:"module_permissions"`
+	Note              *string   `json:"note"`
 }
 
 type adminAnnouncementsRequest struct {
@@ -84,6 +88,7 @@ type adminAccessDTO struct {
 	MaxWallets      int        `json:"max_wallets"`
 	MaxActiveTasks  int        `json:"max_active_tasks"`
 	MiniAppEnabled  bool       `json:"mini_app_enabled"`
+	EnabledModules  []string   `json:"enabled_modules"`
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 	RevokedByUserID *uint      `json:"revoked_by_user_id,omitempty"`
 	Note            string     `json:"note"`
@@ -106,6 +111,7 @@ type adminAuthCodeDTO struct {
 	MaxWallets      int        `json:"max_wallets"`
 	MaxActiveTasks  int        `json:"max_active_tasks"`
 	MiniAppEnabled  bool       `json:"mini_app_enabled"`
+	EnabledModules  []string   `json:"enabled_modules"`
 	DisabledAt      *time.Time `json:"disabled_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -147,16 +153,23 @@ func (s *Server) handleAdminAccess(w http.ResponseWriter, r *http.Request) {
 		}
 		items := make([]adminAccessDTO, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, buildAdminAccessDTO(row.User, row.Access, row.WalletCount, row.ActiveTaskCount))
+			dto, err := buildAdminAccessDTO(row.User, row.Access, row.WalletCount, row.ActiveTaskCount)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			items = append(items, dto)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":         true,
-			"items":      items,
-			"users":      items,
-			"total":      total,
-			"page":       normalizedPage(req.Page),
-			"page_size":  normalizedPageSize(req.PageSize, 20, 100),
-			"updated_at": time.Now(),
+			"ok":                true,
+			"items":             items,
+			"users":             items,
+			"module_catalog":    models.AccessModuleCatalog(),
+			"grantable_modules": models.AccessModuleGrantableCatalog(),
+			"total":             total,
+			"page":              normalizedPage(req.Page),
+			"page_size":         normalizedPageSize(req.PageSize, 20, 100),
+			"updated_at":        time.Now(),
 		})
 	case "get":
 		user, access, err := resolveAdminTargetUser(req)
@@ -190,6 +203,10 @@ func (s *Server) handleAdminAccess(w http.ResponseWriter, r *http.Request) {
 		if miniAppEnabled == nil {
 			miniAppEnabled = req.MiniAppCamel
 		}
+		enabledModules := req.EnabledModules
+		if enabledModules == nil {
+			enabledModules = req.ModulePermissions
+		}
 		access, err := accessService.UpdateUserAccess(adminUser.ID, user.ID, userSvc.UpdateUserAccessInput{
 			ActiveFrom:      activeFrom,
 			ActiveTo:        activeTo,
@@ -198,6 +215,7 @@ func (s *Server) handleAdminAccess(w http.ResponseWriter, r *http.Request) {
 			MaxWallets:      req.MaxWallets,
 			MaxActiveTasks:  req.MaxActiveTasks,
 			MiniAppEnabled:  miniAppEnabled,
+			EnabledModules:  enabledModules,
 			Note:            req.Note,
 		})
 		if err != nil {
@@ -282,15 +300,22 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 		}
 		items := make([]adminAuthCodeDTO, 0, len(codes))
 		for _, code := range codes {
-			items = append(items, buildAdminAuthCodeDTO(code))
+			dto, err := buildAdminAuthCodeDTO(code)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			items = append(items, dto)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":        true,
-			"items":     items,
-			"codes":     items,
-			"total":     total,
-			"page":      normalizedPage(req.Page),
-			"page_size": normalizedPageSize(req.PageSize, 20, 100),
+			"ok":                true,
+			"items":             items,
+			"codes":             items,
+			"module_catalog":    models.AccessModuleCatalog(),
+			"grantable_modules": models.AccessModuleGrantableCatalog(),
+			"total":             total,
+			"page":              normalizedPage(req.Page),
+			"page_size":         normalizedPageSize(req.PageSize, 20, 100),
 		})
 	case "create":
 		activeFrom, err := parseOptionalAdminTime(req.ActiveFrom, "active_from")
@@ -311,6 +336,14 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 			MaxRedemptions: derefInt(req.MaxRedemptions, 1),
 			MiniAppEnabled: req.MiniAppEnabled != nil && *req.MiniAppEnabled,
 		}
+		enabledModules := req.EnabledModules
+		if enabledModules == nil {
+			enabledModules = req.ModulePermissions
+		}
+		if enabledModules != nil {
+			in.EnabledModules = *enabledModules
+			in.EnabledModulesSet = true
+		}
 		if req.Note != nil {
 			in.Note = *req.Note
 		}
@@ -319,7 +352,12 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": buildAdminAuthCodeDTO(*code)})
+		dto, err := buildAdminAuthCodeDTO(*code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": dto})
 	case "update":
 		if req.CodeID == 0 {
 			http.Error(w, "code_id required", http.StatusBadRequest)
@@ -330,6 +368,10 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		enabledModules := req.EnabledModules
+		if enabledModules == nil {
+			enabledModules = req.ModulePermissions
+		}
 		code, err := accessService.UpdateAuthCode(req.CodeID, userSvc.UpdateAuthCodeInput{
 			ActiveTo:       activeTo,
 			ClearActiveTo:  req.ClearActiveTo,
@@ -337,13 +379,19 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 			MaxActiveTasks: req.MaxActiveTasks,
 			MaxRedemptions: req.MaxRedemptions,
 			MiniAppEnabled: req.MiniAppEnabled,
+			EnabledModules: enabledModules,
 			Note:           req.Note,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": buildAdminAuthCodeDTO(*code)})
+		dto, err := buildAdminAuthCodeDTO(*code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": dto})
 	case "disable":
 		if req.CodeID == 0 {
 			http.Error(w, "code_id required", http.StatusBadRequest)
@@ -358,7 +406,12 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": buildAdminAuthCodeDTO(*code)})
+		dto, err := buildAdminAuthCodeDTO(*code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": dto})
 	case "enable":
 		if req.CodeID == 0 {
 			http.Error(w, "code_id required", http.StatusBadRequest)
@@ -373,7 +426,12 @@ func (s *Server) handleAdminAuthCodes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": buildAdminAuthCodeDTO(*code)})
+		dto, err := buildAdminAuthCodeDTO(*code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "code": dto})
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)
 	}
@@ -579,10 +637,10 @@ func buildAdminAccessDetail(accessService *userSvc.AccessService, user models.Us
 	if err != nil {
 		return adminAccessDTO{}, err
 	}
-	return buildAdminAccessDTO(user, access, walletCount, taskCount), nil
+	return buildAdminAccessDTO(user, access, walletCount, taskCount)
 }
 
-func buildAdminAccessDTO(user models.User, access *models.UserAccess, walletCount, activeTaskCount int64) adminAccessDTO {
+func buildAdminAccessDTO(user models.User, access *models.UserAccess, walletCount, activeTaskCount int64) (adminAccessDTO, error) {
 	dto := adminAccessDTO{
 		UserID:          user.ID,
 		TelegramID:      user.TelegramID,
@@ -594,7 +652,11 @@ func buildAdminAccessDTO(user models.User, access *models.UserAccess, walletCoun
 		ActiveTaskCount: activeTaskCount,
 	}
 	if access == nil {
-		return dto
+		return dto, nil
+	}
+	enabledModules, err := models.AccessModuleKeysFromJSON(access.EnabledModules)
+	if err != nil {
+		return dto, fmt.Errorf("invalid user access modules for user %d: %w", access.UserID, err)
 	}
 	status := "active"
 	now := time.Now()
@@ -614,15 +676,20 @@ func buildAdminAccessDTO(user models.User, access *models.UserAccess, walletCoun
 	dto.MaxWallets = access.MaxWallets
 	dto.MaxActiveTasks = access.MaxActiveTasks
 	dto.MiniAppEnabled = access.MiniAppEnabled
+	dto.EnabledModules = enabledModules
 	dto.RevokedAt = access.RevokedAt
 	dto.RevokedByUserID = access.RevokedByUserID
 	dto.Note = access.Note
 	dto.CreatedAt = &createdAt
 	dto.UpdatedAt = &updatedAt
-	return dto
+	return dto, nil
 }
 
-func buildAdminAuthCodeDTO(code models.AuthCode) adminAuthCodeDTO {
+func buildAdminAuthCodeDTO(code models.AuthCode) (adminAuthCodeDTO, error) {
+	enabledModules, err := models.AccessModuleKeysFromJSON(code.EnabledModules)
+	if err != nil {
+		return adminAuthCodeDTO{}, fmt.Errorf("invalid auth code modules for code %d: %w", code.ID, err)
+	}
 	status := "active"
 	now := time.Now()
 	if code.DisabledAt != nil {
@@ -647,10 +714,11 @@ func buildAdminAuthCodeDTO(code models.AuthCode) adminAuthCodeDTO {
 		MaxWallets:      code.MaxWallets,
 		MaxActiveTasks:  code.MaxActiveTasks,
 		MiniAppEnabled:  code.MiniAppEnabled,
+		EnabledModules:  enabledModules,
 		DisabledAt:      code.DisabledAt,
 		CreatedAt:       code.CreatedAt,
 		UpdatedAt:       code.UpdatedAt,
-	}
+	}, nil
 }
 
 func listAnnouncements(page, pageSize int) ([]models.Announcement, int64, error) {

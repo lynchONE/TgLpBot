@@ -23,10 +23,11 @@ func NewAccessService() *AccessService {
 }
 
 type AccessCheck struct {
-	Allowed bool
-	IsAdmin bool
-	Access  *models.UserAccess
-	Reason  string
+	Allowed        bool
+	IsAdmin        bool
+	Access         *models.UserAccess
+	EnabledModules []string
+	Reason         string
 }
 
 type UserAccessAdminRow struct {
@@ -97,13 +98,15 @@ func (s *AccessService) CheckUserAccess(userID uint, now time.Time) (AccessCheck
 }
 
 type CreateAuthCodeInput struct {
-	ActiveFrom     *time.Time
-	ActiveTo       *time.Time
-	MaxWallets     int
-	MaxActiveTasks int
-	MaxRedemptions int
-	MiniAppEnabled bool
-	Note           string
+	ActiveFrom        *time.Time
+	ActiveTo          *time.Time
+	MaxWallets        int
+	MaxActiveTasks    int
+	MaxRedemptions    int
+	MiniAppEnabled    bool
+	EnabledModules    []string
+	EnabledModulesSet bool
+	Note              string
 }
 
 func generateAuthCode() (string, error) {
@@ -132,6 +135,10 @@ func (s *AccessService) CreateAuthCode(createdByUserID uint, in CreateAuthCodeIn
 	if in.MaxActiveTasks < 0 {
 		in.MaxActiveTasks = 0
 	}
+	enabledModules, err := enabledModulesJSONForCreate(in.MiniAppEnabled, in.EnabledModules, in.EnabledModulesSet)
+	if err != nil {
+		return nil, err
+	}
 
 	var lastErr error
 	for i := 0; i < 5; i++ {
@@ -149,6 +156,7 @@ func (s *AccessService) CreateAuthCode(createdByUserID uint, in CreateAuthCodeIn
 			MaxWallets:      in.MaxWallets,
 			MaxActiveTasks:  in.MaxActiveTasks,
 			MiniAppEnabled:  in.MiniAppEnabled,
+			EnabledModules:  enabledModules,
 		}
 		if err := database.DB.Create(ac).Error; err != nil {
 			lastErr = err
@@ -182,6 +190,7 @@ type UpdateAuthCodeInput struct {
 	MaxActiveTasks *int
 	MaxRedemptions *int
 	MiniAppEnabled *bool
+	EnabledModules *[]string
 	Note           *string
 }
 
@@ -217,6 +226,13 @@ func (s *AccessService) UpdateAuthCode(codeID uint, in UpdateAuthCodeInput) (*mo
 	}
 	if in.MiniAppEnabled != nil {
 		updates["mini_app_enabled"] = *in.MiniAppEnabled
+	}
+	if in.EnabledModules != nil {
+		enabledModules, err := models.AccessModuleKeysToJSON(*in.EnabledModules)
+		if err != nil {
+			return nil, err
+		}
+		updates["enabled_modules"] = enabledModules
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
@@ -331,6 +347,7 @@ func (s *AccessService) RedeemAuthCode(userID uint, rawCode string) (*models.Use
 			"max_wallets":        auth.MaxWallets,
 			"max_active_tasks":   auth.MaxActiveTasks,
 			"mini_app_enabled":   auth.MiniAppEnabled,
+			"enabled_modules":    auth.EnabledModules,
 			"revoked_at":         nil,
 			"revoked_by_user_id": nil,
 			"note":               strings.TrimSpace(auth.Note),
@@ -592,6 +609,7 @@ type UpdateUserAccessInput struct {
 	MaxWallets      *int
 	MaxActiveTasks  *int
 	MiniAppEnabled  *bool
+	EnabledModules  *[]string
 	Note            *string
 }
 
@@ -653,6 +671,13 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 	if in.MiniAppEnabled != nil {
 		updates["mini_app_enabled"] = *in.MiniAppEnabled
 	}
+	if in.EnabledModules != nil {
+		enabledModules, err := models.AccessModuleKeysToJSON(*in.EnabledModules)
+		if err != nil {
+			return nil, err
+		}
+		updates["enabled_modules"] = enabledModules
+	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
 	}
@@ -669,6 +694,14 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 				GrantedByUserID: adminUserID,
 				MaxWallets:      1,
 				MaxActiveTasks:  1,
+			}
+			if in.EnabledModules == nil {
+				miniAppEnabled := in.MiniAppEnabled != nil && *in.MiniAppEnabled
+				enabledModules, err := enabledModulesJSONForCreate(miniAppEnabled, nil, false)
+				if err != nil {
+					return err
+				}
+				access.EnabledModules = enabledModules
 			}
 			if err := tx.Create(&access).Error; err != nil {
 				return err
@@ -751,5 +784,68 @@ func (s *AccessService) CheckMiniAppAccess(userID uint) (bool, string) {
 		return false, "未开通 MiniApp 权限"
 	}
 
+	enabled, err := models.AccessModuleKeysFromJSON(access.EnabledModules)
+	if err != nil {
+		if errors.Is(err, models.ErrAccessModulesNotConfigured) {
+			return false, "未配置功能模块权限"
+		}
+		return false, "功能模块权限配置错误"
+	}
+	if len(enabled) == 0 {
+		return false, "未授权功能模块"
+	}
+
 	return true, ""
+}
+
+func (s *AccessService) CheckUserModuleAccess(userID uint, moduleKey string, now time.Time) (AccessCheck, error) {
+	moduleKey = strings.TrimSpace(moduleKey)
+	if !models.IsAccessModuleKey(moduleKey) {
+		return AccessCheck{Allowed: false, Reason: "unknown module"}, nil
+	}
+	check, err := s.CheckUserAccess(userID, now)
+	if err != nil || !check.Allowed {
+		return check, err
+	}
+	if check.IsAdmin {
+		check.EnabledModules = models.DefaultAccessModuleKeys()
+		return check, nil
+	}
+	if check.Access == nil {
+		check.Allowed = false
+		check.Reason = "未授权"
+		return check, nil
+	}
+	if !check.Access.MiniAppEnabled {
+		check.Allowed = false
+		check.Reason = "未开通 MiniApp 权限"
+		return check, nil
+	}
+	enabled, err := models.AccessModuleKeysFromJSON(check.Access.EnabledModules)
+	if err != nil {
+		check.Allowed = false
+		if errors.Is(err, models.ErrAccessModulesNotConfigured) {
+			check.Reason = "未配置功能模块权限"
+			return check, nil
+		}
+		check.Reason = "功能模块权限配置错误"
+		return check, err
+	}
+	check.EnabledModules = enabled
+	if !models.AccessModuleKeysContain(enabled, moduleKey) {
+		check.Allowed = false
+		check.Reason = "未授权功能模块"
+		return check, nil
+	}
+	return check, nil
+}
+
+func enabledModulesJSONForCreate(miniAppEnabled bool, keys []string, explicit bool) (string, error) {
+	if explicit {
+		return models.AccessModuleKeysToJSON(keys)
+	}
+	if miniAppEnabled {
+		return models.AccessModuleKeysToJSON(models.DefaultAccessModuleKeys())
+	}
+	return models.AccessModuleKeysToJSON([]string{})
 }

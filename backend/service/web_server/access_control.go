@@ -79,6 +79,43 @@ func requireMiniAppPermission(check userSvc.AccessCheck) (int, string) {
 	return 0, ""
 }
 
+func requireModulePermission(check userSvc.AccessCheck, moduleKey string) (int, string) {
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		return status, msg
+	}
+	if check.IsAdmin {
+		return 0, ""
+	}
+	moduleKey = strings.TrimSpace(moduleKey)
+	if !models.IsAccessModuleKey(moduleKey) {
+		return http.StatusForbidden, "unknown module"
+	}
+	if check.Access == nil {
+		return http.StatusForbidden, "未授权"
+	}
+	enabled, err := models.AccessModuleKeysFromJSON(check.Access.EnabledModules)
+	if err != nil {
+		if errors.Is(err, models.ErrAccessModulesNotConfigured) {
+			return http.StatusForbidden, "未配置功能模块权限"
+		}
+		return http.StatusForbidden, "功能模块权限配置错误"
+	}
+	if !models.AccessModuleKeysContain(enabled, moduleKey) {
+		return http.StatusForbidden, "未授权功能模块"
+	}
+	return 0, ""
+}
+
+func enabledModulesForAccessCheck(check userSvc.AccessCheck) ([]string, error) {
+	if check.IsAdmin {
+		return models.DefaultAccessModuleKeys(), nil
+	}
+	if check.Access == nil {
+		return []string{}, nil
+	}
+	return models.AccessModuleKeysFromJSON(check.Access.EnabledModules)
+}
+
 func authenticateAdminWebAppUser(initData string) (*models.User, int, string) {
 	user, status, msg := authenticateTelegramWebAppUser(initData)
 	if status != 0 {

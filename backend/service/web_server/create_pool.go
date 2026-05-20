@@ -438,7 +438,7 @@ func (s *Server) resolveCreatePoolContext(req *createPoolRequest) (*createPoolCo
 	if status != 0 {
 		return nil, fmt.Errorf("%s", msg)
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleCreatePool); status != 0 {
 		return nil, fmt.Errorf("%s", msg)
 	}
 

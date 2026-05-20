@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"TgLpBot/base/database"
+	"TgLpBot/base/models"
 	userSvc "TgLpBot/service/user"
 	"encoding/json"
 	"fmt"
@@ -144,7 +145,7 @@ func authenticateAssetUser(initData string) (uint, int, string) {
 	if status != 0 {
 		return 0, status, msg
 	}
-	if status, msg := requireMiniAppPermission(check); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleAssets); status != 0 {
 		return 0, status, msg
 	}
 	return user.ID, 0, ""
