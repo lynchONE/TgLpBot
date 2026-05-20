@@ -265,7 +265,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, status)
 		return
 	}
-	if status, msg := requireModulePermission(check, models.AccessModuleGlobalConfig); status != 0 {
+	if status, msg := requireModulePermission(check, models.AccessModuleAssets); status != 0 {
 		http.Error(w, msg, status)
 		return
 	}

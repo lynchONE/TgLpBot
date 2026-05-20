@@ -5,10 +5,7 @@ export const WIDGETS = [
   { key: 'positions', label: '仓位' },
   { key: 'assets', label: '我的' },
   { key: 'smart_money', label: '聪明钱' },
-  { key: 'wallet_manage', label: '钱包管理' },
-  { key: 'global_config', label: '全局配置' },
   { key: 'swap', label: '一键兑换' },
-  { key: 'trade_history', label: '交易记录' },
   { key: 'admin_panel', label: '管理员' },
 ];
 
@@ -21,10 +18,7 @@ export const WIDGET_MODULE_MAP = {
   positions: 'positions',
   assets: 'assets',
   smart_money: 'smart_money',
-  wallet_manage: 'wallet_manage',
-  global_config: 'global_config',
   swap: 'swap',
-  trade_history: 'positions',
   admin_panel: 'admin_panel',
 };
 

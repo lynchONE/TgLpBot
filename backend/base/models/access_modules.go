@@ -36,8 +36,6 @@ var accessModuleCatalog = []AccessModule{
 	{Key: AccessModuleCreatePool, Label: "创建池子", Group: "交易", Grantable: true},
 	{Key: AccessModuleSwap, Label: "一键兑换", Group: "交易", Grantable: true},
 	{Key: AccessModuleAssets, Label: "我的资产", Group: "资产", Grantable: true},
-	{Key: AccessModuleWalletManage, Label: "钱包管理", Group: "资产", Grantable: true},
-	{Key: AccessModuleGlobalConfig, Label: "全局配置", Group: "设置", Grantable: true},
 	{Key: AccessModuleSmartMoney, Label: "聪明钱", Group: "分析", Grantable: true},
 	{Key: AccessModuleAdminPanel, Label: "管理员", Group: "管理", Grantable: false},
 }
@@ -68,12 +66,12 @@ func DefaultAccessModuleKeys() []string {
 }
 
 func IsAccessModuleKey(key string) bool {
-	_, ok := accessModuleByKey(strings.TrimSpace(key))
+	_, ok := accessModuleByKey(canonicalAccessModuleKey(strings.TrimSpace(key)))
 	return ok
 }
 
 func IsGrantableAccessModuleKey(key string) bool {
-	item, ok := accessModuleByKey(strings.TrimSpace(key))
+	item, ok := accessModuleByKey(canonicalAccessModuleKey(strings.TrimSpace(key)))
 	return ok && item.Grantable
 }
 
@@ -81,7 +79,7 @@ func NormalizeAccessModuleKeys(keys []string) ([]string, error) {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(keys))
 	for _, raw := range keys {
-		key := strings.TrimSpace(raw)
+		key := canonicalAccessModuleKey(strings.TrimSpace(raw))
 		if key == "" {
 			return nil, errors.New("empty module key")
 		}
@@ -129,9 +127,9 @@ func AccessModuleKeysFromJSON(raw string) ([]string, error) {
 }
 
 func AccessModuleKeysContain(keys []string, key string) bool {
-	needle := strings.TrimSpace(key)
+	needle := canonicalAccessModuleKey(strings.TrimSpace(key))
 	for _, item := range keys {
-		if item == needle {
+		if canonicalAccessModuleKey(item) == needle {
 			return true
 		}
 	}
@@ -145,4 +143,13 @@ func accessModuleByKey(key string) (AccessModule, bool) {
 		}
 	}
 	return AccessModule{}, false
+}
+
+func canonicalAccessModuleKey(key string) string {
+	switch key {
+	case AccessModuleWalletManage, AccessModuleGlobalConfig:
+		return AccessModuleAssets
+	default:
+		return key
+	}
 }

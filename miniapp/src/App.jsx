@@ -1516,9 +1516,7 @@ export default function App() {
     );
     const hasKlineAccess = hasModuleAccess(me, 'gmgn_kline');
     const hasCreatePoolAccess = hasModuleAccess(me, 'create_pool');
-    const hasGlobalConfigAccess = hasModuleAccess(me, 'global_config');
-    const hasWalletManageAccess = hasModuleAccess(me, 'wallet_manage');
-    const hasTradeHistoryAccess = hasModuleAccess(me, 'positions');
+    const hasAssetsAccess = hasModuleAccess(me, 'assets');
     const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage;
     const activePollIntervalSec = showAdmin
         ? adminPollIntervalSec
@@ -3596,7 +3594,7 @@ export default function App() {
     }, [apiBaseUrl, initData, hasInitData]);
 
     const openGlobalConfig = () => {
-        if (!hasGlobalConfigAccess) return;
+        if (!hasAssetsAccess) return;
         setGlobalConfigOpen(true);
     };
 
@@ -4230,12 +4228,6 @@ export default function App() {
                                 tick={tick}
                                 pollIntervalSec={assetsPollIntervalSec}
                                 accentTheme={accentTheme}
-                                moduleAccess={{
-                                    assets: hasModuleAccess(me, 'assets'),
-                                    global_config: hasGlobalConfigAccess,
-                                    wallet_manage: hasWalletManageAccess,
-                                    trade_history: hasTradeHistoryAccess,
-                                }}
                                 onNotice={showNotice}
                             />
                         </Suspense>
@@ -4349,8 +4341,8 @@ export default function App() {
                                     <button
                                         type="button"
                                         onClick={openGlobalConfig}
-                                        disabled={!hasInitData || !hasGlobalConfigAccess}
-                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData && hasGlobalConfigAccess
+                                        disabled={!hasInitData || !hasAssetsAccess}
+                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData && hasAssetsAccess
                                             ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
                                             : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
                                             }`}

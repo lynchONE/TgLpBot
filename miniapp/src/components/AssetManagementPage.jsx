@@ -933,8 +933,8 @@ export default function AssetManagementPage({
         const access = moduleAccess && typeof moduleAccess === 'object' ? moduleAccess : {};
         return [
             { key: 'my_assets', label: '我的资产', icon: Wallet, allowed: access.assets !== false },
-            { key: 'global_config', label: '全局配置', icon: Settings2, allowed: Boolean(access.global_config) },
-            { key: 'wallet_manage', label: '钱包管理', icon: Wallet, allowed: Boolean(access.wallet_manage) },
+            { key: 'global_config', label: '全局配置', icon: Settings2, allowed: access.global_config !== false },
+            { key: 'wallet_manage', label: '钱包管理', icon: Wallet, allowed: access.wallet_manage !== false },
             { key: 'trade_history', label: '交易记录', icon: History, allowed: access.trade_history !== false },
         ].filter((tab) => tab.allowed);
     }, [moduleAccess]);

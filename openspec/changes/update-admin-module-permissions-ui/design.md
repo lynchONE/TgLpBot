@@ -11,7 +11,7 @@
 - Non-Goals: 不把模块授权用于绕过现有业务安全校验；现有资金相关校验仍保持独立。
 
 ## Decisions
-- Decision: 使用稳定字符串 key 表示功能模块，例如 `hot_pools`、`positions`、`assets`、`smart_money`、`swap`、`wallet_manage`、`global_config`、`create_pool`、`admin_panel`。前后端共享同一语义，未知 key 在保存时 MUST 被拒绝。
+- Decision: 使用稳定字符串 key 表示可授权的顶层功能模块，例如 `hot_pools`、`positions`、`assets`、`smart_money`、`swap`、`create_pool`、`admin_panel`。钱包管理、交易记录、全局配置仍属于“我的/资产”内部功能，不作为单独授权入口展示。前后端共享同一语义，未知 key 在保存时 MUST 被拒绝。
 - Decision: 用户授权与授权码分别持久化模块 key 清单。为避免 `mini_app_enabled=true` 但模块列表为空造成隐式全开放，后端 MUST 明确区分“未配置模块列表”和“配置为空列表”。新建授权默认不依赖静默 fallback；需要授权全部模块时写入完整模块列表。
 - Decision: 管理员账号始终具有管理模块访问权，但普通用户只有在整体授权有效、MiniApp 开关开启且模块 key 被授权时才能访问对应模块。
 - Decision: 前端管理页采用“左侧对象列表 + 右侧编辑详情”的桌面布局，移动端改为上下分段；模块权限用分组 checkbox 网格展示，提供“全选全部功能”“清空全部”“按组全选”。
