@@ -1442,11 +1442,12 @@ export async function fetchTradeHistory({ apiBaseUrl, initData, chain, status, l
     return resp.json();
 }
 
-export async function walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd, signal }) {
+export async function walletSwapPreview({ apiBaseUrl, initData, chain, walletId, minValueUsd, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = base + '/api/settings?endpoint=wallet_swap_preview';
     const payload = { initData };
     if (chain) payload.chain = String(chain);
+    if (walletId) payload.wallet_id = Number(walletId);
     if (Number.isFinite(minValueUsd)) payload.min_value_usd = minValueUsd;
     const resp = await fetch(url, {
         method: 'POST',

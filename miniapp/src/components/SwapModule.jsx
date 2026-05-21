@@ -184,6 +184,8 @@ export default function SwapModule({
 
     const debounceRef = useRef(null);
     const refreshTimerRef = useRef(null);
+    const walletTokensAbortRef = useRef(null);
+    const walletTokensSeqRef = useRef(0);
     const [tick, setTick] = useState(0);
 
     /* chain change → reset tokens to defaults */
@@ -229,9 +231,20 @@ export default function SwapModule({
 
     const loadWalletTokens = useCallback(async () => {
         if (!hasInitData || !selectedWalletId) {
+            if (walletTokensAbortRef.current) {
+                walletTokensAbortRef.current.abort();
+                walletTokensAbortRef.current = null;
+            }
             setWalletTokens([]);
             return;
         }
+        const seq = walletTokensSeqRef.current + 1;
+        walletTokensSeqRef.current = seq;
+        if (walletTokensAbortRef.current) {
+            walletTokensAbortRef.current.abort();
+        }
+        const controller = new AbortController();
+        walletTokensAbortRef.current = controller;
         setWalletTokensLoading(true);
         setWalletTokensError('');
         try {
@@ -241,7 +254,9 @@ export default function SwapModule({
                 chain,
                 walletId: selectedWalletId,
                 minValueUsd: MIN_WALLET_TOKEN_VALUE_USD,
+                signal: controller.signal,
             });
+            if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
             const list = (resp?.tokens || []).map((t) => ({
                 address: normalizeHex(t.address) || String(t.address || '').toLowerCase(),
                 symbol: t.symbol,
@@ -257,15 +272,26 @@ export default function SwapModule({
             })).filter((t) => t.address);
             setWalletTokens(list);
         } catch (e) {
+            if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
             setWalletTokensError(String(e?.message || e));
             setWalletTokens([]);
         } finally {
-            setWalletTokensLoading(false);
+            if (walletTokensAbortRef.current === controller) {
+                walletTokensAbortRef.current = null;
+            }
+            if (walletTokensSeqRef.current === seq) {
+                setWalletTokensLoading(false);
+            }
         }
     }, [apiBaseUrl, initData, chain, hasInitData, selectedWalletId]);
 
     useEffect(() => { loadWallets(); }, [loadWallets]);
     useEffect(() => { loadWalletTokens(); }, [loadWalletTokens]);
+    useEffect(() => () => {
+        if (walletTokensAbortRef.current) {
+            walletTokensAbortRef.current.abort();
+        }
+    }, []);
 
     const fromBalanceToken = useMemo(() => {
         if (!fromToken?.address) return null;
