@@ -198,6 +198,7 @@ type Config struct {
 	SoSoValueNewsSyncIntervalSeconds int
 	SoSoValueNewsPageSize            int
 	SoSoValueNewsCategoryList        string
+	SoSoValueNewsTickerCategoryList  string
 	SoSoValueNewsMonthlySafetyLimit  int
 	SoSoValueNewsFeaturedEndpoint    string
 	SoSoValueNewsTickerEndpoint      string
@@ -450,6 +451,7 @@ func LoadConfig() error {
 		SoSoValueNewsSyncIntervalSeconds: sosoNewsSyncInterval,
 		SoSoValueNewsPageSize:            sosoNewsPageSize,
 		SoSoValueNewsCategoryList:        strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_CATEGORY_LIST", "1,2,3,4,5,6,7,9,10")),
+		SoSoValueNewsTickerCategoryList:  strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_CATEGORY_LIST", "1,2,3,4,5")),
 		SoSoValueNewsMonthlySafetyLimit:  sosoNewsMonthlySafetyLimit,
 		SoSoValueNewsFeaturedEndpoint:    strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_FEATURED_ENDPOINT", "/api/v1/news/featured/currency")),
 		SoSoValueNewsTickerEndpoint:      strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_ENDPOINT", "")),

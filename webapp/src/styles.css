@@ -445,7 +445,7 @@ body {
   bottom: 0;
   height: 34px;
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr);
+  grid-template-columns: 84px 96px minmax(0, 1fr);
   border-top: 1px solid rgba(var(--accent-rgb), 0.38);
   background: rgba(4, 7, 12, 0.94);
   backdrop-filter: blur(12px);
@@ -462,6 +462,37 @@ body {
   border-right: 1px solid rgba(139, 160, 196, 0.2);
 }
 
+.news-ticker-speed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 8px;
+  border-right: 1px solid rgba(139, 160, 196, 0.16);
+}
+
+.news-ticker-speed button {
+  width: 24px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid rgba(139, 160, 196, 0.22);
+  background: rgba(18, 26, 40, 0.7);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.news-ticker-speed button:hover,
+.news-ticker-speed button.active {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.42);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
 .news-ticker-track {
   min-width: 0;
   overflow: hidden;
@@ -474,7 +505,7 @@ body {
   align-items: center;
   gap: 34px;
   min-width: max-content;
-  animation: newsTickerScroll 60s linear infinite;
+  animation: newsTickerScroll var(--news-ticker-duration, 96s) linear infinite;
 }
 
 .news-ticker:hover .news-ticker-marquee {
@@ -505,9 +536,10 @@ body {
 }
 
 .news-ticker-marquee time {
-  color: var(--text-muted);
+  color: var(--accent);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .news-ticker-empty {
@@ -3195,7 +3227,7 @@ body {
   }
 
   .news-ticker {
-    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-columns: 66px 90px minmax(0, 1fr);
   }
 
   .login-popover {
@@ -4048,12 +4080,21 @@ body {
 
   .news-ticker {
     height: 38px;
-    grid-template-columns: 58px minmax(0, 1fr);
+    grid-template-columns: 58px 82px minmax(0, 1fr);
+  }
+
+  .news-ticker-speed {
+    padding: 0 5px;
+  }
+
+  .news-ticker-speed button {
+    width: 22px;
+    height: 22px;
+    font-size: 10px;
   }
 
   .news-ticker-marquee {
     gap: 24px;
-    animation-duration: 46s;
   }
 
   .hot-pools-filter-grid {

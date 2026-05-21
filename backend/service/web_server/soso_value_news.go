@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/html"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -174,10 +175,13 @@ func (s *SosoValueNewsService) monthlySafetyLimit() int {
 	return config.AppConfig.SoSoValueNewsMonthlySafetyLimit
 }
 
-func (s *SosoValueNewsService) categoryList() []string {
+func (s *SosoValueNewsService) categoryList(feed string) []string {
 	raw := ""
 	if config.AppConfig != nil {
 		raw = config.AppConfig.SoSoValueNewsCategoryList
+		if feed == sosoValueFeedTicker && strings.TrimSpace(config.AppConfig.SoSoValueNewsTickerCategoryList) != "" {
+			raw = config.AppConfig.SoSoValueNewsTickerCategoryList
+		}
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
@@ -209,7 +213,7 @@ func (s *SosoValueNewsService) fetchAndPersist(ctx context.Context, feed string,
 		return 0, fmt.Errorf("monthly SoSoValue request safety limit reached: %d/%d", count, limit)
 	}
 
-	items, err := s.fetchItems(ctx, endpoint, apiKey)
+	items, err := s.fetchItems(ctx, feed, endpoint, apiKey)
 	if err != nil {
 		return 0, err
 	}
@@ -298,7 +302,7 @@ func (s *SosoValueNewsService) reserveMonthlyRequest(ctx context.Context) (bool,
 	return count <= limit, count, limit, nil
 }
 
-func (s *SosoValueNewsService) fetchItems(ctx context.Context, endpoint string, apiKey string) ([]map[string]any, error) {
+func (s *SosoValueNewsService) fetchItems(ctx context.Context, feed string, endpoint string, apiKey string) ([]map[string]any, error) {
 	u, err := s.buildURL(endpoint)
 	if err != nil {
 		return nil, err
@@ -311,7 +315,7 @@ func (s *SosoValueNewsService) fetchItems(ctx context.Context, endpoint string, 
 		q.Set("pageSize", strconv.Itoa(s.pageSize()))
 	}
 	if !queryHasAny(q, "categoryList", "categories", "category") {
-		categories := s.categoryList()
+		categories := s.categoryList(feed)
 		if len(categories) > 0 {
 			q.Set("categoryList", strings.Join(categories, ","))
 		}
@@ -446,7 +450,7 @@ func normalizeSosoValueNewsItem(feed string, raw map[string]any, now time.Time) 
 		Title:           title,
 		Content:         content,
 		Language:        language,
-		SourceLink:      firstStringField(raw, "sourceLink", "source_link", "url", "link"),
+		SourceLink:      resolveSosoValueSourceLink(raw),
 		Author:          firstStringField(raw, "author", "source", "sourceName"),
 		AuthorAvatarURL: firstStringField(raw, "authorAvatarUrl", "author_avatar_url", "sourceLogo"),
 		NickName:        firstStringField(raw, "nickName", "nickname"),
@@ -457,6 +461,107 @@ func normalizeSosoValueNewsItem(feed string, raw map[string]any, now time.Time) 
 		ReleaseTime:     releaseTime,
 		FetchedAt:       now,
 	}, true
+}
+
+func resolveSosoValueSourceLink(raw map[string]any) string {
+	for _, value := range []string{
+		firstNestedStringField(raw, []string{"quoteInfo"}, "originalUrl", "original_url"),
+		firstStringField(raw, "originalUrl", "original_url", "sourceUrl", "source_url", "externalUrl", "external_url", "articleUrl", "article_url"),
+		firstExternalContentLink(raw),
+		firstStringField(raw, "sourceLink", "source_link", "url", "link"),
+	} {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func resolveSosoValueSourceLinkFromRaw(current string, rawJSON string) string {
+	current = strings.TrimSpace(current)
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(rawJSON), &raw); err != nil {
+		return current
+	}
+	resolved := resolveSosoValueSourceLink(raw)
+	if resolved == "" {
+		return current
+	}
+	if current != "" && isSosoValueURL(resolved) && !isSosoValueURL(current) {
+		return current
+	}
+	return resolved
+}
+
+func firstNestedStringField(raw map[string]any, path []string, keys ...string) string {
+	var current any = raw
+	for _, part := range path {
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = obj[part]
+	}
+	obj, ok := current.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return firstStringField(obj, keys...)
+}
+
+func firstExternalContentLink(raw map[string]any) string {
+	contentValues := make([]string, 0, 4)
+	if title, content, _ := sosoValueLocalizedContent(raw); title != "" && content != "" {
+		contentValues = append(contentValues, content)
+	}
+	for _, key := range []string{"content", "summary", "description"} {
+		if value := firstStringField(raw, key); value != "" {
+			contentValues = append(contentValues, value)
+		}
+	}
+	for _, content := range contentValues {
+		if href := firstExternalHref(content); href != "" {
+			return href
+		}
+	}
+	return ""
+}
+
+func firstExternalHref(content string) string {
+	root, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return ""
+	}
+	var walk func(*html.Node) string
+	walk = func(node *html.Node) string {
+		if node.Type == html.ElementNode && node.Data == "a" {
+			for _, attr := range node.Attr {
+				if strings.EqualFold(attr.Key, "href") {
+					href := strings.TrimSpace(attr.Val)
+					if href != "" && !isSosoValueURL(href) {
+						return href
+					}
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if href := walk(child); href != "" {
+				return href
+			}
+		}
+		return ""
+	}
+	return walk(root)
+}
+
+func isSosoValueURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "sosovalue.com" || host == "sosovalue.xyz" || strings.HasSuffix(host, ".sosovalue.com") || strings.HasSuffix(host, ".sosovalue.xyz")
 }
 
 func sosoValueLocalizedContent(raw map[string]any) (string, string, string) {
@@ -741,6 +846,7 @@ func (s *Server) handleSosoValueNews(w http.ResponseWriter, r *http.Request) {
 	items := make([]sosoValueNewsDTO, 0, len(rows))
 	updatedAt := time.Time{}
 	for _, row := range rows {
+		sourceLink := resolveSosoValueSourceLinkFromRaw(row.SourceLink, row.RawJSON)
 		items = append(items, sosoValueNewsDTO{
 			ID:              row.ID,
 			Feed:            row.Feed,
@@ -748,7 +854,7 @@ func (s *Server) handleSosoValueNews(w http.ResponseWriter, r *http.Request) {
 			Title:           row.Title,
 			Content:         row.Content,
 			Language:        row.Language,
-			SourceLink:      row.SourceLink,
+			SourceLink:      sourceLink,
 			Author:          row.Author,
 			AuthorAvatarURL: row.AuthorAvatarURL,
 			NickName:        row.NickName,

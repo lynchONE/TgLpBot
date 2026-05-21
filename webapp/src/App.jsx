@@ -83,6 +83,7 @@ import {
   formatUsd,
   formatUsdCompact,
   formatUtc8DateTime,
+  formatUtc8Time,
   computeHotPoolActiveFeeRate,
   normalizePoolAddress,
   normalizeHexAddress,
@@ -144,32 +145,49 @@ const FEE_TIER_BY_TICK_SPACING = {
   200: 10000,
   2000: 20000,
 };
+const NEWS_TICKER_SPEEDS = [
+  { key: 'slow', label: '慢', durationSec: 140 },
+  { key: 'normal', label: '中', durationSec: 96 },
+  { key: 'fast', label: '快', durationSec: 64 },
+];
+const NEWS_TICKER_DEFAULT_SPEED = 'slow';
 
-function formatNewsTime(value) {
+function normalizeNewsTickerSpeed(value) {
+  const key = String(value || '').trim().toLowerCase();
+  return NEWS_TICKER_SPEEDS.some((item) => item.key === key) ? key : NEWS_TICKER_DEFAULT_SPEED;
+}
+
+function getNewsTickerSpeedMeta(speedKey) {
+  return NEWS_TICKER_SPEEDS.find((item) => item.key === speedKey) || NEWS_TICKER_SPEEDS[0];
+}
+
+function formatNewsDateTime(value) {
   if (!value) return '';
-  const ts = Date.parse(value);
-  if (!Number.isFinite(ts)) return '';
-  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (diffSec < 60) return '刚刚';
-  const min = Math.floor(diffSec / 60);
-  if (min < 60) return `${min}分钟前`;
-  const hour = Math.floor(min / 60);
-  if (hour < 24) return `${hour}小时前`;
-  return formatUtc8DateTime(value);
+  const text = formatUtc8DateTime(value);
+  return text === '--' ? '' : text;
+}
+
+function formatNewsTickerTime(value) {
+  if (!value) return '';
+  const text = formatUtc8Time(value);
+  return text === '--' ? '' : text;
 }
 
 function NewsShowcase({ items, loading, error, status, onOpen }) {
   const rows = Array.isArray(items) ? items.slice(0, 4) : [];
+  const showStatus = loading || status !== 'ok';
   return (
-    <section className="news-showcase" aria-label="SoSoValue 推荐新闻">
+    <section className="news-showcase" aria-label="热点推荐新闻">
       <div className="news-showcase-head">
         <div className="news-showcase-title">
           <Newspaper size={15} />
-          <span>SoSoValue 推荐</span>
+          <span>热点推荐</span>
         </div>
-        <span className={`news-showcase-status ${status === 'ok' ? 'ok' : ''}`}>
-          {loading ? '同步中' : status === 'ok' ? '24h 缓存' : '待同步'}
-        </span>
+        {showStatus ? (
+          <span className={`news-showcase-status ${status === 'ok' ? 'ok' : ''}`}>
+            {loading ? '同步中' : '待同步'}
+          </span>
+        ) : null}
       </div>
       {rows.length > 0 ? (
         <div className="news-showcase-list">
@@ -186,8 +204,8 @@ function NewsShowcase({ items, loading, error, status, onOpen }) {
               <span className="news-showcase-main">
                 <span className="news-showcase-item-title">{item.title}</span>
                 <span className="news-showcase-meta">
-                  {item.author || 'SoSoValue'}
-                  {item.release_time ? <span>{formatNewsTime(item.release_time)}</span> : null}
+                  {item.author ? <span>{item.author}</span> : null}
+                  {item.release_time ? <span>{formatNewsDateTime(item.release_time)}</span> : null}
                 </span>
               </span>
             </button>
@@ -195,19 +213,39 @@ function NewsShowcase({ items, loading, error, status, onOpen }) {
         </div>
       ) : (
         <div className="news-showcase-empty">
-          {loading ? '正在读取新闻缓存...' : error || '暂无 24 小时内新闻'}
+          {loading ? '正在读取新闻...' : error || '暂无新闻'}
         </div>
       )}
     </section>
   );
 }
 
-function NewsTicker({ items, loading, error, onOpen }) {
+function NewsTicker({ items, loading, error, speedKey, onSpeedChange, onOpen }) {
   const rows = Array.isArray(items) ? items.filter((item) => item?.title) : [];
   const tickerRows = rows.length > 0 ? [...rows, ...rows] : [];
+  const speedMeta = getNewsTickerSpeedMeta(speedKey);
   return (
-    <div className="news-ticker" role="region" aria-label="SoSoValue 新闻滚动条">
+    <div
+      className="news-ticker"
+      role="region"
+      aria-label="热点新闻滚动条"
+      style={{ '--news-ticker-duration': `${speedMeta.durationSec}s` }}
+    >
       <div className="news-ticker-label">NEWS</div>
+      <div className="news-ticker-speed" aria-label="滚动速度">
+        {NEWS_TICKER_SPEEDS.map((speed) => (
+          <button
+            type="button"
+            key={speed.key}
+            className={speed.key === speedMeta.key ? 'active' : ''}
+            onClick={() => onSpeedChange(speed.key)}
+            title={`滚动速度：${speed.label}`}
+            aria-pressed={speed.key === speedMeta.key}
+          >
+            {speed.label}
+          </button>
+        ))}
+      </div>
       <div className="news-ticker-track">
         {tickerRows.length > 0 ? (
           <div className="news-ticker-marquee">
@@ -219,8 +257,8 @@ function NewsTicker({ items, loading, error, onOpen }) {
                 disabled={!item.source_link}
                 title={item.title}
               >
+                {item.release_time ? <time>{formatNewsTickerTime(item.release_time)}</time> : null}
                 <span>{item.title}</span>
-                {item.release_time ? <time>{formatNewsTime(item.release_time)}</time> : null}
               </button>
             ))}
           </div>
@@ -452,6 +490,7 @@ const STORAGE = {
   hotPoolsHeight: 'tglp_web_hot_pools_height',
   hotPoolsFilter: 'tglp_web_hot_pools_filter_v1',
   smartMoneyWatchWallets: 'tglp_web_sm_watch_wallets',
+  newsTickerSpeed: 'tglp_web_news_ticker_speed',
 };
 
 const MIN_REFRESH_INTERVAL_SEC = 2;
@@ -826,6 +865,9 @@ export default function App() {
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError, setNewsError] = useState('');
   const [newsStatus, setNewsStatus] = useState('empty');
+  const [newsTickerSpeed, setNewsTickerSpeed] = useState(() =>
+    normalizeNewsTickerSpeed(storageGet(STORAGE.newsTickerSpeed))
+  );
 
   const [positions, setPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -1576,6 +1618,12 @@ export default function App() {
     },
     [apiBaseUrl]
   );
+
+  const updateNewsTickerSpeed = useCallback((speedKey) => {
+    const normalized = normalizeNewsTickerSpeed(speedKey);
+    setNewsTickerSpeed(normalized);
+    storageSet(STORAGE.newsTickerSpeed, normalized);
+  }, []);
 
   const loadPositions = useCallback(
     async (signal) => {
@@ -3851,6 +3899,8 @@ export default function App() {
         items={tickerNews}
         loading={newsLoading}
         error={newsError}
+        speedKey={newsTickerSpeed}
+        onSpeedChange={updateNewsTickerSpeed}
         onOpen={openExternal}
       />
 

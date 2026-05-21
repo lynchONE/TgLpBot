@@ -62,6 +62,42 @@ func TestNormalizeSosoValueNewsItemUsesChineseContentArray(t *testing.T) {
 	}
 }
 
+func TestNormalizeSosoValueNewsItemPrefersOriginalSourceLink(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	raw := map[string]any{
+		"id":         "news-1",
+		"title":      "news title",
+		"sourceLink": "https://sosovalue.com/zh/research/1",
+		"quoteInfo": map[string]any{
+			"originalUrl": "https://example.com/original-news",
+		},
+	}
+
+	row, ok := normalizeSosoValueNewsItem(sosoValueFeedFeatured, raw, now)
+	if !ok {
+		t.Fatal("normalize returned false")
+	}
+	if row.SourceLink != "https://example.com/original-news" {
+		t.Fatalf("SourceLink = %q, want original source", row.SourceLink)
+	}
+}
+
+func TestResolveSosoValueSourceLinkFromRawKeepsExternalCurrentOverSosoValue(t *testing.T) {
+	rawJSON := `{"sourceLink":"https://sosovalue.com/zh/research/1"}`
+	got := resolveSosoValueSourceLinkFromRaw("https://example.com/current", rawJSON)
+	if got != "https://example.com/current" {
+		t.Fatalf("got %q, want current external link", got)
+	}
+}
+
+func TestResolveSosoValueSourceLinkFromRawUsesSosoValueWhenCurrentEmpty(t *testing.T) {
+	rawJSON := `{"sourceLink":"https://sosovalue.com/zh/research/1"}`
+	got := resolveSosoValueSourceLinkFromRaw("", rawJSON)
+	if got != "https://sosovalue.com/zh/research/1" {
+		t.Fatalf("got %q, want raw source link", got)
+	}
+}
+
 func TestNormalizeSosoValueNewsItemRejectsMissingTitle(t *testing.T) {
 	_, ok := normalizeSosoValueNewsItem(sosoValueFeedFeatured, map[string]any{
 		"id": "news-2",
