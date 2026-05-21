@@ -6,6 +6,7 @@ import {
   Check,
   Copy,
   Flame,
+  Newspaper,
   GripVertical,
   LogOut,
   Maximize,
@@ -26,6 +27,7 @@ import {
   fetchHotPools,
   fetchMe,
   fetchMyTradeMarkers,
+  fetchNewsFeed,
   fetchRealtimePositions,
   fetchSmartMoneyPoolMarkers,
   fetchTokenCandles,
@@ -80,6 +82,7 @@ import {
   formatPriceDisplay,
   formatUsd,
   formatUsdCompact,
+  formatUtc8DateTime,
   computeHotPoolActiveFeeRate,
   normalizePoolAddress,
   normalizeHexAddress,
@@ -141,6 +144,95 @@ const FEE_TIER_BY_TICK_SPACING = {
   200: 10000,
   2000: 20000,
 };
+
+function formatNewsTime(value) {
+  if (!value) return '';
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return '';
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return '刚刚';
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min}分钟前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}小时前`;
+  return formatUtc8DateTime(value);
+}
+
+function NewsShowcase({ items, loading, error, status, onOpen }) {
+  const rows = Array.isArray(items) ? items.slice(0, 4) : [];
+  return (
+    <section className="news-showcase" aria-label="SoSoValue 推荐新闻">
+      <div className="news-showcase-head">
+        <div className="news-showcase-title">
+          <Newspaper size={15} />
+          <span>SoSoValue 推荐</span>
+        </div>
+        <span className={`news-showcase-status ${status === 'ok' ? 'ok' : ''}`}>
+          {loading ? '同步中' : status === 'ok' ? '24h 缓存' : '待同步'}
+        </span>
+      </div>
+      {rows.length > 0 ? (
+        <div className="news-showcase-list">
+          {rows.map((item, index) => (
+            <button
+              type="button"
+              key={`${item.external_id || item.id || index}`}
+              className="news-showcase-item"
+              onClick={() => onOpen(item.source_link)}
+              disabled={!item.source_link}
+              title={item.title}
+            >
+              <span className="news-showcase-rank">{index + 1}</span>
+              <span className="news-showcase-main">
+                <span className="news-showcase-item-title">{item.title}</span>
+                <span className="news-showcase-meta">
+                  {item.author || 'SoSoValue'}
+                  {item.release_time ? <span>{formatNewsTime(item.release_time)}</span> : null}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="news-showcase-empty">
+          {loading ? '正在读取新闻缓存...' : error || '暂无 24 小时内新闻'}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NewsTicker({ items, loading, error, onOpen }) {
+  const rows = Array.isArray(items) ? items.filter((item) => item?.title) : [];
+  const tickerRows = rows.length > 0 ? [...rows, ...rows] : [];
+  return (
+    <div className="news-ticker" role="region" aria-label="SoSoValue 新闻滚动条">
+      <div className="news-ticker-label">NEWS</div>
+      <div className="news-ticker-track">
+        {tickerRows.length > 0 ? (
+          <div className="news-ticker-marquee">
+            {tickerRows.map((item, index) => (
+              <button
+                type="button"
+                key={`${item.external_id || item.id || index}:${index}`}
+                onClick={() => onOpen(item.source_link)}
+                disabled={!item.source_link}
+                title={item.title}
+              >
+                <span>{item.title}</span>
+                {item.release_time ? <time>{formatNewsTime(item.release_time)}</time> : null}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="news-ticker-empty">
+            {loading ? '新闻同步中...' : error || '暂无新闻滚动内容'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function normalizePositionSmartMoneyGroups(groups) {
   return Array.isArray(groups)
@@ -729,6 +821,11 @@ export default function App() {
       hotPoolsDefaultHeightRef.current
     )
   );
+  const [featuredNews, setFeaturedNews] = useState([]);
+  const [tickerNews, setTickerNews] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState('');
+  const [newsStatus, setNewsStatus] = useState('empty');
 
   const [positions, setPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -1440,6 +1537,46 @@ export default function App() {
     [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotPoolsLimit, hotSort, hotTokenFilter?.address, initData]
   );
 
+  const loadNewsFeeds = useCallback(
+    async (signal) => {
+      setNewsLoading(true);
+      setNewsError('');
+      try {
+        const [featuredResp, tickerResp] = await Promise.allSettled([
+          fetchNewsFeed({ apiBaseUrl, feed: 'featured', limit: 6, signal }),
+          fetchNewsFeed({ apiBaseUrl, feed: 'ticker', limit: 24, signal }),
+        ]);
+
+        let nextError = '';
+        let nextStatus = 'ok';
+        if (featuredResp.status === 'fulfilled') {
+          setFeaturedNews(Array.isArray(featuredResp.value?.items) ? featuredResp.value.items : []);
+          nextStatus = featuredResp.value?.status || nextStatus;
+          if (featuredResp.value?.message) nextError = String(featuredResp.value.message);
+        } else if (featuredResp.reason?.name !== 'AbortError') {
+          setFeaturedNews([]);
+          nextError = String(featuredResp.reason?.message || featuredResp.reason || '新闻读取失败');
+          nextStatus = 'error';
+        }
+
+        if (tickerResp.status === 'fulfilled') {
+          setTickerNews(Array.isArray(tickerResp.value?.items) ? tickerResp.value.items : []);
+          if (!nextError && tickerResp.value?.message) nextError = String(tickerResp.value.message);
+        } else if (tickerResp.reason?.name !== 'AbortError') {
+          setTickerNews([]);
+          if (!nextError) nextError = String(tickerResp.reason?.message || tickerResp.reason || 'ticker 读取失败');
+          nextStatus = 'error';
+        }
+
+        setNewsStatus(nextStatus);
+        setNewsError(nextError);
+      } finally {
+        setNewsLoading(false);
+      }
+    },
+    [apiBaseUrl]
+  );
+
   const loadPositions = useCallback(
     async (signal) => {
       if (!hasInitData) {
@@ -1621,6 +1758,12 @@ export default function App() {
 
   useEffect(() => {
     const ctrl = new AbortController();
+    loadNewsFeeds(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadNewsFeeds]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
     loadPositions(ctrl.signal);
     return () => ctrl.abort();
   }, [loadPositions]);
@@ -1648,6 +1791,11 @@ export default function App() {
     const timer = window.setInterval(() => loadHotPools(), hotPoolsRefreshInterval * 1000);
     return () => window.clearInterval(timer);
   }, [hasInitData, hotPoolsRefreshInterval, loadHotPools]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => loadNewsFeeds(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [loadNewsFeeds]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -3475,6 +3623,14 @@ export default function App() {
               </h1>
             </div>
 
+            <NewsShowcase
+              items={featuredNews}
+              loading={newsLoading}
+              error={newsError}
+              status={newsStatus}
+              onOpen={openExternal}
+            />
+
             <div className="top-actions">
           {loginUser ? (
             <div className="user-chip">
@@ -3690,6 +3846,13 @@ export default function App() {
           </div>
         ))}
       </main>
+
+      <NewsTicker
+        items={tickerNews}
+        loading={newsLoading}
+        error={newsError}
+        onOpen={openExternal}
+      />
 
       {openPosPool && (
         <OpenPositionModal

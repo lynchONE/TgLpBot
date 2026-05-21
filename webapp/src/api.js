@@ -106,6 +106,21 @@ export async function fetchHotPools({
   return requestJson(url, { method: 'GET', signal });
 }
 
+export async function fetchNewsFeed({
+  apiBaseUrl,
+  feed = 'featured',
+  limit = 6,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (feed) params.set('feed', String(feed));
+  if (Number.isFinite(limit)) params.set('limit', String(limit));
+  const qs = params.toString();
+  const url = `${base}/api/news_feed${qs ? `?${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
 export async function fetchTokenCandles({
   apiBaseUrl,
   initData,

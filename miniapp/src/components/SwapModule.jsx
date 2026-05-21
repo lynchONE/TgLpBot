@@ -10,6 +10,7 @@ import SwapHistoryDrawer from './swap/SwapHistoryDrawer.jsx';
 import {
     createWalletSwapLimitOrder,
     fetchWallets,
+    fetchWalletSwapTokenMetadata,
     walletSwapPreview,
     walletSwapSingleExecute,
     walletSwapSingleQuote,
@@ -22,6 +23,7 @@ import {
     MIN_WALLET_TOKEN_VALUE_USD,
     SLIPPAGE_PRESETS,
     applyAmountPreset,
+    applyTokenMetadata,
     formatQuoteGasCostSummary,
     formatQuoteRelativeTime,
     formatTokenAmount,
@@ -30,10 +32,12 @@ import {
     getNativePresetToken,
     getPresetTokens,
     isNativeAddress,
+    makeCustomToken,
     normalizeHex,
     pushRecentToken,
     resolveTokenMeta,
     shortAddress,
+    shouldFetchTokenMetadata,
 } from '../lib/swapMeta';
 
 const CHAIN_OPTIONS = Object.values(CHAIN_META).map((c) => ({
@@ -49,6 +53,10 @@ const SWAP_MODES = [
 ];
 
 function TokenChip({ token, onClick, placeholder = '选择代币' }) {
+    const [imgFailed, setImgFailed] = useState(false);
+    const logo = String(token?.logoUrl || '').trim();
+    useEffect(() => { setImgFailed(false); }, [logo, token?.address]);
+
     if (!token) {
         return (
             <button
@@ -69,12 +77,21 @@ function TokenChip({ token, onClick, placeholder = '选择代币' }) {
             onClick={onClick}
             className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2 py-1 text-[12px] font-bold text-zinc-900 transition active:scale-[0.98] dark:border-white/10 dark:bg-white/10 dark:text-white/90"
         >
-            <span
-                className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
-                style={{ background: color }}
-            >
-                {symbol}
-            </span>
+            {logo && !imgFailed ? (
+                <img
+                    src={logo}
+                    alt={token.symbol || ''}
+                    onError={() => setImgFailed(true)}
+                    className="h-6 w-6 rounded-full bg-zinc-100 object-cover dark:bg-white/10"
+                />
+            ) : (
+                <span
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                    style={{ background: color }}
+                >
+                    {symbol}
+                </span>
+            )}
             <span className="truncate max-w-[80px]">{token.symbol}</span>
             <ChevronDown size={14} className="text-zinc-400 dark:text-white/45" />
         </button>
@@ -182,6 +199,9 @@ export default function SwapModule({
     const [historyOpen, setHistoryOpen] = useState(false);
     const [showSlippage, setShowSlippage] = useState(false);
 
+    /* token metadata enrichment (logo / canonical symbol / name) */
+    const [tokenMetaMap, setTokenMetaMap] = useState({});
+
     const debounceRef = useRef(null);
     const refreshTimerRef = useRef(null);
     const walletTokensAbortRef = useRef(null);
@@ -199,6 +219,7 @@ export default function SwapModule({
         setQuoteError('');
         setExecError('');
         setSelectedWalletId('');
+        setTokenMetaMap({});
     }, [chain]);
 
     /* clock for "x秒前" hint */
@@ -292,6 +313,81 @@ export default function SwapModule({
             walletTokensAbortRef.current.abort();
         }
     }, []);
+
+    /* enriched token lists with logo / name from tokenMetaMap */
+    const rawPresetTokens = useMemo(() => getPresetTokens(chain), [chain]);
+    const presetTokens = useMemo(
+        () => rawPresetTokens.map((t) => applyTokenMetadata(t, tokenMetaMap, chain)),
+        [rawPresetTokens, tokenMetaMap, chain],
+    );
+    const enrichedWalletTokens = useMemo(
+        () => walletTokens.map((t) => applyTokenMetadata(t, tokenMetaMap, chain)),
+        [walletTokens, tokenMetaMap, chain],
+    );
+
+    const fromTokenEnriched = useMemo(
+        () => (fromToken ? applyTokenMetadata(fromToken, tokenMetaMap, chain) : null),
+        [fromToken, tokenMetaMap, chain],
+    );
+    const toTokenEnriched = useMemo(
+        () => (toToken ? applyTokenMetadata(toToken, tokenMetaMap, chain) : null),
+        [toToken, tokenMetaMap, chain],
+    );
+
+    /* fetch metadata for any token missing logo / canonical name */
+    useEffect(() => {
+        if (!hasInitData) return undefined;
+        const candidates = [
+            ...rawPresetTokens,
+            ...walletTokens,
+            fromToken,
+            toToken,
+        ].filter(Boolean);
+        const addresses = [];
+        const seen = new Set();
+        for (const token of candidates) {
+            if (!shouldFetchTokenMetadata(token)) continue;
+            const addr = normalizeHex(token.address);
+            if (!addr || seen.has(addr) || tokenMetaMap[addr]) continue;
+            seen.add(addr);
+            addresses.push(addr);
+        }
+        if (!addresses.length) return undefined;
+
+        const controller = new AbortController();
+        fetchWalletSwapTokenMetadata({
+            apiBaseUrl,
+            initData,
+            chain,
+            addresses,
+            signal: controller.signal,
+        })
+            .then((resp) => {
+                if (controller.signal.aborted) return;
+                const rows = Array.isArray(resp?.tokens) ? resp.tokens : [];
+                if (!rows.length) return;
+                setTokenMetaMap((prev) => {
+                    const next = { ...prev };
+                    for (const item of rows) {
+                        const addr = normalizeHex(item?.address);
+                        if (!addr) continue;
+                        next[addr] = {
+                            address: addr,
+                            symbol: String(item?.symbol || '').trim(),
+                            name: String(item?.name || '').trim(),
+                            logoUrl: String(item?.logo_url || '').trim(),
+                        };
+                    }
+                    return next;
+                });
+            })
+            .catch((e) => {
+                if (controller.signal.aborted) return;
+                // 元数据是装饰性的，拉取失败不打扰用户，保留 fallback 字母圆
+                console.warn('fetchWalletSwapTokenMetadata failed', e);
+            });
+        return () => controller.abort();
+    }, [apiBaseUrl, initData, chain, hasInitData, rawPresetTokens, walletTokens, fromToken, toToken, tokenMetaMap]);
 
     const fromBalanceToken = useMemo(() => {
         if (!fromToken?.address) return null;
@@ -663,7 +759,7 @@ export default function SwapModule({
                             inputMode="decimal"
                             className="min-w-0 flex-1 bg-transparent text-[32px] font-black tabular-nums text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-zinc-700"
                         />
-                        <TokenChip token={fromToken} onClick={() => setPickerSide('from')} placeholder="选择支付" />
+                        <TokenChip token={fromTokenEnriched} onClick={() => setPickerSide('from')} placeholder="选择支付" />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1">
                         {AMOUNT_PRESETS.map((ratio) => (
@@ -710,7 +806,7 @@ export default function SwapModule({
                                 <NumberFlowValue value={toAmountText} formatter={() => toAmountText} />
                             )}
                         </div>
-                        <TokenChip token={toToken} onClick={() => setPickerSide('to')} placeholder="选择获得" />
+                        <TokenChip token={toTokenEnriched} onClick={() => setPickerSide('to')} placeholder="选择获得" />
                     </div>
                     {quote ? (
                         <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/45">
@@ -834,7 +930,8 @@ export default function SwapModule({
                 open={pickerSide !== null}
                 onClose={() => setPickerSide(null)}
                 chain={chain}
-                walletTokens={walletTokens}
+                walletTokens={enrichedWalletTokens}
+                tokenMetaMap={tokenMetaMap}
                 excludeAddress={pickerSide === 'from' ? toToken?.address : fromToken?.address}
                 onSelect={(t) => handleSelectToken(pickerSide, t)}
             />

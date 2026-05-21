@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Star } from 'lucide-react';
 import BottomSheet from '../BottomSheet.jsx';
 import {
+    applyTokenMetadata,
     dedupeTokens,
     formatTokenAmount,
     formatUSDCompact,
@@ -104,6 +105,7 @@ export default function SwapTokenPicker({
     onClose,
     chain,
     walletTokens = [],
+    tokenMetaMap = {},
     onSelect,
     excludeAddress,
 }) {
@@ -113,8 +115,16 @@ export default function SwapTokenPicker({
         if (!open) setQuery('');
     }, [open]);
 
-    const presets = useMemo(() => getPresetTokens(chain), [chain]);
-    const recents = useMemo(() => (open ? getRecentTokensFor(chain) : []), [open, chain]);
+    const presets = useMemo(
+        () => getPresetTokens(chain).map((t) => applyTokenMetadata(t, tokenMetaMap, chain)),
+        [chain, tokenMetaMap],
+    );
+    const recents = useMemo(
+        () => (open
+            ? getRecentTokensFor(chain).map((t) => applyTokenMetadata(t, tokenMetaMap, chain))
+            : []),
+        [open, chain, tokenMetaMap],
+    );
 
     const excludeNorm = normalizeHex(excludeAddress);
     const filterExclude = (t) => !excludeNorm || normalizeHex(t?.address) !== excludeNorm;
@@ -134,7 +144,9 @@ export default function SwapTokenPicker({
 
     const queryNormalized = String(query || '').trim().toLowerCase();
     const looksLikeAddress = /^0x[0-9a-f]{40}$/.test(queryNormalized);
-    const customCandidate = looksLikeAddress ? makeCustomToken(queryNormalized) : null;
+    const customCandidate = looksLikeAddress
+        ? applyTokenMetadata(makeCustomToken(queryNormalized), tokenMetaMap, chain)
+        : null;
 
     const handlePick = (token) => {
         if (!token) return;

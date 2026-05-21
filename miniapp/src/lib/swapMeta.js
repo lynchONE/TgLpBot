@@ -1,6 +1,9 @@
 // Swap module shared metadata, presets, and formatting helpers.
 // Adapted from webapp SwapPanel.jsx — kept minimal for miniapp.
 
+import bnbLogo from '../image/bnb.svg';
+import baseLogo from '../image/base.svg';
+
 export const NATIVE_PSEUDO_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 export const RECENT_STORAGE_KEY = 'tg_lp_bot_swap_recent_tokens_v1';
 export const AUTO_QUOTE_REFRESH_MS = 8000;
@@ -16,6 +19,7 @@ export const CHAIN_META = {
         shortLabel: 'BSC',
         emoji: '🟡',
         nativeSymbol: 'BNB',
+        nativeLogoUrl: bnbLogo,
         wrappedNativeAddress: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
         stable: {
             symbol: 'USDT',
@@ -37,6 +41,7 @@ export const CHAIN_META = {
         shortLabel: 'Base',
         emoji: '🔵',
         nativeSymbol: 'ETH',
+        nativeLogoUrl: baseLogo,
         wrappedNativeAddress: '0x4200000000000000000000000000000000000006',
         stable: {
             symbol: 'USDC',
@@ -103,6 +108,7 @@ export function getNativePresetToken(chain) {
         symbol: chainConfig.nativeSymbol || 'NATIVE',
         name: chainConfig.nativeSymbol || 'NATIVE',
         color: wrapped?.color || '#7c8aa6',
+        logoUrl: String(chainConfig.nativeLogoUrl || '').trim(),
         native: true,
         canSwap: true,
     };
@@ -117,6 +123,59 @@ export function resolveTokenMeta(address, tokens) {
     if (!normalized) return null;
     const pool = dedupeTokens(tokens);
     return pool.find((item) => item.address === normalized) || makeCustomToken(normalized);
+}
+
+export function shouldFetchTokenMetadata(token) {
+    const address = normalizeHex(token?.address);
+    if (!address) return false;
+    if (Boolean(token?.native)) return false;
+    const symbol = String(token?.symbol || '').trim();
+    const name = String(token?.name || '').trim();
+    const logoUrl = String(token?.logoUrl || '').trim();
+    if (!logoUrl) return true;
+    if (Boolean(token?.custom)) return true;
+    return !symbol || !name || name === symbol;
+}
+
+export function resolveNativeLogoUrl(token, tokenMetaMap, chain) {
+    const chainConfig = getChainConfig(chain);
+    const wrappedAddress = normalizeHex(chainConfig?.wrappedNativeAddress);
+    const wrappedLogoUrl = wrappedAddress ? String(tokenMetaMap?.[wrappedAddress]?.logoUrl || '').trim() : '';
+    const currentLogoUrl = String(token?.logoUrl || '').trim();
+    return currentLogoUrl || wrappedLogoUrl || String(chainConfig?.nativeLogoUrl || '').trim();
+}
+
+export function applyTokenMetadata(token, tokenMetaMap, chain) {
+    if (!token) return token;
+    const address = normalizeHex(token.address);
+    if (!address) return token;
+    if (Boolean(token.native)) {
+        return {
+            ...token,
+            address,
+            logoUrl: resolveNativeLogoUrl(token, tokenMetaMap, chain),
+        };
+    }
+    const meta = tokenMetaMap?.[address];
+    if (!meta) return token;
+
+    const fallbackSymbol = shortAddress(address, 4, 4);
+    const symbol = String(token.symbol || '').trim();
+    const name = String(token.name || '').trim();
+    const nextSymbol = symbol && symbol !== fallbackSymbol
+        ? symbol
+        : String(meta.symbol || symbol || fallbackSymbol).trim() || fallbackSymbol;
+    const nextName = Boolean(token.custom) || !name || name === symbol
+        ? String(meta.name || name || nextSymbol).trim() || nextSymbol
+        : name;
+
+    return {
+        ...token,
+        address,
+        symbol: nextSymbol,
+        name: nextName,
+        logoUrl: String(token.logoUrl || meta.logoUrl || '').trim(),
+    };
 }
 
 export function matchesToken(token, query) {

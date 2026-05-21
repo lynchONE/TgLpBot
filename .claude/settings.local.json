@@ -69,7 +69,8 @@
       "Bash(GOPROXY=https://goproxy.io,direct GOTOOLCHAIN=auto go build ./...)",
       "Bash(git stash *)",
       "Bash(awk '/^\\\\}/{n++} END{print \"}lines:\",n}' /mnt/e/goProject/TgLpBot/webapp/src/components/OpenPositionModal.jsx)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(timeout 60 npx --no-install vite build)"
     ]
   }
 }
