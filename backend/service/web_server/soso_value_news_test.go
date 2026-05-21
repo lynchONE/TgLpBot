@@ -1,6 +1,9 @@
 package web_server
 
 import (
+	"TgLpBot/base/config"
+	"TgLpBot/base/models"
+	"strings"
 	"testing"
 	"time"
 )
@@ -106,6 +109,74 @@ func TestNormalizeNewsTitleKeyDedupesPunctuationAndSpaces(t *testing.T) {
 	}
 	if left != right {
 		t.Fatalf("left = %q, right = %q", left, right)
+	}
+}
+
+func TestNormalizeNewsContentKeyDedupesSameHTMLContent(t *testing.T) {
+	left := normalizeNewsContentKey(`<p>BTC 现货 ETF 资金流入扩大，市场风险偏好回升。</p>`)
+	right := normalizeNewsContentKey(`BTC现货ETF资金流入扩大市场风险偏好回升`)
+	if left == "" {
+		t.Fatal("left key is empty")
+	}
+	if left != right {
+		t.Fatalf("left = %q, right = %q", left, right)
+	}
+}
+
+func TestIsDuplicateNewsRowDedupesByContent(t *testing.T) {
+	seen := make(map[string]struct{})
+	first := models.SosoValueNewsItem{
+		Title:   "source A title",
+		Content: "BTC 现货 ETF 资金流入扩大，市场风险偏好回升。",
+	}
+	second := models.SosoValueNewsItem{
+		Title:   "source B different title",
+		Content: "BTC现货ETF资金流入扩大市场风险偏好回升",
+	}
+	if isDuplicateNewsRow(first, "https://example.com/a", seen) {
+		t.Fatal("first row detected as duplicate")
+	}
+	if !isDuplicateNewsRow(second, "https://example.com/b", seen) {
+		t.Fatal("second row was not detected as duplicate")
+	}
+}
+
+func TestTickerEndpointDefaultsToFeaturedNewsEndpoint(t *testing.T) {
+	service := NewSosoValueNewsService()
+	oldConfig := config.AppConfig
+	defer func() { config.AppConfig = oldConfig }()
+
+	config.AppConfig = nil
+	if got := service.tickerEndpoint(); got != defaultSosoValueFeaturedPath {
+		t.Fatalf("tickerEndpoint = %q, want default endpoint", got)
+	}
+
+	config.AppConfig = &config.Config{}
+	if got := service.tickerEndpoint(); got != "" {
+		t.Fatalf("tickerEndpoint = %q, want explicit empty endpoint", got)
+	}
+	config.AppConfig.SoSoValueNewsTickerEndpoint = defaultSosoValueFeaturedPath
+	if got := service.tickerEndpoint(); got != defaultSosoValueFeaturedPath {
+		t.Fatalf("tickerEndpoint = %q, want featured endpoint", got)
+	}
+}
+
+func TestCategoryListUsesTickerCategory(t *testing.T) {
+	service := NewSosoValueNewsService()
+	oldConfig := config.AppConfig
+	defer func() { config.AppConfig = oldConfig }()
+	config.AppConfig = &config.Config{
+		SoSoValueNewsCategoryList:       "1,2,3",
+		SoSoValueNewsTickerCategoryList: "13",
+	}
+
+	featured := service.categoryList(sosoValueFeedFeatured)
+	ticker := service.categoryList(sosoValueFeedTicker)
+	if strings.Join(featured, ",") != "1,2,3" {
+		t.Fatalf("featured categories = %v, want 1,2,3", featured)
+	}
+	if strings.Join(ticker, ",") != "13" {
+		t.Fatalf("ticker categories = %v, want 13", ticker)
 	}
 }
 

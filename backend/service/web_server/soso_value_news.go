@@ -110,7 +110,7 @@ func (s *SosoValueNewsService) runOnce() {
 
 	tickerEndpoint := s.tickerEndpoint()
 	tickerCount := 0
-	if tickerEndpoint != "" && tickerEndpoint != s.featuredEndpoint() {
+	if tickerEndpoint != "" {
 		tickerCount, err = s.fetchAndPersist(ctx, sosoValueFeedTicker, tickerEndpoint, apiKey)
 		if err != nil {
 			log.Printf("[SoSoValueNews] sync ticker failed: %v", err)
@@ -151,9 +151,13 @@ func (s *SosoValueNewsService) featuredEndpoint() string {
 
 func (s *SosoValueNewsService) tickerEndpoint() string {
 	if config.AppConfig == nil {
+		return defaultSosoValueFeaturedPath
+	}
+	raw := strings.TrimSpace(config.AppConfig.SoSoValueNewsTickerEndpoint)
+	if raw == "" {
 		return ""
 	}
-	return strings.TrimSpace(config.AppConfig.SoSoValueNewsTickerEndpoint)
+	return raw
 }
 
 func (s *SosoValueNewsService) pageSize() int {
@@ -845,17 +849,13 @@ func (s *Server) handleSosoValueNews(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]sosoValueNewsDTO, 0, limit)
-	seenTitles := make(map[string]struct{}, len(rows))
+	seenKeys := make(map[string]struct{}, len(rows)*2)
 	updatedAt := time.Time{}
 	for _, row := range rows {
-		titleKey := normalizeNewsTitleKey(row.Title)
-		if titleKey != "" {
-			if _, exists := seenTitles[titleKey]; exists {
-				continue
-			}
-			seenTitles[titleKey] = struct{}{}
-		}
 		sourceLink := resolveSosoValueSourceLinkFromRaw(row.SourceLink, row.RawJSON)
+		if isDuplicateNewsRow(row, sourceLink, seenKeys) {
+			continue
+		}
 		items = append(items, sosoValueNewsDTO{
 			ID:              row.ID,
 			Feed:            row.Feed,
@@ -943,12 +943,100 @@ func newsQueryLimit(limit int) int {
 var newsTitleKeyReplacer = regexp.MustCompile(`[\s[:punct:]\p{P}\p{S}]+`)
 
 func normalizeNewsTitleKey(title string) string {
-	key := strings.ToLower(strings.TrimSpace(title))
+	key := normalizeNewsTextKey(title)
+	if len(key) > 160 {
+		return key[:160]
+	}
+	return key
+}
+
+func normalizeNewsContentKey(content string) string {
+	key := normalizeNewsTextKey(stripHTMLText(content))
+	if len(key) < 24 {
+		return ""
+	}
+	if len(key) > 220 {
+		return key[:220]
+	}
+	return key
+}
+
+func normalizeNewsTextKey(text string) string {
+	key := strings.ToLower(strings.TrimSpace(text))
 	if key == "" {
 		return ""
 	}
 	key = newsTitleKeyReplacer.ReplaceAllString(key, "")
 	return key
+}
+
+func stripHTMLText(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	root, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return content
+	}
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if node.Type == html.TextNode {
+			b.WriteString(node.Data)
+			b.WriteByte(' ')
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	text := strings.TrimSpace(b.String())
+	if text == "" {
+		return content
+	}
+	return text
+}
+
+func normalizeNewsURLKey(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.Fragment = ""
+	q := u.Query()
+	for _, key := range []string{"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "from", "ref"} {
+		q.Del(key)
+	}
+	u.RawQuery = q.Encode()
+	return strings.ToLower(u.String())
+}
+
+func isDuplicateNewsRow(row models.SosoValueNewsItem, sourceLink string, seen map[string]struct{}) bool {
+	keys := []string{
+		"title:" + normalizeNewsTitleKey(row.Title),
+		"content:" + normalizeNewsContentKey(row.Content),
+		"url:" + normalizeNewsURLKey(sourceLink),
+	}
+	duplicate := false
+	for _, key := range keys {
+		if strings.HasSuffix(key, ":") {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			duplicate = true
+		}
+	}
+	if duplicate {
+		return true
+	}
+	for _, key := range keys {
+		if strings.HasSuffix(key, ":") {
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	return false
 }
 
 func formatOptionalRFC3339(t time.Time) string {

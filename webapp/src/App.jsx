@@ -168,6 +168,49 @@ function formatNewsTickerTime(value) {
   return text === '--' ? '' : text;
 }
 
+function normalizeNewsTextKey(value, maxLength) {
+  const key = String(value || '')
+    .replace(/<[^>]*>/g, '')
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+    .trim();
+  if (!key) return '';
+  return maxLength && key.length > maxLength ? key.slice(0, maxLength) : key;
+}
+
+function normalizeNewsUrlKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    url.hash = '';
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'from', 'ref'].forEach((key) => {
+      url.searchParams.delete(key);
+    });
+    return url.toString().toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function dedupeNewsItems(items, limit) {
+  const rows = Array.isArray(items) ? items : [];
+  const seen = new Set();
+  const out = [];
+  rows.forEach((item) => {
+    if (!item?.title) return;
+    const keys = [
+      `title:${normalizeNewsTextKey(item.title, 160)}`,
+      `content:${normalizeNewsTextKey(item.content, 220)}`,
+      `url:${normalizeNewsUrlKey(item.source_link)}`,
+    ].filter((key) => !key.endsWith(':'));
+    if (keys.some((key) => seen.has(key))) return;
+    keys.forEach((key) => seen.add(key));
+    out.push(item);
+  });
+  return Number.isFinite(limit) && limit > 0 ? out.slice(0, limit) : out;
+}
+
 function NewsShowcase({ items, loading, error, status, onOpen }) {
   const rows = Array.isArray(items) ? items.slice(0, 4) : [];
   const showStatus = loading || status !== 'ok';
@@ -1605,7 +1648,7 @@ export default function App() {
         let nextError = '';
         let nextStatus = 'ok';
         if (featuredResp.status === 'fulfilled') {
-          setFeaturedNews(Array.isArray(featuredResp.value?.items) ? featuredResp.value.items : []);
+          setFeaturedNews(dedupeNewsItems(featuredResp.value?.items, 6));
           nextStatus = featuredResp.value?.status || nextStatus;
           if (featuredResp.value?.message) nextError = String(featuredResp.value.message);
         } else if (featuredResp.reason?.name !== 'AbortError') {
@@ -1615,7 +1658,7 @@ export default function App() {
         }
 
         if (tickerResp.status === 'fulfilled') {
-          setTickerNews(Array.isArray(tickerResp.value?.items) ? tickerResp.value.items : []);
+          setTickerNews(dedupeNewsItems(tickerResp.value?.items, 24));
           if (!nextError && tickerResp.value?.message) nextError = String(tickerResp.value.message);
         } else if (tickerResp.reason?.name !== 'AbortError') {
           setTickerNews([]);

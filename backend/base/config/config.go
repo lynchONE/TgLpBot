@@ -451,10 +451,10 @@ func LoadConfig() error {
 		SoSoValueNewsSyncIntervalSeconds: sosoNewsSyncInterval,
 		SoSoValueNewsPageSize:            sosoNewsPageSize,
 		SoSoValueNewsCategoryList:        strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_CATEGORY_LIST", "1,2,3,4,5,6,7,9,10")),
-		SoSoValueNewsTickerCategoryList:  strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_CATEGORY_LIST", "1,2,3,4,5")),
+		SoSoValueNewsTickerCategoryList:  strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_CATEGORY_LIST", "13")),
 		SoSoValueNewsMonthlySafetyLimit:  sosoNewsMonthlySafetyLimit,
 		SoSoValueNewsFeaturedEndpoint:    strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_FEATURED_ENDPOINT", "/api/v1/news/featured/currency")),
-		SoSoValueNewsTickerEndpoint:      strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_ENDPOINT", "")),
+		SoSoValueNewsTickerEndpoint:      strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_ENDPOINT", "/api/v1/news/featured/currency")),
 
 		// Token Addresses
 		USDTAddress:      getEnv("USDT_ADDRESS", "0x55d398326f99059fF775485246999027B3197955"),
