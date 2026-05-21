@@ -145,20 +145,15 @@ const FEE_TIER_BY_TICK_SPACING = {
   200: 10000,
   2000: 20000,
 };
-const NEWS_TICKER_SPEEDS = [
-  { key: 'slow', label: '慢', durationSec: 140 },
-  { key: 'normal', label: '中', durationSec: 96 },
-  { key: 'fast', label: '快', durationSec: 64 },
-];
-const NEWS_TICKER_DEFAULT_SPEED = 'slow';
+const NEWS_TICKER_MIN_SPEED = 2;
+const NEWS_TICKER_MAX_SPEED = 80;
+const NEWS_TICKER_DEFAULT_SPEED = 8;
+const NEWS_TICKER_DEFAULT_DURATION_SEC = 360;
 
 function normalizeNewsTickerSpeed(value) {
-  const key = String(value || '').trim().toLowerCase();
-  return NEWS_TICKER_SPEEDS.some((item) => item.key === key) ? key : NEWS_TICKER_DEFAULT_SPEED;
-}
-
-function getNewsTickerSpeedMeta(speedKey) {
-  return NEWS_TICKER_SPEEDS.find((item) => item.key === speedKey) || NEWS_TICKER_SPEEDS[0];
+  const n = Number(value);
+  if (!Number.isFinite(n)) return NEWS_TICKER_DEFAULT_SPEED;
+  return Math.min(NEWS_TICKER_MAX_SPEED, Math.max(NEWS_TICKER_MIN_SPEED, Math.round(n)));
 }
 
 function formatNewsDateTime(value) {
@@ -220,35 +215,53 @@ function NewsShowcase({ items, loading, error, status, onOpen }) {
   );
 }
 
-function NewsTicker({ items, loading, error, speedKey, onSpeedChange, onOpen }) {
+function NewsTicker({ items, loading, error, speedPxPerSec, onOpen }) {
   const rows = Array.isArray(items) ? items.filter((item) => item?.title) : [];
   const tickerRows = rows.length > 0 ? [...rows, ...rows] : [];
-  const speedMeta = getNewsTickerSpeedMeta(speedKey);
+  const tickerContentKey = rows.map((item) => `${item.external_id || item.id || ''}:${item.title}`).join('|');
+  const marqueeRef = useRef(null);
+  const [durationSec, setDurationSec] = useState(NEWS_TICKER_DEFAULT_DURATION_SEC);
+
+  useEffect(() => {
+    const marquee = marqueeRef.current;
+    if (!marquee || tickerRows.length === 0) {
+      setDurationSec(NEWS_TICKER_DEFAULT_DURATION_SEC);
+      return undefined;
+    }
+
+    const updateDuration = () => {
+      const distancePx = marquee.scrollWidth / 2;
+      if (!Number.isFinite(distancePx) || distancePx <= 0) return;
+      const nextDuration = Math.max(1, Math.round((distancePx / normalizeNewsTickerSpeed(speedPxPerSec)) * 10) / 10);
+      setDurationSec((prev) => (Math.abs(prev - nextDuration) < 0.1 ? prev : nextDuration));
+    };
+
+    const frameId = window.requestAnimationFrame(updateDuration);
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(updateDuration);
+      observer.observe(marquee);
+    }
+    window.addEventListener('resize', updateDuration);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', updateDuration);
+    };
+  }, [tickerContentKey, tickerRows.length, speedPxPerSec]);
+
   return (
     <div
       className="news-ticker"
       role="region"
       aria-label="热点新闻滚动条"
-      style={{ '--news-ticker-duration': `${speedMeta.durationSec}s` }}
+      style={{ '--news-ticker-duration': `${durationSec}s` }}
     >
       <div className="news-ticker-label">NEWS</div>
-      <div className="news-ticker-speed" aria-label="滚动速度">
-        {NEWS_TICKER_SPEEDS.map((speed) => (
-          <button
-            type="button"
-            key={speed.key}
-            className={speed.key === speedMeta.key ? 'active' : ''}
-            onClick={() => onSpeedChange(speed.key)}
-            title={`滚动速度：${speed.label}`}
-            aria-pressed={speed.key === speedMeta.key}
-          >
-            {speed.label}
-          </button>
-        ))}
-      </div>
       <div className="news-ticker-track">
         {tickerRows.length > 0 ? (
-          <div className="news-ticker-marquee">
+          <div className="news-ticker-marquee" ref={marqueeRef}>
             {tickerRows.map((item, index) => (
               <button
                 type="button"
@@ -1622,7 +1635,7 @@ export default function App() {
   const updateNewsTickerSpeed = useCallback((speedKey) => {
     const normalized = normalizeNewsTickerSpeed(speedKey);
     setNewsTickerSpeed(normalized);
-    storageSet(STORAGE.newsTickerSpeed, normalized);
+    storageSet(STORAGE.newsTickerSpeed, String(normalized));
   }, []);
 
   const loadPositions = useCallback(
@@ -3745,6 +3758,26 @@ export default function App() {
                         ))}
                       </div>
                     </div>
+                    <div className="settings-row settings-row-stack">
+                      <div className="settings-label-line">
+                        <span className="settings-label">底部新闻速度</span>
+                        <span className="settings-value">{newsTickerSpeed}px/s</span>
+                      </div>
+                      <input
+                        type="range"
+                        className="settings-range"
+                        min={NEWS_TICKER_MIN_SPEED}
+                        max={NEWS_TICKER_MAX_SPEED}
+                        step="1"
+                        value={newsTickerSpeed}
+                        onChange={(e) => updateNewsTickerSpeed(e.target.value)}
+                        aria-label="底部新闻滚动速度"
+                      />
+                      <div className="settings-range-scale">
+                        <span>很慢</span>
+                        <span>更快</span>
+                      </div>
+                    </div>
                     <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
                     <div className="settings-hint">各模块独立保存到当前浏览器；仓位会按当前是否有仓位自动切换，当前是{hasTrackedPositions ? '有仓位' : '无仓位'}档。</div>
                     <div className="settings-hint">我的资产最低 60 秒，K 线最低 5 秒，无仓位档默认 30 秒。</div>
@@ -3899,8 +3932,7 @@ export default function App() {
         items={tickerNews}
         loading={newsLoading}
         error={newsError}
-        speedKey={newsTickerSpeed}
-        onSpeedChange={updateNewsTickerSpeed}
+        speedPxPerSec={newsTickerSpeed}
         onOpen={openExternal}
       />
 

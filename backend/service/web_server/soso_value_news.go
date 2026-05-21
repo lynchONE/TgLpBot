@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -837,15 +838,23 @@ func (s *Server) handleSosoValueNews(w http.ResponseWriter, r *http.Request) {
 	if err := database.DB.WithContext(r.Context()).
 		Where("feed = ? AND release_time >= ? AND fetched_at >= ?", feed, cutoff, cutoff).
 		Order("release_time DESC").
-		Limit(limit).
+		Limit(newsQueryLimit(limit)).
 		Find(&rows).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	items := make([]sosoValueNewsDTO, 0, len(rows))
+	items := make([]sosoValueNewsDTO, 0, limit)
+	seenTitles := make(map[string]struct{}, len(rows))
 	updatedAt := time.Time{}
 	for _, row := range rows {
+		titleKey := normalizeNewsTitleKey(row.Title)
+		if titleKey != "" {
+			if _, exists := seenTitles[titleKey]; exists {
+				continue
+			}
+			seenTitles[titleKey] = struct{}{}
+		}
 		sourceLink := resolveSosoValueSourceLinkFromRaw(row.SourceLink, row.RawJSON)
 		items = append(items, sosoValueNewsDTO{
 			ID:              row.ID,
@@ -865,6 +874,9 @@ func (s *Server) handleSosoValueNews(w http.ResponseWriter, r *http.Request) {
 		})
 		if row.FetchedAt.After(updatedAt) {
 			updatedAt = row.FetchedAt
+		}
+		if len(items) >= limit {
+			break
 		}
 	}
 
@@ -912,6 +924,31 @@ func parseNewsLimit(raw string, feed string) int {
 		return 50
 	}
 	return n
+}
+
+func newsQueryLimit(limit int) int {
+	if limit <= 0 {
+		return 24
+	}
+	queryLimit := limit * 4
+	if queryLimit < 20 {
+		queryLimit = 20
+	}
+	if queryLimit > 100 {
+		queryLimit = 100
+	}
+	return queryLimit
+}
+
+var newsTitleKeyReplacer = regexp.MustCompile(`[\s[:punct:]\p{P}\p{S}]+`)
+
+func normalizeNewsTitleKey(title string) string {
+	key := strings.ToLower(strings.TrimSpace(title))
+	if key == "" {
+		return ""
+	}
+	key = newsTitleKeyReplacer.ReplaceAllString(key, "")
+	return key
 }
 
 func formatOptionalRFC3339(t time.Time) string {

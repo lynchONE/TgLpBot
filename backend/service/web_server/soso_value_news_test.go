@@ -98,6 +98,17 @@ func TestResolveSosoValueSourceLinkFromRawUsesSosoValueWhenCurrentEmpty(t *testi
 	}
 }
 
+func TestNormalizeNewsTitleKeyDedupesPunctuationAndSpaces(t *testing.T) {
+	left := normalizeNewsTitleKey("BTC 现货 ETF：资金流入扩大")
+	right := normalizeNewsTitleKey("btc现货ETF资金流入扩大")
+	if left == "" {
+		t.Fatal("left key is empty")
+	}
+	if left != right {
+		t.Fatalf("left = %q, right = %q", left, right)
+	}
+}
+
 func TestNormalizeSosoValueNewsItemRejectsMissingTitle(t *testing.T) {
 	_, ok := normalizeSosoValueNewsItem(sosoValueFeedFeatured, map[string]any{
 		"id": "news-2",
