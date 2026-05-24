@@ -654,6 +654,11 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 	}
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 	protocol := strings.TrimSpace(r.URL.Query().Get("protocol"))
+	source, ok := normalizeSmartMoneyWalletSourceScope(r.URL.Query().Get("source"))
+	if !ok {
+		jsonError(w, "invalid source", http.StatusBadRequest)
+		return
+	}
 	var minSmartMoneyUSD float64
 	hasMinSmartMoneyUSD := false
 	if raw := strings.TrimSpace(r.URL.Query().Get("min_smart_money_usd")); raw != "" {
@@ -678,7 +683,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sqlStarted := time.Now()
-	pools, err := repo.ListPoolsWithPositions(ctx)
+	pools, err := repo.ListPoolsWithPositions(ctx, source)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -752,7 +757,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	rangeStarted := time.Now()
-	if err := attachSmartMoneyRangeGroupsToPoolList(ctx, repo, pagedPools); err != nil {
+	if err := attachSmartMoneyRangeGroupsToPoolList(ctx, repo, pagedPools, source); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1472,6 +1477,19 @@ func smartMoneyWalletSourceContractValue(wallet *models.MonitoredWallet) string 
 	return strings.TrimSpace(*wallet.SourceContract)
 }
 
+func normalizeSmartMoneyWalletSourceScope(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "all":
+		return "", true
+	case "manual":
+		return "manual", true
+	case "contract", "contract_interaction":
+		return "contract_interaction", true
+	default:
+		return "", false
+	}
+}
+
 func repairSmartMoneyPositions(ctx context.Context, repo *sm.Repository) {
 	if repo == nil {
 		return
@@ -1864,7 +1882,7 @@ func buildSmartMoneyPoolRangeGroups(rows []sm.PoolPositionRangeRow) map[string][
 	return out
 }
 
-func attachSmartMoneyRangeGroupsToPoolList(ctx context.Context, repo *sm.Repository, pools []sm.PoolAggRow) error {
+func attachSmartMoneyRangeGroupsToPoolList(ctx context.Context, repo *sm.Repository, pools []sm.PoolAggRow, source string) error {
 	if repo == nil || len(pools) == 0 {
 		return nil
 	}
@@ -1878,7 +1896,7 @@ func attachSmartMoneyRangeGroupsToPoolList(ctx context.Context, repo *sm.Reposit
 		poolAddresses = append(poolAddresses, addr)
 	}
 
-	rangeRows, err := repo.ListRecentOpenPositionRanges(ctx, poolAddresses)
+	rangeRows, err := repo.ListRecentOpenPositionRanges(ctx, poolAddresses, source)
 	if err != nil {
 		return err
 	}
@@ -1899,7 +1917,7 @@ func attachSmartMoneyRangeGroupsToPoolStats(ctx context.Context, repo *sm.Reposi
 		return nil
 	}
 
-	rangeRows, err := repo.ListRecentOpenPositionRanges(ctx, []string{addr})
+	rangeRows, err := repo.ListRecentOpenPositionRanges(ctx, []string{addr}, "")
 	if err != nil {
 		return err
 	}

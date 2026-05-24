@@ -1465,7 +1465,7 @@ func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]flo
 	return out, nil
 }
 
-func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddresses []string) ([]PoolPositionRangeRow, error) {
+func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddresses []string, source string) ([]PoolPositionRangeRow, error) {
 	recentCutoff := smartMoneyDisplayRecentCutoff()
 	normalizedPools := make([]string, 0, len(poolAddresses))
 	for _, raw := range poolAddresses {
@@ -1486,6 +1486,18 @@ func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddre
 		FROM sm_lp_positions p
 		LEFT JOIN sm_lp_active_positions ap
 			ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
+	`
+	args := []interface{}{}
+	if source != "" {
+		query += `
+		INNER JOIN monitored_wallets mw
+			ON mw.address = p.wallet_address
+			AND mw.chain_id = p.chain_id
+			AND mw.source = ?
+		`
+		args = append(args, source)
+	}
+	query += `
 		LEFT JOIN (
 			SELECT
 				chain_id,
@@ -1507,7 +1519,7 @@ func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddre
 			AND evt_net.nft_token_id = p.nft_token_id
 		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
 	`
-	args := []interface{}{recentCutoff}
+	args = append(args, recentCutoff)
 	if len(normalizedPools) > 0 {
 		query += ` AND p.pool_address IN ?`
 		args = append(args, normalizedPools)
@@ -1860,10 +1872,10 @@ func sortPoolFeeHeatmapRows(rows []PoolFeeHeatmapRow, sortKey string) {
 	})
 }
 
-func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, error) {
+func (r *Repository) ListPoolsWithPositions(ctx context.Context, source string) ([]PoolAggRow, error) {
 	var rows []PoolAggRow
 	cutoff := smartMoneyDisplayRecentCutoff()
-	err := database.DB.WithContext(ctx).Raw(`
+	query := `
 		SELECT
 			p.pool_address,
 			p.token0_symbol,
@@ -1885,6 +1897,18 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 		FROM sm_lp_positions p
 		LEFT JOIN sm_lp_active_positions ap
 			ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
+	`
+	args := []interface{}{}
+	if source != "" {
+		query += `
+		INNER JOIN monitored_wallets mw
+			ON mw.address = p.wallet_address
+			AND mw.chain_id = p.chain_id
+			AND mw.source = ?
+		`
+		args = append(args, source)
+	}
+	query += `
 		LEFT JOIN (
 			SELECT
 				chain_id,
@@ -1908,7 +1932,9 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
 		GROUP BY p.pool_address, p.token0_symbol, p.token1_symbol, p.token0_address, p.token1_address, p.fee_tier, p.protocol, p.chain_id
 		ORDER BY total_position_amount_usd DESC, latest_event_at DESC
-	`, cutoff).Scan(&rows).Error
+	`
+	args = append(args, cutoff)
+	err := database.DB.WithContext(ctx).Raw(query, args...).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

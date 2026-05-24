@@ -145,6 +145,14 @@ function formatOptionalNumber(value) {
 
 const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
 const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
+const SMART_MONEY_POOL_SOURCE_TABS = [
+    { key: 'all', label: '全部', source: '' },
+    { key: 'manual', label: '手动添加', source: 'manual' },
+    { key: 'contract', label: '合约发现', source: 'contract_interaction' },
+];
+const SMART_MONEY_POOL_SOURCE_BY_KEY = Object.fromEntries(
+    SMART_MONEY_POOL_SOURCE_TABS.map((item) => [item.key, item.source])
+);
 
 function normalizeStoredSmartMoneyPoolFilter(value) {
     if (!value || typeof value !== 'object') {
@@ -983,12 +991,14 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     const [error, setError] = useState('');
     const [search, setSearch] = useState('');
     const [proto, setProto] = useState('all');
+    const [sourceScope, setSourceScope] = useState('all');
     const [page, setPage] = useState(1);
     const [filterOpen, setFilterOpen] = useState(false);
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
     const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
+    const sourceFilter = SMART_MONEY_POOL_SOURCE_BY_KEY[sourceScope];
     const normalizedActivePoolAddress = useMemo(
         () => normalizePoolSelectionId(activePoolAddress),
         [activePoolAddress]
@@ -1010,6 +1020,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             size: POOL_LIST_PAGE_SIZE,
             keyword: searchKeyword || undefined,
             protocol: proto !== 'all' ? proto : undefined,
+            source: sourceFilter,
             minSmartMoneyUsd: poolFilter.minSmartMoneyUsd,
             maxFeeRate: poolFilter.maxFeeRate,
         })
@@ -1040,7 +1051,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) setLoading(false);
             });
-    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword]);
+    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceFilter]);
 
     useEffect(() => {
         loadPools();
@@ -1055,13 +1066,13 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
 
     useEffect(() => {
         setPage(1);
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword]);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceScope]);
 
     const poolFilterActive = useMemo(
         () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
         [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]
     );
-    const hasFilter = Boolean(searchKeyword) || proto !== 'all' || poolFilterActive;
+    const hasFilter = Boolean(searchKeyword) || proto !== 'all' || sourceScope !== 'all' || poolFilterActive;
     const openPoolFilter = useCallback(() => {
         setPoolFilterDraft({
             minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
@@ -1090,6 +1101,23 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
 
     return (
         <div>
+            <div className="smd-source-tabs" role="tablist" aria-label="聪明钱来源范围">
+                {SMART_MONEY_POOL_SOURCE_TABS.map((item) => (
+                    <button
+                        key={item.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={sourceScope === item.key}
+                        className={`smd-source-tab${sourceScope === item.key ? ' active' : ''}`}
+                        onClick={() => {
+                            setSourceScope(item.key);
+                            setPage(1);
+                        }}
+                    >
+                        {item.label}
+                    </button>
+                ))}
+            </div>
             <div className="smd-search-row">
                 <div className="smd-search-input">
                     <Search size={14} />

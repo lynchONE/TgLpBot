@@ -6940,6 +6940,36 @@ body {
   background: var(--accent);
   color: var(--accent-contrast);
 }
+.smd-source-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(136, 157, 191, 0.18);
+  border-radius: 12px;
+  background: rgba(7, 12, 20, 0.45);
+}
+.smd-source-tab {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.smd-source-tab:hover {
+  color: var(--text);
+  background: rgba(18, 26, 40, 0.72);
+}
+.smd-source-tab.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
 .smd-search-row {
   display: flex;
   gap: 8px;
@@ -7759,6 +7789,7 @@ body {
 
 .module-slot.module-smart_money .smd-search-input,
 .module-slot.module-smart_money .smd-filter-group,
+.module-slot.module-smart_money .smd-source-tabs,
 .module-slot.module-smart_money .smd-add-btn,
 .module-slot.module-smart_money .smd-add-form > * {
   min-width: 0;
@@ -7766,6 +7797,8 @@ body {
 
 .workbench.layout-4 .module-smart_money .smd-tabs,
 .workbench.layout-work-4 .module-smart_money .smd-tabs,
+.workbench.layout-4 .module-smart_money .smd-source-tabs,
+.workbench.layout-work-4 .module-smart_money .smd-source-tabs,
 .workbench.layout-4 .module-smart_money .smd-search-row,
 .workbench.layout-work-4 .module-smart_money .smd-search-row,
 .workbench.layout-4 .module-smart_money .smd-filter-group,
