@@ -45,6 +45,16 @@ import {
     normalizeAccentTheme,
 } from './lib/brand';
 import { TASK_MODE_OPTIONS, getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary, normalizeTaskMode } from './lib/taskModes';
+import useScrollMemory from './hooks/useScrollMemory';
+import useGlobalSettings from './hooks/useGlobalSettings';
+import useAuthData from './hooks/useAuthData';
+import {
+    formatUsd,
+    formatUsdCompact,
+    formatRangePercentCompact,
+    formatSignedPercentCompact,
+    formatPercentInputValue,
+} from './lib/format';
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
 const LazySwapModule = lazy(() => import('./components/SwapModule.jsx'));
@@ -191,8 +201,6 @@ const storage = {
     },
 };
 
-const STORAGE_THEME = 'tglp_theme';
-const STORAGE_ACCENT_THEME = 'tglp_accent_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
 const STORAGE_MODULE_POLL_SECS = 'tglp_module_poll_interval_secs_v1';
 const MIN_POLL_INTERVAL_SEC = 2;
@@ -337,53 +345,6 @@ function buildGmgnUrl(pool, fallbackChain = 'bsc') {
     if (!tokenAddress) return '';
     const chain = String(pool?.chain || fallbackChain || 'bsc').trim().toLowerCase() === 'base' ? 'base' : 'bsc';
     return `https://gmgn.ai/${chain}/token/${tokenAddress}`;
-}
-
-const USD_DISPLAY_LIMIT = 1e15;
-const usdFormatter = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-});
-
-function formatUsd(v) {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
-    return usdFormatter.format(n);
-}
-
-function formatUsdCompact(v) {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || n <= 0 || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
-    const abs = Math.abs(n);
-    if (abs >= 1000000) return `$${(n / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
-    if (abs >= 1000) return `$${(n / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
-    if (abs >= 100) return `$${n.toFixed(0)}`;
-    if (abs >= 10) return `$${n.toFixed(1).replace(/\.0$/, '')}`;
-    return `$${n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
-}
-
-function formatRangePercentCompact(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '--';
-    if (num >= 100) return `${Math.round(num)}%`;
-    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
-    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
-function formatSignedPercentCompact(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '--';
-    if (Math.abs(num) < 0.0001) return '0%';
-    return `${num > 0 ? '+' : '-'}${formatRangePercentCompact(Math.abs(num))}`;
-}
-
-function formatPercentInputValue(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '';
-    if (num >= 10) return num.toFixed(1).replace(/\.0$/, '');
-    if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-    return num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function parseAmountInput(value) {
@@ -1090,6 +1051,7 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
     const [viewMode, setViewMode] = useState('hot_pools');
+    useScrollMemory(viewMode);
 
     const [hotPoolsSort, setHotPoolsSort] = useState('fees');
     const [hotPoolsData, setHotPoolsData] = useState(null);
@@ -1209,8 +1171,7 @@ export default function App() {
     const noticeTimerRef = useRef(null);
     const lastOpenPositionRequestRef = useRef(null);
 
-    const [theme, setTheme] = useState('dark');
-    const [accentTheme, setAccentTheme] = useState(() => normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
+    const { theme, setTheme, toggleTheme, accentTheme, setAccentTheme } = useGlobalSettings();
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [modulePollOverrides, setModulePollOverrides] = useState(() =>
         normalizeModulePollOverrides(storage.get(STORAGE_MODULE_POLL_SECS), storage.get(STORAGE_POLL_SEC))
@@ -1909,7 +1870,9 @@ export default function App() {
         if (!text) return;
         setNotice({ message: text, tone });
         if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-        noticeTimerRef.current = setTimeout(() => setNotice(null), 3200);
+        const charCount = [...text].length;
+        const duration = Math.min(8000, Math.max(3500, 3500 + Math.floor(charCount / 10) * 600));
+        noticeTimerRef.current = setTimeout(() => setNotice(null), duration);
     };
 
     useEffect(() => {
@@ -1944,33 +1907,6 @@ export default function App() {
         if (!me || topNavItems.some((item) => item.key === viewMode)) return;
         setViewMode(topNavItems[0]?.key || 'hot_pools');
     }, [me, topNavItems, viewMode]);
-
-    useEffect(() => {
-        const tg = getTelegramWebApp();
-        const savedTheme = storage.get(STORAGE_THEME);
-        if (savedTheme === 'light' || savedTheme === 'dark') {
-            setTheme(savedTheme);
-        } else {
-            setTheme('dark');
-        }
-
-        setAccentTheme(normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
-    }, []);
-
-    useEffect(() => {
-        const isDark = theme === 'dark';
-        document.documentElement.classList.toggle('dark', isDark);
-        storage.set(STORAGE_THEME, isDark ? 'dark' : 'light');
-        storage.set(STORAGE_ACCENT_THEME, accentTheme);
-
-        const tg = getTelegramWebApp();
-        try {
-            tg?.setHeaderColor?.(isDark ? '#0b0f14' : '#fafafa');
-            tg?.setBackgroundColor?.(isDark ? '#0b0f14' : '#fafafa');
-        } catch {
-            // ignore
-        }
-    }, [accentTheme, theme]);
 
     useEffect(() => {
         return () => {
@@ -2394,8 +2330,6 @@ export default function App() {
         closePoolSearch();
         setTimeout(() => openPositionModal(pool), 0);
     };
-
-    const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     const defaultQuickRangeOptions = useMemo(() => ([
         { key: '1', label: '1%', lowerValue: '1', upperValue: '1', subLabel: '快捷范围' },
@@ -4148,7 +4082,7 @@ export default function App() {
     );
 
     return (
-        <div className={`min-h-screen max-w-[720px] mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] ${(isPositions || isSwap) ? 'pb-[calc(96px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'}`}>
+        <div className={`min-h-screen max-w-[720px] xl:max-w-[960px] 2xl:max-w-[1080px] mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] ${(isPositions || isSwap) ? 'pb-[calc(96px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'}`}>
             {notice ? (
                 <div className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+64px)] z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
                     <div className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-lg ${noticeClass}`}>
@@ -4231,7 +4165,7 @@ export default function App() {
                     </ModuleHeader>
                 ) : isAssets ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载我的资产...</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#14171c] dark:text-white/45">正在加载我的资产...</div>}>
                             <LazyAssetManagementPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -4260,7 +4194,7 @@ export default function App() {
                     </div>
                 ) : isAdminPage ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理页...</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#14171c] dark:text-white/45">正在加载管理页...</div>}>
                             <LazyAdminPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -4274,7 +4208,7 @@ export default function App() {
                     </div>
                 ) : isSwap ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载兑换模块...</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#14171c] dark:text-white/45">正在加载兑换模块...</div>}>
                             <LazySwapModule
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -4331,7 +4265,7 @@ export default function App() {
                                 >
                                     <Icon path={icons.filter} className="h-3.5 w-3.5" />
                                     {hotPoolsFilterEnabled ? (
-                                        <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-[#111318] ${brand.dotClass}`} />
+                                        <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-[#14171c] ${brand.dotClass}`} />
                                     ) : null}
                                 </button>
                             </>
@@ -4435,7 +4369,7 @@ export default function App() {
 
             {
                 !isHotPools && showAdmin ? (
-                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理模块...</div>}>
+                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#14171c] dark:text-white/45">正在加载管理模块...</div>}>
                         <LazyAdminPage
                             apiBaseUrl={apiBaseUrl}
                             initData={initData}
@@ -4602,7 +4536,7 @@ export default function App() {
                             onClick={closePoolSearch}
                             aria-label="关闭搜索池"
                         />
-                        <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none">
                             <div className="flex items-center justify-between">
                                 <div className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 p-2 text-zinc-700 dark:border-white/10 dark:bg-white/5 dark:text-white/80">
                                     <Icon path={icons.search} className="h-4 w-4" />
@@ -4725,7 +4659,7 @@ export default function App() {
                             onClick={() => setHotPoolsFilterOpen(false)}
                             aria-label="关闭热门池筛选"
                         />
-                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none">
                             <div className="flex items-center justify-between">
                                 <div className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 p-2 text-zinc-700 dark:border-white/10 dark:bg-white/5 dark:text-white/80">
                                     <Icon path={icons.filter} className="h-4 w-4" />
@@ -4895,7 +4829,7 @@ export default function App() {
                             onClick={() => setSettingsOpen(false)}
                             aria-label="关闭设置"
                         />
-                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none">
                             <div className="flex items-center justify-between">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
                                 <button
@@ -5011,7 +4945,7 @@ export default function App() {
                         open={Boolean(openPositionPool)}
                         onClose={closeOpenPosition}
                         maxHeightClass="max-h-[92vh]"
-                        className="bg-white dark:bg-[#111318] backdrop-blur-none"
+                        className="bg-white dark:bg-[#14171c] backdrop-blur-none"
                         headerClassName="px-4 pt-3 pb-2.5"
                         contentClassName="px-4 pb-5"
                         footerClassName="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.85rem)]"
@@ -5859,13 +5793,13 @@ export default function App() {
                                                 {openPositionDCASummaryItems.map((item) => (
                                                     <span
                                                         key={item.key}
-                                                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200/50 bg-zinc-50 px-2 py-1 text-[10px] font-semibold text-zinc-700 dark:border-white/10 dark:bg-[#111318]/50 dark:text-white/70"
+                                                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200/50 bg-zinc-50 px-2 py-1 text-[10px] font-semibold text-zinc-700 dark:border-white/10 dark:bg-[#14171c]/50 dark:text-white/70"
                                                     >
                                                         <span className="opacity-70">{item.label}</span>
                                                         <span>{item.amount}</span>
                                                     </span>
                                                 ))}
-                                                <span className="inline-flex items-center rounded-full border border-zinc-200/50 bg-zinc-50 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:border-white/10 dark:bg-[#111318]/50 dark:text-white/70">
+                                                <span className="inline-flex items-center rounded-full border border-zinc-200/50 bg-zinc-50 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:border-white/10 dark:bg-[#14171c]/50 dark:text-white/70">
                                                     间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
                                                 </span>
                                             </>
@@ -6150,7 +6084,7 @@ export default function App() {
                             onClick={closeTaskRangeModal}
                             aria-label="Close update range"
                         />
-                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none">
                             <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
                                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">更新区间</div>
@@ -6242,7 +6176,7 @@ export default function App() {
                         onClick={closeAddLiqModal}
                         aria-label="关闭补仓弹窗"
                     />
-                    <div className="absolute inset-x-0 bottom-0 rounded-t-[28px] border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                    <div className="absolute inset-x-0 bottom-0 rounded-t-[28px] border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none">
                         <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">补充流动性</div>
@@ -6430,7 +6364,7 @@ export default function App() {
                         onClick={() => closeConfirm(false)}
                         aria-label="关闭确认弹窗"
                         />
-                        <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318]">
+                        <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c]">
                             <div className="flex items-center justify-between gap-2">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{confirmState.title}</div>
                                 <button
@@ -6460,7 +6394,7 @@ export default function App() {
                                     onClick={() => closeConfirm(true)}
                                     className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${confirmButtonClass}`}
                                 >
-                                    {confirmState.confirmText || '缁绢収鍠涢?'}
+                                    {confirmState.confirmText || '继续'}
                                 </button>
                             </div>
                         </div>
@@ -6470,7 +6404,7 @@ export default function App() {
 
             {/* Bottom Navigation */}
             <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none pb-[max(0.75rem,env(safe-area-inset-bottom))] px-4">
-                <nav className="pointer-events-auto max-w-[400px] mx-auto flex items-center justify-between rounded-full border border-zinc-200/60 bg-white/95 px-3 py-2.5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-[#1a1c23]/95 dark:shadow-black/70 ring-1 ring-black/5 dark:ring-white/5">
+                <nav className="pointer-events-auto max-w-[400px] mx-auto flex items-center justify-between rounded-full border border-zinc-200/60 bg-white/95 px-3 py-2.5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-[#1c2026]/95 dark:shadow-black/70 ring-1 ring-black/5 dark:ring-white/5">
                     {topNavItems.map((item) => {
                         const isActive = viewMode === item.key;
                         let iconPath = icons.bot;
@@ -6487,7 +6421,8 @@ export default function App() {
                                 type="button"
                                 onClick={() => setViewMode(item.key)}
                                 aria-pressed={isActive}
-                                className={`relative flex flex-col items-center justify-center rounded-full px-4 py-1.5 transition-all duration-300 ${isActive
+                                aria-label={item.label}
+                                className={`relative flex min-h-[44px] min-w-[44px] flex-col items-center justify-center rounded-full px-4 py-2.5 transition-all duration-300 ${isActive
                                     ? brand.navActiveClass
                                     : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
                                     }`}

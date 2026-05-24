@@ -236,7 +236,7 @@ function SmPagination({ page, totalPages, onPageChange }) {
 /* ─── Card wrapper ─── */
 function Card({ children, className = '' }) {
     return (
-        <div className={`rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518] ${className}`.trim()}>
+        <div className={`rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c] ${className}`.trim()}>
             {children}
         </div>
     );
@@ -392,7 +392,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
             }},
             crosshairMarkerRadius: 4,
             crosshairMarkerBorderColor: color,
-            crosshairMarkerBackgroundColor: isDark ? '#131518' : '#ffffff',
+            crosshairMarkerBackgroundColor: isDark ? '#14171c' : '#ffffff',
         });
         chartRef.current = chart;
         seriesRef.current = series;
@@ -586,7 +586,7 @@ function PnLBreakdownEditor({ entry, brand, saving = false, error = '', onSave, 
     ];
 
     return (
-        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 dark:border-white/[0.05] dark:bg-[#0d0f12]" data-pnl-calendar-keep="true">
+        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 dark:border-white/[0.05] dark:bg-[#0f1116]" data-pnl-calendar-keep="true">
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                     <div className="text-[11px] font-bold text-zinc-900 dark:text-white/90">{entry.day} 盈亏校准</div>
@@ -1182,7 +1182,7 @@ export default function AssetManagementPage({
                                 type="button"
                                 onClick={() => loadAssets({ forceRefresh: true })}
                                 disabled={!canManualRefresh || isLoading}
-                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1c2026] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
                             >
                                 <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
                             </button>
@@ -1258,7 +1258,7 @@ export default function AssetManagementPage({
                                 </div>
                             </div>
                         </div>
-                        <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-white/[0.04] dark:bg-[#0d0f12]">
+                        <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-white/[0.04] dark:bg-[#0f1116]">
                             <div className="flex items-end justify-between gap-2">
                                 <div>
                                     <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">

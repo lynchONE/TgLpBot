@@ -99,7 +99,7 @@ function SmPagination({ page, totalPages, onPageChange }) {
 }
 
 function Card({ children, className = '' }) {
-    return <div className={`rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518] ${className}`.trim()}>{children}</div>;
+    return <div className={`rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c] ${className}`.trim()}>{children}</div>;
 }
 
 function StatBlock({ label, value, tone = 'default' }) {
@@ -397,7 +397,7 @@ export default function SmartMoneyAssetsPage({
                             const lpPct = total > 0 ? (Number(assets.open_lp_usd||0)/total*100) : 0;
                             return (
                                 <button key={walletKey(wallet)} type="button" onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}
-                                    className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${selected ? `${brand.selectionClass} dark:text-white` : 'border-zinc-100 bg-zinc-50/60 text-zinc-700 hover:bg-white dark:border-white/[0.04] dark:bg-[#0d0f12] dark:text-white/75 dark:hover:bg-white/[0.06]'}`}>
+                                    className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${selected ? `${brand.selectionClass} dark:text-white` : 'border-zinc-100 bg-zinc-50/60 text-zinc-700 hover:bg-white dark:border-white/[0.04] dark:bg-[#0f1116] dark:text-white/75 dark:hover:bg-white/[0.06]'}`}>
                                     <div className="flex items-center justify-between gap-3 w-full">
                                         <div className="flex items-center gap-2.5 min-w-0">
                                             <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
@@ -480,7 +480,7 @@ export default function SmartMoneyAssetsPage({
                             return (
                                 <button key={`${item.address}:${item.chain_id}`} type="button"
                                     onClick={() => selectSmartMoneyWallet(item, { openDetail: true })}
-                                    className="flex w-full items-center gap-2.5 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 text-left transition active:scale-[0.98] hover:bg-white dark:border-white/[0.04] dark:bg-[#0d0f12] dark:text-white/75 dark:hover:bg-white/[0.06]">
+                                    className="flex w-full items-center gap-2.5 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 text-left transition active:scale-[0.98] hover:bg-white dark:border-white/[0.04] dark:bg-[#0f1116] dark:text-white/75 dark:hover:bg-white/[0.06]">
                                     <RankBadge rank={rank} />
                                     <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={28} />
                                     <div className="flex-1 min-w-0">

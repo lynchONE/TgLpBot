@@ -20,6 +20,11 @@ import {
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
 import { formatDurationFrom } from '../lib/time';
+import {
+    formatFeeTier,
+    formatUSDCompact,
+    formatWalletBalance,
+} from '../lib/format';
 import FlashIcon from './FlashIcon.jsx';
 import PositionCard from './PositionCard.jsx';
 import uniswapIcon from '../image/uniswap.svg';
@@ -981,29 +986,6 @@ function getPairInitials(value) {
         .map((part) => String(part || '').trim().charAt(0).toUpperCase())
         .join('')
         .slice(0, 2) || 'LP';
-}
-
-function formatFeeTier(fee) {
-    if (!fee) return '';
-    return `${(Number(fee) / 10000).toFixed(4)}%`;
-}
-
-function formatUSDCompact(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '—';
-    const abs = Math.abs(num);
-    if (abs >= 1000000) return `$${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
-    if (abs >= 1000) return `$${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
-    if (abs >= 100) return `$${num.toFixed(0)}`;
-    if (abs >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
-    return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
-}
-
-function formatWalletBalance(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '--';
-    if (num === 0) return '$0';
-    return formatUSDCompact(num);
 }
 
 function parseOptionalNumber(value) {

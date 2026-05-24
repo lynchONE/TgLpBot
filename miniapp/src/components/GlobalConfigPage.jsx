@@ -164,7 +164,7 @@ export default function GlobalConfigPage({ open = true, onClose, apiBaseUrl, ini
                 </div>
             ) : config ? (
                 <div className="space-y-3 pb-4">
-                    <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+                    <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
                         <div className="flex items-start gap-3">
                                 <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                                     <Settings2 className="h-5 w-5" />
@@ -457,7 +457,7 @@ function QuickSwitch({ label, active, onClick }) {
 
 function Section({ icon: Icon, iconClassName, title, description, children, accent = '', compact = false }) {
     return (
-        <section className={`relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518] ${compact ? 'h-full' : ''}`}>
+        <section className={`relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c] ${compact ? 'h-full' : ''}`}>
             {accent ? <div className={`absolute -right-8 -top-8 h-20 w-20 rounded-full blur-2xl opacity-20 ${accent}`} /> : null}
             <div className="mb-3 flex items-start gap-2.5">
                 <div className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconClassName}`}>

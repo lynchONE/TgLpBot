@@ -616,7 +616,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); openGmgn(); }}
-                            className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10 dark:bg-[#1a1c23] dark:ring-white/10 transition-colors hover:bg-zinc-700 dark:hover:bg-[#252831]"
+                            className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10 dark:bg-[#1c2026] dark:ring-white/10 transition-colors hover:bg-zinc-700 dark:hover:bg-[#252831]"
                             title="在 GMGN 查看代币"
                         >
                             <img src={gmgnIcon} alt="GMGN" className="h-3.5 w-3.5" />

@@ -6,6 +6,14 @@ import NumberFlowValue from './NumberFlowValue.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../lib/taskModes';
+import {
+    formatUsd,
+    formatUsdCompact,
+    formatFeeUsd,
+    formatBotAmount,
+    formatPrice,
+    formatRangePercentPlain,
+} from '../lib/format';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -48,59 +56,6 @@ function getDexIconConfig(exchangeName, versionText) {
     }
     return null;
 }
-
-const USD_DISPLAY_LIMIT = 1e15;
-const usdFormatter = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-});
-const botAmountFormatter = new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-});
-
-const formatUsd = (v) => {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
-    return usdFormatter.format(n);
-};
-
-const formatFeeUsd = (v) => {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
-    if (n === 0) return usdFormatter.format(0);
-    const abs = Math.abs(n);
-    if (abs < 0.01) return `${n < 0 ? '-' : ''}<$0.01`;
-    return usdFormatter.format(n);
-};
-
-const formatBotAmount = (v) => {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '--';
-    if (Math.abs(n) < 0.005) return '0.00';
-    return botAmountFormatter.format(n);
-};
-
-const formatUsdCompact = (v) => {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || n <= 0 || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
-    const abs = Math.abs(n);
-    if (abs >= 1000000) return `$${(n / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
-    if (abs >= 1000) return `$${(n / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
-    if (abs >= 100) return `$${n.toFixed(0)}`;
-    if (abs >= 10) return `$${n.toFixed(1).replace(/\.0$/, '')}`;
-    return `$${n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
-};
-
-const formatRangePercentPlain = (value) => {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '--';
-    if (num >= 100) return `${Math.round(num)}%`;
-    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
-    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-};
 
 const SMART_MONEY_RANGE_LIMIT = 4;
 
@@ -173,27 +128,6 @@ const safeInvert = (value) => {
     if (!Number.isFinite(value) || value === 0) return null;
     const v = 1 / value;
     return Number.isFinite(v) ? v : null;
-};
-
-const formatPrice = (value) => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return '--';
-    if (n === 0) return '0';
-    const sign = n < 0 ? '-' : '';
-    let s = Math.abs(n).toFixed(18).replace(/\.?0+$/, '');
-    if (!s.includes('.')) return `${sign}${s}`;
-    const [intPart, fracRaw] = s.split('.');
-    const frac = fracRaw || '';
-    let nonZero = 0;
-    let cut = frac.length;
-    for (let i = 0; i < frac.length; i++) {
-        if (frac[i] !== '0') {
-            nonZero += 1;
-            if (nonZero === 2) { cut = i + 1; break; }
-        }
-    }
-    const trimmed = frac.slice(0, cut);
-    return trimmed ? `${sign}${intPart}.${trimmed}` : `${sign}${intPart}`;
 };
 
 const getStatusTheme = (label) => {
@@ -612,7 +546,7 @@ export default function PositionCard({
     }, [position?.fee_tier, position?.pool?.tickSpacing, position?.tick_spacing]);
 
     return (
-        <div className="relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#131518] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
+        <div className="relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#14171c] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
             <div className="px-3 pt-3 pb-2 flex flex-col gap-2">
                 <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -731,14 +665,14 @@ export default function PositionCard({
                                 <button
                                     type="button"
                                     onClick={() => setMenuOpen((v) => !v)}
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1c2026] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
                                     aria-label="更多操作"
                                     disabled={Boolean(actionPending)}
                                 >
                                     <Icon path={icons.kebab} className="h-4 w-4" />
                                 </button>
                                 {menuOpen && (
-                                    <div className="absolute right-0 top-full z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/95 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1f2126]/95">
+                                    <div className="absolute right-0 top-full z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/95 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1c2026]/95">
                                         {typeof onSetTaskPaused === 'function' && (
                                             <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
                                                 className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
@@ -803,14 +737,14 @@ export default function PositionCard({
                                 <button
                                     type="button"
                                     onClick={() => setMenuOpen((v) => !v)}
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1c2026] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
                                     aria-label="任务操作"
                                     disabled={Boolean(actionPending)}
                                 >
                                     <Icon path={icons.kebab} className="h-4 w-4" />
                                 </button>
                                 {menuOpen && (
-                                    <div className="absolute right-0 top-full z-30 mt-1.5 w-32 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/95 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1f2126]/95">
+                                    <div className="absolute right-0 top-full z-30 mt-1.5 w-32 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/95 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1c2026]/95">
                                         {typeof onSetTaskPaused === 'function' && (
                                             <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
                                                 className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
@@ -983,7 +917,7 @@ export default function PositionCard({
                     <SmartMoneyRangeSummaryClean groups={smartMoneyRangeGroups} />
                 ) : null}
 
-                <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1a1c20]">
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1c2026]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">
                         <div className="flex items-center gap-1.5">
@@ -1089,7 +1023,7 @@ export default function PositionCard({
                 </div>
 
                 {false && (
-                <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1a1c20]">
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1c2026]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">
                         <div className="flex items-center gap-1.5">

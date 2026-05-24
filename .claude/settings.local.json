@@ -70,7 +70,16 @@
       "Bash(git stash *)",
       "Bash(awk '/^\\\\}/{n++} END{print \"}lines:\",n}' /mnt/e/goProject/TgLpBot/webapp/src/components/OpenPositionModal.jsx)",
       "Bash(git checkout *)",
-      "Bash(timeout 60 npx --no-install vite build)"
+      "Bash(timeout 60 npx --no-install vite build)",
+      "Bash(curl -s \"http://localhost:27377/src/components/PositionCard.jsx\" -o /tmp/pc.compiled.js -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(curl *)",
+      "Bash(xargs sed -i 's/#111318/#14171c/g; s/#131518/#14171c/g; s/#1a1c20/#1c2026/g; s/#1a1c23/#1c2026/g; s/#0d0f12/#0f1116/g; s/#181a1f/#14171c/g; s/#1f2126/#1c2026/g')",
+      "Bash(awk 'NR==6396' /mnt/e/goProject/TgLpBot/miniapp/src/App.jsx)",
+      "Bash(perl -i -pe 'BEGIN { $bad = \"\\\\xE7\\\\xBC\\\\x81\\\\xE7\\\\xBB\\\\xA2\\\\xE5\\\\x8F\\\\x8E\\\\xE9\\\\x8D\\\\xA0\\\\xE6\\\\xB6\\\\xA2\\\\xEE\\\\x94\\\\x98\\\\?\"; $good = \"继续\"; } s/\\\\Q$bad\\\\E/$good/' /mnt/e/goProject/TgLpBot/miniapp/src/App.jsx)",
+      "Bash(awk '/^58:/{flag=1} flag && /^[0-9]+:}/{print; flag=0}')",
+      "Bash(awk *)",
+      "Bash(pkill -f \"vite$\")",
+      "Bash(pkill -f \"node.*vite\")"
     ]
   }
 }

@@ -53,7 +53,7 @@ export default function BottomSheet({
 
             {/* Sheet wrapper */}
             <div
-                className={`relative w-full sm:max-w-md flex flex-col overflow-hidden bg-white/80 dark:bg-[#111318]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
+                className={`relative w-full sm:max-w-md flex flex-col overflow-hidden bg-white/80 dark:bg-[#14171c]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
             >
                 {/* 顶部抓手 (移动端暗示可下拉) */}
                 <div
@@ -90,7 +90,7 @@ export default function BottomSheet({
                 </div>
 
                 {footer ? (
-                    <div className={`shrink-0 border-t border-zinc-200/70 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#111318]/95 ${footerClassName}`}>
+                    <div className={`shrink-0 border-t border-zinc-200/70 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#14171c]/95 ${footerClassName}`}>
                         {footer}
                     </div>
                 ) : null}

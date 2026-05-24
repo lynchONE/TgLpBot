@@ -160,7 +160,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                 : '只修改展示名称，不影响链上地址。';
         const Icon = crudAction === 'import' ? KeyRound : crudAction === 'create' ? Plus : Pencil;
         return (
-            <div className="mb-3 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+            <div className="mb-3 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
                 <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
                         <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
@@ -247,7 +247,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
             contentClassName="px-5 pb-0 sm:pb-0"
             footer={footer}
         >
-            <section className="mb-3 rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+            <section className="mb-3 rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
                     <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 gap-2.5">
                             <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
@@ -283,7 +283,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                 <div className="mb-3 grid grid-cols-2 gap-2">
                     <button
                         onClick={() => { setCrudAction('create'); setCrudForm({ name: '', privateKey: '', walletId: null }); }}
-                        className="group rounded-2xl border border-zinc-200/80 bg-white p-3 text-left transition hover:bg-zinc-50 dark:border-white/5 dark:bg-[#131518] dark:hover:bg-white/[0.03]"
+                        className="group rounded-2xl border border-zinc-200/80 bg-white p-3 text-left transition hover:bg-zinc-50 dark:border-white/5 dark:bg-[#14171c] dark:hover:bg-white/[0.03]"
                     >
                         <span className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                             <Plus className="h-[18px] w-[18px]" />
@@ -293,7 +293,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                     </button>
                     <button
                         onClick={() => { setCrudAction('import'); setCrudForm({ name: '', privateKey: '', walletId: null }); }}
-                        className="group rounded-2xl border border-zinc-200/80 bg-white p-3 text-left transition hover:bg-zinc-50 dark:border-white/5 dark:bg-[#131518] dark:hover:bg-white/[0.03]"
+                        className="group rounded-2xl border border-zinc-200/80 bg-white p-3 text-left transition hover:bg-zinc-50 dark:border-white/5 dark:bg-[#14171c] dark:hover:bg-white/[0.03]"
                     >
                         <span className="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/25">
                             <KeyRound className="h-[18px] w-[18px]" />
@@ -347,7 +347,7 @@ export default function WalletManagePage({ open = true, onClose, apiBaseUrl, ini
                 onCancel={() => setDeleteTarget(null)}
             />
             {embedded ? (
-                <div className="sticky bottom-[calc(76px+env(safe-area-inset-bottom,0px))] -mx-1 border-t border-zinc-200/70 bg-white/[0.88] px-1 pb-2 pt-3 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#111318]/90">
+                <div className="sticky bottom-[calc(76px+env(safe-area-inset-bottom,0px))] -mx-1 border-t border-zinc-200/70 bg-white/[0.88] px-1 pb-2 pt-3 backdrop-blur-xl dark:border-white/[0.08] dark:bg-[#14171c]/90">
                     {footer}
                 </div>
             ) : null}
@@ -375,7 +375,7 @@ function WalletCard({ wallet, nativeSymbol, stableSymbol, copied, onCopy, onActi
     const actionClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-[11px] font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-white/[0.06] dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white/80';
 
     return (
-        <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+        <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
             <div className="flex items-start gap-3">
                 <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${wallet.is_default ? 'bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/[0.06] dark:text-white/50 dark:ring-white/[0.08]'}`}>
                     {wallet.is_default ? <ShieldCheck className="h-5 w-5" /> : <WalletCards className="h-5 w-5" />}

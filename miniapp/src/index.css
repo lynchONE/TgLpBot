@@ -114,12 +114,12 @@ body {
 .animate-shimmer {
     position: relative;
     overflow: hidden;
-    background-color: rgba(228, 228, 231, 0.4);
-    /* zinc-200/40 */
+    background-color: rgba(228, 228, 231, 0.45);
+    /* zinc-200/45 */
 }
 
 .dark .animate-shimmer {
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(255, 255, 255, 0.07);
 }
 
 .animate-shimmer::after {
@@ -141,8 +141,8 @@ body {
 .dark .animate-shimmer::after {
     background-image: linear-gradient(90deg,
             rgba(255, 255, 255, 0) 0,
-            rgba(255, 255, 255, 0.02) 20%,
-            rgba(255, 255, 255, 0.05) 60%,
+            rgba(255, 255, 255, 0.06) 20%,
+            rgba(255, 255, 255, 0.12) 60%,
             rgba(255, 255, 255, 0));
 }
 
@@ -204,7 +204,7 @@ body {
     --text-secondary: rgba(255, 255, 255, 0.75);
     --text-tertiary: rgba(255, 255, 255, 0.55);
     --border-color: rgba(255, 255, 255, 0.15);
-    --bg-card: #111318;
+    --bg-card: #14171c;
     --bg-elevated: #0f1116;
 }
 
@@ -232,4 +232,55 @@ body {
 
 .dark .pnl-negative {
     color: #f87171;
+}
+
+/* PnL 箭头微动画（用于 PnLValue 组件的方向箭头） */
+@keyframes pnl-arrow-bob-up {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-1px);
+    }
+}
+
+@keyframes pnl-arrow-bob-down {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(1px);
+    }
+}
+
+.pnl-arrow-up {
+    display: inline-block;
+    animation: pnl-arrow-bob-up 1.6s ease-in-out infinite;
+}
+
+.pnl-arrow-down {
+    display: inline-block;
+    animation: pnl-arrow-bob-down 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .pnl-arrow-up,
+    .pnl-arrow-down {
+        animation: none;
+    }
+}
+
+/* Surface 层级过渡，让模块切换不那么突兀 */
+body,
+.surface-1,
+.surface-2,
+.surface-3 {
+    transition: background-color 0.2s ease;
 }

@@ -129,7 +129,7 @@ export default function TradeHistoryPage({ open = true, onClose, apiBaseUrl, ini
 
     return (
         <TradeHistoryFrame embedded={embedded} open={open} onClose={onClose} title="交易历史" maxHeightClass="max-h-[90vh]">
-            <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+            <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
                 <div className="flex items-start gap-3">
                     <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/25">
                         <BarChart3 className="h-5 w-5" />
@@ -149,7 +149,7 @@ export default function TradeHistoryPage({ open = true, onClose, apiBaseUrl, ini
                 </div>
             </section>
 
-            <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+            <section className="rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
                 <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">筛选</div>
                     <div className="text-[10px] text-zinc-400 dark:text-white/30">{loading ? '刷新中...' : `${records.length} 条`}</div>
@@ -204,7 +204,7 @@ export default function TradeHistoryPage({ open = true, onClose, apiBaseUrl, ini
                             type="button"
                             onClick={() => load(offset + PAGE_SIZE)}
                             disabled={loading}
-                            className={`w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-bold text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-white/5 dark:bg-[#131518] dark:text-white/60 dark:hover:bg-white/[0.03] ${loading ? 'cursor-not-allowed opacity-50' : ''}`}
+                            className={`w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-bold text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-white/5 dark:bg-[#14171c] dark:text-white/60 dark:hover:bg-white/[0.03] ${loading ? 'cursor-not-allowed opacity-50' : ''}`}
                         >
                             {loading ? '加载中...' : '加载更多'}
                         </button>
@@ -249,7 +249,7 @@ function TradeRecordCard({ rec }) {
     const duration = formatDuration(rec.opened_at, rec.closed_at);
 
     return (
-        <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518]">
+        <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-2">

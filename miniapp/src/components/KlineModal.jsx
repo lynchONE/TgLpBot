@@ -72,7 +72,7 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
             onClose={onClose}
             maxHeightClass="h-[92vh] sm:h-[700px] max-h-none"
             className="overflow-hidden"
-            headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
+            headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#14171c]/50 shrink-0"
             contentClassName=""
             title={
                 <div>
@@ -92,7 +92,7 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
                 </div>
             }
         >
-            <div className="w-full h-full bg-[#111318] relative min-h-[500px]">
+            <div className="w-full h-full bg-[#14171c] relative min-h-[500px]">
                 {poolAddress ? (
                     <iframe
                         src={embedUrl}

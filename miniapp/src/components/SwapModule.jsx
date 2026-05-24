@@ -743,7 +743,7 @@ export default function SwapModule({
             {/* from-to card */}
             <div className="relative rounded-3xl bg-zinc-50 p-1 dark:bg-[#0f1116]/80">
                 {/* FROM */}
-                <div className="rounded-[20px] bg-white p-4 dark:bg-[#181a1f]">
+                <div className="rounded-[20px] bg-white p-4 dark:bg-[#14171c]">
                     <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/45">
                         <span className="font-semibold uppercase tracking-wider">支付</span>
                         <span className="tabular-nums">
@@ -787,7 +787,7 @@ export default function SwapModule({
                 </div>
 
                 {/* TO */}
-                <div className="mt-1 rounded-[20px] bg-white p-4 dark:bg-[#181a1f]">
+                <div className="mt-1 rounded-[20px] bg-white p-4 dark:bg-[#14171c]">
                     <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/45">
                         <span className="font-semibold uppercase tracking-wider">获得 (估算)</span>
                         {quote?.from_amount_float ? (
