@@ -46,6 +46,14 @@ type UserTransferActivityDayRow struct {
 	TransferOutUSD   float64
 }
 
+type WatchActivityQuery struct {
+	UserID        uint
+	ChainID       int
+	WalletAddress string
+	Page          int
+	Size          int
+}
+
 const smartMoneyNetAmountOrderJoin = `
 LEFT JOIN sm_lp_active_positions ap
 	ON ap.chain_id = sm_lp_positions.chain_id
@@ -462,6 +470,94 @@ func (r *Repository) ListLPEvents(ctx context.Context, wallet, pool string, page
 	}
 	var events []models.SmartMoneyLPEvent
 	err := db.Order("tx_timestamp DESC").Offset((page - 1) * size).Limit(size).Find(&events).Error
+	return events, total, err
+}
+
+func normalizeWatchActivityQuery(query WatchActivityQuery) WatchActivityQuery {
+	query.WalletAddress = strings.ToLower(strings.TrimSpace(query.WalletAddress))
+	if query.ChainID <= 0 {
+		query.ChainID = 56
+	}
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.Size <= 0 || query.Size > 100 {
+		query.Size = 20
+	}
+	return query
+}
+
+const watchActivityJoinSQL = `
+INNER JOIN smart_money_user_watch_wallets smww
+	ON smww.wallet_address = sm_lp_events.wallet_address
+	AND smww.chain = ?
+	AND smww.user_id = ?
+`
+
+func buildWatchActivitySelectSQL(query WatchActivityQuery) (string, []any) {
+	query = normalizeWatchActivityQuery(query)
+	sql := strings.TrimSpace(`
+SELECT sm_lp_events.*
+FROM sm_lp_events
+` + watchActivityJoinSQL + `
+WHERE sm_lp_events.chain_id = ?
+  AND sm_lp_events.event_type IN (?, ?)
+`)
+	args := []any{smartMoneyChainName(query.ChainID), query.UserID, query.ChainID, "add", "remove"}
+	if query.WalletAddress != "" {
+		sql += "\n  AND sm_lp_events.wallet_address = ?"
+		args = append(args, query.WalletAddress)
+	}
+	sql += "\nORDER BY sm_lp_events.tx_timestamp DESC, sm_lp_events.id DESC\nLIMIT ? OFFSET ?"
+	args = append(args, query.Size, (query.Page-1)*query.Size)
+	return sql, args
+}
+
+func buildWatchActivityCountSQL(query WatchActivityQuery) (string, []any) {
+	query = normalizeWatchActivityQuery(query)
+	sql := strings.TrimSpace(`
+SELECT COUNT(*)
+FROM sm_lp_events
+` + watchActivityJoinSQL + `
+WHERE sm_lp_events.chain_id = ?
+  AND sm_lp_events.event_type IN (?, ?)
+`)
+	args := []any{smartMoneyChainName(query.ChainID), query.UserID, query.ChainID, "add", "remove"}
+	if query.WalletAddress != "" {
+		sql += "\n  AND sm_lp_events.wallet_address = ?"
+		args = append(args, query.WalletAddress)
+	}
+	return sql, args
+}
+
+func (r *Repository) CountWatchLPEvents(ctx context.Context, query WatchActivityQuery) (int64, error) {
+	query = normalizeWatchActivityQuery(query)
+	if query.UserID == 0 {
+		return 0, nil
+	}
+	var total int64
+	sql, args := buildWatchActivityCountSQL(query)
+	err := database.DB.WithContext(ctx).Raw(sql, args...).Scan(&total).Error
+	return total, err
+}
+
+func (r *Repository) ListWatchLPEvents(ctx context.Context, query WatchActivityQuery) ([]models.SmartMoneyLPEvent, int64, error) {
+	query = normalizeWatchActivityQuery(query)
+	if query.UserID == 0 {
+		return nil, 0, nil
+	}
+
+	total, err := r.CountWatchLPEvents(ctx, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []models.SmartMoneyLPEvent{}, 0, nil
+	}
+
+	var events []models.SmartMoneyLPEvent
+	sql, args := buildWatchActivitySelectSQL(query)
+	err = database.DB.WithContext(ctx).Raw(sql, args...).Scan(&events).Error
 	return events, total, err
 }
 

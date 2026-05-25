@@ -183,12 +183,13 @@ export async function deleteSMContract({ apiBaseUrl, address, signal }) {
 }
 
 // Pools
-export async function fetchSMPools({ apiBaseUrl, page = 1, size = 10, keyword, protocol, minSmartMoneyUsd, maxFeeRate, signal }) {
+export async function fetchSMPools({ apiBaseUrl, page = 1, size = 10, keyword, protocol, source, minSmartMoneyUsd, maxFeeRate, signal }) {
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('size', String(size));
     if (keyword) params.set('keyword', keyword);
     if (protocol) params.set('protocol', protocol);
+    if (source) params.set('source', source);
     if (Number.isFinite(minSmartMoneyUsd)) params.set('min_smart_money_usd', String(minSmartMoneyUsd));
     if (Number.isFinite(maxFeeRate)) params.set('max_fee_rate', String(maxFeeRate));
     return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
@@ -282,6 +283,17 @@ export async function fetchSMWatchWallets({ apiBaseUrl, initData, chain = 'bsc',
     if (initData) params.set('initData', initData);
     if (chain) params.set('chain', chain);
     return goldenDogRequest(`${base}/api/smart_money_watch_wallets?${params.toString()}`, { signal });
+}
+
+export async function fetchSMWatchActivity({ apiBaseUrl, initData, chain = 'bsc', wallet, page = 1, size = 20, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', initData);
+    if (chain) params.set('chain', chain);
+    if (wallet) params.set('wallet', wallet);
+    params.set('page', String(page));
+    params.set('size', String(size));
+    return goldenDogRequest(`${base}/api/smart_money_watch_activity?${params.toString()}`, { signal });
 }
 
 export async function saveSMWatchWallets({ apiBaseUrl, initData, chain = 'bsc', walletAddress, watched, wallets, signal }) {

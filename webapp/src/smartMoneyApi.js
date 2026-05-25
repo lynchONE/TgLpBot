@@ -283,6 +283,17 @@ export async function fetchSMWatchWallets({ apiBaseUrl, initData, chain = 'bsc',
     return goldenDogRequest(`${base}/api/smart_money_watch_wallets?${params.toString()}`, { signal });
 }
 
+export async function fetchSMWatchActivity({ apiBaseUrl, initData, chain = 'bsc', wallet, page = 1, size = 20, signal } = {}) {
+    const base = normalizeBase(apiBaseUrl);
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', initData);
+    if (chain) params.set('chain', chain);
+    if (wallet) params.set('wallet', wallet);
+    params.set('page', String(page));
+    params.set('size', String(size));
+    return goldenDogRequest(`${base}/api/smart_money_watch_activity?${params.toString()}`, { signal });
+}
+
 export async function saveSMWatchWallets({ apiBaseUrl, initData, chain = 'bsc', walletAddress, watched, wallets, signal }) {
     const base = normalizeBase(apiBaseUrl);
     return goldenDogRequest(`${base}/api/smart_money_watch_wallets`, {

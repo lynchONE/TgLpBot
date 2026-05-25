@@ -6887,6 +6887,7 @@ body {
 .smd-stat-value.red { color: var(--negative); }
 .smd-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 18px;
   padding-bottom: 12px;
@@ -7041,6 +7042,174 @@ body {
 }
 .smd-empty-error {
   color: #fca5a5;
+}
+.smd-watch-activity-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.14);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(18, 26, 40, 0.76) 52%, rgba(34, 197, 94, 0.08));
+}
+.smd-watch-activity-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 999px;
+  color: #bae6fd;
+  background: rgba(56, 189, 248, 0.1);
+  font-size: 11px;
+  font-weight: 700;
+}
+.smd-watch-activity-title {
+  margin-top: 9px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+}
+.smd-watch-activity-copy {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.smd-watch-activity-count {
+  flex-shrink: 0;
+  align-self: flex-start;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.smd-watch-wallet-strip {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+}
+.smd-watch-wallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 180px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(18, 26, 40, 0.85);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.smd-watch-wallet-chip span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.smd-watch-wallet-chip.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.smd-watch-empty-btn {
+  display: inline-flex;
+  margin-left: 8px;
+}
+.smd-watch-activity-card {
+  cursor: default;
+}
+.smd-watch-activity-card:hover {
+  transform: none;
+  border-color: rgba(136, 157, 191, 0.2);
+}
+.smd-watch-activity-head,
+.smd-watch-activity-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.smd-watch-activity-main {
+  min-width: 0;
+  flex: 1;
+}
+.smd-watch-activity-pair {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smd-watch-activity-amount {
+  flex-shrink: 0;
+  text-align: right;
+}
+.smd-watch-activity-amount strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.smd-watch-activity-amount span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.smd-watch-action.success {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+}
+.smd-watch-action.danger {
+  border-color: rgba(248, 113, 113, 0.25);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+.smd-watch-activity-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.smd-watch-activity-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid rgba(136, 157, 191, 0.12);
+  border-radius: 999px;
+  background: rgba(7, 12, 20, 0.32);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.smd-watch-activity-metrics strong {
+  color: var(--text);
+}
+.smd-watch-activity-foot {
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(136, 157, 191, 0.12);
+}
+.smd-watch-activity-ids,
+.smd-watch-activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.smd-watch-activity-actions {
+  justify-content: flex-end;
+  margin-left: auto;
 }
 .smd-loading {
   text-align: center;
@@ -7281,6 +7450,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
   border: 1px solid rgba(var(--accent-rgb), 0.28);
   background: rgba(var(--accent-rgb), 0.14);
   color: var(--accent-strong);

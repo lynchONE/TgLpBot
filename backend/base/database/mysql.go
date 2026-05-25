@@ -364,6 +364,7 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("monitored_wallets", "idx_sm_wallet_source_active_created", "`source`, `is_active`, `created_at`")
 	ensureIndex("monitored_wallets", "idx_sm_wallet_active_address_chain", "`is_active`, `address`, `chain_id`")
 	ensureIndex("watch_contracts", "idx_sm_watch_contract_active", "`is_active`")
+	ensureIndex("smart_money_user_watch_wallets", "idx_sm_watch_wallet_chain_user_addr", "`chain`, `user_id`, `wallet_address`")
 
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_total", "`snapshot_day`, `total_usd`")
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_wallet", "`snapshot_day`, `wallet_address`, `chain_id`")

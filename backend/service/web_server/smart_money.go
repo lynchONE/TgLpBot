@@ -98,6 +98,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/smart_money_golden_dog_config", s.handleSmartMoneyGoldenDogConfig)
 	mux.HandleFunc("/api/smart_money_golden_dog_test", s.handleSmartMoneyGoldenDogTest)
 	mux.HandleFunc("/api/smart_money_watch_wallets", s.handleSmartMoneyWatchWallets)
+	mux.HandleFunc("/api/smart_money_watch_activity", s.handleSmartMoneyWatchActivity)
 	mux.HandleFunc("/api/smart_money_watch_open_alert_config", s.handleSmartMoneyWatchOpenAlertConfig)
 	mux.HandleFunc("/api/smart_money_watch_open_alert_test", s.handleSmartMoneyWatchOpenAlertTest)
 	mux.HandleFunc("/api/smart_money_auto_follow", s.handleSmartMoneyAutoFollow)
@@ -134,6 +135,8 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMEvents(w, r)
 		case "stats":
 			s.handleSMStats(w, r)
+		case "watch_activity":
+			s.handleSmartMoneyWatchActivity(w, r)
 		case "auto_follow":
 			s.handleSmartMoneyAutoFollow(w, r)
 		}
@@ -155,6 +158,8 @@ func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
 	case "wallets", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
+	case "watch_activity":
+		return "/api/smart_money_watch_activity", true
 	case "auto_follow":
 		return "/api/smart_money_auto_follow", true
 	default:

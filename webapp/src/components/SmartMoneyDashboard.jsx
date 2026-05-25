@@ -11,6 +11,7 @@ import {
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     buildSMEventsWsUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
+    fetchSMWatchActivity,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
     fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig,
 } from '../smartMoneyApi';
@@ -218,6 +219,39 @@ function formatRangeDrift(value) {
     return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function formatWatchActivityAction(value) {
+    const eventType = String(value || '').trim();
+    if (eventType === 'add') return '加 LP';
+    if (eventType === 'remove') return '撤 LP';
+    return eventType || 'LP 操作';
+}
+
+function getWatchActivityActionClass(value) {
+    return String(value || '').trim() === 'remove' ? 'danger' : 'success';
+}
+
+function normalizeWatchWalletItems(resp, fallbackWallets = []) {
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    const seen = new Set();
+    const normalized = [];
+
+    items.forEach((item) => {
+        const address = normalizeWalletAddress(item?.wallet_address);
+        if (!address || seen.has(address)) return;
+        seen.add(address);
+        normalized.push({ ...item, wallet_address: address });
+    });
+
+    fallbackWallets.forEach((value) => {
+        const address = normalizeWalletAddress(value);
+        if (!address || seen.has(address)) return;
+        seen.add(address);
+        normalized.push({ wallet_address: address, wallet_color: '#7F77DD' });
+    });
+
+    return normalized;
+}
+
 function buildRangeStatusSummary(rangeState) {
     if (!rangeState) return null;
     if (rangeState.inRange) {
@@ -286,6 +320,7 @@ const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
 const POOL_HEATMAP_PAGE_SIZE = 10;
+const WATCH_ACTIVITY_PAGE_SIZE = 12;
 const POOL_HEATMAP_WINDOWS = [
     { key: '30s', label: '30s' },
     { key: '1m', label: '1min' },
@@ -794,6 +829,275 @@ function PositionPagination({ page, total, pageSize = POSITION_LIST_PAGE_SIZE, o
             <button type="button" className="smd-filter-btn" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
                 下一页
             </button>
+        </div>
+    );
+}
+
+function buildPoolFromWatchActivity(event) {
+    return {
+        pool_address: event.pool_address,
+        chain_id: event.chain_id,
+        chain: resolvePoolChain(event),
+        protocol: event.protocol,
+        token0_address: event.token0_address,
+        token1_address: event.token1_address,
+        token0_symbol: event.token0_symbol,
+        token1_symbol: event.token1_symbol,
+        trading_pair: event.trading_pair,
+        display_token_address: event.display_token_address,
+        display_token_symbol: event.display_token_symbol,
+        display_token_logo_url: event.display_token_logo_url,
+        fee_tier: event.fee_tier,
+    };
+}
+
+function WatchActivityCard({ event, onSelectWallet, onSelectPool }) {
+    const walletAddress = normalizeWalletAddress(event?.wallet_address) || String(event?.wallet_address || '').trim();
+    const poolAddress = String(event?.pool_address || '').trim();
+    const amountValue = Number(event?.total_usd);
+    const amountText = Number.isFinite(amountValue) && amountValue > 0 ? formatUSDCompact(amountValue) : '--';
+    const pairLabel = getPairLabel(event);
+    const rangeText = event?.tick_lower !== null && event?.tick_lower !== undefined && event?.tick_upper !== null && event?.tick_upper !== undefined
+        ? `${event.tick_lower} - ${event.tick_upper}`
+        : '--';
+    const nftText = event?.nft_token_id ? `NFT #${event.nft_token_id}` : '';
+    const canOpenWallet = Boolean(walletAddress);
+    const canOpenPool = Boolean(poolAddress);
+
+    return (
+        <div className="smd-pool-card smd-watch-activity-card">
+            <div className="smd-watch-activity-head">
+                <PairAvatar item={event} size="sm" />
+                <div className="smd-watch-activity-main">
+                    <div className="smd-pool-card-badges">
+                        <Badge cls={`smd-watch-action ${getWatchActivityActionClass(event?.event_type)}`}>
+                            {formatWatchActivityAction(event?.event_type)}
+                        </Badge>
+                        <ProtocolBadge protocol={event?.protocol} />
+                        {event?.fee_tier ? <Badge cls="fee">{formatFeeTier(event.fee_tier)}</Badge> : null}
+                    </div>
+                    <div className="smd-watch-activity-pair">{pairLabel}</div>
+                    <WalletIdentity
+                        address={walletAddress}
+                        color={event?.wallet_color}
+                        label={event?.wallet_label || walletAddress}
+                        avatarUrl={event?.wallet_avatar_url}
+                        source={event?.wallet_source}
+                        sourceContract={event?.wallet_source_contract}
+                        size={22}
+                        showSource
+                        onClick={canOpenWallet ? () => onSelectWallet?.(walletAddress) : undefined}
+                    />
+                </div>
+                <div className="smd-watch-activity-amount">
+                    <strong>{amountText}</strong>
+                    <span>{relativeTime(event?.tx_timestamp)}</span>
+                </div>
+            </div>
+
+            <div className="smd-watch-activity-metrics">
+                <span><strong>金额</strong>{amountText}</span>
+                <span><strong>Tick</strong>{rangeText}</span>
+                {nftText ? <span>{nftText}</span> : null}
+            </div>
+
+            <div className="smd-watch-activity-foot">
+                <div className="smd-watch-activity-ids">
+                    <CompactIdentifier value={poolAddress} label="池子" />
+                    {event?.tx_hash ? <CompactIdentifier value={event.tx_hash} label="TX" /> : null}
+                </div>
+                <div className="smd-watch-activity-actions">
+                    {event?.explorer_url ? (
+                        <a href={event.explorer_url} target="_blank" rel="noreferrer" className="smd-link">
+                            浏览器 <ExternalLink size={10} />
+                        </a>
+                    ) : null}
+                    {canOpenPool ? (
+                        <button
+                            type="button"
+                            className="smd-action-chip"
+                            onClick={() => onSelectPool?.(buildPoolFromWatchActivity(event))}
+                        >
+                            池子 <ExternalLink size={10} />
+                        </button>
+                    ) : null}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function WatchActivityPanel({
+    apiBaseUrl,
+    initData,
+    watchedWallets = [],
+    onSelectWallet,
+    onSelectPool,
+    onOpenWallets,
+    refreshInterval = 10,
+}) {
+    const canLoad = Boolean(String(initData || '').trim());
+    const [activities, setActivities] = useState([]);
+    const [walletItems, setWalletItems] = useState(() => normalizeWatchWalletItems(null, watchedWallets));
+    const [selectedWallet, setSelectedWallet] = useState('');
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [loading, setLoading] = useState(canLoad);
+    const [error, setError] = useState('');
+    const loadSeqRef = useRef(0);
+    const refreshIntervalMs = useMemo(() => getRefreshIntervalMs(refreshInterval), [refreshInterval]);
+    const activeWallet = normalizeWalletAddress(selectedWallet);
+
+    useEffect(() => {
+        setWalletItems((prev) => normalizeWatchWalletItems({ items: prev }, watchedWallets));
+    }, [watchedWallets]);
+
+    const load = useCallback((silent = false) => {
+        if (!canLoad) {
+            setActivities([]);
+            setTotal(0);
+            setLoading(false);
+            return;
+        }
+
+        const seq = ++loadSeqRef.current;
+        if (!silent) {
+            setLoading(true);
+            setError('');
+        }
+
+        fetchSMWatchActivity({
+            apiBaseUrl,
+            initData,
+            chain: 'bsc',
+            wallet: activeWallet || undefined,
+            page,
+            size: WATCH_ACTIVITY_PAGE_SIZE,
+        })
+            .then((resp) => {
+                if (seq !== loadSeqRef.current) return;
+                if (!Array.isArray(resp?.list) || !Number.isFinite(Number(resp?.total))) {
+                    throw new Error('特别关注动态格式错误');
+                }
+                const nextTotal = Number(resp.total);
+                const totalPages = Math.max(1, Math.ceil(nextTotal / WATCH_ACTIVITY_PAGE_SIZE));
+                setWalletItems(normalizeWatchWalletItems(resp, watchedWallets));
+                if (page > totalPages) {
+                    setActivities([]);
+                    setTotal(nextTotal);
+                    setPage(totalPages);
+                    return;
+                }
+                setActivities(resp.list);
+                setTotal(nextTotal);
+                setError('');
+            })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                setActivities([]);
+                setTotal(0);
+                setError(String(err?.message || err || '加载特别关注动态失败'));
+            })
+            .finally(() => {
+                if (!silent && seq === loadSeqRef.current) {
+                    setLoading(false);
+                }
+            });
+    }, [activeWallet, apiBaseUrl, canLoad, initData, page, watchedWallets]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    useEffect(() => {
+        if (!canLoad) return undefined;
+        const timer = setInterval(() => {
+            load(true);
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [canLoad, load, refreshIntervalMs]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [activeWallet]);
+
+    if (!canLoad) {
+        return <div className="smd-empty">需要 Telegram initData 才能读取特别关注动态。</div>;
+    }
+
+    const emptyWallets = walletItems.length === 0;
+
+    return (
+        <div>
+            <div className="smd-watch-activity-hero">
+                <div>
+                    <div className="smd-watch-activity-kicker">
+                        <Activity size={13} />
+                        特别关注
+                    </div>
+                    <div className="smd-watch-activity-title">最近 LP 操作</div>
+                    <div className="smd-watch-activity-copy">只展示你特别关注钱包的加 LP 和撤 LP 记录。</div>
+                </div>
+                <div className="smd-watch-activity-count">{total} 条</div>
+            </div>
+
+            <div className="smd-watch-wallet-strip">
+                <button
+                    type="button"
+                    className={`smd-watch-wallet-chip${!activeWallet ? ' active' : ''}`}
+                    onClick={() => setSelectedWallet('')}
+                >
+                    全部
+                </button>
+                {walletItems.map((item) => {
+                    const address = normalizeWalletAddress(item.wallet_address);
+                    const active = activeWallet === address;
+                    return (
+                        <button
+                            key={address}
+                            type="button"
+                            className={`smd-watch-wallet-chip${active ? ' active' : ''}`}
+                            onClick={() => setSelectedWallet(address)}
+                        >
+                            <WalletAvatar address={address} color={item.wallet_color} avatarUrl={item.wallet_avatar_url} size={22} />
+                            <span>{item.wallet_label || shortAddr(address)}</span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {emptyWallets && !loading ? (
+                <div className="smd-empty">
+                    还没有特别关注钱包。
+                    <button type="button" className="smd-filter-btn active smd-watch-empty-btn" onClick={onOpenWallets}>
+                        去钱包视图添加
+                    </button>
+                </div>
+            ) : loading ? (
+                <div className="smd-loading">加载中...</div>
+            ) : error ? (
+                <div className="smd-empty smd-empty-error">{error}</div>
+            ) : activities.length === 0 ? (
+                <div className="smd-empty">当前范围暂无加 LP / 撤 LP 记录</div>
+            ) : (
+                <>
+                    <div className="smd-pool-page-meta">
+                        第 {page} 页 · 当前显示 {activities.length} 条 / 共 {total} 条记录
+                    </div>
+                    <div className="smd-pool-cards">
+                        {activities.map((event) => (
+                            <WatchActivityCard
+                                key={`${event.tx_hash || event.id}:${event.log_index || 0}`}
+                                event={event}
+                                onSelectWallet={onSelectWallet}
+                                onSelectPool={onSelectPool}
+                            />
+                        ))}
+                    </div>
+                </>
+            )}
+
+            <PositionPagination page={page} total={total} pageSize={WATCH_ACTIVITY_PAGE_SIZE} onChange={setPage} />
         </div>
     );
 }
@@ -2980,6 +3284,7 @@ export default function SmartMoneyDashboard({
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
+                            { key: 'watch_activity', label: '特别关注', icon: Activity },
                             { key: 'settings', label: '合约视图', icon: Settings },
                         ].map(({ key, label, icon: Icon }) => (
                             <button key={key} className={`smd-tab${view === key ? ' active' : ''}`} onClick={() => setView(key)}>
@@ -3049,6 +3354,16 @@ export default function SmartMoneyDashboard({
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={onToggleWatchWallet}
+                    />
+                ) : view === 'watch_activity' ? (
+                    <WatchActivityPanel
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        watchedWallets={watchedWallets}
+                        onSelectWallet={addr => { setSelectedWallet(addr); setView('wallets'); setSelectedPool(null); }}
+                        onSelectPool={p => { setSelectedPool(p); setSelectedWallet(null); }}
+                        onOpenWallets={() => setView('wallets')}
+                        refreshInterval={refreshInterval}
                     />
                 ) : view === 'golden_dog' ? (
                     <GoldenDogPanelContent

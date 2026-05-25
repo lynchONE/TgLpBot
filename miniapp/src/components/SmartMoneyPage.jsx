@@ -13,7 +13,7 @@ import {
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
-    fetchSMWatchWallets, saveSMWatchWallets,
+    fetchSMWatchWallets, fetchSMWatchActivity, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
     fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig,
     buildSMEventsWsUrl,
@@ -1004,6 +1004,14 @@ function formatOptionalNumber(value) {
 
 const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
 const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
+const SMART_MONEY_POOL_SOURCE_TABS = [
+    { key: 'all', label: '全部', source: '' },
+    { key: 'manual', label: '手动添加', source: 'manual' },
+    { key: 'contract', label: '合约发现', source: 'contract_interaction' },
+];
+const SMART_MONEY_POOL_SOURCE_BY_KEY = Object.fromEntries(
+    SMART_MONEY_POOL_SOURCE_TABS.map((item) => [item.key, item.source]),
+);
 
 function normalizeStoredSmartMoneyPoolFilter(value) {
     if (!value || typeof value !== 'object') {
@@ -1071,6 +1079,7 @@ const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
 const POOL_HEATMAP_PAGE_SIZE = 10;
+const WATCH_ACTIVITY_PAGE_SIZE = 12;
 const POOL_HEATMAP_WINDOWS = [
     { key: '30s', label: '30s' },
     { key: '1m', label: '1min' },
@@ -1130,6 +1139,41 @@ function formatHeatmapAge(seconds) {
     if (value < 3600) return `${Math.round(value / 60)}分钟`;
     if (value < 86400) return `${Math.round(value / 3600)}小时`;
     return `${Math.round(value / 86400)}天`;
+}
+
+function formatWatchActivityAction(value) {
+    const eventType = String(value || '').trim();
+    if (eventType === 'add') return '加 LP';
+    if (eventType === 'remove') return '撤 LP';
+    return eventType || 'LP 操作';
+}
+
+function getWatchActivityActionClass(value) {
+    return String(value || '').trim() === 'remove'
+        ? 'border-red-500/20 bg-red-500/10 text-red-300'
+        : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+}
+
+function normalizeWatchWalletItems(resp, fallbackWallets = []) {
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    const seen = new Set();
+    const normalized = [];
+
+    items.forEach((item) => {
+        const address = normalizeWalletAddress(item?.wallet_address);
+        if (!address || seen.has(address)) return;
+        seen.add(address);
+        normalized.push({ ...item, wallet_address: address });
+    });
+
+    fallbackWallets.forEach((value) => {
+        const address = normalizeWalletAddress(value);
+        if (!address || seen.has(address)) return;
+        seen.add(address);
+        normalized.push({ wallet_address: address, wallet_color: '#7F77DD' });
+    });
+
+    return normalized;
 }
 
 function heatmapSampleText(row) {
@@ -1826,6 +1870,307 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 // ============ PAGES ============
 
+function buildPoolFromWatchActivity(event) {
+    return {
+        pool_address: event.pool_address,
+        chain_id: event.chain_id,
+        chain: resolvePoolChain(event),
+        protocol: event.protocol,
+        token0_address: event.token0_address,
+        token1_address: event.token1_address,
+        token0_symbol: event.token0_symbol,
+        token1_symbol: event.token1_symbol,
+        trading_pair: event.trading_pair,
+        display_token_address: event.display_token_address,
+        display_token_symbol: event.display_token_symbol,
+        display_token_logo_url: event.display_token_logo_url,
+        fee_tier: event.fee_tier,
+    };
+}
+
+function WatchActivityCard({ event, brand, onSelectWallet, onSelectPool }) {
+    const walletAddress = normalizeWalletAddress(event?.wallet_address) || String(event?.wallet_address || '').trim();
+    const poolAddress = String(event?.pool_address || '').trim();
+    const amountValue = Number(event?.total_usd);
+    const amountText = Number.isFinite(amountValue) && amountValue > 0 ? formatUSDCompact(amountValue) : '--';
+    const pairLabel = getPairLabel(event);
+    const rangeText = event?.tick_lower !== null && event?.tick_lower !== undefined && event?.tick_upper !== null && event?.tick_upper !== undefined
+        ? `${event.tick_lower} - ${event.tick_upper}`
+        : '--';
+    const nftText = event?.nft_token_id ? `NFT #${event.nft_token_id}` : '';
+    const canOpenWallet = Boolean(walletAddress);
+    const canOpenPool = Boolean(poolAddress);
+
+    return (
+        <div className="rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-3 shadow-[0_18px_50px_-32px_rgba(0,0,0,0.95)]">
+            <div className="flex items-start gap-3">
+                <PairAvatar item={event} size="sm" />
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge className={getWatchActivityActionClass(event?.event_type)}>
+                            {formatWatchActivityAction(event?.event_type)}
+                        </Badge>
+                        <ProtocolBadge protocol={event?.protocol} />
+                        <FeeBadge fee={event?.fee_tier} />
+                    </div>
+                    <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{pairLabel}</div>
+                    <div className="mt-2">
+                        <WalletIdentity
+                            address={walletAddress}
+                            color={event?.wallet_color}
+                            label={event?.wallet_label || walletAddress}
+                            avatarUrl={event?.wallet_avatar_url}
+                            source={event?.wallet_source}
+                            sourceContract={event?.wallet_source_contract}
+                            size={30}
+                            showSource
+                            onClick={canOpenWallet ? () => onSelectWallet?.(walletAddress) : undefined}
+                        />
+                    </div>
+                </div>
+                <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold tabular-nums text-zinc-100">{amountText}</div>
+                    <div className="mt-1 text-[10px] text-zinc-500">{relativeTime(event?.tx_timestamp)}</div>
+                </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span className="inline-flex min-w-[104px] items-center justify-between gap-2 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-zinc-300">
+                    <strong className="font-semibold text-zinc-100">金额</strong>
+                    <span className="tabular-nums">{amountText}</span>
+                </span>
+                <span className="inline-flex min-w-[132px] items-center justify-between gap-2 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-zinc-300">
+                    <strong className="font-semibold text-zinc-100">Tick</strong>
+                    <span className="max-w-[132px] truncate font-mono">{rangeText}</span>
+                </span>
+                {nftText ? (
+                    <span className="inline-flex items-center rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-zinc-300">
+                        {nftText}
+                    </span>
+                ) : null}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.05] pt-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <CompactIdentifier value={poolAddress} label="池子" />
+                    {event?.tx_hash ? <CompactIdentifier value={event.tx_hash} label="TX" /> : null}
+                </div>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {event?.explorer_url ? (
+                        <a
+                            href={event.explorer_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`inline-flex items-center gap-1 text-[11px] ${getBrandLinkClass(brand)}`}
+                        >
+                            浏览器 <ExternalLink size={10} />
+                        </a>
+                    ) : null}
+                    {canOpenPool ? (
+                        <button
+                            type="button"
+                            className={`inline-flex items-center gap-1 text-[11px] ${getBrandActionChipClass(brand)}`}
+                            onClick={() => onSelectPool?.(buildPoolFromWatchActivity(event))}
+                        >
+                            池子 <ExternalLink size={10} />
+                        </button>
+                    ) : null}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function WatchActivityPage({
+    apiBaseUrl,
+    initData,
+    hasInitData,
+    brand,
+    watchedWallets = [],
+    onSelectWallet,
+    onSelectPool,
+    onOpenWallets,
+    pollIntervalSec = 15,
+}) {
+    const canLoad = Boolean(String(initData || '').trim()) && hasInitData !== false;
+    const [activities, setActivities] = useState([]);
+    const [walletItems, setWalletItems] = useState(() => normalizeWatchWalletItems(null, watchedWallets));
+    const [selectedWallet, setSelectedWallet] = useState('');
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [loading, setLoading] = useState(canLoad);
+    const [error, setError] = useState('');
+    const loadSeqRef = useRef(0);
+    const activeWallet = normalizeWalletAddress(selectedWallet);
+
+    useEffect(() => {
+        setWalletItems((prev) => {
+            const normalized = normalizeWatchWalletItems({ items: prev }, watchedWallets);
+            return normalized;
+        });
+    }, [watchedWallets]);
+
+    const load = useCallback((silent = false) => {
+        if (!canLoad) {
+            setActivities([]);
+            setTotal(0);
+            setLoading(false);
+            return;
+        }
+
+        const seq = ++loadSeqRef.current;
+        if (!silent) {
+            setLoading(true);
+            setError('');
+        }
+
+        fetchSMWatchActivity({
+            apiBaseUrl,
+            initData,
+            chain: 'bsc',
+            wallet: activeWallet || undefined,
+            page,
+            size: WATCH_ACTIVITY_PAGE_SIZE,
+        })
+            .then((resp) => {
+                if (seq !== loadSeqRef.current) return;
+                if (!Array.isArray(resp?.list) || !Number.isFinite(Number(resp?.total))) {
+                    throw new Error('特别关注动态格式错误');
+                }
+                const nextTotal = Number(resp.total);
+                const totalPages = Math.max(1, Math.ceil(nextTotal / WATCH_ACTIVITY_PAGE_SIZE));
+                setWalletItems(normalizeWatchWalletItems(resp, watchedWallets));
+                if (page > totalPages) {
+                    setActivities([]);
+                    setTotal(nextTotal);
+                    setPage(totalPages);
+                    return;
+                }
+                setActivities(resp.list);
+                setTotal(nextTotal);
+                setError('');
+            })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                setActivities([]);
+                setTotal(0);
+                setError(String(err?.message || err || '加载特别关注动态失败'));
+            })
+            .finally(() => {
+                if (!silent && seq === loadSeqRef.current) {
+                    setLoading(false);
+                }
+            });
+    }, [activeWallet, apiBaseUrl, canLoad, initData, page, watchedWallets]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    useEffect(() => {
+        if (!canLoad) return undefined;
+        const timer = setInterval(() => {
+            load(true);
+        }, Math.max(2, Number(pollIntervalSec)) * 1000);
+        return () => clearInterval(timer);
+    }, [canLoad, load, pollIntervalSec]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [activeWallet]);
+
+    const filterWallets = walletItems;
+    const emptyWallets = filterWallets.length === 0;
+
+    if (!canLoad) {
+        return (
+            <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
+                需要 Telegram initData 才能读取特别关注动态。
+            </div>
+        );
+    }
+
+    return (
+        <div>
+            <div className="mb-3 rounded-[24px] border border-sky-400/10 bg-[linear-gradient(135deg,rgba(56,189,248,0.10),rgba(24,24,27,0.78)_48%,rgba(34,197,94,0.08))] p-3">
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/15 bg-sky-300/10 px-2 py-1 text-[10px] font-semibold text-sky-200">
+                    <Activity size={12} />
+                    特别关注
+                </div>
+                <div className="mt-2 text-sm font-semibold text-zinc-100">最近 LP 操作</div>
+                <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                    只展示你特别关注钱包的加 LP 和撤 LP 记录。
+                </div>
+            </div>
+
+            <div className="mb-3 flex gap-2 overflow-x-auto pb-1 text-[11px]">
+                <button
+                    type="button"
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-2xl px-3 py-2 font-semibold ${getFilterButtonClass(!activeWallet, brand)}`}
+                    onClick={() => setSelectedWallet('')}
+                >
+                    全部
+                </button>
+                {filterWallets.map((item) => {
+                    const address = normalizeWalletAddress(item.wallet_address);
+                    const active = activeWallet === address;
+                    return (
+                        <button
+                            key={address}
+                            type="button"
+                            className={`inline-flex max-w-[168px] shrink-0 items-center gap-2 rounded-2xl px-2.5 py-1.5 font-semibold ${getFilterButtonClass(active, brand)}`}
+                            onClick={() => setSelectedWallet(address)}
+                        >
+                            <WalletAvatar address={address} color={item.wallet_color} avatarUrl={item.wallet_avatar_url} size={26} />
+                            <span className="min-w-0 truncate">{item.wallet_label || shortAddr(address)}</span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {emptyWallets && !loading ? (
+                <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
+                    <div>还没有特别关注钱包。</div>
+                    <button
+                        type="button"
+                        className={`mt-3 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(true, brand)}`}
+                        onClick={onOpenWallets}
+                    >
+                        去钱包视图添加
+                    </button>
+                </div>
+            ) : loading ? (
+                <div className="py-8 text-center text-zinc-500">加载中...</div>
+            ) : error ? (
+                <div className="rounded-2xl border border-red-400/15 bg-red-500/5 px-4 py-8 text-center text-sm text-red-200">
+                    {error}
+                </div>
+            ) : activities.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
+                    当前范围暂无加 LP / 撤 LP 记录
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    <div className="px-1 text-[10px] text-zinc-500">
+                        第 {page} 页 · 当前显示 {activities.length} 条 / 共 {total} 条记录
+                    </div>
+                    {activities.map((event) => (
+                        <WatchActivityCard
+                            key={`${event.tx_hash || event.id}:${event.log_index || 0}`}
+                            event={event}
+                            brand={brand}
+                            onSelectWallet={onSelectWallet}
+                            onSelectPool={onSelectPool}
+                        />
+                    ))}
+                </div>
+            )}
+
+            <PositionPagination page={page} total={total} brand={brand} pageSize={WATCH_ACTIVITY_PAGE_SIZE} onChange={setPage} />
+        </div>
+    );
+}
+
 function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollIntervalSec = 15 }) {
     const [pools, setPools] = useState([]);
     const [poolsTotal, setPoolsTotal] = useState(0);
@@ -1833,12 +2178,14 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     const [error, setError] = useState('');
     const [search, setSearch] = useState('');
     const [protocolFilter, setProtocolFilter] = useState('all');
+    const [sourceScope, setSourceScope] = useState('all');
     const [page, setPage] = useState(1);
     const [filterOpen, setFilterOpen] = useState(false);
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
     const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
+    const sourceFilter = SMART_MONEY_POOL_SOURCE_BY_KEY[sourceScope];
 
     const load = useCallback((silent = false) => {
         const seq = ++loadSeqRef.current;
@@ -1852,6 +2199,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
             size: POOL_LIST_PAGE_SIZE,
             keyword: searchKeyword || undefined,
             protocol: protocolFilter !== 'all' ? protocolFilter : undefined,
+            source: sourceFilter,
             minSmartMoneyUsd: poolFilter.minSmartMoneyUsd,
             maxFeeRate: poolFilter.maxFeeRate,
         })
@@ -1884,7 +2232,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                     setLoading(false);
                 }
             });
-    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword]);
+    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceFilter]);
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
@@ -1895,7 +2243,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     }, [load, pollIntervalSec]);
     useEffect(() => {
         setPage(1);
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword]);
+    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceScope]);
 
     const poolFilterActive = useMemo(
         () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
@@ -1926,10 +2274,26 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
         setFilterOpen(false);
         setPage(1);
     }, []);
-    const hasFilter = Boolean(searchKeyword) || protocolFilter !== 'all' || poolFilterActive;
+    const hasFilter = Boolean(searchKeyword) || protocolFilter !== 'all' || sourceScope !== 'all' || poolFilterActive;
 
     return (
         <div>
+            <div className="mb-3 grid grid-cols-3 gap-1 rounded-[20px] border border-white/[0.05] bg-zinc-950/50 p-1 text-[11px]">
+                {SMART_MONEY_POOL_SOURCE_TABS.map((item) => (
+                    <button
+                        key={item.key}
+                        type="button"
+                        className={`inline-flex min-h-[34px] items-center justify-center rounded-[16px] px-2 font-semibold transition ${getFilterButtonClass(sourceScope === item.key, brand)}`}
+                        onClick={() => {
+                            setSourceScope(item.key);
+                            setPage(1);
+                        }}
+                        aria-pressed={sourceScope === item.key}
+                    >
+                        {item.label}
+                    </button>
+                ))}
+            </div>
             <div className="mb-3 flex gap-2">
                 <div className="relative flex-1">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -5044,10 +5408,11 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                 )}
 
                 {!isDetailView && (
-                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-6' : 'grid-cols-5'} gap-2 mb-4`}>
+                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-7' : 'grid-cols-3 sm:grid-cols-6'} gap-2 mb-4`}>
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
+                            { key: 'watch_activity', label: '特别关注', icon: Activity },
                             { key: 'settings', label: '合约视图', icon: Settings },
                             { key: 'auto_follow', label: '自动跟单', icon: Copy },
                         ].map(({ key, label, icon: Icon }) => (
@@ -5119,6 +5484,18 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={handleToggleWatchWallet}
+                        pollIntervalSec={pollIntervalSec}
+                    />
+                ) : view === 'watch_activity' ? (
+                    <WatchActivityPage
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        hasInitData={hasInitData}
+                        brand={brand}
+                        watchedWallets={watchedWallets}
+                        onSelectWallet={handleSelectWallet}
+                        onSelectPool={handleSelectPool}
+                        onOpenWallets={() => setView('wallets')}
                         pollIntervalSec={pollIntervalSec}
                     />
                 ) : view === 'golden_dog' ? (
