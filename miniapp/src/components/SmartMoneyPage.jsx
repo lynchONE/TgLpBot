@@ -2092,17 +2092,6 @@ function WatchActivityPage({
 
     return (
         <div>
-            <div className="mb-3 rounded-[24px] border border-sky-400/10 bg-[linear-gradient(135deg,rgba(56,189,248,0.10),rgba(24,24,27,0.78)_48%,rgba(34,197,94,0.08))] p-3">
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/15 bg-sky-300/10 px-2 py-1 text-[10px] font-semibold text-sky-200">
-                    <Activity size={12} />
-                    特别关注
-                </div>
-                <div className="mt-2 text-sm font-semibold text-zinc-100">最近 LP 操作</div>
-                <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-                    只展示你特别关注钱包的加 LP 和撤 LP 记录。
-                </div>
-            </div>
-
             <div className="mb-3 flex gap-2 overflow-x-auto pb-1 text-[11px]">
                 <button
                     type="button"
@@ -2461,15 +2450,42 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
 }
 
 function SmartMoneyPoolViewPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollIntervalSec = 15 }) {
+    const [tab, setTab] = useState('active');
     return (
         <div>
-            <PoolListPage
-                apiBaseUrl={apiBaseUrl}
-                onSelectPool={onSelectPool}
-                onOpenPosition={onOpenPosition}
-                brand={brand}
-                pollIntervalSec={pollIntervalSec}
-            />
+            <div className="mb-4 grid grid-cols-2 gap-2 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1">
+                {[
+                    { key: 'active', label: '活跃池子', icon: Activity },
+                    { key: 'heatmap', label: '收益火焰图', icon: Flame },
+                ].map(({ key, label, icon: Icon }) => (
+                    <button
+                        key={key}
+                        type="button"
+                        className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[18px] px-3 text-xs font-semibold transition ${getFilterButtonClass(tab === key, brand)}`}
+                        onClick={() => setTab(key)}
+                    >
+                        <Icon size={14} />
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {tab === 'heatmap' ? (
+                <PoolFeeHeatmapPage
+                    apiBaseUrl={apiBaseUrl}
+                    onSelectPool={onSelectPool}
+                    onOpenPosition={onOpenPosition}
+                    brand={brand}
+                    pollIntervalSec={pollIntervalSec}
+                />
+            ) : (
+                <PoolListPage
+                    apiBaseUrl={apiBaseUrl}
+                    onSelectPool={onSelectPool}
+                    onOpenPosition={onOpenPosition}
+                    brand={brand}
+                    pollIntervalSec={pollIntervalSec}
+                />
+            )}
         </div>
     );
 }
@@ -2551,24 +2567,6 @@ function PoolFeeHeatmapPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, p
 
     return (
         <div>
-            <div className="mb-3 rounded-[24px] border border-amber-400/10 bg-[linear-gradient(135deg,rgba(251,146,60,0.12),rgba(24,24,27,0.72)_46%,rgba(16,185,129,0.08))] p-3 shadow-[0_18px_50px_-34px_rgba(0,0,0,0.95)]">
-                <div className="flex items-start justify-between gap-3">
-                    <div>
-                        <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/15 bg-amber-300/10 px-2 py-1 text-[10px] font-semibold text-amber-200">
-                            <Flame size={12} />
-                            实时机会
-                        </div>
-                        <div className="mt-2 text-sm font-semibold text-zinc-100">按开仓至今平均速度折算</div>
-                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-                            速率为每 1000U 聪明钱仓位在所选窗口的估算手续费，适合快速比较资金效率。
-                        </div>
-                    </div>
-                    <div className="shrink-0 text-right text-[10px] text-zinc-500">
-                        {updatedAt ? `更新 ${relativeTime(updatedAt)}` : ''}
-                    </div>
-                </div>
-            </div>
-
             <div className="mb-3 flex gap-2">
                 <div className="relative flex-1">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -5290,12 +5288,6 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         setSelectedWallet(null);
     }, []);
 
-    useEffect(() => {
-        if (view === 'watch_activity') {
-            setView('pools');
-        }
-    }, [view]);
-
     const handleToggleWatchWallet = useCallback((walletAddress) => {
         const address = normalizeWalletAddress(walletAddress);
         if (!address) return;
@@ -5387,10 +5379,11 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                 )}
 
                 {!isDetailView && (
-                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-6' : 'grid-cols-3 sm:grid-cols-5'} gap-2 mb-4`}>
+                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-7' : 'grid-cols-3 sm:grid-cols-6'} gap-2 mb-4`}>
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
+                            { key: 'watch_activity', label: '特别关注', icon: Activity },
                             { key: 'settings', label: '合约视图', icon: Settings },
                             { key: 'auto_follow', label: '自动跟单', icon: Copy },
                         ].map(({ key, label, icon: Icon }) => (
@@ -5462,6 +5455,18 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={handleToggleWatchWallet}
+                        pollIntervalSec={pollIntervalSec}
+                    />
+                ) : view === 'watch_activity' ? (
+                    <WatchActivityPage
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        hasInitData={hasInitData}
+                        brand={brand}
+                        watchedWallets={watchedWallets}
+                        onSelectWallet={handleSelectWallet}
+                        onSelectPool={handleSelectPool}
+                        onOpenWallets={() => setView('wallets')}
                         pollIntervalSec={pollIntervalSec}
                     />
                 ) : view === 'golden_dog' ? (
