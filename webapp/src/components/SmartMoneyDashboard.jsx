@@ -1598,43 +1598,16 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
 }
 
 function SmartMoneyPoolView({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePoolAddress = '', refreshInterval = 10 }) {
-    const [tab, setTab] = useState('active');
     return (
         <div>
-            <div className="smd-subtabs">
-                {[
-                    { key: 'active', label: '活跃池子', icon: Activity },
-                    { key: 'heatmap', label: '收益火焰图', icon: Flame },
-                ].map(({ key, label, icon: Icon }) => (
-                    <button
-                        key={key}
-                        type="button"
-                        className={`smd-subtab${tab === key ? ' active' : ''}`}
-                        onClick={() => setTab(key)}
-                    >
-                        <Icon size={14} />
-                        {label}
-                    </button>
-                ))}
-            </div>
-            {tab === 'heatmap' ? (
-                <PoolFeeHeatmap
-                    apiBaseUrl={apiBaseUrl}
-                    onSelect={onSelect}
-                    onOpenDetail={onOpenDetail}
-                    onOpenPosition={onOpenPosition}
-                    refreshInterval={refreshInterval}
-                />
-            ) : (
-                <PoolList
-                    apiBaseUrl={apiBaseUrl}
-                    onSelect={onSelect}
-                    onOpenDetail={onOpenDetail}
-                    activePoolAddress={activePoolAddress}
-                    refreshInterval={refreshInterval}
-                    onOpenPosition={onOpenPosition}
-                />
-            )}
+            <PoolList
+                apiBaseUrl={apiBaseUrl}
+                onSelect={onSelect}
+                onOpenDetail={onOpenDetail}
+                activePoolAddress={activePoolAddress}
+                refreshInterval={refreshInterval}
+                onOpenPosition={onOpenPosition}
+            />
         </div>
     );
 }
@@ -3206,6 +3179,9 @@ export default function SmartMoneyDashboard({
         if (!isAdmin && view === 'assets') {
             setView('pools');
         }
+        if (view === 'watch_activity') {
+            setView('pools');
+        }
     }, [isAdmin, view]);
 
     const isDetail = selectedPool || selectedWallet;
@@ -3284,7 +3260,6 @@ export default function SmartMoneyDashboard({
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
-                            { key: 'watch_activity', label: '特别关注', icon: Activity },
                             { key: 'settings', label: '合约视图', icon: Settings },
                         ].map(({ key, label, icon: Icon }) => (
                             <button key={key} className={`smd-tab${view === key ? ' active' : ''}`} onClick={() => setView(key)}>
@@ -3354,16 +3329,6 @@ export default function SmartMoneyDashboard({
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={onToggleWatchWallet}
-                    />
-                ) : view === 'watch_activity' ? (
-                    <WatchActivityPanel
-                        apiBaseUrl={apiBaseUrl}
-                        initData={initData}
-                        watchedWallets={watchedWallets}
-                        onSelectWallet={addr => { setSelectedWallet(addr); setView('wallets'); setSelectedPool(null); }}
-                        onSelectPool={p => { setSelectedPool(p); setSelectedWallet(null); }}
-                        onOpenWallets={() => setView('wallets')}
-                        refreshInterval={refreshInterval}
                     />
                 ) : view === 'golden_dog' ? (
                     <GoldenDogPanelContent

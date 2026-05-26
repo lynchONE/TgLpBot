@@ -213,6 +213,8 @@ function dedupeNewsItems(items, limit) {
 
 function NewsShowcase({ items, loading, error, status, onOpen }) {
   const rows = Array.isArray(items) ? items.slice(0, 4) : [];
+  if (rows.length === 0) return null;
+
   const showStatus = loading || status !== 'ok';
   return (
     <section className="news-showcase" aria-label="热点推荐新闻">
@@ -293,6 +295,8 @@ function NewsTicker({ items, loading, error, speedPxPerSec, onOpen }) {
       window.removeEventListener('resize', updateDuration);
     };
   }, [tickerContentKey, tickerRows.length, speedPxPerSec]);
+
+  if (rows.length === 0) return null;
 
   return (
     <div

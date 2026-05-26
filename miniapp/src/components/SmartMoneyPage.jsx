@@ -2461,42 +2461,15 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
 }
 
 function SmartMoneyPoolViewPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollIntervalSec = 15 }) {
-    const [tab, setTab] = useState('active');
     return (
         <div>
-            <div className="mb-4 grid grid-cols-2 gap-2 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1">
-                {[
-                    { key: 'active', label: '活跃池子', icon: Activity },
-                    { key: 'heatmap', label: '收益火焰图', icon: Flame },
-                ].map(({ key, label, icon: Icon }) => (
-                    <button
-                        key={key}
-                        type="button"
-                        className={`inline-flex min-h-[42px] items-center justify-center gap-1.5 rounded-[18px] px-3 text-xs font-semibold transition ${getFilterButtonClass(tab === key, brand)}`}
-                        onClick={() => setTab(key)}
-                    >
-                        <Icon size={14} />
-                        {label}
-                    </button>
-                ))}
-            </div>
-            {tab === 'heatmap' ? (
-                <PoolFeeHeatmapPage
-                    apiBaseUrl={apiBaseUrl}
-                    onSelectPool={onSelectPool}
-                    onOpenPosition={onOpenPosition}
-                    brand={brand}
-                    pollIntervalSec={pollIntervalSec}
-                />
-            ) : (
-                <PoolListPage
-                    apiBaseUrl={apiBaseUrl}
-                    onSelectPool={onSelectPool}
-                    onOpenPosition={onOpenPosition}
-                    brand={brand}
-                    pollIntervalSec={pollIntervalSec}
-                />
-            )}
+            <PoolListPage
+                apiBaseUrl={apiBaseUrl}
+                onSelectPool={onSelectPool}
+                onOpenPosition={onOpenPosition}
+                brand={brand}
+                pollIntervalSec={pollIntervalSec}
+            />
         </div>
     );
 }
@@ -5317,6 +5290,12 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         setSelectedWallet(null);
     }, []);
 
+    useEffect(() => {
+        if (view === 'watch_activity') {
+            setView('pools');
+        }
+    }, [view]);
+
     const handleToggleWatchWallet = useCallback((walletAddress) => {
         const address = normalizeWalletAddress(walletAddress);
         if (!address) return;
@@ -5408,11 +5387,10 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                 )}
 
                 {!isDetailView && (
-                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-7' : 'grid-cols-3 sm:grid-cols-6'} gap-2 mb-4`}>
+                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-6' : 'grid-cols-3 sm:grid-cols-5'} gap-2 mb-4`}>
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
-                            { key: 'watch_activity', label: '特别关注', icon: Activity },
                             { key: 'settings', label: '合约视图', icon: Settings },
                             { key: 'auto_follow', label: '自动跟单', icon: Copy },
                         ].map(({ key, label, icon: Icon }) => (
@@ -5484,18 +5462,6 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         watchedWalletSet={watchedWalletSet}
                         watchToggleMap={watchToggleMap}
                         onToggleWatchWallet={handleToggleWatchWallet}
-                        pollIntervalSec={pollIntervalSec}
-                    />
-                ) : view === 'watch_activity' ? (
-                    <WatchActivityPage
-                        apiBaseUrl={apiBaseUrl}
-                        initData={initData}
-                        hasInitData={hasInitData}
-                        brand={brand}
-                        watchedWallets={watchedWallets}
-                        onSelectWallet={handleSelectWallet}
-                        onSelectPool={handleSelectPool}
-                        onOpenWallets={() => setView('wallets')}
                         pollIntervalSec={pollIntervalSec}
                     />
                 ) : view === 'golden_dog' ? (
