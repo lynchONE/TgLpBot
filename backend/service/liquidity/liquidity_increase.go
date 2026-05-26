@@ -41,26 +41,34 @@ type trackedIncreaseDustToken struct {
 	Address common.Address
 }
 
-func appendTrackedIncreaseDustToken(tokens []trackedIncreaseDustToken, seen map[common.Address]struct{}, symbol string, addr common.Address) []trackedIncreaseDustToken {
+func appendTrackedIncreaseDustToken(tokens []trackedIncreaseDustToken, seen map[string]struct{}, symbol string, addr common.Address) []trackedIncreaseDustToken {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	key := strings.ToLower(addr.Hex())
 	if addr == (common.Address{}) {
+		if symbol == "" {
+			return tokens
+		}
+		key = "native:" + symbol
+	}
+	if _, ok := seen[key]; ok {
 		return tokens
 	}
-	if _, ok := seen[addr]; ok {
-		return tokens
-	}
-	seen[addr] = struct{}{}
+	seen[key] = struct{}{}
 	return append(tokens, trackedIncreaseDustToken{
-		Symbol:  strings.ToUpper(strings.TrimSpace(symbol)),
+		Symbol:  symbol,
 		Address: addr,
 	})
 }
 
 func buildIncreaseDustTrackers(cc config.ChainConfig, task *models.StrategyTask, plan *entryTokenPlan, stableToken common.Address) []trackedIncreaseDustToken {
-	seen := make(map[common.Address]struct{})
+	seen := make(map[string]struct{})
 	tokens := make([]trackedIncreaseDustToken, 0, 8)
 	addHex := func(symbol, addr string) {
 		if common.IsHexAddress(addr) {
-			tokens = appendTrackedIncreaseDustToken(tokens, seen, symbol, common.HexToAddress(addr))
+			token := common.HexToAddress(addr)
+			if token != (common.Address{}) {
+				tokens = appendTrackedIncreaseDustToken(tokens, seen, symbol, token)
+			}
 		}
 	}
 
@@ -71,6 +79,14 @@ func buildIncreaseDustTrackers(cc config.ChainConfig, task *models.StrategyTask,
 	addHex(cc.WrappedNativeSymbol, cc.WrappedNativeAddress)
 
 	if task != nil {
+		if strings.EqualFold(strings.TrimSpace(task.PoolVersion), "v4") {
+			if common.IsHexAddress(task.Token0Address) && common.HexToAddress(task.Token0Address) == (common.Address{}) {
+				tokens = appendTrackedIncreaseDustToken(tokens, seen, task.Token0Symbol, common.Address{})
+			}
+			if common.IsHexAddress(task.Token1Address) && common.HexToAddress(task.Token1Address) == (common.Address{}) {
+				tokens = appendTrackedIncreaseDustToken(tokens, seen, task.Token1Symbol, common.Address{})
+			}
+		}
 		addHex(task.Token0Symbol, task.Token0Address)
 		addHex(task.Token1Symbol, task.Token1Address)
 	}
@@ -85,10 +101,7 @@ func buildIncreaseDustTrackers(cc config.ChainConfig, task *models.StrategyTask,
 func captureIncreaseDustBalances(exec chainexec.EVMExecutor, walletAddr common.Address, tokens []trackedIncreaseDustToken) map[common.Address]*big.Int {
 	out := make(map[common.Address]*big.Int, len(tokens))
 	for _, token := range tokens {
-		if token.Address == (common.Address{}) {
-			continue
-		}
-		out[token.Address] = tokenBalanceOrZero(exec, token.Address, walletAddr)
+		out[token.Address] = assetBalanceOrZero(exec, token.Address, walletAddr)
 	}
 	return out
 }
@@ -129,17 +142,14 @@ func finalizeIncreaseLiquidityAccounting(
 	extra := make([]models.TradeRecordDustAsset, 0)
 	for _, token := range tracked {
 		addr := token.Address
-		if addr == (common.Address{}) {
-			continue
-		}
-		delta := positiveBalanceDelta(before[addr], after[addr])
+		delta := positiveAssetBalanceDelta(before[addr], after[addr], res.GasSpentWei, addr)
 		if delta.Sign() <= 0 {
 			continue
 		}
 		switch {
-		case res.Token0 != (common.Address{}) && addr == res.Token0:
+		case addr == res.Token0:
 			res.Dust0Wei = maxBigInt(res.Dust0Wei, delta)
-		case res.Token1 != (common.Address{}) && addr == res.Token1:
+		case addr == res.Token1:
 			res.Dust1Wei = maxBigInt(res.Dust1Wei, delta)
 		default:
 			extra = append(extra, models.TradeRecordDustAsset{
@@ -785,8 +795,8 @@ func (s *LiquidityService) increaseV4Liquidity(
 		stableAddr = common.HexToAddress(cc.StableAddress)
 	}
 	stableBefore := tokenBalanceOrZero(exec, stableAddr, walletAddr)
-	c0Before := tokenBalanceOrZero(exec, c0, walletAddr)
-	c1Before := tokenBalanceOrZero(exec, c1, walletAddr)
+	c0Before := assetBalanceOrZero(exec, c0, walletAddr)
+	c1Before := assetBalanceOrZero(exec, c1, walletAddr)
 
 	// Determine input amounts
 	amount0In := big.NewInt(0)
@@ -952,13 +962,14 @@ func (s *LiquidityService) increaseV4Liquidity(
 	}
 
 	// Capture balances after all operations to compute actual stable spent and dust returned.
+	gasSpentWei := s.gasCostWeiFromReceipt(client, tx.Hash(), receipt)
 	stableAfter := tokenBalanceOrZero(exec, stableAddr, walletAddr)
-	c0After := tokenBalanceOrZero(exec, c0, walletAddr)
-	c1After := tokenBalanceOrZero(exec, c1, walletAddr)
+	c0After := assetBalanceOrZero(exec, c0, walletAddr)
+	c1After := assetBalanceOrZero(exec, c1, walletAddr)
 
 	actualStableSpentWei := spentBalanceDelta(stableBefore, stableAfter)
-	dust0Wei := positiveBalanceDelta(c0Before, c0After)
-	dust1Wei := positiveBalanceDelta(c1Before, c1After)
+	dust0Wei := positiveAssetBalanceDelta(c0Before, c0After, gasSpentWei, c0)
+	dust1Wei := positiveAssetBalanceDelta(c1Before, c1After, gasSpentWei, c1)
 	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY balance delta: tokenId=%s stableSpent=%s dust0=%s dust1=%s",
 		tokenId.String(), actualStableSpentWei.String(), dust0Wei.String(), dust1Wei.String())
 
@@ -973,6 +984,6 @@ func (s *LiquidityService) increaseV4Liquidity(
 		Dust1Wei:             dust1Wei,
 		Token0:               c0,
 		Token1:               c1,
-		GasSpentWei:          s.gasCostWeiFromReceipt(client, tx.Hash(), receipt),
+		GasSpentWei:          gasSpentWei,
 	}, nil
 }

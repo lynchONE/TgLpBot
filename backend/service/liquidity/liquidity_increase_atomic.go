@@ -27,6 +27,20 @@ func tokenBalanceOrZero(client chainexec.EVMExecutor, token common.Address, wall
 	return bal
 }
 
+func assetBalanceOrZero(client chainexec.EVMExecutor, token common.Address, walletAddr common.Address) *big.Int {
+	if client == nil {
+		return big.NewInt(0)
+	}
+	if token == (common.Address{}) {
+		bal, err := blockchain.GetBalanceWithClient(client.Client(), walletAddr)
+		if err != nil || bal == nil {
+			return big.NewInt(0)
+		}
+		return bal
+	}
+	return tokenBalanceOrZero(client, token, walletAddr)
+}
+
 func positiveBalanceDelta(before, after *big.Int) *big.Int {
 	if before == nil {
 		before = big.NewInt(0)
@@ -38,6 +52,26 @@ func positiveBalanceDelta(before, after *big.Int) *big.Int {
 		return big.NewInt(0)
 	}
 	return new(big.Int).Sub(after, before)
+}
+
+func positiveAssetBalanceDelta(before, after, gasSpent *big.Int, token common.Address) *big.Int {
+	if token != (common.Address{}) {
+		return positiveBalanceDelta(before, after)
+	}
+	if before == nil {
+		before = big.NewInt(0)
+	}
+	if after == nil {
+		after = big.NewInt(0)
+	}
+	delta := new(big.Int).Sub(after, before)
+	if gasSpent != nil && gasSpent.Sign() > 0 {
+		delta.Add(delta, gasSpent)
+	}
+	if delta.Sign() <= 0 {
+		return big.NewInt(0)
+	}
+	return delta
 }
 
 func spentBalanceDelta(before, after *big.Int) *big.Int {
@@ -653,8 +687,8 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 	}
 
 	stableBefore := tokenBalanceOrZero(exec, stableToken, walletAddr)
-	token0Before := tokenBalanceOrZero(exec, c0, walletAddr)
-	token1Before := tokenBalanceOrZero(exec, c1, walletAddr)
+	token0Before := assetBalanceOrZero(exec, c0, walletAddr)
+	token1Before := assetBalanceOrZero(exec, c1, walletAddr)
 
 	poolKeySimple := blockchain.PoolKeySimple{
 		Currency0:   c0,
@@ -718,12 +752,13 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 		currentLiq = posInfo.Liquidity.String()
 	}
 
+	gasSpentWei := s.gasCostWeiFromReceipt(client, tx.Hash(), receipt)
 	stableAfter := tokenBalanceOrZero(exec, stableToken, walletAddr)
-	token0After := tokenBalanceOrZero(exec, c0, walletAddr)
-	token1After := tokenBalanceOrZero(exec, c1, walletAddr)
+	token0After := assetBalanceOrZero(exec, c0, walletAddr)
+	token1After := assetBalanceOrZero(exec, c1, walletAddr)
 	actualStableSpentWei := spentBalanceDelta(stableBefore, stableAfter)
-	dust0Wei := positiveBalanceDelta(token0Before, token0After)
-	dust1Wei := positiveBalanceDelta(token1Before, token1After)
+	dust0Wei := positiveAssetBalanceDelta(token0Before, token0After, gasSpentWei, c0)
+	dust1Wei := positiveAssetBalanceDelta(token1Before, token1After, gasSpentWei, c1)
 
 	return &IncreaseLiquidityResult{
 		TxHash:               tx.Hash().Hex(),
@@ -737,6 +772,6 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 		Dust1Wei:             dust1Wei,
 		Token0:               c0,
 		Token1:               c1,
-		GasSpentWei:          s.gasCostWeiFromReceipt(client, tx.Hash(), receipt),
+		GasSpentWei:          gasSpentWei,
 	}, nil
 }

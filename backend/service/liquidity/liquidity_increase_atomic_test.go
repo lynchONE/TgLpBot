@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"TgLpBot/base/blockchain"
+	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -89,5 +91,59 @@ func TestBuildAtomicIncreaseV4ParamsNormalizesEmptySwaps(t *testing.T) {
 	}()
 	if _, err := parsed.Pack("zapIncreaseV4", params); err != nil {
 		t.Fatalf("pack zapIncreaseV4 failed: %v", err)
+	}
+}
+
+func TestPositiveAssetBalanceDeltaAddsGasForNativeCurrency(t *testing.T) {
+	t.Parallel()
+
+	got := positiveAssetBalanceDelta(big.NewInt(1000), big.NewInt(960), big.NewInt(75), common.Address{})
+	if got.Cmp(big.NewInt(35)) != 0 {
+		t.Fatalf("positiveAssetBalanceDelta(native) = %s, want 35", got.String())
+	}
+}
+
+func TestPositiveAssetBalanceDeltaIgnoresGasForERC20(t *testing.T) {
+	t.Parallel()
+
+	token := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	got := positiveAssetBalanceDelta(big.NewInt(1000), big.NewInt(960), big.NewInt(75), token)
+	if got.Sign() != 0 {
+		t.Fatalf("positiveAssetBalanceDelta(erc20) = %s, want 0", got.String())
+	}
+}
+
+func TestBuildIncreaseDustTrackersIncludesV4NativeCurrency(t *testing.T) {
+	t.Parallel()
+
+	wbnb := common.HexToAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c")
+	tokens := buildIncreaseDustTrackers(
+		config.ChainConfig{WrappedNativeSymbol: "WBNB", WrappedNativeAddress: wbnb.Hex()},
+		&models.StrategyTask{
+			PoolVersion:   "v4",
+			Token0Symbol:  "BNB",
+			Token0Address: common.Address{}.Hex(),
+			Token1Symbol:  "USDT",
+			Token1Address: "0x55d398326f99059ff775485246999027b3197955",
+		},
+		nil,
+		common.HexToAddress("0x55d398326f99059ff775485246999027b3197955"),
+	)
+
+	foundNative := false
+	foundWrapped := false
+	for _, token := range tokens {
+		if token.Address == (common.Address{}) && token.Symbol == "BNB" {
+			foundNative = true
+		}
+		if token.Address == wbnb {
+			foundWrapped = true
+		}
+	}
+	if !foundNative {
+		t.Fatalf("native V4 currency tracker missing: %+v", tokens)
+	}
+	if !foundWrapped {
+		t.Fatalf("wrapped native tracker missing: %+v", tokens)
 	}
 }
