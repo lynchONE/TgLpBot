@@ -87,6 +87,7 @@ func autoMigrate() error {
 		&models.UserWalletTransferEvent{},
 		&models.StrategyTask{},
 		&models.TokenMetadata{},
+		&models.TokenRiskSnapshot{},
 		&models.MonitoredWallet{},
 		&models.WatchContract{},
 		&models.SmartMoneyScanState{},
