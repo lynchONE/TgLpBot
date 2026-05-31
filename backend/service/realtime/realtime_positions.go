@@ -45,7 +45,7 @@ func NewRealtimePositionsService() *RealtimePositionsService {
 	return &RealtimePositionsService{
 		walletService: wallet.NewWalletService(),
 		taskService:   strategy.NewStrategyTaskService(),
-		priceService:  pricing.NewTokenPriceService(),
+		priceService:  pricing.DefaultTokenPriceService(),
 		pnlService:    strategy.NewPnLService(),
 	}
 }

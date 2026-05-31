@@ -51,7 +51,7 @@ func NewService() *Service {
 	return &Service{
 		walletService:   wallet.NewWalletService(),
 		realtimeService: realtime.NewRealtimePositionsService(),
-		priceService:    pricing.NewTokenPriceService(),
+		priceService:    pricing.DefaultTokenPriceService(),
 		smRepo:          sm.NewRepository(),
 		stopCh:          make(chan struct{}),
 		ticker:          time.NewTicker(time.Minute),

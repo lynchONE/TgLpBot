@@ -26,6 +26,7 @@ type TokenPriceService struct {
 	client *http.Client
 	ttl    time.Duration
 	stale  time.Duration
+	miss   time.Duration
 
 	rateLimitCooldown time.Duration
 
@@ -40,6 +41,7 @@ type cachedTokenPrice struct {
 	priceUSD float64
 	expires  time.Time
 	staleTil time.Time
+	missing  bool
 }
 
 type ProviderHTTPError struct {
@@ -71,9 +73,22 @@ func NewTokenPriceService() *TokenPriceService {
 		client:            &http.Client{Timeout: 12 * time.Second},
 		ttl:               75 * time.Second,
 		stale:             30 * time.Minute,
+		miss:              2 * time.Minute,
 		rateLimitCooldown: 90 * time.Second,
 		cache:             make(map[string]cachedTokenPrice),
 	}
+}
+
+var (
+	defaultTokenPriceService     *TokenPriceService
+	defaultTokenPriceServiceOnce sync.Once
+)
+
+func DefaultTokenPriceService() *TokenPriceService {
+	defaultTokenPriceServiceOnce.Do(func() {
+		defaultTokenPriceService = NewTokenPriceService()
+	})
+	return defaultTokenPriceService
 }
 
 func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string) (map[string]float64, error) {
@@ -95,11 +110,11 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 	for _, addr := range addresses {
 		if p, ok := defaultFallbackPrice(network, addr); ok {
 			out[addr] = p
-			s.putCache(addr, p, now)
+			s.putCache(network, addr, p, now)
 			continue
 		}
 
-		fresh, stale, hasFresh, hasStale := s.getCachedPrice(addr, now)
+		fresh, stale, hasFresh, hasStale := s.getCachedPrice(network, addr, now)
 		if hasFresh {
 			out[addr] = fresh
 			continue
@@ -139,7 +154,7 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 		for _, addr := range missing {
 			if p, ok := fetched[addr]; ok && p > 0 {
 				out[addr] = p
-				s.putCache(addr, p, now)
+				s.putCache(network, addr, p, now)
 				continue
 			}
 			if p, ok := stalePrices[addr]; ok {
@@ -154,7 +169,7 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 	for _, addr := range missing {
 		if p, ok := fetched[addr]; ok && p > 0 {
 			out[addr] = p
-			s.putCache(addr, p, now)
+			s.putCache(network, addr, p, now)
 			continue
 		}
 		if p, ok := stalePrices[addr]; ok {
@@ -162,6 +177,7 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 			continue
 		}
 		out[addr] = 0
+		s.putMissingCache(network, addr, now)
 	}
 
 	return out, nil
@@ -184,11 +200,30 @@ func normalizeTokenAddresses(tokenAddresses []string) []string {
 	return out
 }
 
-func (s *TokenPriceService) getCachedPrice(addr string, now time.Time) (fresh float64, stale float64, hasFresh bool, hasStale bool) {
+func tokenPriceCacheKey(network, addr string) string {
+	network = strings.ToLower(strings.TrimSpace(network))
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if network == "" {
+		network = "bsc"
+	}
+	return network + "|" + addr
+}
+
+func (s *TokenPriceService) getCachedPrice(network, addr string, now time.Time) (fresh float64, stale float64, hasFresh bool, hasStale bool) {
+	key := tokenPriceCacheKey(network, addr)
 	s.mu.RLock()
-	c, ok := s.cache[addr]
+	c, ok := s.cache[key]
 	s.mu.RUnlock()
-	if !ok || c.priceUSD <= 0 {
+	if !ok {
+		return 0, 0, false, false
+	}
+	if c.missing {
+		if c.expires.After(now) {
+			return 0, 0, true, false
+		}
+		return 0, 0, false, false
+	}
+	if c.priceUSD <= 0 {
 		return 0, 0, false, false
 	}
 	if c.expires.After(now) {
@@ -200,12 +235,23 @@ func (s *TokenPriceService) getCachedPrice(addr string, now time.Time) (fresh fl
 	return 0, 0, false, false
 }
 
-func (s *TokenPriceService) putCache(addr string, price float64, now time.Time) {
+func (s *TokenPriceService) putCache(network, addr string, price float64, now time.Time) {
 	if strings.TrimSpace(addr) == "" || price <= 0 {
 		return
 	}
+	key := tokenPriceCacheKey(network, addr)
 	s.mu.Lock()
-	s.cache[addr] = cachedTokenPrice{priceUSD: price, expires: now.Add(s.ttl), staleTil: now.Add(s.stale)}
+	s.cache[key] = cachedTokenPrice{priceUSD: price, expires: now.Add(s.ttl), staleTil: now.Add(s.stale)}
+	s.mu.Unlock()
+}
+
+func (s *TokenPriceService) putMissingCache(network, addr string, now time.Time) {
+	if strings.TrimSpace(addr) == "" {
+		return
+	}
+	key := tokenPriceCacheKey(network, addr)
+	s.mu.Lock()
+	s.cache[key] = cachedTokenPrice{expires: now.Add(s.miss), missing: true}
 	s.mu.Unlock()
 }
 
@@ -476,13 +522,22 @@ func okxSignRequest(req *http.Request, body string) {
 type okxCurrentPriceResponse struct {
 	Code string `json:"code"`
 	Data []struct {
-		Price string `json:"price"`
+		ChainIndex           string `json:"chainIndex"`
+		TokenContractAddress string `json:"tokenContractAddress"`
+		Price                string `json:"price"`
+		TokenPrice           string `json:"tokenPrice"`
 	} `json:"data"`
 }
+
+const okxPriceBatchSize = 20
 
 func (s *TokenPriceService) fetchOKXTokenPrices(network string, tokenAddresses []string) (map[string]float64, error) {
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
+	}
+	tokenAddresses = normalizeTokenAddresses(tokenAddresses)
+	if len(tokenAddresses) == 0 {
+		return map[string]float64{}, nil
 	}
 	cc, ok := config.AppConfig.GetChainConfig(network)
 	if !ok || cc.ChainID == 0 {
@@ -492,78 +547,102 @@ func (s *TokenPriceService) fetchOKXTokenPrices(network string, tokenAddresses [
 	baseURL := okxMarketBaseURL()
 
 	out := make(map[string]float64, len(tokenAddresses))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
 	var firstErr error
 
-	for _, addr := range tokenAddresses {
-		wg.Add(1)
-		go func(addr string) {
-			defer wg.Done()
-			price, err := s.fetchOKXSinglePrice(baseURL, chainIndex, addr)
-			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-				return
-			}
+	for start := 0; start < len(tokenAddresses); start += okxPriceBatchSize {
+		end := start + okxPriceBatchSize
+		if end > len(tokenAddresses) {
+			end = len(tokenAddresses)
+		}
+		batch := tokenAddresses[start:end]
+		prices, err := s.fetchOKXPriceBatch(baseURL, chainIndex, batch)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		for addr, price := range prices {
 			if price > 0 {
-				mu.Lock()
 				out[addr] = price
-				mu.Unlock()
 			}
-		}(addr)
+		}
 	}
-	wg.Wait()
 
 	return out, firstErr
 }
 
 func (s *TokenPriceService) fetchOKXSinglePrice(baseURL, chainIndex, tokenAddr string) (float64, error) {
-	payload := []map[string]string{
-		{
+	prices, err := s.fetchOKXPriceBatch(baseURL, chainIndex, []string{tokenAddr})
+	if err != nil {
+		return 0, err
+	}
+	return prices[strings.ToLower(strings.TrimSpace(tokenAddr))], nil
+}
+
+func (s *TokenPriceService) fetchOKXPriceBatch(baseURL, chainIndex string, tokenAddresses []string) (map[string]float64, error) {
+	tokenAddresses = normalizeTokenAddresses(tokenAddresses)
+	if len(tokenAddresses) == 0 {
+		return map[string]float64{}, nil
+	}
+
+	payload := make([]map[string]string, 0, len(tokenAddresses))
+	for _, tokenAddr := range tokenAddresses {
+		payload = append(payload, map[string]string{
 			"chainIndex":           chainIndex,
 			"tokenContractAddress": tokenAddr,
-		},
+		})
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	endpoint := fmt.Sprintf("%s/price", baseURL)
 
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	okxSignRequest(req, string(body))
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusOK {
-		return 0, &ProviderHTTPError{Provider: "okx", Status: resp.StatusCode}
+		return nil, &ProviderHTTPError{Provider: "okx", Status: resp.StatusCode}
 	}
 
 	var parsed okxCurrentPriceResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if parsed.Code != "0" {
-		return 0, fmt.Errorf("okx price code=%s", parsed.Code)
+		return nil, fmt.Errorf("okx price code=%s", parsed.Code)
 	}
-	if len(parsed.Data) == 0 || strings.TrimSpace(parsed.Data[0].Price) == "" {
-		return 0, nil
+
+	out := make(map[string]float64, len(tokenAddresses))
+	canMapByPosition := len(parsed.Data) == len(tokenAddresses)
+	for i, row := range parsed.Data {
+		addr := strings.ToLower(strings.TrimSpace(row.TokenContractAddress))
+		if addr == "" && canMapByPosition && i < len(tokenAddresses) {
+			addr = tokenAddresses[i]
+		}
+		if addr == "" {
+			continue
+		}
+		rawPrice := strings.TrimSpace(row.Price)
+		if rawPrice == "" {
+			rawPrice = strings.TrimSpace(row.TokenPrice)
+		}
+		if rawPrice == "" {
+			continue
+		}
+		f, err := strconv.ParseFloat(rawPrice, 64)
+		if err != nil || f <= 0 {
+			continue
+		}
+		out[addr] = f
 	}
-	f, err := strconv.ParseFloat(strings.TrimSpace(parsed.Data[0].Price), 64)
-	if err != nil {
-		return 0, nil
-	}
-	return f, nil
+	return out, nil
 }

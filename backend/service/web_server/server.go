@@ -28,7 +28,7 @@ type Server struct {
 func NewServer() *Server {
 	return &Server{
 		Realtime:        realtime.NewRealtimePositionsService(),
-		TokenPrice:      pricing.NewTokenPriceService(),
+		TokenPrice:      pricing.DefaultTokenPriceService(),
 		TokenMeta:       token_metadata.NewService(),
 		Assets:          assets.NewService(),
 		SwapLimitOrders: NewWalletSwapLimitOrderWorker(),

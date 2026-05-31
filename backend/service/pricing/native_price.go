@@ -20,7 +20,7 @@ var nativePriceCache = struct {
 	cache: make(map[string]cachedNativePrice),
 }
 
-var nativePriceTokenSvc = NewTokenPriceService()
+var nativePriceTokenSvc = DefaultTokenPriceService()
 
 // GetNativePriceUSD returns the native gas token price in USD (best effort).
 //

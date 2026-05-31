@@ -535,7 +535,7 @@ func (s *Server) resolveCreatePoolPrice(plan *createPoolPlan, raw string) (*big.
 	}
 
 	if s.TokenPrice == nil {
-		s.TokenPrice = pricing.NewTokenPriceService()
+		s.TokenPrice = pricing.DefaultTokenPriceService()
 	}
 	prices, err := s.TokenPrice.GetUSDPrices(plan.ctx.chain, []string{
 		plan.tokenA.AddressHex,

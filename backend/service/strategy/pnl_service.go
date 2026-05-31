@@ -772,7 +772,7 @@ func (s *PnLService) recordedDustAssetValueUSDT(chain string, asset models.Trade
 	case isWrappedNativeToken(chain, symbol, addr):
 		valueUSDT = amount * pricing.GetNativePriceUSD(chain)
 	case common.IsHexAddress(addr):
-		prices, priceErr := pricing.NewTokenPriceService().GetUSDPrices(config.NormalizeChain(chain), []string{addr})
+		prices, priceErr := pricing.DefaultTokenPriceService().GetUSDPrices(config.NormalizeChain(chain), []string{addr})
 		if priceErr == nil {
 			if price := prices[strings.ToLower(addr)]; price > 0 {
 				valueUSDT = amount * price

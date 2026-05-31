@@ -7,7 +7,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type stubTransport struct {
@@ -16,6 +19,16 @@ type stubTransport struct {
 
 func (s stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return s.fn(req)
+}
+
+func resetOKXReadCachesForTest() {
+	okxBasicInfoCache = sync.Map{}
+	okxAdvancedInfoCache = sync.Map{}
+	okxCandlesCache = sync.Map{}
+	okxDeFiCache = sync.Map{}
+	okxBalanceCache = sync.Map{}
+	okxApproveSpenderCache = sync.Map{}
+	okxReadGroup = singleflight.Group{}
 }
 
 func TestMarketAPIURL_RewritesAggregatorBase(t *testing.T) {
@@ -148,6 +161,7 @@ func TestGetSwapData_AppliesDefaultReferrerFee(t *testing.T) {
 }
 
 func TestGetMarketTokenBasicInfos_UsesOfficialEndpoint(t *testing.T) {
+	resetOKXReadCachesForTest()
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
 		apiKey:     "test-key",
@@ -200,7 +214,89 @@ func TestGetMarketTokenBasicInfos_UsesOfficialEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetMarketTokenBasicInfos_UsesSharedCacheAcrossInstances(t *testing.T) {
+	resetOKXReadCachesForTest()
+	calls := 0
+	transport := stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"chainIndex":"56","tokenContractAddress":"0x1111111111111111111111111111111111111111","tokenSymbol":"TEST","tokenName":"Test Token","tokenLogoUrl":"https://img.example/test.png"}]}`)),
+			Header:     make(http.Header),
+		}, nil
+	}}
+	first := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client:     &http.Client{Transport: transport},
+	}
+	second := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client:     &http.Client{Transport: transport},
+	}
+
+	reqs := []MarketTokenBasicInfoRequest{{
+		ChainIndex:           "56",
+		TokenContractAddress: "0x1111111111111111111111111111111111111111",
+	}}
+	if _, err := first.GetMarketTokenBasicInfos(reqs); err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	resp, err := second.GetMarketTokenBasicInfos(reqs)
+	if err != nil {
+		t.Fatalf("second request failed: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one upstream call, got %d", calls)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].TokenSymbol != "TEST" {
+		t.Fatalf("unexpected cached response: %+v", resp)
+	}
+}
+
+func TestGetMarketTokenBasicInfos_CachesMissingToken(t *testing.T) {
+	resetOKXReadCachesForTest()
+	calls := 0
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	reqs := []MarketTokenBasicInfoRequest{{
+		ChainIndex:           "56",
+		TokenContractAddress: "0x1111111111111111111111111111111111111111",
+	}}
+	for i := 0; i < 2; i++ {
+		resp, err := svc.GetMarketTokenBasicInfos(reqs)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i+1, err)
+		}
+		if len(resp.Data) != 0 {
+			t.Fatalf("expected empty data, got %+v", resp.Data)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("expected missing basic-info cache to avoid second network call, calls=%d", calls)
+	}
+}
+
 func TestGetMarketTokenAdvancedInfo_UsesOfficialEndpoint(t *testing.T) {
+	resetOKXReadCachesForTest()
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
 		apiKey:     "test-key",
@@ -250,6 +346,7 @@ func TestGetMarketTokenAdvancedInfo_UsesOfficialEndpoint(t *testing.T) {
 }
 
 func TestGetAllTokenBalances_UsesChainsParameter(t *testing.T) {
+	resetOKXReadCachesForTest()
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
 		apiKey:     "test-key",
@@ -291,7 +388,40 @@ func TestGetAllTokenBalances_UsesChainsParameter(t *testing.T) {
 	}
 }
 
+func TestGetAllTokenBalances_UsesShortSharedCache(t *testing.T) {
+	resetOKXReadCachesForTest()
+	calls := 0
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"tokenAssets":[{"tokenContractAddress":"0x1111111111111111111111111111111111111111","symbol":"TEST","balance":"1","tokenPrice":"2"}]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	for i := 0; i < 2; i++ {
+		resp, err := svc.GetAllTokenBalances("56", "0x1111111111111111111111111111111111111111")
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i+1, err)
+		}
+		if len(resp.Data) != 1 || len(resp.Data[0].TokenAssets) != 1 {
+			t.Fatalf("unexpected response: %+v", resp)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("expected one upstream call, got %d", calls)
+	}
+}
+
 func TestGetDeFiUserAssetPlatformList_PostsWalletAddressList(t *testing.T) {
+	resetOKXReadCachesForTest()
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
 		apiKey:     "test-key",
@@ -344,6 +474,7 @@ func TestGetDeFiUserAssetPlatformList_PostsWalletAddressList(t *testing.T) {
 }
 
 func TestGetDeFiUserAssetPlatformList_PreservesSolanaWalletAddress(t *testing.T) {
+	resetOKXReadCachesForTest()
 	solanaWallet := "9xQeWvG816bUx9EPjHmaT23yvVM2ZW57QbZz3Mz1Yw7"
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
@@ -388,6 +519,7 @@ func TestGetDeFiUserAssetPlatformList_PreservesSolanaWalletAddress(t *testing.T)
 }
 
 func TestGetDeFiUserAssetPlatformDetail_PostsPlatformList(t *testing.T) {
+	resetOKXReadCachesForTest()
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
 		apiKey:     "test-key",
@@ -439,6 +571,7 @@ func TestGetDeFiUserAssetPlatformDetail_PostsPlatformList(t *testing.T) {
 }
 
 func TestGetDeFiUserAssetPlatformList_ReturnsAPIError(t *testing.T) {
+	resetOKXReadCachesForTest()
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
 		apiKey:     "test-key",
@@ -463,5 +596,42 @@ func TestGetDeFiUserAssetPlatformList_ReturnsAPIError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "51000") {
 		t.Fatalf("expected code in error, got %v", err)
+	}
+}
+
+func TestGetDeFiUserAssetPlatformList_DoesNotCacheUpdatingStatus(t *testing.T) {
+	resetOKXReadCachesForTest()
+	calls := 0
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"assetStatus":"2","platformList":[]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	req := DeFiUserAssetPlatformListRequest{
+		WalletAddressList: []DeFiWalletAddressRequest{
+			{ChainIndex: "56", WalletAddress: "0x1111111111111111111111111111111111111111"},
+		},
+	}
+	for i := 0; i < 2; i++ {
+		resp, err := svc.GetDeFiUserAssetPlatformList(context.Background(), req)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i+1, err)
+		}
+		if resp == nil || !strings.Contains(string(resp.Data), `"assetStatus":"2"`) {
+			t.Fatalf("unexpected response: %+v", resp)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("expected updating DeFi response to bypass cache, got calls=%d", calls)
 	}
 }

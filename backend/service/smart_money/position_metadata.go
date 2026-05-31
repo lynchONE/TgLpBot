@@ -352,7 +352,7 @@ func ComputeEventAmountUSD(ctx context.Context, event *models.SmartMoneyLPEvent)
 	}
 }
 
-var smTokenPriceService = pricing.NewTokenPriceService()
+var smTokenPriceService = pricing.DefaultTokenPriceService()
 
 func readTokenDecimalsWithClient(client *ethclient.Client, addr string) int {
 	if !common.IsHexAddress(addr) {

@@ -333,7 +333,7 @@ func tokenPriceUSD(chain string, token common.Address, symbol string, cc config.
 		return 1.0, nil
 	}
 
-	prices, err := pricing.NewTokenPriceService().GetUSDPrices(chain, []string{token.Hex()})
+	prices, err := pricing.DefaultTokenPriceService().GetUSDPrices(chain, []string{token.Hex()})
 	if err != nil {
 		return 0, err
 	}

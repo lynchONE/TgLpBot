@@ -1863,7 +1863,7 @@ func (s *LiquidityService) checkZapSafety(
 			balF = balF / divisor
 
 			// 获取入场代币的 USD 价格
-			prices, pErr := pricing.NewTokenPriceService().GetUSDPrices(chain, []string{entryToken.Hex()})
+			prices, pErr := pricing.DefaultTokenPriceService().GetUSDPrices(chain, []string{entryToken.Hex()})
 			if pErr != nil {
 				return &ZapSafetyError{
 					Reason: fmt.Sprintf("获取入场代币价格失败，无法评估池子流动性：%v", pErr),
