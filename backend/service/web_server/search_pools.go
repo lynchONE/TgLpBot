@@ -211,6 +211,7 @@ func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, pool
 	}
 
 	return HotPoolResponse{
+		Chain:            normalizeDexScreenerChain(pair.ChainID),
 		ProtocolVersion:  poolVersion,
 		PoolAddress:      poolAddress,
 		Dex:              strings.TrimSpace(pair.DexID),
@@ -427,6 +428,9 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 			source = "chain"
 		}
 	}
+
+	s.enrichHotPoolDisplayTokens(ctx, chain, rows)
+	s.enrichHotPoolTokenRisks(ctx, chain, rows)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(searchPoolsEnvelope{

@@ -30,6 +30,7 @@ type openPositionPrepareResponse struct {
 	WalletSelectionRequired bool                         `json:"wallet_selection_required,omitempty"`
 	ResolvedWalletID        uint                         `json:"resolved_wallet_id,omitempty"`
 	RangeEditor             *openPositionRangeEditorInfo `json:"range_editor,omitempty"`
+	TokenRisk               *TokenRiskInfo               `json:"token_risk,omitempty"`
 }
 
 type openPositionPrepareContext struct {
@@ -253,6 +254,9 @@ func (s *Server) handleOpenPositionPrepare(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
+	tokenRisk := resolveOpenPositionTokenRisk(r.Context(), s, ctx.task)
+	logTokenRiskWarning("prepare", tokenRisk)
+	checks = appendTokenRiskCheck(checks, tokenRisk)
 
 	statusText := "ok"
 	for _, item := range checks {
@@ -271,5 +275,6 @@ func (s *Server) handleOpenPositionPrepare(w http.ResponseWriter, r *http.Reques
 		WalletSelectionRequired: ctx.walletSelectionRequired,
 		ResolvedWalletID:        ctx.selectedWallet.ID,
 		RangeEditor:             rangeEditor,
+		TokenRisk:               tokenRisk,
 	})
 }

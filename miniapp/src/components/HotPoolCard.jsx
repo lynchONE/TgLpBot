@@ -6,6 +6,12 @@ import gmgnIcon from '../image/gmgn.svg';
 import NumberFlowValue from './NumberFlowValue.jsx';
 import FlashIcon from './FlashIcon.jsx';
 import { getBrandTheme } from '../lib/brand';
+import {
+    normalizeTokenRisk,
+    tokenRiskLabel,
+    tokenRiskSummary,
+    tokenRiskToneClass,
+} from '../lib/format';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -121,6 +127,30 @@ const PositionBadge = ({ pool }) => {
                 💰 持仓 <NumberFlowValue value={usd} formatter={(v) => formatUsdCompact(v)} />
             </span>
         </div>
+    );
+};
+
+const tokenRiskClassMap = {
+    neutral: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
+    low: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
+    medium: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
+    unknown: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
+    high: 'border-red-500/35 bg-red-500/10 text-red-700 dark:text-red-200',
+    critical: 'border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-200',
+};
+
+const TokenRiskBadge = ({ risk }) => {
+    const normalized = normalizeTokenRisk(risk);
+    if (!normalized) return null;
+    const tone = tokenRiskToneClass(normalized);
+    const cls = tokenRiskClassMap[tone] || tokenRiskClassMap.unknown;
+    return (
+        <span
+            className={`inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-bold ${cls}`}
+            title={tokenRiskSummary(normalized)}
+        >
+            {tokenRiskLabel(normalized)}
+        </span>
     );
 };
 
@@ -432,6 +462,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],
     );
     const hotPoolBadges = useMemo(() => parseHotPoolBadges(pool?.badges), [pool?.badges]);
+    const tokenRisk = useMemo(() => normalizeTokenRisk(pool?.token_risk), [pool?.token_risk]);
     const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
     const showTVL = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0, [tvlValue]);
     const feeRateAvailable = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0 && Number.isFinite(feeRateValue), [tvlValue, feeRateValue]);
@@ -612,6 +643,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             <div className="mt-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
                     <DexBadge pool={pool} />
+                    <TokenRiskBadge risk={tokenRisk} />
                     {gmgnTokenAddr ? (
                         <button
                             type="button"

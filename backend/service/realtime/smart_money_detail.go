@@ -478,10 +478,8 @@ func (s *RealtimePositionsService) buildSmartMoneyV4PositionWithClient(
 			}
 		} else if pos != nil {
 			v4pos = pos
-			if pos.Token0 != (common.Address{}) {
+			if v4PositionHasCurrencies(pos) {
 				token0 = pos.Token0
-			}
-			if pos.Token1 != (common.Address{}) {
 				token1 = pos.Token1
 			}
 			if pos.TickLower < pos.TickUpper {
@@ -560,9 +558,19 @@ func (s *RealtimePositionsService) buildDynamicSmartMoneyPosition(
 	w0 := s.getWalletTokenBalance(chain, token0, walletAddr)
 	w1 := s.getWalletTokenBalance(chain, token1, walletAddr)
 
-	prices, _ := s.priceService.GetUSDPrices(chain, []string{token0.Hex(), token1.Hex()})
-	price0 := prices[strings.ToLower(token0.Hex())]
-	price1 := prices[strings.ToLower(token1.Hex())]
+	price0 := 0.0
+	price1 := 0.0
+	if version == "v4" {
+		w0 = s.getWalletV4CurrencyBalance(chain, token0, walletAddr)
+		w1 = s.getWalletV4CurrencyBalance(chain, token1, walletAddr)
+		prices := s.getV4CurrencyUSDPrices(chain, token0, token1)
+		price0 = prices[token0]
+		price1 = prices[token1]
+	} else {
+		prices, _ := s.priceService.GetUSDPrices(chain, []string{token0.Hex(), token1.Hex()})
+		price0 = prices[strings.ToLower(token0.Hex())]
+		price1 = prices[strings.ToLower(token1.Hex())]
+	}
 
 	row0 := buildTokenRow(token0, meta0, price0, w0, amt0Raw, owed0)
 	row1 := buildTokenRow(token1, meta1, price1, w1, amt1Raw, owed1)
@@ -587,9 +595,19 @@ func (s *RealtimePositionsService) buildStaticSmartMoneyPosition(
 
 	w0 := s.getWalletTokenBalance(chain, token0, walletAddr)
 	w1 := s.getWalletTokenBalance(chain, token1, walletAddr)
-	prices, _ := s.priceService.GetUSDPrices(chain, []string{token0.Hex(), token1.Hex()})
-	price0 := prices[strings.ToLower(token0.Hex())]
-	price1 := prices[strings.ToLower(token1.Hex())]
+	price0 := 0.0
+	price1 := 0.0
+	if version == "v4" {
+		w0 = s.getWalletV4CurrencyBalance(chain, token0, walletAddr)
+		w1 = s.getWalletV4CurrencyBalance(chain, token1, walletAddr)
+		prices := s.getV4CurrencyUSDPrices(chain, token0, token1)
+		price0 = prices[token0]
+		price1 = prices[token1]
+	} else {
+		prices, _ := s.priceService.GetUSDPrices(chain, []string{token0.Hex(), token1.Hex()})
+		price0 = prices[strings.ToLower(token0.Hex())]
+		price1 = prices[strings.ToLower(token1.Hex())]
+	}
 
 	row0 := buildTokenRow(token0, meta0, price0, w0, big.NewInt(0), big.NewInt(0))
 	row1 := buildTokenRow(token1, meta1, price1, w1, big.NewInt(0), big.NewInt(0))
@@ -680,6 +698,15 @@ func (s *RealtimePositionsService) smartMoneyTokenMeta(chain string, token commo
 	meta := realtimeTokenMeta{
 		symbol:   strings.TrimSpace(symbol),
 		decimals: decimals,
+	}
+	if token == (common.Address{}) {
+		if meta.symbol == "" {
+			meta.symbol = realtimeNativeSymbol(chain)
+		}
+		if meta.decimals <= 0 {
+			meta.decimals = 18
+		}
+		return meta
 	}
 	if meta.symbol != "" && meta.decimals > 0 {
 		return meta

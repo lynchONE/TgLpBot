@@ -93,6 +93,10 @@ import {
   pickNonStableTokenAddress,
   resolveHotPoolFilterToken,
   resolveKlineTokenOptions,
+  normalizeTokenRisk,
+  tokenRiskLabel,
+  tokenRiskSummary,
+  tokenRiskToneClass,
   shortAddress,
   inferPoolVersion,
   computePriceRange,
@@ -2253,7 +2257,9 @@ export default function App() {
         typeof e?.liquidity_usd === 'number' ||
         typeof e?.max_open_amount === 'number' ||
         Boolean(e?.risk_ack_required) ||
+        Boolean(e?.token_risk) ||
         typeof e?.price_deviation_percent === 'number' ||
+        errorCode === 'token_honeypot' ||
         errorCode === 'zap_safety_check_failed' ||
         errorCode.startsWith('pool_')
       );
@@ -2267,6 +2273,7 @@ export default function App() {
           risk_ack_required: Boolean(e?.risk_ack_required),
           price_deviation_percent: Number(e?.price_deviation_percent),
           price_deviation_max_percent: Number(e?.price_deviation_max_percent),
+          token_risk: e?.token_risk || null,
         }
         : null;
       setOperationProgress((prev) => (prev?.operation === 'open_position' ? null : prev));
@@ -2757,6 +2764,8 @@ export default function App() {
               const filterToken = resolveHotPoolFilterToken(pool);
               const avatarFilterActive = filterToken && hotTokenFilter?.address === filterToken.address;
               const badges = parseHotPoolBadges(pool?.badges);
+              const tokenRisk = normalizeTokenRisk(pool?.token_risk);
+              const tokenRiskTone = tokenRiskToneClass(tokenRisk);
 
               const isHighFeeRate = feeRate >= 1;
 
@@ -2814,6 +2823,14 @@ export default function App() {
                           持仓 <NumberFlowValue value={userPosUsd} formatter={(v) => formatUsdCompact(v)} />
                         </span>
                       )}
+                      {tokenRisk ? (
+                        <span
+                          className={`tag pool-risk-chip is-${tokenRiskTone}`}
+                          title={tokenRiskSummary(tokenRisk)}
+                        >
+                          {tokenRiskLabel(tokenRisk)}
+                        </span>
+                      ) : null}
                     </div>
                     {badges.length > 0 && (
                       <div className="pool-badge-line">

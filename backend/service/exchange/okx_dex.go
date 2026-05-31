@@ -3,6 +3,7 @@ package exchange
 import (
 	"TgLpBot/base/config"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -144,12 +145,46 @@ type MarketTokenBasicInfoRequest struct {
 	TokenContractAddress string `json:"tokenContractAddress"`
 }
 
+type MarketTokenAdvancedInfoRequest struct {
+	ChainIndex           string
+	TokenContractAddress string
+}
+
 type MarketTokenBasicInfo struct {
 	ChainIndex           string `json:"chainIndex"`
 	TokenContractAddress string `json:"tokenContractAddress"`
 	TokenSymbol          string `json:"tokenSymbol"`
 	TokenName            string `json:"tokenName"`
 	TokenLogoURL         string `json:"tokenLogoUrl"`
+}
+
+type MarketTokenAdvancedInfo struct {
+	ChainIndex                   string   `json:"chainIndex"`
+	TokenContractAddress         string   `json:"tokenContractAddress"`
+	TotalFee                     string   `json:"totalFee"`
+	LPBurnedPercent              string   `json:"lpBurnedPercent"`
+	IsInternal                   bool     `json:"isInternal"`
+	ProtocolID                   string   `json:"protocolId"`
+	Progress                     string   `json:"progress"`
+	TokenTags                    []string `json:"tokenTags"`
+	CreateTime                   string   `json:"createTime"`
+	CreatorAddress               string   `json:"creatorAddress"`
+	DevRugPullTokenCount         string   `json:"devRugPullTokenCount"`
+	DevCreateTokenCount          string   `json:"devCreateTokenCount"`
+	DevLaunchedTokenCount        string   `json:"devLaunchedTokenCount"`
+	RiskControlLevel             string   `json:"riskControlLevel"`
+	Top10HoldPercent             string   `json:"top10HoldPercent"`
+	DevHoldingPercent            string   `json:"devHoldingPercent"`
+	BundleHoldingPercent         string   `json:"bundleHoldingPercent"`
+	SuspiciousHoldingPercent     string   `json:"suspiciousHoldingPercent"`
+	SniperHoldingPercent         string   `json:"sniperHoldingPercent"`
+	SnipersClearAddressCount     string   `json:"snipersClearAddressCount"`
+	SnipersTotal                 string   `json:"snipersTotal"`
+	InsiderNetworkHoldPercent    string   `json:"insiderNetworkHoldPercent"`
+	InsiderNetworkAddressCount   string   `json:"insiderNetworkAddressCount"`
+	PhishingActivitiesCount      string   `json:"phishingActivitiesCount"`
+	BlackListActivitiesCount     string   `json:"blackListActivitiesCount"`
+	ContractCreatorRiskTokenRate string   `json:"contractCreatorRiskTokenRate"`
 }
 
 type MarketCandle struct {
@@ -174,6 +209,43 @@ type MarketTokenBasicInfoResponse struct {
 	Code string                 `json:"code"`
 	Msg  string                 `json:"msg"`
 	Data []MarketTokenBasicInfo `json:"data"`
+}
+
+type MarketTokenAdvancedInfoResponse struct {
+	Code string                    `json:"code"`
+	Msg  string                    `json:"msg"`
+	Data []MarketTokenAdvancedInfo `json:"data"`
+}
+
+func (r *MarketTokenAdvancedInfoResponse) UnmarshalJSON(body []byte) error {
+	var raw struct {
+		Code string          `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return err
+	}
+	r.Code = raw.Code
+	r.Msg = raw.Msg
+
+	data := bytes.TrimSpace(raw.Data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		r.Data = []MarketTokenAdvancedInfo{}
+		return nil
+	}
+	if bytes.HasPrefix(data, []byte("[")) {
+		return json.Unmarshal(data, &r.Data)
+	}
+	if bytes.HasPrefix(data, []byte("{")) {
+		var item MarketTokenAdvancedInfo
+		if err := json.Unmarshal(data, &item); err != nil {
+			return err
+		}
+		r.Data = []MarketTokenAdvancedInfo{item}
+		return nil
+	}
+	return fmt.Errorf("unexpected advanced-info data shape")
 }
 
 // TokenBalance represents a token balance from OKX balance API
@@ -573,6 +645,65 @@ func (s *OKXDexService) GetMarketTokenBasicInfos(reqs []MarketTokenBasicInfoRequ
 	}
 	if out.Code != "0" {
 		return nil, &OKXAPIError{Endpoint: "market/token/basic-info", Code: out.Code, Msg: out.Msg}
+	}
+	return &out, nil
+}
+
+func (s *OKXDexService) GetMarketTokenAdvancedInfo(ctx context.Context, req MarketTokenAdvancedInfoRequest) (*MarketTokenAdvancedInfoResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	chainIndex := strings.TrimSpace(req.ChainIndex)
+	tokenAddress := strings.TrimSpace(req.TokenContractAddress)
+	if chainIndex == "" {
+		return nil, fmt.Errorf("chainIndex is required")
+	}
+	if tokenAddress == "" {
+		return nil, fmt.Errorf("tokenContractAddress is required")
+	}
+
+	query := url.Values{}
+	query.Set("chainIndex", chainIndex)
+	query.Set("tokenContractAddress", strings.ToLower(tokenAddress))
+
+	endpoint := fmt.Sprintf("%s/token/advanced-info?%s", s.marketAPIURL(), query.Encode())
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] advanced-info request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeaders(httpReq, "", timestamp)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("OKX market/token/advanced-info http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] advanced-info raw response: %s", string(respBody))
+	}
+
+	var out MarketTokenAdvancedInfoResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if out.Code != "0" {
+		return nil, &OKXAPIError{Endpoint: "market/token/advanced-info", Code: out.Code, Msg: out.Msg}
 	}
 	return &out, nil
 }

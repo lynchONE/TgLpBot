@@ -570,14 +570,12 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 	c0 := common.HexToAddress(task.Token0Address)
 	c1 := common.HexToAddress(task.Token1Address)
 	if posInfo != nil {
-		if posInfo.Token0 != (common.Address{}) {
+		if taskTokenAddressesReady("v4", posInfo.Token0, posInfo.Token1, true, true) {
 			c0 = posInfo.Token0
-		}
-		if posInfo.Token1 != (common.Address{}) {
 			c1 = posInfo.Token1
 		}
 	}
-	if c0 == (common.Address{}) || c1 == (common.Address{}) {
+	if !taskTokenAddressesReady("v4", c0, c1, true, true) {
 		return nil, fmt.Errorf("V4 token addresses missing")
 	}
 	onchainTickLower, onchainTickUpper := 0, 0

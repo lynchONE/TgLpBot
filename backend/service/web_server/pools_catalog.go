@@ -77,7 +77,7 @@ func buildPoolCatalogCacheKey(opts poolCatalogOptions) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"pools:catalog:v5:chain=%s:sort=%s:tf=%d:limit=%d",
+		"pools:catalog:v6:chain=%s:sort=%s:tf=%d:limit=%d",
 		opts.Chain,
 		opts.Sort,
 		opts.TimeframeMinutes,

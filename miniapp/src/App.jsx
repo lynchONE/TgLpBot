@@ -54,6 +54,11 @@ import {
     formatRangePercentCompact,
     formatSignedPercentCompact,
     formatPercentInputValue,
+    normalizeTokenRisk,
+    shortAddress,
+    tokenRiskLabel,
+    tokenRiskSummary,
+    tokenRiskToneClass,
 } from './lib/format';
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
@@ -921,10 +926,12 @@ function isOpenPositionSafetyError(error) {
     const code = String(payload?.code || '').trim();
     return Boolean(
         code === 'zap_safety_check_failed' ||
+        code === 'token_honeypot' ||
         code.startsWith('pool_') ||
         typeof payload?.liquidity_usd === 'number' ||
         typeof payload?.max_open_amount === 'number' ||
         typeof payload?.price_deviation_percent === 'number' ||
+        Boolean(payload?.token_risk) ||
         Boolean(payload?.risk_ack_required)
     );
 }
@@ -1042,6 +1049,20 @@ const HOT_POOL_SORT_TABS = [
     { key: 'fee_rate', label: '费率' },
     { key: 'volume', label: '交易量' },
 ];
+
+function tokenRiskPanelClass(tone) {
+    switch (tone) {
+        case 'high':
+        case 'critical':
+            return 'border-red-500/35 bg-red-500/10 text-red-800 dark:text-red-100';
+        case 'medium':
+        case 'unknown':
+            return 'border-amber-500/35 bg-amber-500/10 text-amber-800 dark:text-amber-100';
+        default:
+            return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-800 dark:text-emerald-100';
+    }
+}
+
 export default function App() {
     const initData = useInitData();
     const tick = useTick();
@@ -1118,6 +1139,8 @@ export default function App() {
     const openPositionAutoSingleSideRangeRef = useRef('');
     const [openPositionPreparePrivateZapInfo, setOpenPositionPreparePrivateZapInfo] = useState(null);
     const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
+    const [openPositionPrepareTokenRisk, setOpenPositionPrepareTokenRisk] = useState(null);
+    const [openPositionPreviewTokenRisk, setOpenPositionPreviewTokenRisk] = useState(null);
     const [openPositionRangeEditor, setOpenPositionRangeEditor] = useState(null);
     const [openPositionPreviewRangeEditor, setOpenPositionPreviewRangeEditor] = useState(null);
     const [openPositionSizingAdvice, setOpenPositionSizingAdvice] = useState(null);
@@ -1211,6 +1234,11 @@ export default function App() {
             : (Array.isArray(openPositionPrepareChecks) ? openPositionPrepareChecks : [])
     ), [openPositionChecks, openPositionPrepareChecks]);
     const activeOpenPositionPrivateZapInfo = openPositionPrivateZapInfo || openPositionPreparePrivateZapInfo;
+    const openPositionTokenRisk = normalizeTokenRisk(
+        openPositionPreviewTokenRisk || openPositionPrepareTokenRisk || openPositionPool?.token_risk
+    );
+    const openPositionTokenRiskTone = tokenRiskToneClass(openPositionTokenRisk);
+    const openPositionTokenRiskSymbol = openPositionTokenRisk?.token_symbol || shortAddress(openPositionTokenRisk?.token_address);
     const openPositionEffectiveRangeEditor = openPositionPreviewRangeEditor || openPositionRangeEditor;
     const openPositionFailChecks = activeOpenPositionChecks.filter((item) => item.status === 'fail');
     const openPositionHasBlockingSafetyFailure = openPositionFailChecks.length > 0;
@@ -2672,6 +2700,8 @@ export default function App() {
         setOpenPositionEntrySwapPreviewError('');
         setOpenPositionPreparePrivateZapInfo(null);
         setOpenPositionPrivateZapInfo(null);
+        setOpenPositionPrepareTokenRisk(null);
+        setOpenPositionPreviewTokenRisk(null);
         setOpenPositionRangeEditor(null);
         setOpenPositionPreviewRangeEditor(null);
         setOpenPositionSizingAdvice(null);
@@ -3016,6 +3046,7 @@ export default function App() {
         if (!openPositionPool || !hasInitData) {
             setOpenPositionPrepareChecks([]);
             setOpenPositionPreparePrivateZapInfo(null);
+            setOpenPositionPrepareTokenRisk(null);
             setOpenPositionRangeEditor(null);
             return undefined;
         }
@@ -3051,12 +3082,14 @@ export default function App() {
                 if (!active) return;
                 setOpenPositionPrepareChecks(Array.isArray(resp?.checks) ? resp.checks : []);
                 setOpenPositionPreparePrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
+                setOpenPositionPrepareTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
                 setOpenPositionRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
             })
             .catch(() => {
                 if (!active || controller.signal.aborted) return;
                 setOpenPositionPrepareChecks([]);
                 setOpenPositionPreparePrivateZapInfo(null);
+                setOpenPositionPrepareTokenRisk(null);
                 setOpenPositionRangeEditor(null);
             });
 
@@ -3103,6 +3136,7 @@ export default function App() {
             setOpenPositionPrivateZapInfo(null);
             setOpenPositionSizingAdvice(null);
             setOpenPositionPreviewRangeEditor(null);
+            setOpenPositionPreviewTokenRisk(null);
             return undefined;
         }
 
@@ -3132,6 +3166,7 @@ export default function App() {
             setOpenPositionSizingAdvice(null);
             setOpenPositionChecks([]);
             setOpenPositionPreviewRangeEditor(null);
+            setOpenPositionPreviewTokenRisk(null);
             return undefined;
         }
 
@@ -3145,6 +3180,7 @@ export default function App() {
                 setOpenPositionPrivateZapInfo(null);
                 setOpenPositionSizingAdvice(null);
                 setOpenPositionPreviewRangeEditor(null);
+                setOpenPositionPreviewTokenRisk(null);
                 return undefined;
             }
             if (walletsError) {
@@ -3155,6 +3191,7 @@ export default function App() {
                 setOpenPositionPrivateZapInfo(null);
                 setOpenPositionSizingAdvice(null);
                 setOpenPositionPreviewRangeEditor(null);
+                setOpenPositionPreviewTokenRisk(null);
                 return undefined;
             }
             const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
@@ -3166,6 +3203,7 @@ export default function App() {
                 setOpenPositionPrivateZapInfo(null);
                 setOpenPositionSizingAdvice(null);
                 setOpenPositionPreviewRangeEditor(null);
+                setOpenPositionPreviewTokenRisk(null);
                 return undefined;
             }
             if (list.length > 1) {
@@ -3179,6 +3217,7 @@ export default function App() {
                     setOpenPositionPrivateZapInfo(null);
                     setOpenPositionSizingAdvice(null);
                     setOpenPositionPreviewRangeEditor(null);
+                    setOpenPositionPreviewTokenRisk(null);
                     return undefined;
                 }
             } else {
@@ -3227,6 +3266,7 @@ export default function App() {
                 setOpenPositionPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
                 setOpenPositionSizingAdvice(resp?.sizing_advice && typeof resp.sizing_advice === 'object' ? resp.sizing_advice : null);
                 setOpenPositionPreviewRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
+                setOpenPositionPreviewTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
             } catch (e) {
                 if (!active || controller.signal.aborted) return;
                 const msg = String(e?.message || e || '').trim();
@@ -3240,6 +3280,7 @@ export default function App() {
                 setOpenPositionSizingAdvice(payload?.sizing_advice && typeof payload.sizing_advice === 'object' ? payload.sizing_advice : null);
                 setOpenPositionChecks(failChecks);
                 setOpenPositionPreviewRangeEditor(payload?.range_editor && typeof payload.range_editor === 'object' ? payload.range_editor : null);
+                setOpenPositionPreviewTokenRisk(payload?.token_risk && typeof payload.token_risk === 'object' ? payload.token_risk : null);
                 setOpenPositionEntrySwapPreviewError(failChecks.length > 0 ? '' : (msg || '获取前置兑换预览失败'));
             } finally {
                 if (active) {
@@ -3305,6 +3346,7 @@ export default function App() {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionEntrySwapConfirm(true);
+            setOpenPositionPreviewTokenRisk(null);
             setOperationProgress((prev) => (prev?.operation === 'open_position'
                 ? {
                     ...prev,
@@ -3323,6 +3365,7 @@ export default function App() {
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
             const payload = resolveOpenPositionErrorPayload(e);
+            setOpenPositionPreviewTokenRisk(payload?.token_risk && typeof payload.token_risk === 'object' ? payload.token_risk : null);
             const entrySwapInfo = payload?.entry_swap && typeof payload.entry_swap === 'object'
                 ? payload.entry_swap
                 : null;
@@ -5074,6 +5117,31 @@ export default function App() {
                                             <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">智能建议金额</div>
                                             <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
                                                 系统会结合池子深度、钱包余额和当前模式给出建议金额，你也可以直接手动输入。</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+
+                            {openPositionTokenRisk ? (
+                                <div className={`rounded-xl border p-3 ${tokenRiskPanelClass(openPositionTokenRiskTone)}`}>
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-current/10">
+                                            <AlertTriangle className="h-3 w-3" strokeWidth={3} />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="text-xs font-bold">{tokenRiskLabel(openPositionTokenRisk)}</div>
+                                                <div className="shrink-0 rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">
+                                                    等级 {openPositionTokenRisk.risk_control_label}
+                                                </div>
+                                            </div>
+                                            <div className="mt-1 text-[11px] leading-5 opacity-85">
+                                                {(openPositionTokenRiskSymbol || 'Token')} · {tokenRiskSummary(openPositionTokenRisk)}
+                                            </div>
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                {openPositionTokenRisk.has_honeypot ? <span className="rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">貔貅盘</span> : null}
+                                                {openPositionTokenRisk.has_low_liquidity ? <span className="rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">低流动性</span> : null}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

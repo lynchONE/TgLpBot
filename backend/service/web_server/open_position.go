@@ -62,6 +62,7 @@ type openPositionPreviewResponse struct {
 	EntrySwap   *openPositionEntrySwapInfo   `json:"entry_swap,omitempty"`
 	PrivateZap  openPositionPrivateZapInfo   `json:"private_zap"`
 	RangeEditor *openPositionRangeEditorInfo `json:"range_editor,omitempty"`
+	TokenRisk   *TokenRiskInfo               `json:"token_risk,omitempty"`
 }
 
 type openPositionEntrySwapInfo struct {
@@ -102,6 +103,7 @@ type openPositionError struct {
 	PriceDeviationPercent    *float64                   `json:"price_deviation_percent,omitempty"`
 	PriceDeviationMaxPercent *float64                   `json:"price_deviation_max_percent,omitempty"`
 	EntrySwap                *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
+	TokenRisk                *TokenRiskInfo             `json:"token_risk,omitempty"`
 }
 
 type openPositionContext struct {
@@ -718,6 +720,9 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 			Extra:  cr.Extra,
 		})
 	}
+	tokenRisk := resolveOpenPositionTokenRisk(r.Context(), s, ctx.task)
+	logTokenRiskWarning("preview", tokenRisk)
+	checks = appendTokenRiskCheck(checks, tokenRisk)
 
 	rangeEditor := buildOpenPositionRangeEditorInfo(ctx.task, ctx.currentTick, ctx.task.TickSpacing, &ctx.resolvedRange)
 
@@ -737,6 +742,7 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 			Checks:      checks,
 			PrivateZap:  buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 			RangeEditor: rangeEditor,
+			TokenRisk:   tokenRisk,
 		})
 		return
 	}
@@ -778,6 +784,7 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 		EntrySwap:   entrySwapInfo,
 		PrivateZap:  buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 		RangeEditor: rangeEditor,
+		TokenRisk:   tokenRisk,
 	})
 }
 
@@ -806,6 +813,17 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
 			Code:    "open_position_failed",
 			Message: err.Error(),
+		})
+		return
+	}
+
+	tokenRisk := resolveOpenPositionTokenRisk(r.Context(), s, ctx.task)
+	logTokenRiskWarning("execute", tokenRisk)
+	if tokenRiskBlocksOpen(tokenRisk) {
+		writeOpenPositionError(w, http.StatusConflict, openPositionError{
+			Code:      "token_honeypot",
+			Message:   tokenRiskBlockMessage(tokenRisk),
+			TokenRisk: tokenRisk,
 		})
 		return
 	}

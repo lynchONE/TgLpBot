@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"TgLpBot/base/config"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -187,6 +188,55 @@ func TestGetMarketTokenBasicInfos_UsesOfficialEndpoint(t *testing.T) {
 	}
 	if resp.Data[0].TokenName != "Test Token" || resp.Data[0].TokenLogoURL != "https://img.example/test.png" {
 		t.Fatalf("unexpected response row: %+v", resp.Data[0])
+	}
+}
+
+func TestGetMarketTokenAdvancedInfo_UsesOfficialEndpoint(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET request, got %s", req.Method)
+			}
+			if req.URL.Scheme != "https" || req.URL.Host != "web3.okx.com" {
+				t.Fatalf("unexpected request host: %s", req.URL.String())
+			}
+			if req.URL.Path != "/api/v6/dex/market/token/advanced-info" {
+				t.Fatalf("unexpected request path: %s", req.URL.Path)
+			}
+			if got := req.URL.Query().Get("chainIndex"); got != "56" {
+				t.Fatalf("expected chainIndex=56, got %q", got)
+			}
+			if got := req.URL.Query().Get("tokenContractAddress"); got != "0x1111111111111111111111111111111111111111" {
+				t.Fatalf("unexpected tokenContractAddress: %q", got)
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"chainIndex":"56","tokenContractAddress":"0x1111111111111111111111111111111111111111","riskControlLevel":"4","tokenTags":["honeypot","lowLiquidity"],"top10HoldPercent":"0.82"}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetMarketTokenAdvancedInfo(context.Background(), MarketTokenAdvancedInfoRequest{
+		ChainIndex:           "56",
+		TokenContractAddress: "0x1111111111111111111111111111111111111111",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected one data row, got %+v", resp.Data)
+	}
+	row := resp.Data[0]
+	if row.RiskControlLevel != "4" || len(row.TokenTags) != 2 || row.Top10HoldPercent != "0.82" {
+		t.Fatalf("unexpected response row: %+v", row)
 	}
 }
 

@@ -764,15 +764,16 @@ func (s *LiquidityService) increaseV4Liquidity(
 	c0 := common.HexToAddress(task.Token0Address)
 	c1 := common.HexToAddress(task.Token1Address)
 	if posInfo != nil {
-		if posInfo.Token0 != (common.Address{}) {
+		if taskTokenAddressesReady("v4", posInfo.Token0, posInfo.Token1, true, true) {
 			c0 = posInfo.Token0
-		}
-		if posInfo.Token1 != (common.Address{}) {
 			c1 = posInfo.Token1
 		}
 	}
 	if bytes.Compare(c0.Bytes(), c1.Bytes()) >= 0 {
 		return nil, fmt.Errorf("unexpected V4 token ordering")
+	}
+	if c0 == (common.Address{}) || c1 == (common.Address{}) {
+		return nil, fmt.Errorf("native V4 currency requires atomic increase zap")
 	}
 	onchainTickLower, onchainTickUpper := 0, 0
 	if posInfo != nil {
@@ -785,7 +786,7 @@ func (s *LiquidityService) increaseV4Liquidity(
 			rangeLower, rangeUpper, task.TickLower, task.TickUpper, tokenId.String())
 	}
 
-	if c0 != tokenIn && c1 != tokenIn {
+	if !v4CurrencyMatchesFundingToken(cc, c0, tokenIn) && !v4CurrencyMatchesFundingToken(cc, c1, tokenIn) {
 		return nil, fmt.Errorf("V4 pool does not contain entry token")
 	}
 
@@ -801,7 +802,7 @@ func (s *LiquidityService) increaseV4Liquidity(
 	// Determine input amounts
 	amount0In := big.NewInt(0)
 	amount1In := big.NewInt(0)
-	if c0 == tokenIn {
+	if v4CurrencyMatchesFundingToken(cc, c0, tokenIn) {
 		amount0In = new(big.Int).Set(amountIn)
 	} else {
 		amount1In = new(big.Int).Set(amountIn)
@@ -827,7 +828,15 @@ func (s *LiquidityService) increaseV4Liquidity(
 		} else {
 			swapFrom, swapTo = c1, c0
 		}
-		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, swapFrom, swapTo, swapAmount, task.SlippageTolerance)
+		swapFromFunding, err := v4CurrencyFundingToken(cc, swapFrom)
+		if err != nil {
+			return nil, err
+		}
+		swapToFunding, err := v4CurrencyFundingToken(cc, swapTo)
+		if err != nil {
+			return nil, err
+		}
+		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, swapFromFunding, swapToFunding, swapAmount, task.SlippageTolerance)
 		if swapErr != nil {
 			return nil, fmt.Errorf("V4 optimal swap failed: %w", swapErr)
 		}
@@ -855,10 +864,10 @@ func (s *LiquidityService) increaseV4Liquidity(
 
 	amount0Max := new(big.Int).Set(amount0In)
 	amount1Max := new(big.Int).Set(amount1In)
-	if bal0, balErr := blockchain.GetTokenBalanceWithClient(client, c0, walletAddr); balErr == nil && bal0 != nil && bal0.Cmp(amount0Max) > 0 {
+	if bal0 := assetBalanceOrZero(exec, c0, walletAddr); bal0 != nil && bal0.Cmp(amount0Max) > 0 {
 		amount0Max = bal0
 	}
-	if bal1, balErr := blockchain.GetTokenBalanceWithClient(client, c1, walletAddr); balErr == nil && bal1 != nil && bal1.Cmp(amount1Max) > 0 {
+	if bal1 := assetBalanceOrZero(exec, c1, walletAddr); bal1 != nil && bal1.Cmp(amount1Max) > 0 {
 		amount1Max = bal1
 	}
 	log.Printf("[Liquidity] V4 increase spend caps: tokenId=%s amount0In=%s amount1In=%s amount0Max=%s amount1Max=%s",
@@ -866,11 +875,17 @@ func (s *LiquidityService) increaseV4Liquidity(
 
 	// Approve tokens via Permit2 to PositionManager
 	if amount0Max.Sign() > 0 {
+		if c0 == (common.Address{}) {
+			return nil, fmt.Errorf("native V4 currency requires atomic increase zap")
+		}
 		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, c0, positionManager, amount0Max, opts); err != nil {
 			return nil, fmt.Errorf("approve token0 via Permit2 failed: %w", err)
 		}
 	}
 	if amount1Max.Sign() > 0 {
+		if c1 == (common.Address{}) {
+			return nil, fmt.Errorf("native V4 currency requires atomic increase zap")
+		}
 		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, c1, positionManager, amount1Max, opts); err != nil {
 			return nil, fmt.Errorf("approve token1 via Permit2 failed: %w", err)
 		}

@@ -1,7 +1,9 @@
 package realtime
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"github.com/ethereum/go-ethereum/common"
 	"testing"
 	"time"
 )
@@ -132,6 +134,61 @@ func TestSortRealtimePositionsKeepsMissingCreationTimeAfterCreatedPositions(t *t
 
 	if positions[0].Title != "created" || positions[1].Title != "chain-only" {
 		t.Fatalf("sortRealtimePositions order = [%s %s], want [created chain-only]", positions[0].Title, positions[1].Title)
+	}
+}
+
+func TestV4TaskCurrenciesAllowNativeCurrency(t *testing.T) {
+	t.Parallel()
+
+	c0, c1, ok := v4TaskCurrencies(&models.StrategyTask{
+		PoolVersion:   "v4",
+		Token0Address: common.Address{}.Hex(),
+		Token1Address: "0x0000000000000000000000000000000000000001",
+	})
+	if !ok {
+		t.Fatal("v4TaskCurrencies() ok = false, want true")
+	}
+	if c0 != (common.Address{}) {
+		t.Fatalf("currency0 = %s, want native zero address", c0.Hex())
+	}
+	if c1 != common.HexToAddress("0x0000000000000000000000000000000000000001") {
+		t.Fatalf("currency1 = %s", c1.Hex())
+	}
+}
+
+func TestV4TaskCurrenciesRejectMissingOrDoubleNative(t *testing.T) {
+	t.Parallel()
+
+	if _, _, ok := v4TaskCurrencies(&models.StrategyTask{PoolVersion: "v4"}); ok {
+		t.Fatal("empty token metadata accepted")
+	}
+	if _, _, ok := v4TaskCurrencies(&models.StrategyTask{
+		PoolVersion:   "v4",
+		Token0Address: common.Address{}.Hex(),
+		Token1Address: common.Address{}.Hex(),
+	}); ok {
+		t.Fatal("double native currencies accepted")
+	}
+}
+
+func TestV4CurrencyMetaUsesNativeSymbolForZeroAddress(t *testing.T) {
+	oldConfig := config.AppConfig
+	defer func() { config.AppConfig = oldConfig }()
+	config.AppConfig = &config.Config{
+		Chains: map[string]config.ChainConfig{
+			"bsc": {
+				Chain:               "bsc",
+				WrappedNativeSymbol: "WBNB",
+			},
+		},
+	}
+
+	got := (&RealtimePositionsService{}).getV4CurrencyMeta("bsc", common.Address{})
+	if got.symbol != "BNB" {
+		t.Fatalf("symbol = %q, want BNB", got.symbol)
+	}
+	if got.decimals != 18 {
+		t.Fatalf("decimals = %d, want 18", got.decimals)
 	}
 }
 

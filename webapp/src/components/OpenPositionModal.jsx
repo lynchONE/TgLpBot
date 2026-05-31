@@ -3,6 +3,13 @@ import { AlertTriangle, Check, CheckCircle, Eye, EyeOff, X, XCircle } from 'luci
 import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition, previewOpenPosition } from '../api';
 import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
 import { TASK_MODE_OPTIONS, getOutOfRangeActionSummary as getTaskModeActionSummary } from '../taskModes';
+import {
+  normalizeTokenRisk,
+  shortAddress as shortAddressShared,
+  tokenRiskLabel,
+  tokenRiskSummary,
+  tokenRiskToneClass,
+} from '../utils';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 const RANGE_INPUT_OPTIONS = [
@@ -71,6 +78,8 @@ function isOpenPositionSafetyError(error) {
     typeof payload?.liquidity_usd === 'number' ||
     typeof payload?.max_open_amount === 'number' ||
     typeof payload?.price_deviation_percent === 'number' ||
+    Boolean(payload?.token_risk) ||
+    code === 'token_honeypot' ||
     Boolean(payload?.risk_ack_required)
   );
 }
@@ -455,6 +464,8 @@ export default function OpenPositionModal({
   const [privateZapInfo, setPrivateZapInfo] = useState(null);
   const [preparePrivateZapInfo, setPreparePrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
+  const [prepareTokenRisk, setPrepareTokenRisk] = useState(null);
+  const [previewTokenRisk, setPreviewTokenRisk] = useState(null);
   const [error, setError] = useState('');
   const [riskAck, setRiskAck] = useState(false);
   const [dcaEnabled, setDcaEnabled] = useState(false);
@@ -525,6 +536,14 @@ export default function OpenPositionModal({
   const riskMessage = warnChecks.length > 0
     ? (warnChecks.map(c => c.detail || c.label).filter(Boolean).join('；') || null)
     : null;
+
+  const tokenRisk = normalizeTokenRisk(
+    previewTokenRisk || prepareTokenRisk || submitRisk?.token_risk || pool?.token_risk
+  );
+  const tokenRiskTone = tokenRiskToneClass(tokenRisk);
+  const tokenRiskTitle = tokenRisk ? tokenRiskLabel(tokenRisk) : '';
+  const tokenRiskDetail = tokenRisk ? tokenRiskSummary(tokenRisk) : '';
+  const tokenRiskSymbol = tokenRisk?.token_symbol || shortAddressShared(tokenRisk?.token_address);
 
   const showWalletPicker = Array.isArray(wallets) && wallets.length > 1;
   const visibleSmartRanges = useMemo(() => (
@@ -778,6 +797,8 @@ export default function OpenPositionModal({
     setPreviewSuspended(false);
     setPrivateZapInfo(null);
     setPreparePrivateZapInfo(null);
+    setPrepareTokenRisk(null);
+    setPreviewTokenRisk(null);
     setEntrySwapSlippage('');
     setEntrySwapSlippageDirty(false);
     setPrepareRangeEditor(null);
@@ -822,11 +843,13 @@ export default function OpenPositionModal({
         if (!active) return;
         setPrepareRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
         setPreparePrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
+        setPrepareTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
       })
       .catch(() => {
         if (!active || controller.signal.aborted) return;
         setPrepareRangeEditor(null);
         setPreparePrivateZapInfo(null);
+        setPrepareTokenRisk(null);
       });
     return () => {
       active = false;
@@ -861,6 +884,7 @@ export default function OpenPositionModal({
       setPrivateZapInfo(null);
       setPreviewChecks([]);
       setPreviewRangeEditor(null);
+      setPreviewTokenRisk(null);
       return undefined;
     }
 
@@ -881,6 +905,7 @@ export default function OpenPositionModal({
         setEntrySwapPreview(resp?.entry_swap || { required: false });
         setPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
         setPreviewRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
+        setPreviewTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
       } catch (e) {
         if (!active || controller.signal.aborted) return;
         const payload = resolveOpenPositionErrorPayload(e);
@@ -892,6 +917,7 @@ export default function OpenPositionModal({
         setPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
         setPreviewChecks(failChecks);
         setPreviewRangeEditor(payload?.range_editor && typeof payload.range_editor === 'object' ? payload.range_editor : null);
+        setPreviewTokenRisk(payload?.token_risk && typeof payload.token_risk === 'object' ? payload.token_risk : null);
         setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
       } finally {
         if (active) {
@@ -2461,6 +2487,24 @@ export default function OpenPositionModal({
 
             {walletsLoading ? (
               <div className="wallet-picker-loading">钱包加载中...</div>
+            ) : null}
+
+            {tokenRisk ? (
+              <div className={`opm-section token-risk-card is-${tokenRiskTone}`}>
+                <div className="token-risk-card-head">
+                  <AlertTriangle size={15} />
+                  <div>
+                    <strong>{tokenRiskTitle}</strong>
+                    <span>{tokenRiskSymbol || 'Token'} · OKX 风控</span>
+                  </div>
+                </div>
+                <div className="token-risk-card-detail">{tokenRiskDetail}</div>
+                <div className="token-risk-card-tags">
+                  <span>等级 {tokenRisk.risk_control_label}</span>
+                  {tokenRisk.has_honeypot ? <span>貔貅盘</span> : null}
+                  {tokenRisk.has_low_liquidity ? <span>低流动性</span> : null}
+                </div>
+              </div>
             ) : null}
 
             {showWalletPicker && !walletsLoading ? (

@@ -612,6 +612,9 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			if addr == "" {
 				continue
 			}
+			if common.IsHexAddress(addr) && common.HexToAddress(addr) == (common.Address{}) {
+				continue
+			}
 			chainKey := strings.ToLower(strings.TrimSpace(p.Chain))
 			if chainKey == "" {
 				chainKey = "bsc"
@@ -1291,11 +1294,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
 	stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
 
-	c0 := common.HexToAddress(task.Token0Address)
-	c1 := common.HexToAddress(task.Token1Address)
-	if (c0 == common.Address{}) || (c1 == common.Address{}) {
-		return nil, fmt.Sprintf("V4 tokenId=%s missing token0/token1 metadata", tokenId)
-	}
+	c0, c1, currenciesReady := v4TaskCurrencies(task)
 	var warn string
 	liq := big.NewInt(0)
 	if v, ok := new(big.Int).SetString(strings.TrimSpace(task.CurrentLiquidity), 10); ok && v != nil {
@@ -1330,6 +1329,11 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 			}
 			if pos != nil {
 				v4pos = pos
+				if v4PositionHasCurrencies(pos) {
+					c0 = pos.Token0
+					c1 = pos.Token1
+					currenciesReady = true
+				}
 				if pos.Liquidity != nil {
 					liq = pos.Liquidity
 				}
@@ -1339,6 +1343,10 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 				}
 			}
 		}
+	}
+
+	if !currenciesReady {
+		return nil, fmt.Sprintf("V4 tokenId=%s missing token0/token1 metadata", tokenId)
 	}
 
 	// Ignore empty positions (NFT not burned but liquidity already removed).
@@ -1397,15 +1405,15 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		chain = "bsc"
 	}
 
-	w0 := s.getWalletTokenBalance(chain, c0, walletAddr)
-	w1 := s.getWalletTokenBalance(chain, c1, walletAddr)
+	w0 := s.getWalletV4CurrencyBalance(chain, c0, walletAddr)
+	w1 := s.getWalletV4CurrencyBalance(chain, c1, walletAddr)
 
-	meta0 := s.getTokenMeta(chain, c0)
-	meta1 := s.getTokenMeta(chain, c1)
+	meta0 := s.getV4CurrencyMeta(chain, c0)
+	meta1 := s.getV4CurrencyMeta(chain, c1)
 
-	prices, _ := s.priceService.GetUSDPrices(chain, []string{c0.Hex(), c1.Hex()})
-	price0 := prices[strings.ToLower(c0.Hex())]
-	price1 := prices[strings.ToLower(c1.Hex())]
+	prices := s.getV4CurrencyUSDPrices(chain, c0, c1)
+	price0 := prices[c0]
+	price1 := prices[c1]
 
 	row0 := buildTokenRow(c0, meta0, price0, w0, amt0Raw, owed0)
 	row1 := buildTokenRow(c1, meta1, price1, w1, amt1Raw, owed1)
@@ -1779,6 +1787,139 @@ func (s *RealtimePositionsService) getTokenMeta(chain string, addr common.Addres
 	}
 
 	return realtimeTokenMeta{symbol: symbol, decimals: decimals}
+}
+
+func v4TaskCurrencies(task *models.StrategyTask) (common.Address, common.Address, bool) {
+	if task == nil {
+		return common.Address{}, common.Address{}, false
+	}
+	token0 := strings.TrimSpace(task.Token0Address)
+	token1 := strings.TrimSpace(task.Token1Address)
+	if !common.IsHexAddress(token0) || !common.IsHexAddress(token1) {
+		return common.Address{}, common.Address{}, false
+	}
+	c0 := common.HexToAddress(token0)
+	c1 := common.HexToAddress(token1)
+	return c0, c1, v4CurrenciesReady(c0, c1)
+}
+
+func v4PositionHasCurrencies(pos *blockchain.V4PositionInfo) bool {
+	if pos == nil {
+		return false
+	}
+	return v4CurrenciesReady(pos.Token0, pos.Token1)
+}
+
+func v4CurrenciesReady(c0 common.Address, c1 common.Address) bool {
+	if c0 == c1 {
+		return false
+	}
+	return c0 != (common.Address{}) || c1 != (common.Address{})
+}
+
+func realtimeChainConfig(chain string) (config.ChainConfig, bool) {
+	if config.AppConfig == nil {
+		return config.ChainConfig{}, false
+	}
+	return config.AppConfig.GetChainConfig(chain)
+}
+
+func realtimeWrappedNative(chain string) (common.Address, bool) {
+	cc, ok := realtimeChainConfig(chain)
+	if !ok || !common.IsHexAddress(cc.WrappedNativeAddress) {
+		return common.Address{}, false
+	}
+	wrapped := common.HexToAddress(cc.WrappedNativeAddress)
+	return wrapped, wrapped != (common.Address{})
+}
+
+func realtimeNativeSymbol(chain string) string {
+	cc, ok := realtimeChainConfig(chain)
+	if ok {
+		wrapped := strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+		if strings.HasPrefix(wrapped, "W") && len(wrapped) > 1 {
+			return wrapped[1:]
+		}
+		if wrapped != "" {
+			return wrapped
+		}
+	}
+	switch config.NormalizeChain(chain) {
+	case "bsc":
+		return "BNB"
+	case "base":
+		return "ETH"
+	default:
+		return "NATIVE"
+	}
+}
+
+func (s *RealtimePositionsService) getV4CurrencyMeta(chain string, currency common.Address) realtimeTokenMeta {
+	if currency != (common.Address{}) {
+		return s.getTokenMeta(chain, currency)
+	}
+	return realtimeTokenMeta{symbol: realtimeNativeSymbol(chain), decimals: 18}
+}
+
+func (s *RealtimePositionsService) getWalletV4CurrencyBalance(chain string, currency common.Address, walletAddress common.Address) *big.Int {
+	if currency != (common.Address{}) {
+		return s.getWalletTokenBalance(chain, currency, walletAddress)
+	}
+	if walletAddress == (common.Address{}) {
+		return big.NewInt(0)
+	}
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil || client == nil {
+		return big.NewInt(0)
+	}
+	bal, err := blockchain.GetBalanceWithClient(client, walletAddress)
+	if err != nil || bal == nil {
+		return big.NewInt(0)
+	}
+	return bal
+}
+
+func (s *RealtimePositionsService) getV4CurrencyUSDPrices(chain string, currencies ...common.Address) map[common.Address]float64 {
+	out := make(map[common.Address]float64, len(currencies))
+	priceKeys := make(map[common.Address]string, len(currencies))
+	seen := make(map[string]struct{}, len(currencies))
+	query := make([]string, 0, len(currencies))
+
+	for _, currency := range currencies {
+		priceAddress := currency
+		if currency == (common.Address{}) {
+			wrapped, ok := realtimeWrappedNative(chain)
+			if !ok {
+				continue
+			}
+			priceAddress = wrapped
+		}
+		key := strings.ToLower(priceAddress.Hex())
+		priceKeys[currency] = key
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		query = append(query, key)
+	}
+
+	if len(query) > 0 && s != nil && s.priceService != nil {
+		if prices, err := s.priceService.GetUSDPrices(chain, query); err == nil {
+			for currency, key := range priceKeys {
+				out[currency] = prices[key]
+			}
+		}
+	}
+	for _, currency := range currencies {
+		if currency == (common.Address{}) && out[currency] <= 0 {
+			out[currency] = pricing.GetNativePriceUSD(chain)
+		}
+	}
+	return out
 }
 
 func (s *RealtimePositionsService) getWalletTokenBalance(chain string, tokenAddress, walletAddress common.Address) *big.Int {

@@ -61,6 +61,7 @@ type HotPoolResponse struct {
 	DisplayTokenSymbol      string          `json:"display_token_symbol,omitempty"`
 	DisplayTokenName        string          `json:"display_token_name,omitempty"`
 	DisplayTokenLogoURL     string          `json:"display_token_logo_url,omitempty"`
+	TokenRisk               *TokenRiskInfo  `json:"token_risk,omitempty"`
 	TotalFees24h            float64         `json:"total_fees_24h,omitempty"`
 	TotalVolume24h          float64         `json:"total_volume_24h,omitempty"`
 	TransactionCount24h     uint32          `json:"transaction_count_24h,omitempty"`
