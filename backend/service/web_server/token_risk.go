@@ -328,19 +328,19 @@ func tokenRiskTargetsForTask(task *models.StrategyTask) []tokenRiskTarget {
 func tokenRiskLevelLabel(level int) string {
 	switch level {
 	case 0:
-		return "Undefined"
+		return "未定义"
 	case 1:
-		return "Low"
+		return "低"
 	case 2:
-		return "Medium"
+		return "中"
 	case 3:
-		return "Medium-high"
+		return "中高"
 	case 4:
-		return "High"
+		return "高"
 	case 5:
-		return "High(manual)"
+		return "高(人工)"
 	default:
-		return fmt.Sprintf("Unknown(%d)", level)
+		return fmt.Sprintf("未知(%d)", level)
 	}
 }
 
@@ -389,6 +389,73 @@ func tokenRiskHasTag(tags []string, tag string) bool {
 	return false
 }
 
+func tokenRiskLevelTextToChinese(text string) string {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "undefined":
+		return "未定义"
+	case "low":
+		return "低"
+	case "medium":
+		return "中"
+	case "medium-high":
+		return "中高"
+	case "high":
+		return "高"
+	case "high(manual)":
+		return "高(人工)"
+	default:
+		return strings.TrimSpace(text)
+	}
+}
+
+func tokenRiskWarningTextToChinese(message string) string {
+	text := strings.TrimSpace(message)
+	lower := strings.ToLower(text)
+	switch {
+	case text == "":
+		return ""
+	case strings.Contains(lower, "okx marked honeypot"):
+		return "OKX 标记为貔貅盘"
+	case strings.Contains(lower, "okx marked low liquidity"):
+		return "OKX 标记为低流动性"
+	case strings.HasPrefix(lower, "okx risk level:"):
+		parts := strings.SplitN(text, ":", 2)
+		if len(parts) == 2 {
+			return "OKX 风险等级: " + tokenRiskLevelTextToChinese(parts[1])
+		}
+		return "OKX 风险等级异常"
+	case strings.HasPrefix(lower, "okx risk lookup failed:"):
+		parts := strings.SplitN(text, ":", 2)
+		if len(parts) == 2 {
+			return "OKX 风控查询失败: " + strings.TrimSpace(parts[1])
+		}
+		return "OKX 风控查询失败"
+	case strings.Contains(lower, "429") || strings.Contains(lower, "too many"):
+		return "OKX 风控接口限流，已延后后台刷新"
+	case strings.Contains(lower, "advanced-info returned empty data"):
+		return "OKX advanced-info 未返回风控数据"
+	default:
+		return text
+	}
+}
+
+func tokenRiskWarningsToChinese(warnings []string) []string {
+	out := make([]string, 0, len(warnings))
+	seen := make(map[string]struct{}, len(warnings))
+	for _, warning := range warnings {
+		text := tokenRiskWarningTextToChinese(warning)
+		if text == "" {
+			continue
+		}
+		if _, ok := seen[text]; ok {
+			continue
+		}
+		seen[text] = struct{}{}
+		out = append(out, text)
+	}
+	return out
+}
+
 func tokenRiskWarningList(level int, hasHoneypot bool, hasLowLiquidity bool, queryErr error) []string {
 	warnings := make([]string, 0, 3)
 	if queryErr != nil {
@@ -410,7 +477,7 @@ func tokenRiskWarningList(level int, hasHoneypot bool, hasLowLiquidity bool, que
 	if level >= 3 {
 		warnings = append(warnings, "OKX 风险等级: "+tokenRiskLevelLabel(level))
 	}
-	return warnings
+	return tokenRiskWarningsToChinese(warnings)
 }
 
 func buildTokenRiskInfo(target tokenRiskTarget, chainIndex string, advanced *exchange.MarketTokenAdvancedInfo, queryErr error) TokenRiskInfo {
@@ -436,7 +503,7 @@ func buildTokenRiskInfo(target tokenRiskTarget, chainIndex string, advanced *exc
 		return risk
 	}
 	if advanced == nil {
-		err := fmt.Errorf("OKX advanced-info returned empty data")
+		err := fmt.Errorf("OKX advanced-info 未返回风控数据")
 		risk.Error = err.Error()
 		risk.Warnings = tokenRiskWarningList(0, false, false, err)
 		risk.NextRefreshAt = now.Add(tokenRiskRefreshTTL(risk))
@@ -495,10 +562,10 @@ func tokenRiskInfoToSnapshot(risk TokenRiskInfo) models.TokenRiskSnapshot {
 		TokenSymbol:              strings.TrimSpace(risk.TokenSymbol),
 		TokenName:                strings.TrimSpace(risk.TokenName),
 		RiskControlLevel:         risk.RiskControlLevel,
-		RiskControlLabel:         strings.TrimSpace(risk.RiskControlLabel),
+		RiskControlLabel:         tokenRiskLevelLabel(risk.RiskControlLevel),
 		RiskTone:                 strings.TrimSpace(risk.RiskTone),
 		TokenTagsJSON:            tokenRiskJSONString(risk.TokenTags),
-		WarningsJSON:             tokenRiskJSONString(risk.Warnings),
+		WarningsJSON:             tokenRiskJSONString(tokenRiskWarningsToChinese(risk.Warnings)),
 		HasHoneypot:              risk.HasHoneypot,
 		HasLowLiquidity:          risk.HasLowLiquidity,
 		Top10HoldPercent:         strings.TrimSpace(risk.Top10HoldPercent),
@@ -524,12 +591,12 @@ func tokenRiskSnapshotToInfo(snapshot models.TokenRiskSnapshot) TokenRiskInfo {
 		TokenSymbol:              strings.TrimSpace(snapshot.TokenSymbol),
 		TokenName:                strings.TrimSpace(snapshot.TokenName),
 		RiskControlLevel:         snapshot.RiskControlLevel,
-		RiskControlLabel:         strings.TrimSpace(snapshot.RiskControlLabel),
+		RiskControlLabel:         tokenRiskLevelLabel(snapshot.RiskControlLevel),
 		RiskTone:                 strings.TrimSpace(snapshot.RiskTone),
 		TokenTags:                tokenRiskStringSlice(snapshot.TokenTagsJSON),
 		HasHoneypot:              snapshot.HasHoneypot,
 		HasLowLiquidity:          snapshot.HasLowLiquidity,
-		Warnings:                 tokenRiskStringSlice(snapshot.WarningsJSON),
+		Warnings:                 tokenRiskWarningsToChinese(tokenRiskStringSlice(snapshot.WarningsJSON)),
 		Top10HoldPercent:         strings.TrimSpace(snapshot.Top10HoldPercent),
 		DevHoldingPercent:        strings.TrimSpace(snapshot.DevHoldingPercent),
 		BundleHoldingPercent:     strings.TrimSpace(snapshot.BundleHoldingPercent),
@@ -542,9 +609,6 @@ func tokenRiskSnapshotToInfo(snapshot models.TokenRiskSnapshot) TokenRiskInfo {
 		Source:                   strings.TrimSpace(snapshot.Source),
 		UpdatedAt:                snapshot.FetchedAt,
 		NextRefreshAt:            snapshot.NextRefreshAt,
-	}
-	if risk.RiskControlLabel == "" {
-		risk.RiskControlLabel = tokenRiskLevelLabel(risk.RiskControlLevel)
 	}
 	if risk.RiskTone == "" {
 		risk.RiskTone = tokenRiskTone(risk.RiskControlLevel, risk.HasHoneypot, risk.HasLowLiquidity, strings.TrimSpace(risk.Error) != "")
@@ -700,7 +764,7 @@ func waitTokenRiskOKXSlot(ctx context.Context) error {
 func fetchTokenRiskFromOKX(ctx context.Context, target tokenRiskTarget) TokenRiskInfo {
 	chainIndex := config.ChainToOKXChainIndex(target.Chain)
 	if chainIndex == "" {
-		return buildTokenRiskInfo(target, "", nil, fmt.Errorf("unsupported chain for OKX token risk: %s", target.Chain))
+		return buildTokenRiskInfo(target, "", nil, fmt.Errorf("OKX 暂不支持该链的代币风控: %s", target.Chain))
 	}
 	if err := waitTokenRiskOKXSlot(ctx); err != nil {
 		return buildTokenRiskInfo(target, chainIndex, nil, err)
@@ -729,7 +793,7 @@ func refreshTokenRiskSnapshot(ctx context.Context, target tokenRiskTarget, exist
 			markTokenRiskRefreshFailure(ctx, existing, risk)
 			stale := withTokenRiskTargetMetadata(*existing, target)
 			stale.Error = strings.TrimSpace(risk.Error)
-			stale.Warnings = append(stale.Warnings, "OKX 风控刷新失败，当前展示上次快照")
+			stale.Warnings = tokenRiskWarningsToChinese(append(stale.Warnings, "OKX 风控刷新失败，当前展示上次快照"))
 			return stale
 		}
 		saveTokenRiskSnapshot(ctx, risk)
@@ -942,14 +1006,14 @@ func tokenRiskCheckItem(risk *TokenRiskInfo) *openPositionCheckItem {
 		status = "warn"
 	}
 
-	detail := "OKX risk level: " + risk.RiskControlLabel
+	detail := "OKX 风控等级: " + risk.RiskControlLabel
 	if len(risk.Warnings) > 0 {
 		detail = strings.Join(risk.Warnings, "; ")
 	}
 	return &openPositionCheckItem{
 		Key:    "token_risk",
 		Status: status,
-		Label:  "Token risk",
+		Label:  "代币风控",
 		Detail: detail,
 		Extra: map[string]interface{}{
 			"token_address":      risk.TokenAddress,
@@ -972,7 +1036,7 @@ func appendTokenRiskCheck(checks []openPositionCheckItem, risk *TokenRiskInfo) [
 
 func tokenRiskBlockMessage(risk *TokenRiskInfo) string {
 	if risk == nil {
-		return "Token risk check failed"
+		return "代币风控校验失败"
 	}
 	if len(risk.Warnings) > 0 {
 		return strings.Join(risk.Warnings, "; ")
@@ -981,7 +1045,7 @@ func tokenRiskBlockMessage(risk *TokenRiskInfo) string {
 	if symbol == "" {
 		symbol = strings.TrimSpace(risk.TokenAddress)
 	}
-	return fmt.Sprintf("%s token risk check failed", symbol)
+	return fmt.Sprintf("%s 代币风控校验失败", symbol)
 }
 
 func logTokenRiskWarning(scope string, risk *TokenRiskInfo) {

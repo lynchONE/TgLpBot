@@ -69,11 +69,50 @@ export function shortAddress(value, left = 6, right = 4) {
 
 const TOKEN_RISK_LEVEL_LABELS = ['未定义', '低', '中', '中高', '高', '高(人工)'];
 
+function tokenRiskLevelToChinese(value) {
+    const raw = String(value || '').trim();
+    switch (raw.toLowerCase()) {
+        case 'undefined':
+            return '未定义';
+        case 'low':
+            return '低';
+        case 'medium':
+            return '中';
+        case 'medium-high':
+            return '中高';
+        case 'high':
+            return '高';
+        case 'high(manual)':
+            return '高(人工)';
+        default:
+            return raw;
+    }
+}
+
+function tokenRiskWarningToChinese(value) {
+    const raw = String(value || '').trim();
+    const lower = raw.toLowerCase();
+    if (!raw) return '';
+    if (lower.includes('okx marked honeypot')) return 'OKX 标记为貔貅盘';
+    if (lower.includes('okx marked low liquidity')) return 'OKX 标记为低流动性';
+    if (lower.startsWith('okx risk level:')) {
+        return `OKX 风险等级: ${tokenRiskLevelToChinese(raw.split(':').slice(1).join(':'))}`;
+    }
+    if (lower.startsWith('okx risk lookup failed:')) {
+        return `OKX 风控查询失败: ${raw.split(':').slice(1).join(':').trim()}`;
+    }
+    if (lower.includes('429') || lower.includes('too many')) return 'OKX 风控接口限流，已延后后台刷新';
+    if (lower.includes('advanced-info returned empty data')) return 'OKX advanced-info 未返回风控数据';
+    if (lower.includes('low liquidity')) return raw.replace(/low liquidity/ig, '低流动性');
+    if (lower.includes('honeypot')) return raw.replace(/honeypot/ig, '貔貅盘');
+    return raw;
+}
+
 export function normalizeTokenRisk(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const level = Number(value.risk_control_level);
     const warnings = Array.isArray(value.warnings)
-        ? value.warnings.map((item) => String(item || '').trim()).filter(Boolean)
+        ? value.warnings.map(tokenRiskWarningToChinese).filter(Boolean)
         : [];
     const tags = Array.isArray(value.token_tags)
         ? value.token_tags.map((item) => String(item || '').trim()).filter(Boolean)
@@ -81,7 +120,7 @@ export function normalizeTokenRisk(value) {
     return {
         ...value,
         risk_control_level: Number.isFinite(level) ? level : 0,
-        risk_control_label: TOKEN_RISK_LEVEL_LABELS[Number.isFinite(level) ? level : 0] || String(value.risk_control_label || '').trim() || '未知',
+        risk_control_label: TOKEN_RISK_LEVEL_LABELS[Number.isFinite(level) ? level : 0] || tokenRiskLevelToChinese(value.risk_control_label) || '未知',
         risk_tone: String(value.risk_tone || '').trim() || 'unknown',
         token_symbol: String(value.token_symbol || '').trim(),
         token_address: normalizeHexAddress(value.token_address),
@@ -89,7 +128,7 @@ export function normalizeTokenRisk(value) {
         has_low_liquidity: Boolean(value.has_low_liquidity),
         warnings,
         token_tags: tags,
-        error: String(value.error || '').trim(),
+        error: tokenRiskWarningToChinese(value.error),
     };
 }
 
