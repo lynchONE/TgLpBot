@@ -823,7 +823,7 @@ func normalizeDeFiUserAssetWalletPayload(items []DeFiWalletAddressRequest) ([]De
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		chainIndex := strings.TrimSpace(item.ChainIndex)
-		walletAddress := strings.ToLower(strings.TrimSpace(item.WalletAddress))
+		walletAddress := normalizeDeFiUserAssetWalletAddress(item.WalletAddress)
 		if chainIndex == "" || walletAddress == "" {
 			continue
 		}
@@ -841,6 +841,17 @@ func normalizeDeFiUserAssetWalletPayload(items []DeFiWalletAddressRequest) ([]De
 		return nil, fmt.Errorf("walletAddressList with chainIndex and walletAddress is required")
 	}
 	return out, nil
+}
+
+func normalizeDeFiUserAssetWalletAddress(value string) string {
+	walletAddress := strings.TrimSpace(value)
+	if len(walletAddress) == 42 && strings.HasPrefix(walletAddress, "0x") {
+		return strings.ToLower(walletAddress)
+	}
+	if len(walletAddress) == 42 && strings.HasPrefix(walletAddress, "0X") {
+		return "0x" + strings.ToLower(walletAddress[2:])
+	}
+	return walletAddress
 }
 
 func (s *OKXDexService) doDeFiUserAssetPost(ctx context.Context, path string, payload interface{}) (*DeFiUserAssetResponse, error) {

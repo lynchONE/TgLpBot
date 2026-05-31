@@ -868,6 +868,13 @@ function normalizeWalletAddress(value) {
     return `0x${raw.slice(2).toLowerCase()}`;
 }
 
+function normalizeOKXDeFiWalletAddress(value) {
+    const raw = String(value || '').trim();
+    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) return `0x${raw.slice(2).toLowerCase()}`;
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(raw)) return raw;
+    return '';
+}
+
 function getBrandFocusRingClass(brand) {
     return brand?.key === 'emerald'
         ? 'focus:ring-emerald-500'
@@ -1146,6 +1153,12 @@ function okxDeFiChainText(item) {
     const balanceNames = balances.map((row) => String(row?.chain_name || row?.chain_index || '').trim()).filter(Boolean);
     if (balanceNames.length > 0) return balanceNames.join(' / ');
     return '--';
+}
+
+function okxDeFiStatusText(item) {
+    return item?.status === 'updating' || item?.asset_status === '2'
+        ? 'OKX 正在更新该钱包 DeFi 数据，请稍后刷新'
+        : 'OKX 未返回该钱包的 DeFi 平台数据';
 }
 
 function formatHeatmapRate(value) {
@@ -1784,7 +1797,7 @@ function OKXDeFiOverviewPanel({ apiBaseUrl, walletAddress, brand }) {
     const [selectedPlatform, setSelectedPlatform] = useState(null);
 
     useEffect(() => {
-        const address = normalizeWalletAddress(walletAddress);
+        const address = normalizeOKXDeFiWalletAddress(walletAddress);
         if (!address) {
             setOverview(null);
             setLoading(false);
@@ -1862,7 +1875,7 @@ function OKXDeFiOverviewPanel({ apiBaseUrl, walletAddress, brand }) {
 
                     {platforms.length === 0 ? (
                         <div className="mt-3 rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-6 text-center text-sm text-zinc-500">
-                            OKX 未返回该钱包的 DeFi 平台数据
+                            {okxDeFiStatusText(overview)}
                         </div>
                     ) : (
                         <div className="mt-3 space-y-2">

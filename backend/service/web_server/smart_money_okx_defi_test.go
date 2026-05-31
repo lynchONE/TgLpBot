@@ -30,6 +30,69 @@ func TestHandleSMDeFiDetail_RequiresPlatformID(t *testing.T) {
 	}
 }
 
+func TestOKXDeFiNormalizeWalletAddress_AcceptsSolana(t *testing.T) {
+	addr := "9xQeWvG816bUx9EPjHmaT23yvVM2ZW57QbZz3Mz1Yw7"
+	if got := okxDeFiNormalizeWalletAddress(addr); got != addr {
+		t.Fatalf("expected Solana address to be preserved, got %q", got)
+	}
+
+	if got := okxDeFiNormalizeWalletAddress("0xABCDEFabcdefABCDEFabcdefABCDEFabcdefabcd"); got != "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" {
+		t.Fatalf("expected EVM address to be lower-cased, got %q", got)
+	}
+
+	if got := okxDeFiNormalizeWalletAddress("0OIl"); got != "" {
+		t.Fatalf("expected invalid address to be rejected, got %q", got)
+	}
+}
+
+func TestOKXDeFiRequestedChainIndexes_IncludesSolana(t *testing.T) {
+	defaults := okxDeFiRequestedChainIndexes(nil)
+	hasSolana := false
+	for _, chainIndex := range defaults {
+		if chainIndex == "501" {
+			hasSolana = true
+			break
+		}
+	}
+	if !hasSolana {
+		t.Fatalf("expected default chain indexes to include Solana 501, got %+v", defaults)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sm/defi_overview?chain=solana", nil)
+	indexes := okxDeFiRequestedChainIndexes(req)
+	if len(indexes) != 1 || indexes[0] != "501" {
+		t.Fatalf("expected chain=solana to normalize to 501, got %+v", indexes)
+	}
+	if name := okxDeFiChainName("501"); name != "Solana" {
+		t.Fatalf("expected Solana chain name, got %q", name)
+	}
+}
+
+func TestOKXDeFiCompatibleChainIndexes_MatchesWalletType(t *testing.T) {
+	evmWallet := "0x1111111111111111111111111111111111111111"
+	solanaWallet := "9xQeWvG816bUx9EPjHmaT23yvVM2ZW57QbZz3Mz1Yw7"
+	defaults := okxDeFiDefaultChainIndexes()
+
+	evmChains := okxDeFiCompatibleChainIndexes(evmWallet, defaults)
+	for _, chainIndex := range evmChains {
+		if chainIndex == "501" {
+			t.Fatalf("expected EVM wallet to exclude Solana, got %+v", evmChains)
+		}
+	}
+	if len(evmChains) == 0 {
+		t.Fatalf("expected EVM wallet to keep EVM chains")
+	}
+
+	solanaChains := okxDeFiCompatibleChainIndexes(solanaWallet, defaults)
+	if len(solanaChains) != 1 || solanaChains[0] != "501" {
+		t.Fatalf("expected Solana wallet to keep only 501, got %+v", solanaChains)
+	}
+
+	if got := okxDeFiCompatibleChainIndexes(evmWallet, []string{"501"}); len(got) != 0 {
+		t.Fatalf("expected incompatible requested chain to be rejected, got %+v", got)
+	}
+}
+
 func TestOKXDeFiNormalizeOverview_OfficialPlatformListShape(t *testing.T) {
 	raw := json.RawMessage(`[
 		{
@@ -75,6 +138,32 @@ func TestOKXDeFiNormalizeOverview_OfficialPlatformListShape(t *testing.T) {
 	}
 	if len(platform.NetworkBalances) != 1 || platform.NetworkBalances[0].TotalValue != "100.5" {
 		t.Fatalf("unexpected network balances: %+v", platform.NetworkBalances)
+	}
+}
+
+func TestOKXDeFiNormalizeOverview_AssetUpdating(t *testing.T) {
+	raw := json.RawMessage(`[
+		{
+			"walletIdPlatformList": [
+				{
+					"walletAddress": "0x1111111111111111111111111111111111111111",
+					"assetStatus": "2",
+					"totalAssets": "0",
+					"platformList": []
+				}
+			]
+		}
+	]`)
+
+	out, err := okxDeFiNormalizeOverview("0x1111111111111111111111111111111111111111", []string{"56"}, raw, time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if out.Status != "updating" || out.AssetStatus != "2" {
+		t.Fatalf("expected updating status, got %+v", out)
+	}
+	if len(out.Warnings) == 0 || out.Warnings[0] != "OKX DeFi asset data is still updating" {
+		t.Fatalf("expected updating warning, got %+v", out.Warnings)
 	}
 }
 

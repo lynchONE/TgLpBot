@@ -343,6 +343,50 @@ func TestGetDeFiUserAssetPlatformList_PostsWalletAddressList(t *testing.T) {
 	}
 }
 
+func TestGetDeFiUserAssetPlatformList_PreservesSolanaWalletAddress(t *testing.T) {
+	solanaWallet := "9xQeWvG816bUx9EPjHmaT23yvVM2ZW57QbZz3Mz1Yw7"
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			rawBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("failed to read request body: %v", err)
+			}
+			var payload DeFiUserAssetPlatformListRequest
+			if err := json.Unmarshal(rawBody, &payload); err != nil {
+				t.Fatalf("failed to parse request body: %v", err)
+			}
+			if len(payload.WalletAddressList) != 2 {
+				t.Fatalf("expected two wallet requests, got %+v", payload.WalletAddressList)
+			}
+			if got := payload.WalletAddressList[0].WalletAddress; got != solanaWallet {
+				t.Fatalf("expected Solana wallet address to be preserved, got %q", got)
+			}
+			if got := payload.WalletAddressList[1].WalletAddress; got != "0x1111111111111111111111111111111111111111" {
+				t.Fatalf("expected EVM wallet address to be lower-cased, got %q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	_, err := svc.GetDeFiUserAssetPlatformList(context.Background(), DeFiUserAssetPlatformListRequest{
+		WalletAddressList: []DeFiWalletAddressRequest{
+			{ChainIndex: "501", WalletAddress: solanaWallet},
+			{ChainIndex: "56", WalletAddress: "0x1111111111111111111111111111111111111111"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
 func TestGetDeFiUserAssetPlatformDetail_PostsPlatformList(t *testing.T) {
 	svc := &OKXDexService{
 		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",

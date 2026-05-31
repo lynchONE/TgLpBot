@@ -39,6 +39,7 @@ type smOKXDeFiDetailCacheEntry struct {
 type smOKXDeFiOverviewResponse struct {
 	Source        string                     `json:"source"`
 	Status        string                     `json:"status"`
+	AssetStatus   string                     `json:"asset_status,omitempty"`
 	WalletAddress string                     `json:"wallet_address"`
 	ChainIndexes  []string                   `json:"chain_indexes"`
 	ChainNames    []string                   `json:"chain_names"`
@@ -54,6 +55,7 @@ type smOKXDeFiOverviewResponse struct {
 type smOKXDeFiDetailResponse struct {
 	Source             string                   `json:"source"`
 	Status             string                   `json:"status"`
+	AssetStatus        string                   `json:"asset_status,omitempty"`
 	WalletAddress      string                   `json:"wallet_address"`
 	AnalysisPlatformID string                   `json:"analysis_platform_id"`
 	ChainIndex         string                   `json:"chain_index,omitempty"`
@@ -163,6 +165,11 @@ func (s *Server) handleSMDeFiOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chainIndexes := okxDeFiRequestedChainIndexes(r)
+	chainIndexes = okxDeFiCompatibleChainIndexes(walletAddress, chainIndexes)
+	if len(chainIndexes) == 0 {
+		jsonError(w, "wallet address is not compatible with requested chain_index", http.StatusBadRequest)
+		return
+	}
 	cacheKey := okxDeFiCacheKey("overview", walletAddress, "", chainIndexes)
 	if payload, ok := okxDeFiGetOverviewCache(cacheKey); ok {
 		payload.CacheHit = true
@@ -186,7 +193,9 @@ func (s *Server) handleSMDeFiOverview(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "OKX DeFi overview parse failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	okxDeFiSetOverviewCache(cacheKey, payload)
+	if payload.Status != "updating" {
+		okxDeFiSetOverviewCache(cacheKey, payload)
+	}
 	jsonOK(w, payload)
 }
 
@@ -223,6 +232,11 @@ func (s *Server) handleSMDeFiDetail(w http.ResponseWriter, r *http.Request) {
 	if requestedChainIndex != "" {
 		chainIndexes = []string{requestedChainIndex}
 	}
+	chainIndexes = okxDeFiCompatibleChainIndexes(walletAddress, chainIndexes)
+	if len(chainIndexes) == 0 {
+		jsonError(w, "wallet address is not compatible with requested chain_index", http.StatusBadRequest)
+		return
+	}
 
 	cacheKey := okxDeFiCacheKey("detail", walletAddress, platformID+"|"+requestedChainIndex, chainIndexes)
 	if payload, ok := okxDeFiGetDetailCache(cacheKey); ok {
@@ -252,7 +266,9 @@ func (s *Server) handleSMDeFiDetail(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "OKX DeFi detail parse failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	okxDeFiSetDetailCache(cacheKey, payload)
+	if payload.Status != "updating" {
+		okxDeFiSetDetailCache(cacheKey, payload)
+	}
 	jsonOK(w, payload)
 }
 
@@ -269,18 +285,37 @@ func okxDeFiWalletAddressRequests(walletAddress string, chainIndexes []string) [
 
 func okxDeFiNormalizeWalletAddress(value string) string {
 	addr := strings.TrimSpace(value)
-	if len(addr) != 42 {
-		return ""
+	if okxDeFiIsEVMWalletAddress(addr) {
+		return "0x" + strings.ToLower(addr[2:])
 	}
-	if !strings.HasPrefix(addr, "0x") && !strings.HasPrefix(addr, "0X") {
-		return ""
+	if okxDeFiIsSolanaWalletAddress(addr) {
+		return addr
+	}
+	return ""
+}
+
+func okxDeFiIsEVMWalletAddress(addr string) bool {
+	if len(addr) != 42 || (!strings.HasPrefix(addr, "0x") && !strings.HasPrefix(addr, "0X")) {
+		return false
 	}
 	for _, c := range addr[2:] {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return ""
+			return false
 		}
 	}
-	return "0x" + strings.ToLower(addr[2:])
+	return true
+}
+
+func okxDeFiIsSolanaWalletAddress(addr string) bool {
+	if len(addr) < 32 || len(addr) > 44 {
+		return false
+	}
+	for _, c := range addr {
+		if !((c >= '1' && c <= '9') || (c >= 'A' && c <= 'H') || (c >= 'J' && c <= 'N') || (c >= 'P' && c <= 'Z') || (c >= 'a' && c <= 'k') || (c >= 'm' && c <= 'z')) {
+			return false
+		}
+	}
+	return true
 }
 
 func okxDeFiRequestedChainIndexes(r *http.Request) []string {
@@ -303,7 +338,30 @@ func okxDeFiRequestedChainIndexes(r *http.Request) []string {
 }
 
 func okxDeFiDefaultChainIndexes() []string {
-	return []string{"56", "8453", "1", "42161", "10", "137", "43114"}
+	return []string{"56", "501", "8453", "1", "42161", "10", "137", "43114"}
+}
+
+func okxDeFiCompatibleChainIndexes(walletAddress string, chainIndexes []string) []string {
+	isSolana := okxDeFiIsSolanaWalletAddress(walletAddress)
+	isEVM := okxDeFiIsEVMWalletAddress(walletAddress)
+	if !isSolana && !isEVM {
+		return nil
+	}
+
+	out := make([]string, 0, len(chainIndexes))
+	for _, chainIndex := range chainIndexes {
+		switch strings.TrimSpace(chainIndex) {
+		case "501":
+			if isSolana {
+				out = append(out, chainIndex)
+			}
+		default:
+			if isEVM {
+				out = append(out, chainIndex)
+			}
+		}
+	}
+	return out
 }
 
 func okxDeFiNormalizeChainIndexes(values []string) []string {
@@ -353,6 +411,8 @@ func okxDeFiChainIndex(raw string) string {
 		return "137"
 	case "avax", "avalanche":
 		return "43114"
+	case "sol", "solana":
+		return "501"
 	default:
 		if _, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return value
@@ -377,6 +437,8 @@ func okxDeFiChainName(chainIndex string) string {
 		return "Polygon"
 	case "43114":
 		return "Avalanche"
+	case "501":
+		return "Solana"
 	default:
 		if strings.TrimSpace(chainIndex) == "" {
 			return ""
@@ -447,6 +509,7 @@ func okxDeFiNormalizeOverview(walletAddress string, chainIndexes []string, raw j
 		return smOKXDeFiOverviewResponse{}, err
 	}
 	dataMaps := okxDeFiMapsFromValue(root)
+	allMaps := okxDeFiAllMaps(root)
 	platformMaps := okxDeFiCollectMapsByKeys(root, okxDeFiPlatformArrayKeys())
 	if len(platformMaps) == 0 {
 		platformMaps = okxDeFiCollectLooksLikePlatform(root)
@@ -458,11 +521,18 @@ func okxDeFiNormalizeOverview(walletAddress string, chainIndexes []string, raw j
 	if totalValue == "" && len(walletPlatformMaps) > 0 {
 		totalValue, totalValueUSD = okxDeFiFirstAmount(walletPlatformMaps, okxDeFiTotalValueKeys()...)
 	}
+	assetStatus := okxDeFiFirstString(allMaps, "assetStatus")
+	status := "ok"
 	chains := okxDeFiNormalizeChains(chainMaps)
 	platforms := okxDeFiNormalizePlatforms(platformMaps)
 	warnings := make([]string, 0, 2)
 	if len(platforms) == 0 {
-		warnings = append(warnings, "OKX DeFi platform list returned no platform data")
+		if assetStatus == "2" {
+			status = "updating"
+			warnings = append(warnings, "OKX DeFi asset data is still updating")
+		} else {
+			warnings = append(warnings, "OKX DeFi platform list returned no platform data")
+		}
 	}
 	if totalValue != "" && totalValueUSD == nil {
 		warnings = append(warnings, "OKX DeFi total value is not numeric")
@@ -470,7 +540,8 @@ func okxDeFiNormalizeOverview(walletAddress string, chainIndexes []string, raw j
 
 	return smOKXDeFiOverviewResponse{
 		Source:        "okx_defi",
-		Status:        "ok",
+		Status:        status,
+		AssetStatus:   assetStatus,
 		WalletAddress: walletAddress,
 		ChainIndexes:  append([]string(nil), chainIndexes...),
 		ChainNames:    okxDeFiChainNames(chainIndexes),
@@ -488,6 +559,7 @@ func okxDeFiNormalizeDetail(walletAddress string, platformID string, requestedCh
 	if err != nil {
 		return smOKXDeFiDetailResponse{}, err
 	}
+	allMaps := okxDeFiAllMaps(root)
 	platformMaps := okxDeFiCollectMapsByKeys(root, okxDeFiPlatformArrayKeys())
 	if len(platformMaps) == 0 {
 		platformMaps = okxDeFiCollectLooksLikePlatform(root)
@@ -529,9 +601,16 @@ func okxDeFiNormalizeDetail(walletAddress string, platformID string, requestedCh
 	}
 	feeValue, feeUSD := okxDeFiFeeAmount(selectedPlatform)
 
+	assetStatus := okxDeFiFirstString(allMaps, "assetStatus")
+	status := "ok"
 	warnings := make([]string, 0, 2)
 	if len(positions) == 0 && len(investments) == 0 {
-		warnings = append(warnings, "OKX DeFi detail returned no investment or position rows")
+		if assetStatus == "2" {
+			status = "updating"
+			warnings = append(warnings, "OKX DeFi asset data is still updating")
+		} else {
+			warnings = append(warnings, "OKX DeFi detail returned no investment or position rows")
+		}
 	}
 	if totalValue != "" && totalValueUSD == nil {
 		warnings = append(warnings, "OKX DeFi detail total value is not numeric")
@@ -539,7 +618,8 @@ func okxDeFiNormalizeDetail(walletAddress string, platformID string, requestedCh
 
 	return smOKXDeFiDetailResponse{
 		Source:             "okx_defi",
-		Status:             "ok",
+		Status:             status,
+		AssetStatus:        assetStatus,
 		WalletAddress:      walletAddress,
 		AnalysisPlatformID: platformID,
 		ChainIndex:         platform.ChainIndex,
@@ -588,6 +668,29 @@ func okxDeFiMapsFromValue(value interface{}) []map[string]interface{} {
 	default:
 		return nil
 	}
+}
+
+func okxDeFiAllMaps(value interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0)
+	var walk func(interface{})
+	walk = func(current interface{}) {
+		switch typed := current.(type) {
+		case map[string]interface{}:
+			out = append(out, typed)
+			for _, value := range typed {
+				switch value.(type) {
+				case map[string]interface{}, []interface{}:
+					walk(value)
+				}
+			}
+		case []interface{}:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(value)
+	return out
 }
 
 func okxDeFiCollectMapsByKeys(value interface{}, keys map[string]struct{}) []map[string]interface{} {
@@ -1002,6 +1105,16 @@ func okxDeFiFirstAmount(items []map[string]interface{}, keys ...string) (string,
 		}
 	}
 	return "", nil
+}
+
+func okxDeFiFirstString(items []map[string]interface{}, keys ...string) string {
+	for _, item := range items {
+		value := okxDeFiString(item, keys...)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func okxDeFiAmount(item map[string]interface{}, keys ...string) (string, *float64) {
