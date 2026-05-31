@@ -266,6 +266,51 @@ type AllTokenBalancesResponse struct {
 	} `json:"data"`
 }
 
+type DeFiWalletAddressRequest struct {
+	ChainIndex    string `json:"chainIndex"`
+	WalletAddress string `json:"walletAddress"`
+}
+
+type DeFiUserAssetPlatformListRequest struct {
+	WalletAddressList []DeFiWalletAddressRequest `json:"walletAddressList"`
+}
+
+type DeFiPlatformRequest struct {
+	AnalysisPlatformID string `json:"analysisPlatformId"`
+	ChainIndex         string `json:"chainIndex,omitempty"`
+}
+
+type DeFiUserAssetPlatformDetailRequest struct {
+	WalletAddressList []DeFiWalletAddressRequest `json:"walletAddressList"`
+	PlatformList      []DeFiPlatformRequest      `json:"platformList"`
+}
+
+type DeFiUserAssetResponse struct {
+	Code string          `json:"code"`
+	Msg  string          `json:"msg"`
+	Data json.RawMessage `json:"data"`
+}
+
+func (r *DeFiUserAssetResponse) UnmarshalJSON(body []byte) error {
+	var raw struct {
+		Code json.RawMessage `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return err
+	}
+	code := strings.TrimSpace(string(raw.Code))
+	if len(raw.Code) > 0 {
+		if err := json.Unmarshal(raw.Code, &r.Code); err != nil {
+			r.Code = strings.Trim(code, `"`)
+		}
+	}
+	r.Msg = raw.Msg
+	r.Data = raw.Data
+	return nil
+}
+
 func (e *OKXAPIError) Error() string {
 	if e == nil {
 		return "OKX API error"
@@ -295,6 +340,29 @@ func (s *OKXDexService) marketAPIURL() string {
 		return base
 	}
 	return "https://web3.okx.com/api/v6/dex/market"
+}
+
+func (s *OKXDexService) defiUserAssetAPIURL() string {
+	base := strings.TrimSpace(s.apiURL)
+	if base == "" {
+		return "https://web3.okx.com/api/v6/defi/user/asset"
+	}
+	base = strings.TrimRight(base, "/")
+	base = strings.Replace(base, "https://www.okx.com/", "https://web3.okx.com/", 1)
+	replacer := strings.NewReplacer(
+		"/api/v6/dex/aggregator", "/api/v6/defi/user/asset",
+		"/api/v5/dex/aggregator", "/api/v6/defi/user/asset",
+		"/api/v6/dex/market", "/api/v6/defi/user/asset",
+		"/api/v5/dex/market", "/api/v6/defi/user/asset",
+	)
+	next := replacer.Replace(base)
+	if next != base {
+		return next
+	}
+	if strings.Contains(base, "/api/v6/defi/user/asset") {
+		return base
+	}
+	return "https://web3.okx.com/api/v6/defi/user/asset"
 }
 
 func normalizeOKXSwapFeePercent(raw string, chainID string) string {
@@ -704,6 +772,121 @@ func (s *OKXDexService) GetMarketTokenAdvancedInfo(ctx context.Context, req Mark
 	}
 	if out.Code != "0" {
 		return nil, &OKXAPIError{Endpoint: "market/token/advanced-info", Code: out.Code, Msg: out.Msg}
+	}
+	return &out, nil
+}
+
+func (s *OKXDexService) GetDeFiUserAssetPlatformList(ctx context.Context, req DeFiUserAssetPlatformListRequest) (*DeFiUserAssetResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload, err := normalizeDeFiUserAssetWalletPayload(req.WalletAddressList)
+	if err != nil {
+		return nil, err
+	}
+	return s.doDeFiUserAssetPost(ctx, "platform/list", DeFiUserAssetPlatformListRequest{
+		WalletAddressList: payload,
+	})
+}
+
+func (s *OKXDexService) GetDeFiUserAssetPlatformDetail(ctx context.Context, req DeFiUserAssetPlatformDetailRequest) (*DeFiUserAssetResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	walletPayload, err := normalizeDeFiUserAssetWalletPayload(req.WalletAddressList)
+	if err != nil {
+		return nil, err
+	}
+	platformPayload := make([]DeFiPlatformRequest, 0, len(req.PlatformList))
+	for _, item := range req.PlatformList {
+		platformID := strings.TrimSpace(item.AnalysisPlatformID)
+		if platformID == "" {
+			continue
+		}
+		platformPayload = append(platformPayload, DeFiPlatformRequest{
+			AnalysisPlatformID: platformID,
+			ChainIndex:         strings.TrimSpace(item.ChainIndex),
+		})
+	}
+	if len(platformPayload) == 0 {
+		return nil, fmt.Errorf("analysisPlatformId is required")
+	}
+
+	return s.doDeFiUserAssetPost(ctx, "platform/detail", DeFiUserAssetPlatformDetailRequest{
+		WalletAddressList: walletPayload,
+		PlatformList:      platformPayload,
+	})
+}
+
+func normalizeDeFiUserAssetWalletPayload(items []DeFiWalletAddressRequest) ([]DeFiWalletAddressRequest, error) {
+	out := make([]DeFiWalletAddressRequest, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		chainIndex := strings.TrimSpace(item.ChainIndex)
+		walletAddress := strings.ToLower(strings.TrimSpace(item.WalletAddress))
+		if chainIndex == "" || walletAddress == "" {
+			continue
+		}
+		key := chainIndex + "|" + walletAddress
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, DeFiWalletAddressRequest{
+			ChainIndex:    chainIndex,
+			WalletAddress: walletAddress,
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("walletAddressList with chainIndex and walletAddress is required")
+	}
+	return out, nil
+}
+
+func (s *OKXDexService) doDeFiUserAssetPost(ctx context.Context, path string, payload interface{}) (*DeFiUserAssetResponse, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	path = strings.Trim(path, "/")
+	endpoint := fmt.Sprintf("%s/%s", s.defiUserAssetAPIURL(), path)
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX DeFi] request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeaders(httpReq, string(body), timestamp)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("OKX defi/user/asset/%s http %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX DeFi] raw response: %s", string(respBody))
+	}
+
+	var out DeFiUserAssetResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if out.Code != "0" {
+		return nil, &OKXAPIError{Endpoint: "defi/user/asset/" + path, Code: out.Code, Msg: out.Msg}
 	}
 	return &out, nil
 }

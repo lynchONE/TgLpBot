@@ -27,6 +27,15 @@ func TestMarketAPIURL_RewritesAggregatorBase(t *testing.T) {
 	}
 }
 
+func TestDeFiUserAssetAPIURL_RewritesAggregatorBase(t *testing.T) {
+	svc := &OKXDexService{apiURL: "https://www.okx.com/api/v6/dex/aggregator"}
+	got := svc.defiUserAssetAPIURL()
+	want := "https://web3.okx.com/api/v6/defi/user/asset"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
 func TestNormalizeMarketCandlesRows_ParsesOfficialOrder(t *testing.T) {
 	rows := normalizeMarketCandlesRows([][]string{
 		{"1710000000000", "1.0", "1.2", "0.9", "1.1", "123.45", "234.56", "1"},
@@ -279,5 +288,136 @@ func TestGetAllTokenBalances_UsesChainsParameter(t *testing.T) {
 	}
 	if len(resp.Data) != 1 {
 		t.Fatalf("expected one data row, got %+v", resp.Data)
+	}
+}
+
+func TestGetDeFiUserAssetPlatformList_PostsWalletAddressList(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("expected POST request, got %s", req.Method)
+			}
+			if req.URL.String() != "https://web3.okx.com/api/v6/defi/user/asset/platform/list" {
+				t.Fatalf("unexpected request url: %s", req.URL.String())
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			rawBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("failed to read request body: %v", err)
+			}
+			var payload DeFiUserAssetPlatformListRequest
+			if err := json.Unmarshal(rawBody, &payload); err != nil {
+				t.Fatalf("failed to parse request body: %v", err)
+			}
+			if len(payload.WalletAddressList) != 2 {
+				t.Fatalf("expected two wallet requests, got %+v", payload.WalletAddressList)
+			}
+			if payload.WalletAddressList[0].ChainIndex != "56" || payload.WalletAddressList[0].WalletAddress != "0x1111111111111111111111111111111111111111" {
+				t.Fatalf("unexpected first wallet request: %+v", payload.WalletAddressList[0])
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"totalValue":"123.45","platformList":[]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetDeFiUserAssetPlatformList(context.Background(), DeFiUserAssetPlatformListRequest{
+		WalletAddressList: []DeFiWalletAddressRequest{
+			{ChainIndex: "56", WalletAddress: "0x1111111111111111111111111111111111111111"},
+			{ChainIndex: "8453", WalletAddress: "0x1111111111111111111111111111111111111111"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if resp == nil || resp.Code != "0" || !strings.Contains(string(resp.Data), "platformList") {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetDeFiUserAssetPlatformDetail_PostsPlatformList(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("expected POST request, got %s", req.Method)
+			}
+			if req.URL.String() != "https://web3.okx.com/api/v6/defi/user/asset/platform/detail" {
+				t.Fatalf("unexpected request url: %s", req.URL.String())
+			}
+			rawBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("failed to read request body: %v", err)
+			}
+			var payload DeFiUserAssetPlatformDetailRequest
+			if err := json.Unmarshal(rawBody, &payload); err != nil {
+				t.Fatalf("failed to parse request body: %v", err)
+			}
+			if len(payload.PlatformList) != 1 {
+				t.Fatalf("expected one platform request, got %+v", payload.PlatformList)
+			}
+			if payload.PlatformList[0].AnalysisPlatformID != "123" || payload.PlatformList[0].ChainIndex != "56" {
+				t.Fatalf("unexpected platform request: %+v", payload.PlatformList[0])
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"analysisPlatformId":"123","platformName":"PancakeSwap","investmentList":[]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetDeFiUserAssetPlatformDetail(context.Background(), DeFiUserAssetPlatformDetailRequest{
+		WalletAddressList: []DeFiWalletAddressRequest{
+			{ChainIndex: "56", WalletAddress: "0x1111111111111111111111111111111111111111"},
+		},
+		PlatformList: []DeFiPlatformRequest{
+			{AnalysisPlatformID: "123", ChainIndex: "56"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if resp == nil || resp.Code != "0" || !strings.Contains(string(resp.Data), "PancakeSwap") {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetDeFiUserAssetPlatformList_ReturnsAPIError(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"51000","msg":"invalid request","data":[]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	_, err := svc.GetDeFiUserAssetPlatformList(context.Background(), DeFiUserAssetPlatformListRequest{
+		WalletAddressList: []DeFiWalletAddressRequest{
+			{ChainIndex: "56", WalletAddress: "0x1111111111111111111111111111111111111111"},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected API error")
+	}
+	if !strings.Contains(err.Error(), "51000") {
+		t.Fatalf("expected code in error, got %v", err)
 	}
 }

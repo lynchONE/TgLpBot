@@ -93,6 +93,8 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/pool_fee_heatmap", s.handleSMPoolFeeHeatmap)
 	mux.HandleFunc("/api/sm/positions", s.handleSMPositions)
 	mux.HandleFunc("/api/sm/position_detail", s.handleSMPositionDetail)
+	mux.HandleFunc("/api/sm/defi_overview", s.handleSMDeFiOverview)
+	mux.HandleFunc("/api/sm/defi_detail", s.handleSMDeFiDetail)
 	mux.HandleFunc("/api/sm/events", s.handleSMEvents)
 	mux.HandleFunc("/api/sm/stats", s.handleSMStats)
 	mux.HandleFunc("/api/smart_money_golden_dog_config", s.handleSmartMoneyGoldenDogConfig)
@@ -131,6 +133,10 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMPositions(w, r)
 		case "position_detail":
 			s.handleSMPositionDetail(w, r)
+		case "defi_overview":
+			s.handleSMDeFiOverview(w, r)
+		case "defi_detail":
+			s.handleSMDeFiDetail(w, r)
 		case "events":
 			s.handleSMEvents(w, r)
 		case "stats":
@@ -156,7 +162,7 @@ func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
 
 func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
-	case "wallets", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
+	case "wallets", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "defi_overview", "defi_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
 	case "watch_activity":
 		return "/api/smart_money_watch_activity", true
