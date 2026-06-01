@@ -81,7 +81,9 @@
       "Bash(pkill -f \"vite$\")",
       "Bash(pkill -f \"node.*vite\")",
       "Bash(xargs cat)",
-      "Bash(./node_modules/.bin/vite --version)"
+      "Bash(./node_modules/.bin/vite --version)",
+      "Bash(sed -n '1304,1320p' src/App.jsx)",
+      "Bash(ls node_modules/jsdom)"
     ]
   }
 }

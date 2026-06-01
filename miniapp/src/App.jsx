@@ -1309,8 +1309,13 @@ export default function App() {
     }, [openPositionAmount, openPositionSlippage]);
     const openPositionStep1Valid = useMemo(() => {
         if (openPositionRangeInputMode === 'percentage') {
-            const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
-            return Boolean(range) && range.lower > 0 && range.upper > 0 && range.lower < 100 && range.upper < 100;
+            // 内联等价于 parseRangeInput（该函数定义在本 memo 之后，此处直接调用会触发 TDZ）
+            const lowerN = Number(String(openPositionRangeLower || '').trim());
+            const upperN = Number(String(openPositionRangeUpper || '').trim());
+            if (!Number.isFinite(lowerN) || !Number.isFinite(upperN)) return false;
+            const lower = Math.abs(lowerN);
+            const upper = Math.abs(upperN);
+            return lower > 0 && upper > 0 && lower < 100 && upper < 100;
         }
         return Number.isInteger(openPositionSelectedManualTickLower)
             && Number.isInteger(openPositionSelectedManualTickUpper)

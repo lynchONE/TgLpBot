@@ -19,8 +19,88 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-push:
+  detect-changes:
     runs-on: ubuntu-latest
+
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      webapp: ${{ steps.changes.outputs.webapp }}
+      miniapp: ${{ steps.changes.outputs.miniapp }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed image contexts
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          backend=false
+          webapp=false
+          miniapp=false
+
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            backend=true
+            webapp=true
+            miniapp=true
+          else
+            before="${{ github.event.before }}"
+            current="${{ github.sha }}"
+
+            if [[ "$before" == "0000000000000000000000000000000000000000" ]]; then
+              backend=true
+              webapp=true
+              miniapp=true
+            else
+              if ! git cat-file -e "$before^{commit}"; then
+                backend=true
+                webapp=true
+                miniapp=true
+              else
+                changed_files="$(git diff --name-only "$before" "$current")"
+
+                if printf '%s\n' "$changed_files" | grep -Eq '^backend/'; then
+                  backend=true
+                fi
+
+                if printf '%s\n' "$changed_files" | grep -Eq '^webapp/'; then
+                  webapp=true
+                fi
+
+                if printf '%s\n' "$changed_files" | grep -Eq '^miniapp/'; then
+                  miniapp=true
+                fi
+
+                if printf '%s\n' "$changed_files" | grep -Fxq '.github/workflows/docker-image.yml'; then
+                  backend=true
+                  webapp=true
+                  miniapp=true
+                fi
+              fi
+            fi
+          fi
+
+          {
+            echo "backend=$backend"
+            echo "webapp=$webapp"
+            echo "miniapp=$miniapp"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Image build selection"
+            echo "- backend: $backend"
+            echo "- webapp: $webapp"
+            echo "- miniapp: $miniapp"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-backend:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
 
     steps:
       - name: Checkout repository
@@ -51,8 +131,30 @@ jobs:
             lynchone/repo:tglpbot-${{ steps.image-tags.outputs.short_sha }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+  build-webapp:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.webapp == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: lynchone
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare image tags
+        id: image-tags
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push webapp image
         uses: docker/build-push-action@v7
@@ -72,8 +174,30 @@ jobs:
             VITE_DEFAULT_CHAIN=${{ vars.WEBAPP_VITE_DEFAULT_CHAIN }}
             VITE_TELEGRAM_BOT_ID=${{ vars.WEBAPP_VITE_TELEGRAM_BOT_ID }}
             VITE_TELEGRAM_BOT_USERNAME=${{ vars.WEBAPP_VITE_TELEGRAM_BOT_USERNAME }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=webapp
+          cache-to: type=gha,scope=webapp,mode=max
+
+  build-miniapp:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.miniapp == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: lynchone
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare image tags
+        id: image-tags
+        run: echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push miniapp image
         uses: docker/build-push-action@v7
@@ -90,5 +214,5 @@ jobs:
           build-args: |
             VITE_API_BASE_URL=${{ vars.MINIAPP_VITE_API_BASE_URL }}
             VITE_ALLOW_EMPTY_INITDATA=${{ vars.MINIAPP_VITE_ALLOW_EMPTY_INITDATA }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=miniapp
+          cache-to: type=gha,scope=miniapp,mode=max
