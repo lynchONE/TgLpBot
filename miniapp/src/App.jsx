@@ -12,7 +12,7 @@ import GlobalConfigPage from './components/GlobalConfigPage.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
-import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet, ArrowLeftRight } from 'lucide-react';
+import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -1112,6 +1112,7 @@ export default function App() {
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
     const [openPositionPool, setOpenPositionPool] = useState(null);
+    const [openPositionStep, setOpenPositionStep] = useState(0); // 开仓向导当前步：0 资金 / 1 区间 / 2 策略&确认
     const [openPositionAmount, setOpenPositionAmount] = useState('');
     const [openPositionRangeLower, setOpenPositionRangeLower] = useState('');
     const [openPositionRangeUpper, setOpenPositionRangeUpper] = useState('');
@@ -1300,6 +1301,21 @@ export default function App() {
         if (openPositionRangeInputMode === 'price') return openPositionPriceTickRange?.upperTick ?? null;
         return Number.isInteger(openPositionTickUpperValue) ? openPositionTickUpperValue : null;
     }, [openPositionRangeInputMode, openPositionPriceTickRange, openPositionTickUpperValue]);
+    // 向导步骤校验：与 preview useEffect 内的合法性判断保持一致，作为「下一步」按钮的 gate
+    const openPositionStep0Valid = useMemo(() => {
+        const amount = Number(String(openPositionAmount || '').trim());
+        if (!Number.isFinite(amount) || amount <= 0) return false;
+        return parseOptionalPercent(openPositionSlippage).valid;
+    }, [openPositionAmount, openPositionSlippage]);
+    const openPositionStep1Valid = useMemo(() => {
+        if (openPositionRangeInputMode === 'percentage') {
+            const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
+            return Boolean(range) && range.lower > 0 && range.upper > 0 && range.lower < 100 && range.upper < 100;
+        }
+        return Number.isInteger(openPositionSelectedManualTickLower)
+            && Number.isInteger(openPositionSelectedManualTickUpper)
+            && openPositionSelectedManualTickLower < openPositionSelectedManualTickUpper;
+    }, [openPositionRangeInputMode, openPositionRangeLower, openPositionRangeUpper, openPositionSelectedManualTickLower, openPositionSelectedManualTickUpper]);
     const openPositionSyncPriceInputsFromTicks = useCallback((lowerTick, upperTick) => {
         const displayRange = buildDisplayPriceRangeFromTicks(
             lowerTick,
@@ -2710,6 +2726,7 @@ export default function App() {
         setOpenPositionEntrySwapConfirm(true);
         setOpenPositionDCAExpanded(false);
         setOpenPositionTaskMode('pause');
+        setOpenPositionStep(0);
 
         setOpenPositionError('');
         setOpenPositionChecks([]);
@@ -2751,6 +2768,7 @@ export default function App() {
 
     const closeOpenPosition = () => {
         setOpenPositionPool(null);
+        setOpenPositionStep(0);
         setOpenPositionSmartRanges([]);
         setOpenPositionSmartRangesLoading(false);
         setOpenPositionDCAExpanded(false);
@@ -5006,17 +5024,45 @@ export default function App() {
                                         </div>
                                     </div>
                                 ) : null}
-                                <button
-                                    type="button"
-                                    onClick={handleOpenPosition}
-                                    disabled={openPositionSubmitDisabled}
-                                    className={`w-full rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
-                                        ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
-                                        : brand.solidButtonClass
-                                        }`}
-                                >
-                                    {openPositionLoading ? '开仓中...' : '确认开仓'}
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {openPositionStep > 0 ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setOpenPositionStep((s) => Math.max(0, s - 1))}
+                                            disabled={openPositionLoading}
+                                            className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                        >
+                                            <ChevronLeft className="h-4 w-4" />
+                                            上一步
+                                        </button>
+                                    ) : null}
+                                    {openPositionStep < 2 ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setOpenPositionStep((s) => Math.min(2, s + 1))}
+                                            disabled={openPositionStep === 0 ? !openPositionStep0Valid : !openPositionStep1Valid}
+                                            className={`inline-flex flex-1 items-center justify-center gap-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] ${(openPositionStep === 0 ? !openPositionStep0Valid : !openPositionStep1Valid)
+                                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
+                                                : brand.solidButtonClass
+                                                }`}
+                                        >
+                                            下一步
+                                            <ChevronRight className="h-4 w-4" />
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={handleOpenPosition}
+                                            disabled={openPositionSubmitDisabled}
+                                            className={`flex-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
+                                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
+                                                : brand.solidButtonClass
+                                                }`}
+                                        >
+                                            {openPositionLoading ? '开仓中...' : '确认开仓'}
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         }
                         title={
@@ -5028,9 +5074,34 @@ export default function App() {
                             </div>
                         }
                     >
-                        <div className="space-y-3.5 pb-2">
+                        <div className="pb-2">
+                            {/* 步骤指示器 */}
+                            <div className="mb-3 flex items-center gap-1.5">
+                                {[{ k: 0, label: '资金' }, { k: 1, label: '区间' }, { k: 2, label: '确认' }].map((s, i) => {
+                                    const active = openPositionStep === s.k;
+                                    const done = openPositionStep > s.k;
+                                    return (
+                                        <React.Fragment key={s.k}>
+                                            <button
+                                                type="button"
+                                                onClick={() => { if (s.k < openPositionStep) setOpenPositionStep(s.k); }}
+                                                disabled={s.k > openPositionStep}
+                                                className={`flex items-center gap-1.5 rounded-full px-1.5 py-1 text-[12px] font-semibold transition ${active ? brand.textClass : done ? 'text-zinc-500 dark:text-white/55' : 'text-zinc-400 dark:text-white/30'}`}
+                                            >
+                                                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${active ? brand.solidButtonClass : done ? 'bg-zinc-300 text-white dark:bg-white/25 dark:text-white' : 'bg-zinc-200 text-zinc-400 dark:bg-white/10 dark:text-white/40'}`}>
+                                                    {done ? <Check className="h-3 w-3" strokeWidth={3} /> : i + 1}
+                                                </span>
+                                                {s.label}
+                                            </button>
+                                            {i < 2 ? <div className={`h-px flex-1 ${done ? 'bg-zinc-300 dark:bg-white/20' : 'bg-zinc-200 dark:bg-white/10'}`} /> : null}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+                            {/* Step 0 · 资金 */}
+                            <div className={`space-y-3 ${openPositionStep === 0 ? '' : 'hidden'}`}>
                             {multiWalletEnabled ? (
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">钱包</div>
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">
@@ -5086,18 +5157,18 @@ export default function App() {
                                                         setOpenPositionError('');
                                                         hapticSelection();
                                                     }}
-                                                    className={`flex min-h-[30px] w-full min-w-0 items-center rounded-[15px] border px-2 py-1 text-left transition ${selected
+                                                    className={`flex min-h-[38px] w-full min-w-0 items-center rounded-xl border px-2.5 py-1.5 text-left transition ${selected
                                                         ? `${brand.selectionClass} shadow-sm`
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                                         }`}
                                                 >
                                                     <div className="flex min-w-0 flex-1 items-center gap-1">
-                                                        <span className="truncate text-[9px] font-semibold leading-3">{name || shortAddr || `钱包 ${id}`}</span>
+                                                        <span className="truncate text-[11px] font-semibold leading-tight">{name || shortAddr || `钱包 ${id}`}</span>
                                                         {w?.is_default ? (
-                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[8px] font-bold text-zinc-500 dark:text-white/50">默认</span>
+                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[9px] font-bold text-zinc-500 dark:text-white/50">默认</span>
                                                         ) : null}
                                                     </div>
-                                                    <span className="shrink-0 pl-1 text-[8px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
+                                                    <span className="shrink-0 pl-1 text-[10px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
                                                         {openPositionWalletBalancesHidden ? '****' : `$${String(w?.stable_balance ?? '--')}`}
                                                     </span>
                                                 </button>
@@ -5147,39 +5218,37 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            <div className="rounded-2xl bg-zinc-50/50 p-3 dark:bg-white/5">
-                                <div className="flex flex-col gap-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 whitespace-nowrap">开仓金额</div>
-                                        <div className="relative flex-1">
-                                            <input
-                                                value={openPositionAmount}
-                                                onChange={(e) => {
-                                                    setOpenPositionAmount(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="decimal"
-                                                className={`w-full rounded-xl border border-zinc-200/50 bg-white/70 pl-3 pr-11 py-1.5 text-sm text-right text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="0.00"
-                                            />
-                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-500 dark:text-white/50">USDT</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 whitespace-nowrap">滑点</div>
-                                        <div className="relative flex-1">
-                                            <input
-                                                value={openPositionSlippage}
-                                                onChange={(e) => {
-                                                    setOpenPositionSlippage(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="decimal"
-                                                className={`w-full rounded-xl border border-zinc-200/50 bg-white/70 pl-3 pr-8 py-1.5 text-sm text-right text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder={String(openPositionGlobalSlippageHint).replace('%', '').trim()}
-                                            />
-                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-500 dark:text-white/50">%</span>
-                                        </div>
+                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
+                                {/* 金额：大字主输入 */}
+                                <div className="flex items-baseline justify-between gap-2">
+                                    <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">开仓金额</span>
+                                    <span className="text-[11px] font-medium text-zinc-400 dark:text-white/35">USDT</span>
+                                </div>
+                                <input
+                                    value={openPositionAmount}
+                                    onChange={(e) => {
+                                        setOpenPositionAmount(e.target.value);
+                                        setOpenPositionError('');
+                                    }}
+                                    inputMode="decimal"
+                                    placeholder="0.00"
+                                    className="mt-1 w-full border-0 bg-transparent p-0 text-[26px] font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-white/20"
+                                />
+                                {/* 滑点：紧凑次级一行 */}
+                                <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
+                                    <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">滑点</span>
+                                    <div className="relative w-24">
+                                        <input
+                                            value={openPositionSlippage}
+                                            onChange={(e) => {
+                                                setOpenPositionSlippage(e.target.value);
+                                                setOpenPositionError('');
+                                            }}
+                                            inputMode="decimal"
+                                            className={`w-full rounded-xl border border-zinc-200/50 bg-white/70 pl-3 pr-7 py-1.5 text-sm text-right text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                            placeholder={String(openPositionGlobalSlippageHint).replace('%', '').trim()}
+                                        />
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-500 dark:text-white/50">%</span>
                                     </div>
                                 </div>
                                 {openPositionNeedsHighSlippageConfirm ? (
@@ -5215,7 +5284,10 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            <div className="rounded-2xl bg-zinc-50/50 p-3 dark:bg-white/5">
+                            </div>{/* /Step0 资金 */}
+                            {/* Step 1 · 区间 */}
+                            <div className={`${openPositionStep === 1 ? '' : 'hidden'}`}>
+                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">区间配置</div>
                                     <div className="flex rounded-lg bg-zinc-200/50 p-0.5 dark:bg-white/10">
@@ -5460,351 +5532,34 @@ export default function App() {
                                     </div>
                                 )}
 
-                            {/*
-                            <div className="hidden">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">
-                                        {openPositionRangeInputMode === 'percentage' ? '百分比区间 (%)' : 'Tick 区间'}
-                                    </div>
-                                    <div className="flex flex-wrap justify-end gap-1.5">
-                                        {OPEN_POSITION_MANUAL_OPTIONS.map((option) => (
-                                            <button
-                                                key={option.key}
-                                                type="button"
-                                                onClick={() => handleOpenPositionRangeInputModeChange(option.key)}
-                                                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${openPositionRangeInputMode === option.key
-                                                    ? `${brand.selectionClass} text-zinc-900 dark:text-white`
-                                                    : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                    }`}
-                                            >
-                                                {option.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                {openPositionRangeInputMode === 'percentage' ? (
-                                    <>
-                                <div className="mt-2 grid grid-cols-2 gap-2">
-                                    <input
-                                        value={openPositionRangeLower}
-                                        onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
-                                        inputMode="decimal"
-                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="下限 %"
-                                    />
-                                    <input
-                                        value={openPositionRangeUpper}
-                                        onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
-                                        inputMode="decimal"
-                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="上限 %"
-                                    />
-                                </div>
-                                {openPositionSmartRangesLoading ? (
-                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        正在读取聪明钱区间...
-                                    </div>
-                                ) : null}
-                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {openPositionQuickRangeOptions.map((option) => {
-                                        const lowerValue = Number(option.lowerValue);
-                                        const upperValue = Number(option.upperValue);
-                                        const isActive =
-                                            Math.abs(Number(openPositionRangeLower) - lowerValue) < 0.05 &&
-                                            Math.abs(Number(openPositionRangeUpper) - upperValue) < 0.05;
-                                        return (
-                                            <button
-                                                key={option.key}
-                                                type="button"
-                                                onClick={() => {
-                                                    setOpenPositionRangeInputMode('percentage');
-                                                    setOpenPositionRangeLower(option.lowerValue);
-                                                    setOpenPositionRangeUpper(option.upperValue);
-                                                    setOpenPositionRangeUpperAuto(true);
-                                                    setOpenPositionError('');
-                                                }}
-                                                className={`inline-flex min-w-[72px] flex-col items-start rounded-lg border px-2 py-1.5 text-left text-[11px] font-semibold transition ${isActive
-                                                    ? `${brand.selectionClass} text-zinc-900 dark:text-white`
-                                                    : option.smart
-                                                        ? 'border-amber-200 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-100/60 text-amber-700 hover:from-amber-100 hover:via-amber-200/70 hover:to-yellow-200/70 dark:border-amber-400/30 dark:from-amber-500/10 dark:via-amber-400/10 dark:to-yellow-400/10 dark:text-amber-200'
-                                                        : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                    }`}
-                                            >
-                                                <span className="leading-none">{option.label}</span>
-                                                {option.subLabel ? (
-                                                    <span className="mt-1 text-[10px] font-medium opacity-70">{option.subLabel}</span>
-                                                ) : null}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                {smartQuickRangeOptions.length > 0 ? (
-                                    <>
-                                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                            也可以继续使用默认区间。
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap gap-1.5">
-                                            {defaultQuickRangeOptions.map((option) => {
-                                                const lowerValue = Number(option.lowerValue);
-                                                const upperValue = Number(option.upperValue);
-                                                const isActive =
-                                                    Math.abs(Number(openPositionRangeLower) - lowerValue) < 0.05 &&
-                                                    Math.abs(Number(openPositionRangeUpper) - upperValue) < 0.05;
-                                                return (
-                                                    <button
-                                                        key={`default-${option.key}`}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setOpenPositionRangeInputMode('percentage');
-                                                            setOpenPositionRangeLower(option.lowerValue);
-                                                            setOpenPositionRangeUpper(option.upperValue);
-                                                            setOpenPositionRangeUpperAuto(true);
-                                                            setOpenPositionError('');
-                                                        }}
-                                                        className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${isActive
-                                                            ? `${brand.selectionClass} text-zinc-900 dark:text-white`
-                                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                            }`}
-                                                    >
-                                                        {option.label}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                            常用区间会跟随当前价格自动刷新，适合快速开仓。
-                                        </div>
-                                    </>
-                                ) : null}
-                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    切到 Tick / 价格 模式后，可以按 1 格、3 格或手动边界精细调整。
-                                </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="mt-2 rounded-2xl border border-sky-400/20 bg-gradient-to-br from-sky-500/12 via-sky-500/6 to-transparent p-3 dark:border-sky-300/20">
-                                            <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/65">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <span>当前 Tick</span>
-                                                    <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
-                                                        {Number.isFinite(Number(openPositionEffectiveRangeEditor?.current_tick)) ? openPositionEffectiveRangeEditor.current_tick : '--'}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <span>Tick Spacing</span>
-                                                    <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
-                                                        {Number.isFinite(Number(openPositionEffectiveRangeEditor?.tick_spacing)) ? openPositionEffectiveRangeEditor.tick_spacing : '--'}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <span>当前价格</span>
-                                                    <span className="font-semibold text-zinc-900 dark:text-white/90">
-                                                        {formatPriceValue(openPositionEffectiveRangeEditor?.current_price)}
-                                                    </span>
-                                                </div>
-                                                {openPositionRangeShapeLabel ? (
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <span>资金形态</span>
-                                                        <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionRangeShapeLabel}</span>
-                                                    </div>
-                                                ) : null}
-                                            </div>
-                                        </div>
-
-                                        <div className={`mt-3 rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                            ? 'border-emerald-500/25 bg-emerald-500/10'
-                                            : 'border-sky-500/20 bg-sky-500/10'
-                                            }`}>
-                                            <div className="flex items-center justify-between gap-3">
-                                                <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">
-                                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_') ? '资金分布偏单边' : '资金分布偏双边'}
-                                                </div>
-                                                {openPositionRangeShapeLabel ? (
-                                                    <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
-                                                        {openPositionRangeShapeLabel}
-                                                    </span>
-                                                ) : null}
-                                            </div>
-                                            <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
-                                                {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                                    ? `当前会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}，适合等待价格回到区间后再逐步进入。`
-                                                    : '当前区间更适合双边开仓，价格进入区间后会同时持有两侧资产。'}
-                                            </div>
-                                            <div className="mt-3 flex flex-wrap gap-1.5">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
-                                                    className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                >
-                                                    切到下侧单边
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
-                                                    className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                >
-                                                    切到上侧单边
-                                                </button>
-                                            </div>
-                                            <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
-                                                切换按钮会沿用当前区间，只改变资金偏向，不会重置你已经选好的边界。
-                                            </div>
-                                        </div>
-
-                                        {openPositionRangeInputMode === 'grid' ? (
-                                            <>
-                                                <div className="mt-3 flex flex-wrap gap-1.5">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setOpenPositionGridBoundaryTarget('lower')}
-                                                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${openPositionGridBoundaryTarget === 'lower'
-                                                            ? `${brand.selectionClass} text-zinc-900 dark:text-white`
-                                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                            }`}
-                                                    >
-                                                        编辑下边界
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setOpenPositionGridBoundaryTarget('upper')}
-                                                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${openPositionGridBoundaryTarget === 'upper'
-                                                            ? `${brand.selectionClass} text-zinc-900 dark:text-white`
-                                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                            }`}
-                                                    >
-                                                        编辑上边界
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => nudgeOpenPositionTickBoundary(openPositionGridBoundaryTarget, -1)}
-                                                        className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                    >
-                                                        -1 格
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => nudgeOpenPositionTickBoundary(openPositionGridBoundaryTarget, 1)}
-                                                        className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                    >
-                                                        +1 格
-                                                    </button>
-                                                </div>
-
-                                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                                    {openPositionGridBins.map((bin) => {
-                                                        const isSelected =
-                                                            Number.isInteger(openPositionTickLowerValue) &&
-                                                            Number.isInteger(openPositionTickUpperValue) &&
-                                                            bin.lowerTick >= openPositionTickLowerValue &&
-                                                            bin.upperTick <= openPositionTickUpperValue;
-                                                        return (
-                                                            <button
-                                                                key={bin.key}
-                                                                type="button"
-                                                                onClick={() => applyOpenPositionGridBin(bin)}
-                                                                className={`inline-flex min-w-[88px] flex-col items-start rounded-lg border px-2 py-1.5 text-left text-[11px] font-semibold transition ${isSelected
-                                                                    ? `${brand.selectionClass} text-zinc-900 dark:text-white`
-                                                                    : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                                    }`}
-                                                            >
-                                                                <span>{bin.isCurrent ? '当前格子' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
-                                                                <span className="mt-1 text-[10px] font-medium opacity-70">{bin.isCurrent ? '当前' : `第 ${Math.abs(bin.index)} 格`}</span>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </>
-                                        ) : null}
-
-                                        {openPositionRangeInputMode === 'price' ? (
-                                            <>
-                                                <div className="mt-3 grid grid-cols-2 gap-2">
-                                                    <input
-                                                        value={openPositionPriceLower}
-                                                        onChange={(e) => {
-                                                            suppressOpenPositionPreview();
-                                                            setOpenPositionPriceLower(e.target.value);
-                                                            setOpenPositionError('');
-                                                        }}
-                                                        inputMode="decimal"
-                                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                        placeholder="下边界价格"
-                                                    />
-                                                    <input
-                                                        value={openPositionPriceUpper}
-                                                        onChange={(e) => {
-                                                            suppressOpenPositionPreview();
-                                                            setOpenPositionPriceUpper(e.target.value);
-                                                            setOpenPositionError('');
-                                                        }}
-                                                        inputMode="decimal"
-                                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                        placeholder="上边界价格"
-                                                    />
-                                                </div>
-                                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-                                                    <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <span>报价方向</span>
-                                                            <span className="font-semibold text-zinc-900 dark:text-white/90">
-                                                                {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </>
-                                        ) : (
-                                        <div className="mt-3 grid grid-cols-2 gap-2">
-                                            <input
-                                                value={openPositionTickLower}
-                                                onChange={(e) => {
-                                                    suppressOpenPositionPreview();
-                                                    setOpenPositionTickLower(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="numeric"
-                                                className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="下边界 Tick"
-                                            />
-                                            <input
-                                                value={openPositionTickUpper}
-                                                onChange={(e) => {
-                                                    suppressOpenPositionPreview();
-                                                    setOpenPositionTickUpper(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="numeric"
-                                                className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="上边界 Tick"
-                                            />
-                                        </div>
-                                        )}
-
-                                        {openPositionEffectiveRangeEditor ? (
-                                            <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-                                                <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <span>对应价格区间</span>
-                                                        <span className="font-semibold text-zinc-900 dark:text-white/90">
-                                                            {formatPriceValue(openPositionEffectiveRangeEditor?.range_lower_price)} - {formatPriceValue(openPositionEffectiveRangeEditor?.range_upper_price)}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <span>相对中价偏移</span>
-                                                        <span className="font-semibold text-zinc-900 dark:text-white/90">
-                                                            {formatRangePercentCompact(openPositionEffectiveRangeEditor?.range_lower_pct)} / {formatRangePercentCompact(openPositionEffectiveRangeEditor?.range_upper_pct)}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
-                                    </>
-                                )}
-                            </div>
-                            */}
                             </div>
 
-                            <div className="rounded-2xl bg-zinc-50/50 p-3 dark:bg-white/5">
+                            </div>{/* /Step1 区间 */}
+                            {/* Step 2 · 策略 & 确认 */}
+                            <div className={`space-y-3 ${openPositionStep === 2 ? '' : 'hidden'}`}>
+                            {/* 订单摘要 */}
+                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
+                                <div className="mb-2 text-xs font-semibold text-zinc-500 dark:text-white/50">本单概览</div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">交易对</span>
+                                        <span className="text-[13px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPool?.trading_pair || '--'}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">投入金额</span>
+                                        <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{openPositionAmount ? `${openPositionAmount} USDT` : '--'}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">价格区间</span>
+                                        <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{openPositionPriceRange ? `${openPositionPriceRange.lowerText} ~ ${openPositionPriceRange.upperText}` : '--'}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">区间偏移</span>
+                                        <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{openPositionPriceRange ? `${openPositionPriceRange.lowerPctText} / ${openPositionPriceRange.upperPctText}` : '--'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">本次开仓</div>
                                     <div className="text-[10px] text-zinc-500 dark:text-white/45 truncate max-w-[200px]">上破:{openPositionOutOfRangeActions.above} 下破:{openPositionOutOfRangeActions.below}</div>
@@ -5831,23 +5586,27 @@ export default function App() {
                                 </div>
                             </div>
 
-                            <div className="mt-2 rounded-2xl bg-zinc-50/50 p-3 dark:bg-white/5">
+                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-900 dark:text-white/80">
                                         分批开仓
                                     </div>
-                                    <label className="flex items-center gap-2">
-                                        <span className="text-[10px] text-zinc-500">{openPositionIsSingleSidedSelection ? '单边不支持' : (openPositionDCAEnabled ? '已启用' : '已关闭')}</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={openPositionDCAEnabled}
-                                            onChange={(e) => {
-                                                setOpenPositionDCAEnabled(e.target.checked);
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-medium text-zinc-500 dark:text-white/45">{openPositionIsSingleSidedSelection ? '单边不支持' : (openPositionDCAEnabled ? '已启用' : '已关闭')}</span>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={openPositionDCAEnabled}
+                                            onClick={() => {
+                                                setOpenPositionDCAEnabled(!openPositionDCAEnabled);
                                                 setOpenPositionError('');
                                             }}
                                             disabled={openPositionLoading || openPositionIsSingleSidedSelection}
-                                        />
-                                    </label>
+                                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ${openPositionDCAEnabled ? brand.solidButtonClass : 'bg-zinc-200 dark:bg-white/15'}`}
+                                        >
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${openPositionDCAEnabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+                                        </button>
+                                    </div>
                                 </div>
                                 <button
                                     type="button"
@@ -6003,40 +5762,6 @@ export default function App() {
                                 ) : null}
                             </div>
 
-                            {false && openPositionDCAEnabled && Array.isArray(openPositionDCAPercentages) && openPositionDCAPercentages.length >= 2 ? (
-                                <div className="mt-4 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/10 via-cyan-500/5 to-transparent p-3 dark:border-cyan-400/25 dark:from-cyan-400/10 dark:via-cyan-400/5">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-1.5 text-[12px] font-bold text-cyan-700 dark:text-cyan-200">
-                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6"/></svg>
-                                            分批开仓 · 共 {openPositionDCAPercentages.length} 笔
-                                        </div>
-                                        <div className="text-[10px] font-semibold text-cyan-600/80 dark:text-cyan-300/70">
-                                            间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
-                                        </div>
-                                    </div>
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {openPositionDCAPercentages.map((pct, idx) => {
-                                            const amt = (Number(openPositionAmount) || 0) * (Number(pct) || 0) / 100;
-                                            return (
-                                                <div
-                                                    key={idx}
-                                                    className="flex min-w-[66px] flex-1 flex-col items-start gap-0.5 rounded-lg border border-cyan-500/20 bg-white/70 px-2 py-1.5 dark:border-cyan-400/20 dark:bg-white/5"
-                                                >
-                                                    <span className="text-[10px] font-semibold text-cyan-600 dark:text-cyan-300">
-                                                        {idx === 0 ? '首笔' : `第 ${idx + 1} 笔 · ${Number(pct).toFixed(0)}%`}
-                                                    </span>
-                                                    <span className="text-[12px] font-bold tabular-nums text-zinc-900 dark:text-white/90">
-                                                        ${amt > 0 ? amt.toFixed(2) : '--'}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="mt-2 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
-                                        首笔会立即提交，后续批次会按间隔继续执行，并沿用当前区间设置。
-                                    </div>
-                                </div>
-                            ) : null}
 
 
 
@@ -6070,36 +5795,6 @@ export default function App() {
                                                                     <span className={`text-[11px] font-semibold ${isFail ? 'text-red-700 dark:text-red-300' : isWarn ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{item.label}</span>
                                                                     {item.detail ? <span className="text-[10px] text-zinc-500 dark:text-white/40 text-right">{item.detail}</span> : null}
                                                                 </div>
-                                                                {false && openPositionEntrySwapPreview?.required ? (
-                                                                    <div className="mt-2 space-y-1 text-[11px] text-zinc-600 dark:text-white/60">
-                                                                        <div>预计兑换：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} -&gt; {openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
-                                                                        <div>预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
-                                                                        <div>建议滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
-                                                                        <input
-                                                                            value={openPositionEntrySwapSlippage}
-                                                                            onChange={(e) => {
-                                                                                setOpenPositionEntrySwapSlippageDirty(true);
-                                                                                setOpenPositionEntrySwapSlippage(e.target.value);
-                                                                                setOpenPositionError('');
-                                                                            }}
-                                                                            inputMode="decimal"
-                                                                            className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-1.5 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                                            placeholder="手动覆盖前置兑换滑点"
-                                                                        />
-                                                                        <label className="mt-2 hidden items-start gap-2">
-                                                                            <input
-                                                                                type="checkbox"
-                                                                                checked={openPositionEntrySwapConfirm}
-                                                                                onChange={(e) => {
-                                                                                    setOpenPositionEntrySwapConfirm(e.target.checked);
-                                                                                    setOpenPositionError('');
-                                                                                }}
-                                                                                disabled={openPositionLoading || openPositionPreviewPending || openPositionPreviewSuspended}
-                                                                            />
-                                                                            <span className="text-[11px] leading-tight">我已确认前置兑换的价格与滑点风险</span>
-                                                                        </label>
-                                                                    </div>
-                                                                ) : null}
                                                                 {isWarn ? (
                                                                     <div className="mt-2 text-[11px] leading-tight opacity-80">建议先确认价格、滑点和兑换路径，再决定是否继续开仓。</div>
                                                                 ) : null}
@@ -6138,6 +5833,7 @@ export default function App() {
                             ) : null}
 
                             {/* footer action rendered above */}
+                            </div>{/* /Step2 确认 */}
                         </div>
                     </BottomSheet>
                 ) : null

@@ -79,7 +79,9 @@
       "Bash(awk '/^58:/{flag=1} flag && /^[0-9]+:}/{print; flag=0}')",
       "Bash(awk *)",
       "Bash(pkill -f \"vite$\")",
-      "Bash(pkill -f \"node.*vite\")"
+      "Bash(pkill -f \"node.*vite\")",
+      "Bash(xargs cat)",
+      "Bash(./node_modules/.bin/vite --version)"
     ]
   }
 }
