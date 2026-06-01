@@ -1477,6 +1477,10 @@ export default function App() {
         if (!Number.isFinite(n) || n < 0) return '留空则使用全局配置';
         return `本次开仓采用全局配置滑点: ${formatPercentValue(n)}`;
     }, [globalConfig?.slippage_tolerance]);
+    const openPositionSlippagePlaceholder = useMemo(() => {
+        const n = Number(globalConfig?.slippage_tolerance);
+        return Number.isFinite(n) && n >= 0 ? String(n) : '0.5';
+    }, [globalConfig?.slippage_tolerance]);
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -5199,26 +5203,15 @@ export default function App() {
                             ) : null}
 
                             {openPositionTokenRisk ? (
-                                <div className={`rounded-xl border p-3 ${tokenRiskPanelClass(openPositionTokenRiskTone)}`}>
-                                    <div className="flex items-start gap-3">
-                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-current/10">
-                                            <AlertTriangle className="h-3 w-3" strokeWidth={3} />
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="text-xs font-bold">{tokenRiskLabel(openPositionTokenRisk)}</div>
-                                                <div className="shrink-0 rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">
-                                                    等级 {openPositionTokenRisk.risk_control_label}
-                                                </div>
-                                            </div>
-                                            <div className="mt-1 text-[11px] leading-5 opacity-85">
-                                                {(openPositionTokenRiskSymbol || 'Token')} · {tokenRiskSummary(openPositionTokenRisk)}
-                                            </div>
-                                            <div className="mt-2 flex flex-wrap gap-1.5">
-                                                {openPositionTokenRisk.has_honeypot ? <span className="rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">貔貅盘</span> : null}
-                                                {openPositionTokenRisk.has_low_liquidity ? <span className="rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">低流动性</span> : null}
-                                            </div>
-                                        </div>
+                                <div className={`rounded-xl border px-3 py-2.5 ${tokenRiskPanelClass(openPositionTokenRiskTone)}`}>
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
+                                        <span className="text-xs font-bold">{tokenRiskLabel(openPositionTokenRisk)}</span>
+                                        {openPositionTokenRisk.has_honeypot ? <span className="shrink-0 rounded-full bg-white/35 px-1.5 py-0.5 text-[10px] font-bold dark:bg-black/20">貔貅盘</span> : null}
+                                        <span className="ml-auto shrink-0 rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">等级 {openPositionTokenRisk.risk_control_label}</span>
+                                    </div>
+                                    <div className="mt-1 text-[11px] leading-4 opacity-80">
+                                        {(openPositionTokenRiskSymbol || 'Token')} · {tokenRiskSummary(openPositionTokenRisk)}
                                     </div>
                                 </div>
                             ) : null}
@@ -5240,21 +5233,24 @@ export default function App() {
                                     className="mt-1 w-full border-0 bg-transparent p-0 text-[26px] font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-white/20"
                                 />
                                 {/* 滑点：紧凑次级一行 */}
-                                <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
-                                    <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">滑点</span>
-                                    <div className="relative w-24">
-                                        <input
-                                            value={openPositionSlippage}
-                                            onChange={(e) => {
-                                                setOpenPositionSlippage(e.target.value);
-                                                setOpenPositionError('');
-                                            }}
-                                            inputMode="decimal"
-                                            className={`w-full rounded-xl border border-zinc-200/50 bg-white/70 pl-3 pr-7 py-1.5 text-sm text-right text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder={String(openPositionGlobalSlippageHint).replace('%', '').trim()}
-                                        />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-500 dark:text-white/50">%</span>
+                                <div className="mt-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">滑点容差</span>
+                                        <div className="relative w-28">
+                                            <input
+                                                value={openPositionSlippage}
+                                                onChange={(e) => {
+                                                    setOpenPositionSlippage(e.target.value);
+                                                    setOpenPositionError('');
+                                                }}
+                                                inputMode="decimal"
+                                                className={`w-full rounded-lg border border-zinc-200/60 bg-white/80 py-1.5 pl-3 pr-8 text-sm text-right tabular-nums text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder={openPositionSlippagePlaceholder}
+                                            />
+                                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-400 dark:text-white/40">%</span>
+                                        </div>
                                     </div>
+                                    <div className="mt-1.5 text-[11px] leading-4 text-zinc-400 dark:text-white/40">{openPositionGlobalSlippageHint}</div>
                                 </div>
                                 {openPositionNeedsHighSlippageConfirm ? (
                                     <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
