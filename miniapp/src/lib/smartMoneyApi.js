@@ -232,23 +232,6 @@ export async function fetchSMPositionDetail({ apiBaseUrl, positionRef, positionI
     return smRequest(buildSMUrl(apiBaseUrl, 'position_detail', params.toString()), { signal });
 }
 
-export async function fetchSMDeFiOverview({ apiBaseUrl, address, wallet, chainIndex, signal }) {
-    const params = new URLSearchParams();
-    const walletAddress = String(address || wallet || '').trim();
-    if (walletAddress) params.set('address', walletAddress);
-    if (chainIndex) params.set('chain_index', String(chainIndex));
-    return smRequest(buildSMUrl(apiBaseUrl, 'defi_overview', params.toString()), { signal });
-}
-
-export async function fetchSMDeFiDetail({ apiBaseUrl, address, wallet, analysisPlatformId, chainIndex, signal }) {
-    const params = new URLSearchParams();
-    const walletAddress = String(address || wallet || '').trim();
-    if (walletAddress) params.set('address', walletAddress);
-    if (analysisPlatformId) params.set('analysis_platform_id', String(analysisPlatformId));
-    if (chainIndex) params.set('chain_index', String(chainIndex));
-    return smRequest(buildSMUrl(apiBaseUrl, 'defi_detail', params.toString()), { signal });
-}
-
 // Events
 export async function fetchSMEvents({ apiBaseUrl, wallet, pool, page = 1, size = 20, signal }) {
     const params = new URLSearchParams();

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity,
@@ -10,7 +10,6 @@ import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositions, fetchSMWallets,
     fetchSMPositionDetail,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
-    fetchSMDeFiOverview, fetchSMDeFiDetail,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
@@ -868,13 +867,6 @@ function normalizeWalletAddress(value) {
     return `0x${raw.slice(2).toLowerCase()}`;
 }
 
-function normalizeOKXDeFiWalletAddress(value) {
-    const raw = String(value || '').trim();
-    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) return `0x${raw.slice(2).toLowerCase()}`;
-    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(raw)) return raw;
-    return '';
-}
-
 function getBrandFocusRingClass(brand) {
     return brand?.key === 'emerald'
         ? 'focus:ring-emerald-500'
@@ -1128,39 +1120,6 @@ function formatHeatmapUSD(value) {
     return formatUSDCompact(num);
 }
 
-function formatOKXDeFiUsd(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '--';
-    if (num === 0) return '$0';
-    return formatUSDCompact(num);
-}
-
-function okxDeFiValueText(item, keys = ['total_value_usd', 'position_amount_usd', 'fee_usd']) {
-    for (const key of keys) {
-        const value = Number(item?.[key]);
-        if (Number.isFinite(value)) return formatOKXDeFiUsd(value);
-    }
-    const raw = String(item?.total_value || item?.position_amount || item?.fee || '').trim();
-    return raw || '--';
-}
-
-function okxDeFiChainText(item) {
-    const names = Array.isArray(item?.chain_names) ? item.chain_names.filter(Boolean) : [];
-    if (names.length > 0) return names.join(' / ');
-    const chainName = String(item?.chain_name || '').trim();
-    if (chainName) return chainName;
-    const balances = Array.isArray(item?.network_balances) ? item.network_balances : [];
-    const balanceNames = balances.map((row) => String(row?.chain_name || row?.chain_index || '').trim()).filter(Boolean);
-    if (balanceNames.length > 0) return balanceNames.join(' / ');
-    return '--';
-}
-
-function okxDeFiStatusText(item) {
-    return item?.status === 'updating' || item?.asset_status === '2'
-        ? 'OKX 正在更新该钱包 DeFi 数据，请稍后刷新'
-        : 'OKX 未返回该钱包的 DeFi 平台数据';
-}
-
 function formatHeatmapRate(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '--';
@@ -1215,54 +1174,6 @@ function normalizeWatchWalletItems(resp, fallbackWallets = []) {
     });
 
     return normalized;
-}
-
-function useOKXDeFiOverviewMap(apiBaseUrl, wallets, enabled = true) {
-    const [overviewMap, setOverviewMap] = useState({});
-
-    useEffect(() => {
-        const addresses = (Array.isArray(wallets) ? wallets : [])
-            .map((item) => normalizeWalletAddress(item?.wallet_address || item?.address || item))
-            .filter(Boolean);
-        const uniqueAddresses = Array.from(new Set(addresses));
-        if (!enabled || uniqueAddresses.length === 0) {
-            setOverviewMap({});
-            return undefined;
-        }
-
-        let cancelled = false;
-        setOverviewMap((prev) => {
-            const next = {};
-            uniqueAddresses.forEach((address) => {
-                if (prev[address]) next[address] = prev[address];
-            });
-            return next;
-        });
-
-        uniqueAddresses.forEach((address) => {
-            fetchSMDeFiOverview({ apiBaseUrl, address })
-                .then((data) => {
-                    if (cancelled) return;
-                    setOverviewMap((prev) => ({
-                        ...prev,
-                        [address]: { status: 'ok', data },
-                    }));
-                })
-                .catch((err) => {
-                    if (cancelled) return;
-                    setOverviewMap((prev) => ({
-                        ...prev,
-                        [address]: { status: 'error', error: String(err?.message || err || 'OKX DeFi 加载失败') },
-                    }));
-                });
-        });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [apiBaseUrl, enabled, wallets]);
-
-    return overviewMap;
 }
 
 function heatmapSampleText(row) {
@@ -1790,264 +1701,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
     );
 }
 
-function OKXDeFiOverviewPanel({ apiBaseUrl, walletAddress, brand }) {
-    const [overview, setOverview] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [selectedPlatform, setSelectedPlatform] = useState(null);
-
-    useEffect(() => {
-        const address = normalizeOKXDeFiWalletAddress(walletAddress);
-        if (!address) {
-            setOverview(null);
-            setLoading(false);
-            setError('钱包地址无效');
-            return undefined;
-        }
-        let cancelled = false;
-        setLoading(true);
-        setError('');
-        setSelectedPlatform(null);
-        fetchSMDeFiOverview({ apiBaseUrl, address })
-            .then((data) => {
-                if (cancelled) return;
-                setOverview(data || null);
-                setError('');
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                setOverview(null);
-                setError(String(err?.message || err || 'OKX DeFi 加载失败'));
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [apiBaseUrl, walletAddress]);
-
-    const platforms = Array.isArray(overview?.platforms) ? overview.platforms : [];
-
-    return (
-        <div className="mb-4 rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4">
-            <div className="mb-3 flex items-start justify-between gap-3">
-                <div>
-                    <div className="text-sm font-semibold text-zinc-100">OKX DeFi 跨链仓位</div>
-                    <div className="mt-1 text-[11px] text-zinc-500">Wallet DeFi API · {okxDeFiChainText(overview)}</div>
-                </div>
-                {overview?.updated_at ? (
-                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                        {new Date(overview.updated_at).toLocaleTimeString()}
-                    </Badge>
-                ) : null}
-            </div>
-
-            {loading ? (
-                <div className="py-6 text-center text-zinc-500">加载 OKX DeFi...</div>
-            ) : error ? (
-                <div className="rounded-2xl border border-red-400/15 bg-red-500/5 px-4 py-6 text-center text-sm text-red-200">
-                    {error}
-                </div>
-            ) : (
-                <>
-                    <div className="grid grid-cols-3 gap-1.5">
-                        <MiniMetric label="总仓位" value={okxDeFiValueText(overview)} />
-                        <MiniMetric label="平台" value={platforms.length} />
-                        <MiniMetric label="覆盖链" value={overview?.chains?.length || overview?.chain_indexes?.length || 0} />
-                    </div>
-
-                    {overview?.warnings?.length ? (
-                        <div className="mt-3 rounded-2xl border border-amber-400/15 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-100">
-                            {overview.warnings.join('；')}
-                        </div>
-                    ) : null}
-
-                    {Array.isArray(overview?.chains) && overview.chains.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                            {overview.chains.map((chain) => (
-                                <Badge key={chain.chain_index || chain.chain_name} className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                                    {chain.chain_name || chain.chain_index}: {okxDeFiValueText(chain)}
-                                </Badge>
-                            ))}
-                        </div>
-                    ) : null}
-
-                    {platforms.length === 0 ? (
-                        <div className="mt-3 rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-6 text-center text-sm text-zinc-500">
-                            {okxDeFiStatusText(overview)}
-                        </div>
-                    ) : (
-                        <div className="mt-3 space-y-2">
-                            {platforms.map((platform, index) => {
-                                const key = `${platform.analysis_platform_id || platform.platform_name || index}:${platform.chain_index || ''}`;
-                                const active = selectedPlatform?.key === key;
-                                return (
-                                    <button
-                                        key={key}
-                                        type="button"
-                                        className={`w-full rounded-2xl border px-3 py-2.5 text-left transition active:scale-[0.995] ${active ? brand.softButtonClass : 'border-white/[0.04] bg-zinc-950/45'}`}
-                                        onClick={() => setSelectedPlatform({ ...platform, key })}
-                                    >
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                                <div className="truncate text-sm font-semibold text-zinc-100">
-                                                    {platform.platform_name || platform.analysis_platform_id || 'OKX DeFi'}
-                                                </div>
-                                                <div className="mt-1 text-[11px] text-zinc-500">{okxDeFiChainText(platform)}</div>
-                                            </div>
-                                            <div className="shrink-0 text-sm font-semibold text-zinc-100">{okxDeFiValueText(platform)}</div>
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap gap-1.5">
-                                            {platform.holding_count ? <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{platform.holding_count} 项</Badge> : null}
-                                            {platform.fee_usd != null ? <Badge className="border-emerald-500/20 bg-emerald-500/10 text-emerald-300">费用 {okxDeFiValueText(platform, ['fee_usd'])}</Badge> : null}
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    {selectedPlatform ? (
-                        <OKXDeFiDetailPanel
-                            apiBaseUrl={apiBaseUrl}
-                            walletAddress={walletAddress}
-                            platform={selectedPlatform}
-                            brand={brand}
-                            onClose={() => setSelectedPlatform(null)}
-                        />
-                    ) : null}
-                </>
-            )}
-        </div>
-    );
-}
-
-function OKXDeFiDetailPanel({ apiBaseUrl, walletAddress, platform, brand, onClose }) {
-    const [detail, setDetail] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const platformID = String(platform?.analysis_platform_id || '').trim();
-
-    useEffect(() => {
-        if (!platformID) {
-            setDetail(null);
-            setLoading(false);
-            setError('OKX 平台 ID 缺失');
-            return undefined;
-        }
-        let cancelled = false;
-        setLoading(true);
-        setError('');
-        fetchSMDeFiDetail({
-            apiBaseUrl,
-            address: walletAddress,
-            analysisPlatformId: platformID,
-            chainIndex: platform?.chain_index,
-        })
-            .then((data) => {
-                if (cancelled) return;
-                setDetail(data || null);
-                setError('');
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                setDetail(null);
-                setError(String(err?.message || err || 'OKX DeFi 详情加载失败'));
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [apiBaseUrl, platformID, platform?.chain_index, walletAddress]);
-
-    const positions = Array.isArray(detail?.positions) ? detail.positions : [];
-    const investments = Array.isArray(detail?.investments) ? detail.investments : [];
-
-    return (
-        <div className="mt-3 rounded-2xl border border-white/[0.04] bg-zinc-950/45 p-3">
-            <div className="mb-3 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-zinc-100">{platform?.platform_name || detail?.platform?.platform_name || 'OKX DeFi 详情'}</div>
-                    <div className="mt-1 text-[11px] text-zinc-500">{detail?.chain_name || platform?.chain_name || okxDeFiChainText(platform)}</div>
-                </div>
-                <button type="button" className={`rounded-full p-2 ${getFilterButtonClass(false, brand)}`} onClick={onClose} aria-label="关闭 OKX DeFi 详情">
-                    <X size={14} />
-                </button>
-            </div>
-            {loading ? (
-                <div className="py-5 text-center text-zinc-500">加载详情...</div>
-            ) : error ? (
-                <div className="rounded-2xl border border-red-400/15 bg-red-500/5 px-4 py-5 text-center text-sm text-red-200">{error}</div>
-            ) : (
-                <>
-                    <div className="grid grid-cols-3 gap-1.5">
-                        <MiniMetric label="仓位" value={okxDeFiValueText(detail?.totals, ['total_value_usd'])} />
-                        <MiniMetric label="费用" value={okxDeFiValueText(detail?.totals, ['fee_usd'])} />
-                        <MiniMetric label="明细" value={positions.length + investments.length} />
-                    </div>
-                    {positions.length === 0 && investments.length === 0 ? (
-                        <div className="mt-3 rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-6 text-center text-sm text-zinc-500">
-                            OKX 未返回可展开的仓位明细
-                        </div>
-                    ) : null}
-                    <div className="mt-3 space-y-2">
-                        {positions.map((position, index) => (
-                            <OKXDeFiPositionCard key={`${position.position_id || position.name || index}:${index}`} position={position} />
-                        ))}
-                        {investments.map((investment, index) => (
-                            <OKXDeFiInvestmentCard key={`${investment.investment_id || investment.name || index}:${index}`} investment={investment} />
-                        ))}
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
-
-function OKXDeFiPositionCard({ position }) {
-    const tokenText = [position?.token0_symbol, position?.token1_symbol].filter(Boolean).join('/') || position?.pool_name || position?.name || 'DeFi 仓位';
-    return (
-        <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-2.5">
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-zinc-100">{tokenText}</div>
-                    <div className="mt-1 font-mono text-[11px] text-zinc-400">
-                        {position?.range_text || [position?.price_lower, position?.price_upper].filter(Boolean).join(' - ') || '--'}
-                    </div>
-                </div>
-                <div className="shrink-0 text-sm font-semibold text-zinc-100">{okxDeFiValueText(position, ['position_amount_usd'])}</div>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{position?.chain_name || position?.chain_index || '--'}</Badge>
-                <Badge className="border-emerald-500/20 bg-emerald-500/10 text-emerald-300">费用 {okxDeFiValueText(position, ['fee_usd'])}</Badge>
-                {position?.tick_lower || position?.tick_upper ? <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">tick {position.tick_lower || '--'} - {position.tick_upper || '--'}</Badge> : null}
-            </div>
-        </div>
-    );
-}
-
-function OKXDeFiInvestmentCard({ investment }) {
-    return (
-        <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-2.5">
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-zinc-100">{investment?.name || 'OKX DeFi investment'}</div>
-                    <div className="mt-1 font-mono text-[11px] text-zinc-400">{investment?.range_text || '--'}</div>
-                </div>
-                <div className="shrink-0 text-sm font-semibold text-zinc-100">{okxDeFiValueText(investment, ['position_amount_usd'])}</div>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{investment?.chain_name || investment?.chain_index || '--'}</Badge>
-                {investment?.type ? <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{investment.type}</Badge> : null}
-                <Badge className="border-emerald-500/20 bg-emerald-500/10 text-emerald-300">费用 {okxDeFiValueText(investment, ['fee_usd'])}</Badge>
-            </div>
-        </div>
-    );
-}
-
 // ============ PriceRangeChart ============
 function PriceRangeChart({ positions, currentPrice }) {
     if (!positions || positions.length === 0) return null;
@@ -2349,7 +2002,6 @@ function WatchActivityPage({
     const [error, setError] = useState('');
     const loadSeqRef = useRef(0);
     const activeWallet = normalizeWalletAddress(selectedWallet);
-    const defiOverviewMap = useOKXDeFiOverviewMap(apiBaseUrl, walletItems, walletItems.length > 0);
 
     useEffect(() => {
         setWalletItems((prev) => {
@@ -2451,7 +2103,6 @@ function WatchActivityPage({
                 {filterWallets.map((item) => {
                     const address = normalizeWalletAddress(item.wallet_address);
                     const active = activeWallet === address;
-                    const defiState = defiOverviewMap[address];
                     return (
                         <button
                             key={address}
@@ -2461,35 +2112,10 @@ function WatchActivityPage({
                         >
                             <WalletAvatar address={address} color={item.wallet_color} avatarUrl={item.wallet_avatar_url} size={26} />
                             <span className="min-w-0 truncate">{item.wallet_label || shortAddr(address)}</span>
-                            {defiState?.status === 'ok' ? (
-                                <span className="shrink-0 rounded-full border border-white/10 bg-zinc-950/40 px-1.5 py-0.5 text-[10px] text-zinc-200">
-                                    {okxDeFiValueText(defiState.data)}
-                                </span>
-                            ) : defiState?.status === 'error' ? (
-                                <span className="shrink-0 rounded-full border border-red-400/20 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-200">
-                                    OKX失败
-                                </span>
-                            ) : null}
                         </button>
                     );
                 })}
             </div>
-
-            {activeWallet && defiOverviewMap[activeWallet]?.status === 'ok' ? (
-                <div className="mb-3 rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-zinc-100">OKX DeFi 跨链概览</div>
-                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
-                            {okxDeFiChainText(defiOverviewMap[activeWallet].data)}
-                        </Badge>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                        <MiniMetric label="总仓位" value={okxDeFiValueText(defiOverviewMap[activeWallet].data)} />
-                        <MiniMetric label="平台数" value={defiOverviewMap[activeWallet].data?.platforms?.length || 0} />
-                        <MiniMetric label="链数量" value={defiOverviewMap[activeWallet].data?.chains?.length || defiOverviewMap[activeWallet].data?.chain_indexes?.length || 0} />
-                    </div>
-                </div>
-            ) : null}
 
             {emptyWallets && !loading ? (
                 <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
@@ -3706,8 +3332,6 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     </div>
                 </div>
             )}
-
-            <OKXDeFiOverviewPanel apiBaseUrl={apiBaseUrl} walletAddress={walletAddress} brand={brand} />
 
             <div className="flex items-center justify-between mb-3 gap-3">
                 <div>

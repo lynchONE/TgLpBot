@@ -4,21 +4,7 @@ import (
 	"TgLpBot/base/config"
 	"log"
 	"strings"
-	"sync"
-	"time"
 )
-
-type cachedNativePrice struct {
-	price   float64
-	expires time.Time
-}
-
-var nativePriceCache = struct {
-	mu    sync.RWMutex
-	cache map[string]cachedNativePrice
-}{
-	cache: make(map[string]cachedNativePrice),
-}
 
 var nativePriceTokenSvc = DefaultTokenPriceService()
 
@@ -31,19 +17,10 @@ var nativePriceTokenSvc = DefaultTokenPriceService()
 // to reasonable constants when unavailable.
 func GetNativePriceUSD(chain string) float64 {
 	chain = config.NormalizeChain(chain)
-	now := time.Now()
-
-	nativePriceCache.mu.RLock()
-	if c, ok := nativePriceCache.cache[chain]; ok && c.price > 0 && c.expires.After(now) {
-		v := c.price
-		nativePriceCache.mu.RUnlock()
-		return v
-	}
-	nativePriceCache.mu.RUnlock()
 
 	price := 0.0
 
-	// Legacy fast-path for BSC (on-chain pool read, cached internally).
+	// Legacy fast-path for BSC (on-chain pool read).
 	if chain == "bsc" {
 		if p := GetBNBPriceUSDT(); p > 0 {
 			price = p
@@ -77,11 +54,6 @@ func GetNativePriceUSD(chain string) float64 {
 			price = 1000.0
 		}
 	}
-
-	ttl := 20 * time.Second
-	nativePriceCache.mu.Lock()
-	nativePriceCache.cache[chain] = cachedNativePrice{price: price, expires: now.Add(ttl)}
-	nativePriceCache.mu.Unlock()
 
 	return price
 }
