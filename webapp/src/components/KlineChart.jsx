@@ -19,8 +19,21 @@ function walletAvatarUrl(address) {
   return AVATAR_URLS[walletAvatarIndex(address)] || AVATAR_URLS[0];
 }
 
+function safeImageSrc(value) {
+  const raw = String(value || '').trim();
+  if (!raw || /["'<>]/.test(raw) || /\s/.test(raw)) return '';
+  if (raw.startsWith('/')) return raw.startsWith('//') ? '' : raw;
+  if (/^data:image\//i.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? raw : '';
+  } catch {
+    return '';
+  }
+}
+
 function markerWalletAvatarUrl(marker) {
-  const uploaded = resolveSMAvatarAssetUrl(marker?.wallet_avatar_url);
+  const uploaded = safeImageSrc(resolveSMAvatarAssetUrl(marker?.wallet_avatar_url));
   if (uploaded) return uploaded;
   return walletAvatarUrl(marker?.wallet_address || '');
 }
@@ -63,6 +76,20 @@ function isClusterHighlighted(cluster, walletAddress) {
 
 function tooltipSafeLabel(value) {
   return String(value || '').trim() || '--';
+}
+
+function safeOverlayLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/[<>]/.test(raw) || /\b(?:href|target|rel)\s*=/i.test(raw) || /javascript:/i.test(raw)) return '';
+  return raw;
+}
+
+function removeChartAttribution(host) {
+  if (!host) return;
+  host
+    .querySelectorAll('#tv-attr-logo, a[href*="tradingview.com"], a[title*="TradingView"]')
+    .forEach((node) => node.remove());
 }
 
 function formatUSD(v) {
@@ -363,6 +390,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters, h
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
   const projected = [];
+  const userAvatarSrc = safeImageSrc(userAvatarUrl);
   const width = Math.max(0, Number(hostWidth || 0));
   const height = Math.max(0, Number(hostHeight || 0));
   const xPad = 18;
@@ -409,7 +437,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters, h
       y: clamp(y, yPad, height > 0 ? Math.max(yPad, height - yPad) : Number.POSITIVE_INFINITY),
       anchorY: clamp(y, yPad, height > 0 ? Math.max(yPad, height - yPad) : Number.POSITIVE_INFINITY),
       rail: cluster.action === 'remove' ? 'bottom' : 'top',
-      label: cluster.isMyTrade && userAvatarUrl ? userAvatarUrl : getClusterAvatarUrl(cluster),
+      label: cluster.isMyTrade && userAvatarSrc ? userAvatarSrc : getClusterAvatarUrl(cluster),
     });
   }
   return layoutMarkerRails(projected, height, priceTop, priceBottom);
@@ -458,8 +486,8 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
         id: overlay.id,
         type: 'range',
         color: String(overlay?.color || 'red'),
-        label: String(overlay?.label || ''),
-        avatarUrl: String(overlay?.avatarUrl || ''),
+        label: safeOverlayLabel(overlay?.label),
+        avatarUrl: safeImageSrc(overlay?.avatarUrl),
         showAvatar: overlay?.showAvatar !== false,
         minPixelGap,
         priceLower: Math.min(lower, upper),
@@ -481,7 +509,7 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
       id: overlay.id,
       type: 'mid',
       color: String(overlay?.color || 'blue'),
-      label: String(overlay?.label || ''),
+      label: safeOverlayLabel(overlay?.label),
       price,
       y,
       width,
@@ -851,6 +879,8 @@ export default function KlineChart({
       handleScroll: true,
       handleScale: true,
     });
+    removeChartAttribution(host);
+    window.requestAnimationFrame(() => removeChartAttribution(host));
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#16c784',
@@ -885,6 +915,9 @@ export default function KlineChart({
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleChange);
 
+    const attributionObserver = new MutationObserver(() => removeChartAttribution(host));
+    attributionObserver.observe(host, { childList: true, subtree: true });
+
     const observer = new ResizeObserver((entries) => {
       const box = entries?.[0]?.contentRect;
       if (!box) return;
@@ -902,6 +935,7 @@ export default function KlineChart({
         tooltipHideTimerRef.current = null;
       }
       observer.disconnect();
+      attributionObserver.disconnect();
       chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleChange);
       chart.remove();
       chartRef.current = null;
@@ -983,7 +1017,7 @@ export default function KlineChart({
       walletLabelRaw,
       walletSourceLabel: markerWalletSourceLabel(walletSource),
       walletSourceContractLabel: markerWalletSourceContractLabel(walletSourceContract),
-      walletAvatarUrl: c.isMyTrade ? String(tooltipCluster.label || '').trim() : markerWalletAvatarUrl(primary),
+      walletAvatarUrl: c.isMyTrade ? safeImageSrc(tooltipCluster.label) : markerWalletAvatarUrl(primary),
       lower,
       upper,
       hasRange,
@@ -1137,7 +1171,7 @@ export default function KlineChart({
             onMouseLeave={scheduleTooltipHide}
           >
             <div className="kmt-head">
-              <span className="kmt-emoji"><img src={tooltipData.walletAvatarUrl || tooltipCluster.label} alt="" /></span>
+              <span className="kmt-emoji"><img src={tooltipData.walletAvatarUrl || safeImageSrc(tooltipCluster.label) || walletAvatarUrl(tooltipData.walletAddress)} alt="" /></span>
               <span className="kmt-wallet-wrap">
                 <span className="kmt-wallet">{tooltipData.walletName}</span>
                 {tooltipData.walletAddress ? (

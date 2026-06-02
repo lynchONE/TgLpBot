@@ -1904,7 +1904,10 @@ body {
   min-height: 520px;
 }
 
-.kline-native-stage #tv-attr-logo {
+.kline-native-wrap #tv-attr-logo,
+.kline-native-wrap a[href*="tradingview.com"],
+.kline-native-stage #tv-attr-logo,
+.kline-native-stage a[href*="tradingview.com"] {
   display: none !important;
 }
 
@@ -9760,7 +9763,97 @@ body {
   margin-bottom: 10px;
 }
 
+.am-okx-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.am-okx-summary > div {
+  min-width: 0;
+  border: 1px solid rgba(136, 157, 191, 0.12);
+  border-radius: var(--radius-md);
+  background: rgba(7, 11, 17, 0.44);
+  padding: 9px 10px;
+}
+
+.am-okx-summary span,
+.am-okx-edit span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.am-okx-summary strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am-okx-summary em {
+  display: inline-flex;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent-text);
+  padding: 2px 7px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.am-okx-edit {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.am-okx-edit input {
+  width: 100%;
+  border: 1px solid rgba(136, 157, 191, 0.14);
+  border-radius: 7px;
+  background: rgba(7, 11, 17, 0.7);
+  color: var(--text);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.am-okx-edit input:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.am-okx-edit .am-action-btn {
+  align-self: end;
+}
+
 /* responsive */
+
+@media (max-width: 900px) {
+  .am-okx-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .am-okx-edit,
+  .am-okx-summary {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* Asset Management compact mode when in 4-column layout */
 .workbench.layout-4 .module-assets .am-metric-row,
@@ -15096,7 +15189,7 @@ img.swap-token-glyph {
 .am-stat-row {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
 
 @media (max-width: 720px) {

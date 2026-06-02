@@ -13,7 +13,7 @@
   - 对网络错误、5xx、OKX 非成功 code、401/403、429/额度耗尽等记录失败。
   - 连续失败达到阈值后临时禁用当前配置并切换到同池下一个可用配置。
   - 额度耗尽类错误禁用到下个月起始时间。
-- 新增管理员接口和 MiniApp 管理页入口，支持列表、新增、重命名、切换、启用/禁用、删除、连通性检查。
+- 新增管理员接口和 MiniApp/WebApp 管理入口，支持列表、新增、重命名、切换、启用/禁用、删除、连通性检查。
 - 启动后台健康检查，定期探测 DB 中启用的 OKX 配置并维护状态。
 
 ## Impact
@@ -29,5 +29,8 @@
   - `miniapp/src/components/AdminPage.jsx`
   - `miniapp/src/components/*`
   - `miniapp/api/admin.js`
+  - `webapp/src/api.js`
+  - `webapp/src/components/AdminPanel.jsx`
+  - `webapp/src/styles.css`
 - Backwards compatibility: DB 池为空时保持现有 `.env` OKX 配置行为。
 - Security: 不能在日志、API 响应、前端状态中暴露 OKX secret/passphrase 明文。

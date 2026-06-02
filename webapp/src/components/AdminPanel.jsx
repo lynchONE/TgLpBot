@@ -8,17 +8,24 @@ import {
   Shield,
 } from 'lucide-react';
 import {
+  addAdminOKXConfig,
   addAdminPoolDataSource,
   addAdminRPCEndpoint,
+  checkAdminOKXConfig,
   checkAdminPoolDataSource,
   checkAdminRPCEndpoint,
+  deleteAdminOKXConfig,
   deleteAdminPoolDataSource,
   deleteAdminRPCEndpoint,
+  disableAdminOKXConfig,
+  disableAdminOKXConfigNextMonth,
   disableAdminPoolDataSource,
   disableAdminRPCEndpointNextMonth,
+  enableAdminOKXConfig,
   enableAdminPoolDataSource,
   enableAdminRPCEndpoint,
   fetchAdminActiveTasks,
+  fetchAdminOKXPool,
   fetchAdminOnlineUsers,
   fetchAdminPoolDataSources,
   fetchAdminPrivateZap,
@@ -26,9 +33,12 @@ import {
   fetchAdminRealtimePositions,
   fetchSystemConfig,
   invalidateAdminPrivateZap,
+  renameAdminOKXConfig,
   renameAdminRPCEndpoint,
+  switchAdminOKXConfig,
   switchAdminPoolDataSource,
   switchAdminRPCEndpoint,
+  updateAdminOKXConfig,
   updateSystemConfig,
 } from '../api';
 import { formatUsd, shortAddress } from '../utils';
@@ -59,6 +69,7 @@ const ADMIN_SYSTEM_SECTIONS = [
   { key: 'config', label: '基础配置' },
   { key: 'rpc', label: 'RPC 节点' },
   { key: 'pool_sources', label: '池子数据源' },
+  { key: 'okx', label: 'OKX 配置' },
   { key: 'private_zap', label: 'Private Zap' },
 ];
 
@@ -132,6 +143,29 @@ function derivePoolSourceHealthSummary(poolData) {
     tone,
     value: `${enabled}/${total}`,
     hint: withError > 0 ? `${withError} 错误` : '启用 / 总数',
+  };
+}
+
+function deriveOKXHealthSummary(okxData) {
+  const configs = Array.isArray(okxData?.configs) ? okxData.configs : [];
+  let available = 0;
+  let withError = 0;
+  configs.forEach((cfg) => {
+    const status = String(cfg?.status || '').trim().toLowerCase();
+    if (cfg?.is_enabled && status !== 'unavailable') available += 1;
+    if (cfg?.last_error) withError += 1;
+  });
+  if (configs.length === 0) {
+    return {
+      tone: okxData?.env_base_url ? 'idle' : 'warn',
+      value: okxData?.env_base_url ? '.env' : '--',
+      hint: okxData?.env_base_url ? '环境变量备用' : '未配置',
+    };
+  }
+  return {
+    tone: available > 0 ? (withError > 0 ? 'warn' : 'ok') : 'danger',
+    value: `${available}/${configs.length}`,
+    hint: withError > 0 ? `${withError} 错误` : '可用 / 总数',
   };
 }
 
@@ -249,6 +283,43 @@ function formatPoolDataSourceType(type) {
   if (value === 'poolm_top_fees') return 'PoolM';
   if (value === 'market_pools') return 'Market Pools';
   return type || '--';
+}
+
+function formatOKXSource(source) {
+  const value = String(source || '').trim().toLowerCase();
+  if (value === 'db') return '配置池';
+  if (value === 'env') return '.env';
+  return source || '--';
+}
+
+function formatOKXReason(reason) {
+  const value = String(reason || '').trim().toLowerCase();
+  if (value === 'quota_exhausted') return '额度用尽';
+  if (value === 'rate_limited') return '频率限制';
+  if (value === 'health_fail') return '健康检查失败';
+  if (value === 'auth_fail') return '认证失败';
+  if (value === 'manual') return '手动禁用';
+  return reason || '';
+}
+
+function okxConfigDisplayName(config) {
+  const name = String(config?.name || '').trim();
+  if (name) return name;
+  const url = String(config?.base_url || '').trim();
+  if (!url) return config?.id ? `#${config.id}` : '--';
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+function isOKXUnavailable(config) {
+  return !config?.is_enabled || String(config?.status || '').trim().toLowerCase() === 'unavailable';
+}
+
+function formatOKXConfigUrl(config) {
+  return String(config?.base_url_masked || config?.base_url || '').trim() || '--';
 }
 
 function poolSourceDisplayName(source) {
@@ -420,6 +491,133 @@ function PoolDataSourceRow({
   );
 }
 
+function OKXConfigRow({
+  config,
+  onRename,
+  onUpdate,
+  onCheck,
+  onSwitch,
+  onDisable,
+  onDisableNextMonth,
+  onEnable,
+  onDelete,
+}) {
+  const [renameValue, setRenameValue] = useState(okxConfigDisplayName(config));
+  const [baseURL, setBaseURL] = useState(String(config?.base_url || '').trim());
+  const [apiKey, setAPIKey] = useState('');
+  const [secretKey, setSecretKey] = useState('');
+  const [passphrase, setPassphrase] = useState('');
+  const unavailable = isOKXUnavailable(config);
+
+  useEffect(() => {
+    setRenameValue(okxConfigDisplayName(config));
+    setBaseURL(String(config?.base_url || '').trim());
+    setAPIKey('');
+    setSecretKey('');
+    setPassphrase('');
+  }, [config?.id, config?.name, config?.base_url]);
+
+  return (
+    <div className="am-list-item am-list-item-wrap">
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="am-item-title">{okxConfigDisplayName(config)}</div>
+        <div className="am-item-sub">
+          {formatOKXConfigUrl(config)} / {config?.api_key_masked || 'no key'} / 延迟 {Number(config?.last_latency_ms || 0) > 0 ? `${Number(config.last_latency_ms)}ms` : '--'}
+        </div>
+        <div className="am-actions" style={{ justifyContent: 'flex-start' }}>
+          <span className={unavailable ? 'am-badge am-badge-warn' : 'am-badge am-badge-ok'}>
+            {unavailable ? '不可用' : '可用'}
+          </span>
+          {config?.is_current ? <span className="am-badge">当前配置</span> : null}
+          {!config?.is_enabled ? <span className="am-badge am-badge-warn">已停用</span> : null}
+          {config?.disabled_until ? (
+            <span className="am-badge am-badge-warn">
+              禁用至 {formatDateTime(config.disabled_until)}
+              {config?.disabled_reason ? ` / ${formatOKXReason(config.disabled_reason)}` : ''}
+            </span>
+          ) : null}
+        </div>
+        <div className="am-item-sub">
+          检测 {formatDateTime(config?.last_checked_at)} / 成功 {formatDateTime(config?.last_success_at)} / 连续失败 {Number(config?.consecutive_failures || 0)}
+        </div>
+        {config?.last_error ? <div className="am-error">{config.last_error}</div> : null}
+        <div className="am-rename">
+          <span>名称</span>
+          <input
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            placeholder="配置名称"
+          />
+          <button
+            type="button"
+            className="am-action-btn"
+            onClick={() => onRename?.(config, renameValue)}
+          >
+            改名
+          </button>
+        </div>
+        <div className="am-okx-edit">
+          <label>
+            <span>Base URL</span>
+            <input value={baseURL} onChange={(event) => setBaseURL(event.target.value)} />
+          </label>
+          <label>
+            <span>API Key</span>
+            <input value={apiKey} onChange={(event) => setAPIKey(event.target.value)} placeholder="留空不修改" autoComplete="off" />
+          </label>
+          <label>
+            <span>Secret</span>
+            <input type="password" value={secretKey} onChange={(event) => setSecretKey(event.target.value)} placeholder="留空不修改" autoComplete="new-password" />
+          </label>
+          <label>
+            <span>Passphrase</span>
+            <input type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} placeholder="留空不修改" autoComplete="new-password" />
+          </label>
+          <button
+            type="button"
+            className="am-action-btn"
+            onClick={() => onUpdate?.(config, {
+              name: renameValue,
+              baseUrl: baseURL,
+              apiKey,
+              secretKey,
+              passphrase,
+            })}
+          >
+            保存连接
+          </button>
+        </div>
+      </div>
+
+      <div className="am-btn-group">
+        <button type="button" className="am-action-btn" onClick={() => onCheck?.(config)}>检测</button>
+        <button
+          type="button"
+          className="am-action-btn"
+          disabled={unavailable || config?.is_current}
+          onClick={() => onSwitch?.(config)}
+        >
+          切换
+        </button>
+        {unavailable ? (
+          <button type="button" className="am-action-btn" onClick={() => onEnable?.(config)}>启用</button>
+        ) : (
+          <button type="button" className="am-action-btn" onClick={() => onDisable?.(config)}>停用</button>
+        )}
+        <button
+          type="button"
+          className="am-action-btn"
+          disabled={unavailable}
+          onClick={() => onDisableNextMonth?.(config)}
+        >
+          禁用到下月
+        </button>
+        <button type="button" className="am-action-btn" onClick={() => onDelete?.(config)}>删除</button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPanel({
   apiBaseUrl,
   initData,
@@ -491,6 +689,19 @@ export default function AdminPanel({
     setCurrent: false,
   });
 
+  const [okxData, setOKXData] = useState(null);
+  const [okxLoading, setOKXLoading] = useState(false);
+  const [okxError, setOKXError] = useState('');
+  const [okxAdding, setOKXAdding] = useState(false);
+  const [okxAddDraft, setOKXAddDraft] = useState({
+    name: '',
+    baseUrl: 'https://www.okx.com/api/v6/dex/aggregator',
+    apiKey: '',
+    secretKey: '',
+    passphrase: '',
+    setCurrent: false,
+  });
+
   const [privateZapData, setPrivateZapData] = useState(null);
   const [privateZapLoading, setPrivateZapLoading] = useState(false);
   const [privateZapError, setPrivateZapError] = useState('');
@@ -546,6 +757,7 @@ export default function AdminPanel({
 
   const rpcHealthSummary = useMemo(() => deriveRpcHealthSummary(rpcData), [rpcData]);
   const poolSourceHealthSummary = useMemo(() => derivePoolSourceHealthSummary(poolSourceData), [poolSourceData]);
+  const okxHealthSummary = useMemo(() => deriveOKXHealthSummary(okxData), [okxData]);
 
   const openUserDrawer = useCallback((user) => {
     if (!user) return;
@@ -680,6 +892,20 @@ export default function AdminPanel({
     }
   }, [apiBaseUrl, initData, isReady]);
 
+  const loadOKXPool = useCallback(async () => {
+    if (!isReady) return;
+    setOKXLoading(true);
+    setOKXError('');
+    try {
+      const response = await fetchAdminOKXPool({ apiBaseUrl, initData });
+      setOKXData(response || null);
+    } catch (err) {
+      setOKXError(errorText(err));
+    } finally {
+      setOKXLoading(false);
+    }
+  }, [apiBaseUrl, initData, isReady]);
+
   const loadPrivateZap = useCallback(async () => {
     if (!isReady) return;
     setPrivateZapLoading(true);
@@ -702,9 +928,10 @@ export default function AdminPanel({
       loadSystemConfig();
       loadRPCPool();
       loadPoolDataSources();
+      loadOKXPool();
       loadPrivateZap();
     }
-  }, [activeTab, loadActiveTasks, loadOnlineUsers, loadPoolDataSources, loadPrivateZap, loadRPCPool, loadSystemConfig]);
+  }, [activeTab, loadActiveTasks, loadOKXPool, loadOnlineUsers, loadPoolDataSources, loadPrivateZap, loadRPCPool, loadSystemConfig]);
 
   useEffect(() => {
     if (!isReady || activeTab !== 'operations') return undefined;
@@ -732,10 +959,12 @@ export default function AdminPanel({
     loadSystemConfig();
     loadRPCPool();
     loadPoolDataSources();
+    loadOKXPool();
     loadPrivateZap();
   }, [
     activeTab,
     loadActiveTasks,
+    loadOKXPool,
     loadOnlineUsers,
     loadPoolDataSources,
     loadPrivateZap,
@@ -884,6 +1113,56 @@ export default function AdminPanel({
     }
   }, [apiBaseUrl, initData, isReady, loadPoolDataSources, poolSourceAddDraft, showNotice]);
 
+  const runOKXAction = useCallback(async (runner, successMessage) => {
+    try {
+      await runner();
+      await loadOKXPool();
+      if (successMessage) showNotice(successMessage);
+    } catch (err) {
+      setOKXError(errorText(err));
+    }
+  }, [loadOKXPool, showNotice]);
+
+  const handleAddOKX = useCallback(async () => {
+    if (!isReady) return;
+    const baseUrl = String(okxAddDraft.baseUrl || '').trim();
+    const apiKey = String(okxAddDraft.apiKey || '').trim();
+    const secretKey = String(okxAddDraft.secretKey || '').trim();
+    const passphrase = String(okxAddDraft.passphrase || '').trim();
+    if (!baseUrl || !apiKey || !secretKey || !passphrase) {
+      setOKXError('请填写 Base URL、API Key、Secret 和 Passphrase');
+      return;
+    }
+    setOKXAdding(true);
+    setOKXError('');
+    try {
+      await addAdminOKXConfig({
+        apiBaseUrl,
+        initData,
+        name: String(okxAddDraft.name || '').trim(),
+        baseUrl,
+        apiKey,
+        secretKey,
+        passphrase,
+        setCurrent: Boolean(okxAddDraft.setCurrent),
+      });
+      setOKXAddDraft((prev) => ({
+        ...prev,
+        name: '',
+        apiKey: '',
+        secretKey: '',
+        passphrase: '',
+        setCurrent: false,
+      }));
+      await loadOKXPool();
+      showNotice('OKX 配置已添加');
+    } catch (err) {
+      setOKXError(errorText(err));
+    } finally {
+      setOKXAdding(false);
+    }
+  }, [apiBaseUrl, initData, isReady, loadOKXPool, okxAddDraft, showNotice]);
+
   const handleInvalidatePrivateZap = useCallback((chain, kind) => {
     if (!isReady) return;
     setConfirmAction({
@@ -915,6 +1194,10 @@ export default function AdminPanel({
   const poolSourceGroups = useMemo(
     () => (Array.isArray(poolSourceData?.groups) ? poolSourceData.groups : []),
     [poolSourceData?.groups]
+  );
+  const okxConfigs = useMemo(
+    () => (Array.isArray(okxData?.configs) ? okxData.configs : []),
+    [okxData?.configs]
   );
   const rpcChains = useMemo(() => {
     const grouped = new Map();
@@ -1009,6 +1292,13 @@ export default function AdminPanel({
                   tone={poolSourceHealthSummary.tone}
                   hint={poolSourceHealthSummary.hint}
                   onClick={() => { setActiveTab('system'); setSystemSection('pool_sources'); }}
+                />
+                <AdminStatChip
+                  label="OKX 配置"
+                  value={okxHealthSummary.value}
+                  tone={okxHealthSummary.tone}
+                  hint={okxHealthSummary.hint}
+                  onClick={() => { setActiveTab('system'); setSystemSection('okx'); }}
                 />
               </div>
 
@@ -1156,6 +1446,12 @@ export default function AdminPanel({
                   value={poolSourceHealthSummary.value}
                   tone={poolSourceHealthSummary.tone}
                   hint={poolSourceHealthSummary.hint}
+                />
+                <AdminStatChip
+                  label="OKX 配置"
+                  value={okxHealthSummary.value}
+                  tone={okxHealthSummary.tone}
+                  hint={okxHealthSummary.hint}
                 />
                 <AdminStatChip
                   label="Private Zap"
@@ -1546,6 +1842,157 @@ export default function AdminPanel({
                         )) : <EmptyState text="当前仅使用 ENV 兜底来源" />}
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+              ) : null}
+
+              {systemSection === 'okx' ? (
+              <div className="am-card">
+                <div className="am-card-header">
+                  <div className="am-card-title">OKX 配置池</div>
+                  <button type="button" className="am-action-btn" disabled={okxLoading} onClick={loadOKXPool}>
+                    <RefreshCw size={12} className={okxLoading ? 'animate-spin' : undefined} />
+                    刷新
+                  </button>
+                </div>
+                {okxError ? <div className="am-error">{okxError}</div> : null}
+                <div className="am-okx-summary">
+                  <div>
+                    <span>当前来源</span>
+                    <strong>{formatOKXSource(okxData?.effective_source)}</strong>
+                    {okxData?.effective_config_id ? <em>#{okxData.effective_config_id}</em> : null}
+                  </div>
+                  <div>
+                    <span>当前 Base URL</span>
+                    <strong>{okxData?.effective_base_url_masked || okxData?.effective_base_url || '--'}</strong>
+                  </div>
+                  <div>
+                    <span>当前 API Key</span>
+                    <strong>{okxData?.effective_api_key_masked || '--'}</strong>
+                  </div>
+                  <div>
+                    <span>.env 备用</span>
+                    <strong>{okxData?.env_base_url_masked || okxData?.env_base_url || '--'}</strong>
+                  </div>
+                </div>
+                <div className="am-form">
+                  <label className="am-field">
+                    <span>名称</span>
+                    <input
+                      value={okxAddDraft.name}
+                      onChange={(event) => setOKXAddDraft((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="可选，留空使用域名"
+                    />
+                  </label>
+                  <label className="am-field am-field-grow">
+                    <span>Base URL</span>
+                    <input
+                      value={okxAddDraft.baseUrl}
+                      onChange={(event) => setOKXAddDraft((prev) => ({ ...prev, baseUrl: event.target.value }))}
+                      placeholder="https://www.okx.com/api/v6/dex/aggregator"
+                    />
+                  </label>
+                  <label className="am-field">
+                    <span>API Key</span>
+                    <input
+                      value={okxAddDraft.apiKey}
+                      onChange={(event) => setOKXAddDraft((prev) => ({ ...prev, apiKey: event.target.value }))}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="am-field">
+                    <span>Secret</span>
+                    <input
+                      type="password"
+                      value={okxAddDraft.secretKey}
+                      onChange={(event) => setOKXAddDraft((prev) => ({ ...prev, secretKey: event.target.value }))}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  <label className="am-field">
+                    <span>Passphrase</span>
+                    <input
+                      type="password"
+                      value={okxAddDraft.passphrase}
+                      onChange={(event) => setOKXAddDraft((prev) => ({ ...prev, passphrase: event.target.value }))}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  <label className="am-field am-field-check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(okxAddDraft.setCurrent)}
+                      onChange={(event) => setOKXAddDraft((prev) => ({ ...prev, setCurrent: event.target.checked }))}
+                    />
+                    <span>添加后切为当前配置</span>
+                  </label>
+                </div>
+                <div className="am-actions">
+                  <span className="am-item-sub">
+                    DB 配置为空或不可用时，系统会继续使用 .env OKX 配置。
+                  </span>
+                  <button type="button" className="am-action-btn" disabled={okxAdding} onClick={handleAddOKX}>
+                    {okxAdding ? '添加中...' : '添加 OKX 配置'}
+                  </button>
+                </div>
+                {okxLoading && okxConfigs.length === 0 ? <div className="panel-loading">正在加载 OKX 配置池...</div> : null}
+                {!okxLoading && okxConfigs.length === 0 ? <EmptyState text="暂无 OKX DB 配置，当前使用 .env 兜底。" /> : null}
+                <div className="am-list">
+                  {okxConfigs.map((config) => (
+                    <OKXConfigRow
+                      key={config.id || `${config?.base_url}:${config?.api_key_masked}`}
+                      config={config}
+                      onRename={(item, value) => runOKXAction(
+                        () => renameAdminOKXConfig({ apiBaseUrl, initData, configId: item?.id, name: String(value || '').trim() }),
+                        'OKX 配置名称已更新'
+                      )}
+                      onUpdate={(item, value) => runOKXAction(
+                        () => updateAdminOKXConfig({
+                          apiBaseUrl,
+                          initData,
+                          configId: item?.id,
+                          name: String(value?.name || '').trim(),
+                          baseUrl: String(value?.baseUrl || '').trim(),
+                          apiKey: String(value?.apiKey || '').trim(),
+                          secretKey: String(value?.secretKey || '').trim(),
+                          passphrase: String(value?.passphrase || '').trim(),
+                        }),
+                        'OKX 配置连接信息已保存'
+                      )}
+                      onCheck={(item) => runOKXAction(
+                        () => checkAdminOKXConfig({ apiBaseUrl, initData, configId: item?.id }),
+                        'OKX 配置检测完成'
+                      )}
+                      onSwitch={(item) => runOKXAction(
+                        () => switchAdminOKXConfig({ apiBaseUrl, initData, configId: item?.id }),
+                        '当前 OKX 配置已切换'
+                      )}
+                      onDisable={(item) => runOKXAction(
+                        () => disableAdminOKXConfig({ apiBaseUrl, initData, configId: item?.id }),
+                        'OKX 配置已停用'
+                      )}
+                      onDisableNextMonth={(item) => runOKXAction(
+                        () => disableAdminOKXConfigNextMonth({ apiBaseUrl, initData, configId: item?.id }),
+                        'OKX 配置已禁用到下月'
+                      )}
+                      onEnable={(item) => runOKXAction(
+                        () => enableAdminOKXConfig({ apiBaseUrl, initData, configId: item?.id }),
+                        'OKX 配置已启用'
+                      )}
+                      onDelete={(item) => {
+                        setConfirmAction({
+                          title: '删除 OKX 配置',
+                          message: `确认删除 OKX 配置 "${okxConfigDisplayName(item)}" 吗？`,
+                          confirmText: '删除',
+                          danger: true,
+                          action: () => runOKXAction(
+                            () => deleteAdminOKXConfig({ apiBaseUrl, initData, configId: item?.id }),
+                            'OKX 配置已删除'
+                          ),
+                        });
+                      }}
+                    />
                   ))}
                 </div>
               </div>

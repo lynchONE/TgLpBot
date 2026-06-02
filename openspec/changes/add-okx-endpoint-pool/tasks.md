@@ -8,7 +8,7 @@
 - [x] 1.7 新增后台健康检查，定期检查启用的 DB OKX 配置
 - [x] 1.8 新增管理员 API：list/add/rename/switch/disable/enable/delete/check（例如 `/api/admin/okx_pool`）
 - [x] 1.9 更新 compat route 和 Vercel proxy allowlist
-- [x] 1.10 新增 MiniApp 管理页 OKX 配置池入口，展示 current、状态、脱敏 key、错误、检查/切换操作和新增表单
+- [x] 1.10 新增 MiniApp/WebApp 管理页 OKX 配置池入口，展示 current、状态、脱敏 key、错误、检查/切换操作和新增表单
 - [x] 1.11 补充 Go 单元测试：manager 选择/兜底/禁用/切换、密钥脱敏、admin handler 校验、OKX client 使用配置
 - [x] 1.12 运行针对性测试：`cd backend; go test ./...`
 - [x] 1.13 如改动 MiniApp，运行 `cd miniapp; npm run build`
