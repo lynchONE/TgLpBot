@@ -1,0 +1,14 @@
+## 1. Implementation
+- [x] 1.1 新增 `OKXAPIConfig` GORM model，并纳入 MySQL AutoMigrate
+- [x] 1.2 实现 OKX 配置池 manager/store：列表、选择 current、`.env` 兜底、加密解密、脱敏
+- [x] 1.3 实现 OKX 配置校验：base URL、API key、secret/passphrase 必填、名称长度、重复 URL/key 处理
+- [x] 1.4 实现失败分类：限流、额度耗尽、认证失败、网络/5xx、业务 code 错误，并记录健康字段
+- [x] 1.5 将 `exchange.OKXDexService` 改为从 OKX 配置池读取当前配置，请求成功/失败回写状态
+- [x] 1.6 覆盖 `/swap`、`/approve-transaction`、`market/token/advanced-info` 的自动切换路径
+- [x] 1.7 新增后台健康检查，定期检查启用的 DB OKX 配置
+- [x] 1.8 新增管理员 API：list/add/rename/switch/disable/enable/delete/check（例如 `/api/admin/okx_pool`）
+- [x] 1.9 更新 compat route 和 Vercel proxy allowlist
+- [x] 1.10 新增 MiniApp 管理页 OKX 配置池入口，展示 current、状态、脱敏 key、错误、检查/切换操作和新增表单
+- [x] 1.11 补充 Go 单元测试：manager 选择/兜底/禁用/切换、密钥脱敏、admin handler 校验、OKX client 使用配置
+- [x] 1.12 运行针对性测试：`cd backend; go test ./...`
+- [x] 1.13 如改动 MiniApp，运行 `cd miniapp; npm run build`

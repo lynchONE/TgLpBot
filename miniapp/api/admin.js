@@ -35,6 +35,7 @@ export default async function handler(req, res) {
         'admin_announcements',
         'rpc_pool',
         'pool_data_sources',
+        'okx_pool',
         'private_zap',
         'assets_smart_money_overview',
         'assets_smart_money_wallet',

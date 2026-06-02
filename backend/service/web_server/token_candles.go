@@ -3,6 +3,7 @@ package web_server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 )
 
 var tokenAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$`)
+var geckoPoolAddressRegex = regexp.MustCompile(`^(0x)?(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$`)
+var geckoTerminalAPIBaseURL = "https://api.geckoterminal.com/api/v2"
 var geckoCandleBarMap = map[string]geckoOHLCVParams{
 	"1m":  {timeframe: "minute", aggregate: 1, step: time.Minute},
 	"3m":  {timeframe: "minute", aggregate: 3, step: 3 * time.Minute},
@@ -54,6 +57,7 @@ type tokenCandle struct {
 type tokenCandlesEnvelope struct {
 	Chain        string        `json:"chain"`
 	TokenAddress string        `json:"token_address"`
+	PoolAddress  string        `json:"pool_address,omitempty"`
 	Bar          string        `json:"bar"`
 	Limit        int           `json:"limit"`
 	Candles      []tokenCandle `json:"candles"`
@@ -79,6 +83,28 @@ type geckoOHLCVResponse struct {
 	} `json:"data"`
 }
 
+type geckoPoolCandidate struct {
+	address    string
+	reserveUSD float64
+}
+
+type geckoHTTPError struct {
+	scope  string
+	status int
+	body   string
+}
+
+func (e *geckoHTTPError) Error() string {
+	if e == nil {
+		return ""
+	}
+	body := strings.TrimSpace(e.body)
+	if body == "" {
+		return fmt.Sprintf("geckoterminal %s http %d", e.scope, e.status)
+	}
+	return fmt.Sprintf("geckoterminal %s http %d: %s", e.scope, e.status, body)
+}
+
 func normalizeGeckoBar(raw string) (string, geckoOHLCVParams, bool) {
 	key := strings.ToLower(strings.TrimSpace(raw))
 	if key == "" {
@@ -89,6 +115,33 @@ func normalizeGeckoBar(raw string) (string, geckoOHLCVParams, bool) {
 		return "", geckoOHLCVParams{}, false
 	}
 	return key, v, true
+}
+
+func geckoAPIURL(format string, args ...any) string {
+	base := strings.TrimRight(strings.TrimSpace(geckoTerminalAPIBaseURL), "/")
+	return base + fmt.Sprintf(format, args...)
+}
+
+func normalizeTokenAddress(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !tokenAddressRegex.MatchString(raw) {
+		return "", false
+	}
+	if !strings.HasPrefix(raw, "0x") && !strings.HasPrefix(raw, "0X") {
+		raw = "0x" + raw
+	}
+	return strings.ToLower(raw), true
+}
+
+func normalizeGeckoPoolAddress(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !geckoPoolAddressRegex.MatchString(raw) {
+		return "", false
+	}
+	if !strings.HasPrefix(raw, "0x") && !strings.HasPrefix(raw, "0X") {
+		raw = "0x" + raw
+	}
+	return strings.ToLower(raw), true
 }
 
 func isDigitsOnly(raw string) bool {
@@ -137,6 +190,22 @@ func geckoTokenIDAddress(id string) string {
 	return ""
 }
 
+func geckoPoolIDAddress(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	idx := strings.LastIndex(id, "_")
+	if idx >= 0 && idx+1 < len(id) {
+		id = id[idx+1:]
+	}
+	addr, ok := normalizeGeckoPoolAddress(id)
+	if !ok {
+		return ""
+	}
+	return addr
+}
+
 func parseGeckoFloat(raw string) float64 {
 	v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 	if err != nil {
@@ -145,60 +214,73 @@ func parseGeckoFloat(raw string) float64 {
 	return sanitizeFloat(v)
 }
 
-func fetchGeckoBestPoolAddress(ctx context.Context, client *http.Client, chain string, tokenAddress string) (string, error) {
+func fetchGeckoPoolCandidates(ctx context.Context, client *http.Client, chain string, tokenAddress string) ([]geckoPoolCandidate, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 12 * time.Second}
 	}
 	network := geckoNetworkForChain(chain)
-	endpoint := fmt.Sprintf(
-		"https://api.geckoterminal.com/api/v2/networks/%s/tokens/%s/pools?page=1",
+	endpoint := geckoAPIURL(
+		"/networks/%s/tokens/%s/pools?page=1",
 		url.PathEscape(network),
 		url.PathEscape(strings.ToLower(strings.TrimSpace(tokenAddress))),
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("geckoterminal token pools http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &geckoHTTPError{scope: "token pools", status: resp.StatusCode, body: string(body)}
 	}
 
 	var parsed geckoTokenPoolsResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	bestAddress := ""
-	bestReserve := -1.0
+	candidates := make([]geckoPoolCandidate, 0, len(parsed.Data))
+	seen := make(map[string]struct{}, len(parsed.Data))
 	for _, row := range parsed.Data {
-		addr := strings.ToLower(strings.TrimSpace(row.Attributes.Address))
+		addr := strings.TrimSpace(row.Attributes.Address)
 		if addr == "" {
-			addr = geckoTokenIDAddress(row.ID)
+			addr = geckoPoolIDAddress(row.ID)
 		}
-		if addr == "" {
+		normalized, ok := normalizeGeckoPoolAddress(addr)
+		if !ok {
 			continue
 		}
-		reserve := parseGeckoFloat(row.Attributes.ReserveInUSD)
-		if reserve > bestReserve {
-			bestReserve = reserve
-			bestAddress = addr
+		if _, ok := seen[normalized]; ok {
+			continue
 		}
+		seen[normalized] = struct{}{}
+		reserve := parseGeckoFloat(row.Attributes.ReserveInUSD)
+		candidates = append(candidates, geckoPoolCandidate{address: normalized, reserveUSD: reserve})
 	}
-	if bestAddress == "" {
-		return "", fmt.Errorf("geckoterminal did not return pools for token %s", tokenAddress)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].reserveUSD > candidates[j].reserveUSD
+	})
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("geckoterminal did not return usable pools for token %s", tokenAddress)
 	}
-	return bestAddress, nil
+	return candidates, nil
+}
+
+func fetchGeckoBestPoolAddress(ctx context.Context, client *http.Client, chain string, tokenAddress string) (string, error) {
+	candidates, err := fetchGeckoPoolCandidates(ctx, client, chain, tokenAddress)
+	if err != nil {
+		return "", err
+	}
+	return candidates[0].address, nil
 }
 
 func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain string, poolAddress string, barParams geckoOHLCVParams, limit int, before string) ([]tokenCandle, error) {
@@ -216,8 +298,8 @@ func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain strin
 	if before != "" {
 		values.Set("before_timestamp", before)
 	}
-	endpoint := fmt.Sprintf(
-		"https://api.geckoterminal.com/api/v2/networks/%s/pools/%s/ohlcv/%s?%s",
+	endpoint := geckoAPIURL(
+		"/networks/%s/pools/%s/ohlcv/%s?%s",
 		url.PathEscape(network),
 		url.PathEscape(strings.ToLower(strings.TrimSpace(poolAddress))),
 		url.PathEscape(barParams.timeframe),
@@ -239,7 +321,7 @@ func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain strin
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("geckoterminal ohlcv http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &geckoHTTPError{scope: "ohlcv", status: resp.StatusCode, body: string(body)}
 	}
 
 	var parsed geckoOHLCVResponse
@@ -272,6 +354,77 @@ func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain strin
 		return candles[i].T < candles[j].T
 	})
 	return candles, nil
+}
+
+func shouldTryNextGeckoPool(err error) bool {
+	var geckoErr *geckoHTTPError
+	if errors.As(err, &geckoErr) {
+		return geckoErr.status == http.StatusBadRequest || geckoErr.status == http.StatusNotFound
+	}
+	return false
+}
+
+func appendUniqueGeckoPoolCandidate(candidates []geckoPoolCandidate, seen map[string]struct{}, address string, reserveUSD float64) []geckoPoolCandidate {
+	normalized, ok := normalizeGeckoPoolAddress(address)
+	if !ok {
+		return candidates
+	}
+	if _, ok := seen[normalized]; ok {
+		return candidates
+	}
+	seen[normalized] = struct{}{}
+	return append(candidates, geckoPoolCandidate{address: normalized, reserveUSD: reserveUSD})
+}
+
+func fetchGeckoTokenCandles(ctx context.Context, client *http.Client, chain string, tokenAddress string, preferredPoolAddress string, barParams geckoOHLCVParams, limit int, before string) ([]tokenCandle, string, error) {
+	preferredPoolAddress, hasPreferredPool := normalizeGeckoPoolAddress(preferredPoolAddress)
+	if hasPreferredPool {
+		candles, err := fetchGeckoPoolCandles(ctx, client, chain, preferredPoolAddress, barParams, limit, before)
+		if err == nil {
+			return candles, preferredPoolAddress, nil
+		}
+		if !shouldTryNextGeckoPool(err) {
+			return nil, preferredPoolAddress, err
+		}
+	}
+
+	poolCandidates, poolErr := fetchGeckoPoolCandidates(ctx, client, chain, tokenAddress)
+	if poolErr != nil {
+		return nil, "", poolErr
+	}
+	candidates := make([]geckoPoolCandidate, 0, 8)
+	seen := make(map[string]struct{}, len(poolCandidates)+1)
+	if hasPreferredPool {
+		seen[preferredPoolAddress] = struct{}{}
+	}
+	for _, candidate := range poolCandidates {
+		candidates = appendUniqueGeckoPoolCandidate(candidates, seen, candidate.address, candidate.reserveUSD)
+		if len(candidates) >= 8 {
+			break
+		}
+	}
+	if len(candidates) == 0 {
+		if poolErr != nil {
+			return nil, "", poolErr
+		}
+		return nil, "", fmt.Errorf("geckoterminal did not return usable pools for token %s", tokenAddress)
+	}
+
+	var lastErr error
+	for _, candidate := range candidates {
+		candles, err := fetchGeckoPoolCandles(ctx, client, chain, candidate.address, barParams, limit, before)
+		if err == nil {
+			return candles, candidate.address, nil
+		}
+		lastErr = err
+		if !shouldTryNextGeckoPool(err) {
+			return nil, candidate.address, err
+		}
+	}
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+	return nil, "", fmt.Errorf("geckoterminal did not return candles for token %s", tokenAddress)
 }
 
 func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
@@ -311,15 +464,11 @@ func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenAddress := strings.TrimSpace(query.Get("token_address"))
-	if !tokenAddressRegex.MatchString(tokenAddress) {
+	tokenAddress, ok := normalizeTokenAddress(query.Get("token_address"))
+	if !ok {
 		http.Error(w, "invalid token_address", http.StatusBadRequest)
 		return
 	}
-	if !strings.HasPrefix(tokenAddress, "0x") && !strings.HasPrefix(tokenAddress, "0X") {
-		tokenAddress = "0x" + tokenAddress
-	}
-	tokenAddress = strings.ToLower(tokenAddress)
 
 	bar, barParams, ok := normalizeGeckoBar(query.Get("bar"))
 	if !ok {
@@ -357,24 +506,15 @@ func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
 
 	poolAddress := strings.TrimSpace(query.Get("pool_address"))
 	if poolAddress != "" {
-		if !tokenAddressRegex.MatchString(poolAddress) {
+		normalizedPoolAddress, ok := normalizeGeckoPoolAddress(poolAddress)
+		if !ok {
 			http.Error(w, "invalid pool_address", http.StatusBadRequest)
 			return
 		}
-		if !strings.HasPrefix(poolAddress, "0x") && !strings.HasPrefix(poolAddress, "0X") {
-			poolAddress = "0x" + poolAddress
-		}
-		poolAddress = strings.ToLower(poolAddress)
-	} else {
-		var poolErr error
-		poolAddress, poolErr = fetchGeckoBestPoolAddress(ctx, nil, chain, tokenAddress)
-		if poolErr != nil {
-			http.Error(w, poolErr.Error(), http.StatusBadGateway)
-			return
-		}
+		poolAddress = normalizedPoolAddress
 	}
 
-	candles, err := fetchGeckoPoolCandles(ctx, nil, chain, poolAddress, barParams, limit, before)
+	candles, usedPoolAddress, err := fetchGeckoTokenCandles(ctx, nil, chain, tokenAddress, poolAddress, barParams, limit, before)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -383,6 +523,7 @@ func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tokenCandlesEnvelope{
 		Chain:        chain,
 		TokenAddress: tokenAddress,
+		PoolAddress:  usedPoolAddress,
 		Bar:          bar,
 		Limit:        limit,
 		Candles:      candles,

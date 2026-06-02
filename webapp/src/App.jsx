@@ -1789,6 +1789,7 @@ export default function App() {
           initData,
           chain: selectedPool?.chain || chain,
           tokenAddress: klineTokenAddress,
+          poolAddress: selectedPoolAddress,
           bar: klineIntervalMeta.key,
           limit: klineIntervalMeta.limit,
           signal,
@@ -1813,6 +1814,7 @@ export default function App() {
       klineIntervalMeta.limit,
       klineTokenAddress,
       selectedPool?.chain,
+      selectedPoolAddress,
     ]
   );
 

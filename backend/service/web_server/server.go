@@ -111,6 +111,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/admin/admin_announcements", s.handleAdminAnnouncements)
 	mux.HandleFunc("/api/admin/rpc_pool", s.handleAdminRPCPool)
 	mux.HandleFunc("/api/admin/pool_data_sources", s.handleAdminPoolDataSources)
+	mux.HandleFunc("/api/admin/okx_pool", s.handleAdminOKXPool)
 	mux.HandleFunc("/api/admin/private_zap", s.handleAdminPrivateZap)
 	mux.HandleFunc("/api/web_login", s.handleWebLogin)
 	mux.HandleFunc("/api/news_feed", s.handleSosoValueNews)

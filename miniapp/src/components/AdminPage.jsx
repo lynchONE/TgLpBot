@@ -3,6 +3,7 @@ import AdminOnlineUsers from './AdminOnlineUsers.jsx';
 import AdminActiveTasks from './AdminActiveTasks.jsx';
 import AdminRPCPool from './AdminRPCPool.jsx';
 import AdminPoolDataSources from './AdminPoolDataSources.jsx';
+import AdminOKXPool from './AdminOKXPool.jsx';
 import AdminPrivateZapCard from './AdminPrivateZapCard.jsx';
 import AdminAccessWorkbench from './AdminAccessWorkbench.jsx';
 import SystemConfigCard from './SystemConfigCard.jsx';
@@ -11,6 +12,7 @@ import AdminUserDetailDrawer from './admin/AdminUserDetailDrawer.jsx';
 import { getBrandTheme } from '../lib/brand';
 import {
     fetchAdminActiveTasks,
+    fetchAdminOKXPool,
     fetchAdminOnlineUsers,
     fetchAdminPoolDataSources,
     fetchAdminRPCPool,
@@ -26,6 +28,7 @@ const SYSTEM_SUBTABS = [
     { key: 'config', label: '基础配置' },
     { key: 'rpc', label: 'RPC 节点' },
     { key: 'pool_sources', label: '池子源' },
+    { key: 'okx', label: 'OKX 配置' },
     { key: 'private_zap', label: 'Private Zap' },
 ];
 
@@ -37,6 +40,7 @@ const LEGACY_TAB_MAP = {
     system_config: 'system',
     rpc_pool: 'system',
     pool_data_sources: 'system',
+    okx_pool: 'system',
 };
 
 const TASK_STATUS_FILTERS = [
@@ -106,6 +110,30 @@ function derivePoolSourceHealth(poolData) {
     };
 }
 
+function deriveOKXHealth(okxData) {
+    const configs = Array.isArray(okxData?.configs) ? okxData.configs : [];
+    let available = 0;
+    let withError = 0;
+    for (const cfg of configs) {
+        const status = String(cfg?.status || '').toLowerCase();
+        if (cfg?.is_enabled && status !== 'unavailable') available += 1;
+        if (cfg?.last_error) withError += 1;
+    }
+    if (configs.length === 0) {
+        return {
+            tone: okxData?.env_base_url ? 'idle' : 'warn',
+            value: okxData?.env_base_url ? '.env' : '--',
+            hint: okxData?.env_base_url ? '环境变量备用' : '未配置',
+        };
+    }
+    const tone = available > 0 ? (withError > 0 ? 'warn' : 'ok') : 'danger';
+    return {
+        tone,
+        value: `${available}/${configs.length}`,
+        hint: withError > 0 ? `${withError} 个有错误` : '可用 / 总数',
+    };
+}
+
 function SegmentedTabs({ tabs, active, onChange, accent }) {
     return (
         <div
@@ -171,6 +199,7 @@ export default function AdminPage({
         const requested = String(initialTab || '').trim();
         if (requested === 'rpc_pool') return 'rpc';
         if (requested === 'pool_data_sources') return 'pool_sources';
+        if (requested === 'okx_pool') return 'okx';
         if (requested === 'system_config') return 'config';
         return 'config';
     });
@@ -191,6 +220,7 @@ export default function AdminPage({
     /* Overview health data */
     const [rpcHealth, setRpcHealth] = useState({ tone: 'idle', value: '--', hint: '--' });
     const [poolHealth, setPoolHealth] = useState({ tone: 'idle', value: '--', hint: '--' });
+    const [okxHealth, setOKXHealth] = useState({ tone: 'idle', value: '--', hint: '--' });
 
     /* Operations UX state */
     const [query, setQuery] = useState('');
@@ -230,12 +260,14 @@ export default function AdminPage({
 
     const loadOverviewHealth = useCallback(async () => {
         if (!hasInitData) return;
-        const [rpcRes, poolRes] = await Promise.allSettled([
+        const [rpcRes, poolRes, okxRes] = await Promise.allSettled([
             fetchAdminRPCPool({ apiBaseUrl, initData }),
             fetchAdminPoolDataSources({ apiBaseUrl, initData }),
+            fetchAdminOKXPool({ apiBaseUrl, initData }),
         ]);
         if (rpcRes.status === 'fulfilled') setRpcHealth(deriveRpcHealth(rpcRes.value));
         if (poolRes.status === 'fulfilled') setPoolHealth(derivePoolSourceHealth(poolRes.value));
+        if (okxRes.status === 'fulfilled') setOKXHealth(deriveOKXHealth(okxRes.value));
     }, [apiBaseUrl, initData, hasInitData]);
 
     useEffect(() => {
@@ -341,7 +373,7 @@ export default function AdminPage({
             />
 
             {/* Overview stat row */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 <StatChip
                     label="在线用户"
                     value={onlineUsers.length}
@@ -368,6 +400,13 @@ export default function AdminPage({
                     tone={poolHealth.tone}
                     hint={poolHealth.hint}
                     onClick={() => { setTopTab('system'); setSystemSubtab('pool_sources'); }}
+                />
+                <StatChip
+                    label="OKX 配置"
+                    value={okxHealth.value}
+                    tone={okxHealth.tone}
+                    hint={okxHealth.hint}
+                    onClick={() => { setTopTab('system'); setSystemSubtab('okx'); }}
                 />
             </div>
 
@@ -509,6 +548,15 @@ export default function AdminPage({
                     )}
                     {systemSubtab === 'pool_sources' && (
                         <AdminPoolDataSources
+                            apiBaseUrl={apiBaseUrl}
+                            initData={initData}
+                            hasInitData={hasInitData}
+                            accentTheme={accentTheme}
+                            onNotice={onNotice}
+                        />
+                    )}
+                    {systemSubtab === 'okx' && (
+                        <AdminOKXPool
                             apiBaseUrl={apiBaseUrl}
                             initData={initData}
                             hasInitData={hasInitData}

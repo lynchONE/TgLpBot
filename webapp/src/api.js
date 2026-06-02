@@ -126,6 +126,7 @@ export async function fetchTokenCandles({
   initData,
   chain = 'bsc',
   tokenAddress,
+  poolAddress,
   bar = '1m',
   limit = 240,
   before,
@@ -137,6 +138,7 @@ export async function fetchTokenCandles({
   if (initData) params.set('initData', String(initData));
   if (chain) params.set('chain', String(chain));
   if (tokenAddress) params.set('token_address', String(tokenAddress));
+  if (poolAddress) params.set('pool_address', String(poolAddress));
   if (bar) params.set('bar', String(bar));
   if (Number.isFinite(limit)) params.set('limit', String(limit));
   if (before !== undefined && before !== null && String(before).trim()) params.set('before', String(before).trim());

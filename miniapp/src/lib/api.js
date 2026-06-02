@@ -1373,6 +1373,144 @@ export async function checkAdminPoolDataSource({ apiBaseUrl, initData, sourceId,
     });
 }
 
+// OKX API config pool (Admin)
+
+async function adminOKXPoolRequest({ apiBaseUrl, payload, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=okx_pool`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function fetchAdminOKXPool({ apiBaseUrl, initData, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'list' },
+        signal,
+    });
+}
+
+export async function addAdminOKXConfig({
+    apiBaseUrl,
+    initData,
+    name,
+    baseUrl,
+    apiKey,
+    secretKey,
+    passphrase,
+    setCurrent,
+    signal,
+}) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: {
+            initData,
+            action: 'add',
+            name,
+            base_url: baseUrl,
+            api_key: apiKey,
+            secret_key: secretKey,
+            passphrase,
+            set_current: Boolean(setCurrent),
+        },
+        signal,
+    });
+}
+
+export async function updateAdminOKXConfig({
+    apiBaseUrl,
+    initData,
+    configId,
+    name,
+    baseUrl,
+    apiKey,
+    secretKey,
+    passphrase,
+    setCurrent,
+    signal,
+}) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: {
+            initData,
+            action: 'update',
+            config_id: Number(configId),
+            name,
+            base_url: baseUrl,
+            api_key: apiKey,
+            secret_key: secretKey,
+            passphrase,
+            set_current: Boolean(setCurrent),
+        },
+        signal,
+    });
+}
+
+export async function renameAdminOKXConfig({ apiBaseUrl, initData, configId, name, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'rename', config_id: Number(configId), name },
+        signal,
+    });
+}
+
+export async function switchAdminOKXConfig({ apiBaseUrl, initData, configId, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'switch', config_id: Number(configId) },
+        signal,
+    });
+}
+
+export async function disableAdminOKXConfig({ apiBaseUrl, initData, configId, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'disable', config_id: Number(configId) },
+        signal,
+    });
+}
+
+export async function disableAdminOKXConfigNextMonth({ apiBaseUrl, initData, configId, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'disable', config_id: Number(configId), disable_next_month: true },
+        signal,
+    });
+}
+
+export async function enableAdminOKXConfig({ apiBaseUrl, initData, configId, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'enable', config_id: Number(configId) },
+        signal,
+    });
+}
+
+export async function deleteAdminOKXConfig({ apiBaseUrl, initData, configId, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'delete', config_id: Number(configId) },
+        signal,
+    });
+}
+
+export async function checkAdminOKXConfig({ apiBaseUrl, initData, configId, signal }) {
+    return adminOKXPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'check', config_id: Number(configId) },
+        signal,
+    });
+}
+
 async function adminPrivateZapRequest({ apiBaseUrl, payload, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=private_zap`;

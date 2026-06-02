@@ -1904,6 +1904,10 @@ body {
   min-height: 520px;
 }
 
+.kline-native-stage #tv-attr-logo {
+  display: none !important;
+}
+
 .kline-state-overlay {
   position: absolute;
   inset: 0;

@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/okxpool"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -28,6 +29,8 @@ type OKXDexService struct {
 	secretKey  string
 	passphrase string
 	client     *http.Client
+	usePool    bool
+	pool       *okxpool.Manager
 }
 
 const (
@@ -53,47 +56,121 @@ type okxApproveSpenderCacheEntry struct {
 
 // NewOKXDexService creates a new OKX DEX service
 func NewOKXDexService() *OKXDexService {
-	return &OKXDexService{
-		apiURL:     config.AppConfig.OKXDexAPIURL,
-		apiKey:     config.AppConfig.OKXAPIKey,
-		secretKey:  config.AppConfig.OKXSecretKey,
-		passphrase: config.AppConfig.OKXPassphrase,
-		client:     &http.Client{Timeout: 30 * time.Second},
+	svc := &OKXDexService{
+		client:  &http.Client{Timeout: 30 * time.Second},
+		usePool: true,
+		pool:    okxpool.Default(),
+	}
+	if config.AppConfig == nil {
+		return svc
+	}
+	svc.apiURL = config.AppConfig.OKXDexAPIURL
+	svc.apiKey = config.AppConfig.OKXAPIKey
+	svc.secretKey = config.AppConfig.OKXSecretKey
+	svc.passphrase = config.AppConfig.OKXPassphrase
+	return svc
+}
+
+func (s *OKXDexService) httpClient() *http.Client {
+	if s != nil && s.client != nil {
+		return s.client
+	}
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
+func (s *OKXDexService) manager() *okxpool.Manager {
+	if s != nil && s.pool != nil {
+		return s.pool
+	}
+	return okxpool.Default()
+}
+
+func (s *OKXDexService) staticConfig() okxpool.EffectiveConfig {
+	return okxpool.EffectiveConfig{
+		Source:     okxpool.SourceEnv,
+		BaseURL:    strings.TrimRight(strings.TrimSpace(s.apiURL), "/"),
+		APIKey:     strings.TrimSpace(s.apiKey),
+		SecretKey:  strings.TrimSpace(s.secretKey),
+		Passphrase: strings.TrimSpace(s.passphrase),
 	}
 }
 
-func (s *OKXDexService) isV6() bool {
-	return strings.Contains(s.apiURL, "/api/v6/") || strings.Contains(s.apiURL, "/api/v6")
+func (s *OKXDexService) effectiveConfig(ctx context.Context) (okxpool.EffectiveConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s == nil {
+		return okxpool.EffectiveConfig{}, fmt.Errorf("OKX service is nil")
+	}
+	if !s.usePool {
+		return s.staticConfig(), nil
+	}
+	mgr := s.manager()
+	if mgr == nil {
+		return s.staticConfig(), nil
+	}
+	eff, err := mgr.Effective(ctx)
+	if err != nil {
+		return okxpool.EffectiveConfig{}, err
+	}
+	if strings.TrimSpace(eff.BaseURL) == "" {
+		return okxpool.EffectiveConfig{}, fmt.Errorf("OKX DEX API URL not configured")
+	}
+	return eff, nil
 }
 
-func (s *OKXDexService) chainQueryKey() string {
-	// OKX DEX aggregator uses "chainId" on v5 endpoints and "chainIndex" on v6.
-	// Detect by API base URL to keep backward compatibility.
-	if s.isV6() {
+func (s *OKXDexService) recordOKXSuccess(ctx context.Context, eff okxpool.EffectiveConfig, latency time.Duration) {
+	if s == nil || !s.usePool {
+		return
+	}
+	if mgr := s.manager(); mgr != nil {
+		mgr.RecordSuccess(ctx, eff, latency)
+	}
+}
+
+func (s *OKXDexService) recordOKXFailure(ctx context.Context, eff okxpool.EffectiveConfig, latency time.Duration, err error) {
+	if s == nil || !s.usePool || err == nil {
+		return
+	}
+	if mgr := s.manager(); mgr != nil {
+		mgr.RecordFailure(ctx, eff, latency, err)
+	}
+}
+
+func (s *OKXDexService) shouldRetryWithNextOKXConfig(eff okxpool.EffectiveConfig, err error, attempt int) bool {
+	if s == nil || !s.usePool || attempt >= 2 || err == nil {
+		return false
+	}
+	return eff.Source == okxpool.SourceDB && eff.Config != nil
+}
+
+func (s *OKXDexService) isV6ForBase(baseURL string) bool {
+	return strings.Contains(baseURL, "/api/v6/") || strings.Contains(baseURL, "/api/v6")
+}
+
+func (s *OKXDexService) chainQueryKeyForBase(baseURL string) string {
+	if s.isV6ForBase(baseURL) {
 		return "chainIndex"
 	}
 	return "chainId"
 }
 
-func (s *OKXDexService) slippageQueryKey() string {
-	// OKX DEX aggregator uses "slippage" on v5 endpoints and "slippagePercent" on v6.
-	if s.isV6() {
+func (s *OKXDexService) slippageQueryKeyForBase(baseURL string) string {
+	if s.isV6ForBase(baseURL) {
 		return "slippagePercent"
 	}
 	return "slippage"
 }
 
-func (s *OKXDexService) slippageQueryValue(slippage string) string {
+func (s *OKXDexService) slippageQueryValueForBase(baseURL string, slippage string) string {
 	slippage = strings.TrimSpace(slippage)
 	if slippage == "" {
 		return ""
 	}
-	if !s.isV6() {
+	if !s.isV6ForBase(baseURL) {
 		return slippage
 	}
 
-	// Existing callers pass slippage as a decimal fraction (e.g. 0.005 for 0.5%).
-	// v6 expects percent value (e.g. 0.5).
 	rat, ok := new(big.Rat).SetString(slippage)
 	if !ok {
 		return slippage
@@ -112,6 +189,36 @@ func (s *OKXDexService) slippageQueryValue(slippage string) string {
 		return "0"
 	}
 	return out
+}
+
+func (s *OKXDexService) isV6() bool {
+	return s.isV6ForBase(s.apiURL)
+}
+
+func (s *OKXDexService) chainQueryKey() string {
+	return s.chainQueryKeyForBase(s.apiURL)
+}
+
+func (s *OKXDexService) slippageQueryKey() string {
+	return s.slippageQueryKeyForBase(s.apiURL)
+}
+
+func (s *OKXDexService) slippageQueryValue(slippage string) string {
+	return s.slippageQueryValueForBase(s.apiURL, slippage)
+}
+
+// NewStaticOKXDexService creates an OKX DEX service bound to a fixed config.
+func NewStaticOKXDexService(apiURL, apiKey, secretKey, passphrase string, client *http.Client) *OKXDexService {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &OKXDexService{
+		apiURL:     apiURL,
+		apiKey:     apiKey,
+		secretKey:  secretKey,
+		passphrase: passphrase,
+		client:     client,
+	}
 }
 
 // SwapRequest represents a swap request
@@ -236,7 +343,11 @@ func (e *OKXAPIError) Error() string {
 }
 
 func (s *OKXDexService) marketAPIURL() string {
-	base := strings.TrimSpace(s.apiURL)
+	return s.marketAPIURLForBase(s.apiURL)
+}
+
+func (s *OKXDexService) marketAPIURLForBase(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
 	if base == "" {
 		return "https://web3.okx.com/api/v6/dex/market"
 	}
@@ -328,12 +439,16 @@ func (s *OKXDexService) swapFeeParams(req SwapRequest) (string, string, string, 
 }
 
 func (s *OKXDexService) swapEndpoint(req SwapRequest) (string, error) {
+	return s.swapEndpointForBase(s.apiURL, req)
+}
+
+func (s *OKXDexService) swapEndpointForBase(baseURL string, req SwapRequest) (string, error) {
 	query := url.Values{}
-	query.Set(s.chainQueryKey(), strings.TrimSpace(req.ChainID))
+	query.Set(s.chainQueryKeyForBase(baseURL), strings.TrimSpace(req.ChainID))
 	query.Set("fromTokenAddress", strings.TrimSpace(req.FromTokenAddress))
 	query.Set("toTokenAddress", strings.TrimSpace(req.ToTokenAddress))
 	query.Set("amount", strings.TrimSpace(req.Amount))
-	query.Set(s.slippageQueryKey(), s.slippageQueryValue(req.Slippage))
+	query.Set(s.slippageQueryKeyForBase(baseURL), s.slippageQueryValueForBase(baseURL, req.Slippage))
 	query.Set("userWalletAddress", strings.TrimSpace(req.UserWalletAddress))
 
 	feePercent, fromReferrer, toReferrer, err := s.swapFeeParams(req)
@@ -350,12 +465,32 @@ func (s *OKXDexService) swapEndpoint(req SwapRequest) (string, error) {
 		}
 	}
 
-	return fmt.Sprintf("%s/swap?%s", strings.TrimRight(s.apiURL, "/"), query.Encode()), nil
+	return fmt.Sprintf("%s/swap?%s", strings.TrimRight(strings.TrimSpace(baseURL), "/"), query.Encode()), nil
 }
 
 // GetSwapData gets swap transaction data
 func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
-	endpoint, err := s.swapEndpoint(req)
+	ctx := context.Background()
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		eff, err := s.effectiveConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := s.getSwapDataOnce(ctx, eff, req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if !s.shouldRetryWithNextOKXConfig(eff, err, attempt) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func (s *OKXDexService) getSwapDataOnce(ctx context.Context, eff okxpool.EffectiveConfig, req SwapRequest) (*SwapResponse, error) {
+	endpoint, err := s.swapEndpointForBase(eff.BaseURL, req)
 	if err != nil {
 		return nil, err
 	}
@@ -364,24 +499,35 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 		log.Printf("[OKX API] 请求 URL: %s", endpoint)
 	}
 
-	httpReq, err := http.NewRequest("GET", endpoint, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Add headers
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	s.addHeaders(httpReq, "", timestamp)
+	s.addHeadersWithConfig(httpReq, "", timestamp, eff)
 
-	resp, err := s.client.Do(httpReq)
+	start := time.Now()
+	resp, err := s.httpClient().Do(httpReq)
+	latency := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		wrapped := fmt.Errorf("failed to send request: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		wrapped := fmt.Errorf("failed to read response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		wrapped := fmt.Errorf("OKX swap http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 
 	if config.AppConfig != nil && config.AppConfig.OKXDebug {
@@ -390,12 +536,18 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 
 	var swapResp SwapResponse
 	if err := json.Unmarshal(body, &swapResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		wrapped := fmt.Errorf("failed to parse response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 
 	if swapResp.Code != "0" {
-		return nil, &OKXAPIError{Endpoint: "swap", Code: swapResp.Code, Msg: swapResp.Msg}
+		err := &OKXAPIError{Endpoint: "swap", Code: swapResp.Code, Msg: swapResp.Msg}
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return nil, err
 	}
+
+	s.recordOKXSuccess(ctx, eff, latency)
 
 	// 打印详细响应信息
 	if config.AppConfig != nil && config.AppConfig.OKXDebug && len(swapResp.Data) > 0 {
@@ -467,7 +619,11 @@ func (s *OKXDexService) GetMarketTokenAdvancedInfo(ctx context.Context, req Mark
 		ChainIndex:           chainIndex,
 		TokenContractAddress: tokenAddress,
 	}
-	baseURL := s.marketAPIURL()
+	eff, err := s.effectiveConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	baseURL := s.marketAPIURLForBase(eff.BaseURL)
 	cacheKey := okxAdvancedInfoCacheKey(baseURL, normalized)
 	now := time.Now()
 	if raw, ok := okxAdvancedInfoCache.Load(cacheKey); ok {
@@ -478,7 +634,27 @@ func (s *OKXDexService) GetMarketTokenAdvancedInfo(ctx context.Context, req Mark
 	}
 
 	fetchedAny, err, _ := okxReadGroup.Do("advanced-info-fetch|"+cacheKey, func() (any, error) {
-		return s.getMarketTokenAdvancedInfoUncached(ctx, baseURL, normalized)
+		var lastErr error
+		for attempt := 1; attempt <= 2; attempt++ {
+			nextEff := eff
+			if attempt > 1 {
+				var cfgErr error
+				nextEff, cfgErr = s.effectiveConfig(ctx)
+				if cfgErr != nil {
+					return nil, cfgErr
+				}
+			}
+			nextBaseURL := s.marketAPIURLForBase(nextEff.BaseURL)
+			resp, err := s.getMarketTokenAdvancedInfoUncached(ctx, nextEff, nextBaseURL, normalized)
+			if err == nil {
+				return resp, nil
+			}
+			lastErr = err
+			if !s.shouldRetryWithNextOKXConfig(nextEff, err, attempt) {
+				return nil, err
+			}
+		}
+		return nil, lastErr
 	})
 	if err != nil {
 		return nil, err
@@ -491,7 +667,7 @@ func (s *OKXDexService) GetMarketTokenAdvancedInfo(ctx context.Context, req Mark
 	return cloneMarketTokenAdvancedInfoResponse(*fetched), nil
 }
 
-func (s *OKXDexService) getMarketTokenAdvancedInfoUncached(ctx context.Context, baseURL string, req MarketTokenAdvancedInfoRequest) (*MarketTokenAdvancedInfoResponse, error) {
+func (s *OKXDexService) getMarketTokenAdvancedInfoUncached(ctx context.Context, eff okxpool.EffectiveConfig, baseURL string, req MarketTokenAdvancedInfoRequest) (*MarketTokenAdvancedInfoResponse, error) {
 	query := url.Values{}
 	query.Set("chainIndex", strings.TrimSpace(req.ChainIndex))
 	query.Set("tokenContractAddress", strings.ToLower(strings.TrimSpace(req.TokenContractAddress)))
@@ -507,20 +683,28 @@ func (s *OKXDexService) getMarketTokenAdvancedInfoUncached(ctx context.Context, 
 	}
 
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	s.addHeaders(httpReq, "", timestamp)
+	s.addHeadersWithConfig(httpReq, "", timestamp, eff)
 
-	resp, err := s.client.Do(httpReq)
+	start := time.Now()
+	resp, err := s.httpClient().Do(httpReq)
+	latency := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		wrapped := fmt.Errorf("failed to send request: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		wrapped := fmt.Errorf("failed to read response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("OKX market/token/advanced-info http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		wrapped := fmt.Errorf("OKX market/token/advanced-info http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 
 	if config.AppConfig != nil && config.AppConfig.OKXDebug {
@@ -529,25 +713,34 @@ func (s *OKXDexService) getMarketTokenAdvancedInfoUncached(ctx context.Context, 
 
 	var out MarketTokenAdvancedInfoResponse
 	if err := json.Unmarshal(respBody, &out); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		wrapped := fmt.Errorf("failed to parse response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
 	}
 	if out.Code != "0" {
-		return nil, &OKXAPIError{Endpoint: "market/token/advanced-info", Code: out.Code, Msg: out.Msg}
+		err := &OKXAPIError{Endpoint: "market/token/advanced-info", Code: out.Code, Msg: out.Msg}
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return nil, err
 	}
+	s.recordOKXSuccess(ctx, eff, latency)
 	return &out, nil
 }
 
 // addHeaders adds authentication headers to the request
 func (s *OKXDexService) addHeaders(req *http.Request, body, timestamp string) {
+	s.addHeadersWithConfig(req, body, timestamp, s.staticConfig())
+}
+
+func (s *OKXDexService) addHeadersWithConfig(req *http.Request, body, timestamp string, eff okxpool.EffectiveConfig) {
 	message := timestamp + req.Method + req.URL.RequestURI() + body
-	mac := hmac.New(sha256.New, []byte(s.secretKey))
+	mac := hmac.New(sha256.New, []byte(eff.SecretKey))
 	mac.Write([]byte(message))
 	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
-	req.Header.Set("OK-ACCESS-KEY", s.apiKey)
+	req.Header.Set("OK-ACCESS-KEY", eff.APIKey)
 	req.Header.Set("OK-ACCESS-SIGN", signature)
 	req.Header.Set("OK-ACCESS-TIMESTAMP", timestamp)
-	req.Header.Set("OK-ACCESS-PASSPHRASE", s.passphrase)
+	req.Header.Set("OK-ACCESS-PASSPHRASE", eff.Passphrase)
 	req.Header.Set("Content-Type", "application/json")
 }
 
@@ -565,7 +758,11 @@ type ApproveTransactionResponse struct {
 func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (string, error) {
 	chainID = strings.TrimSpace(chainID)
 	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
-	cacheKey := okxApproveSpenderCacheKey(s.apiURL, chainID, tokenAddress)
+	eff, err := s.effectiveConfig(context.Background())
+	if err != nil {
+		return "", err
+	}
+	cacheKey := okxApproveSpenderCacheKey(eff.BaseURL, chainID, tokenAddress)
 	now := time.Now()
 	if cacheKey != "" {
 		if raw, ok := okxApproveSpenderCache.Load(cacheKey); ok {
@@ -577,7 +774,26 @@ func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (
 	}
 
 	fetchedAny, err, _ := okxReadGroup.Do("approve-spender-fetch|"+cacheKey, func() (any, error) {
-		return s.getApproveSpenderUncached(chainID, tokenAddress)
+		var lastErr error
+		for attempt := 1; attempt <= 2; attempt++ {
+			nextEff := eff
+			if attempt > 1 {
+				var cfgErr error
+				nextEff, cfgErr = s.effectiveConfig(context.Background())
+				if cfgErr != nil {
+					return "", cfgErr
+				}
+			}
+			spender, err := s.getApproveSpenderUncached(nextEff, chainID, tokenAddress)
+			if err == nil {
+				return spender, nil
+			}
+			lastErr = err
+			if !s.shouldRetryWithNextOKXConfig(nextEff, err, attempt) {
+				return "", err
+			}
+		}
+		return "", lastErr
 	})
 	if err != nil {
 		return "", err
@@ -595,42 +811,61 @@ func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (
 	return approveSpender, nil
 }
 
-func (s *OKXDexService) getApproveSpenderUncached(chainID string, tokenAddress string) (string, error) {
+func (s *OKXDexService) getApproveSpenderUncached(eff okxpool.EffectiveConfig, chainID string, tokenAddress string) (string, error) {
 	url := fmt.Sprintf("%s/approve-transaction?%s=%s&tokenContractAddress=%s&approveAmount=1",
-		s.apiURL, s.chainQueryKey(), chainID, tokenAddress)
+		eff.BaseURL, s.chainQueryKeyForBase(eff.BaseURL), chainID, tokenAddress)
 
-	httpReq, err := http.NewRequest("GET", url, nil)
+	ctx := context.Background()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Add headers
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	s.addHeaders(httpReq, "", timestamp)
+	s.addHeadersWithConfig(httpReq, "", timestamp, eff)
 
-	resp, err := s.client.Do(httpReq)
+	start := time.Now()
+	resp, err := s.httpClient().Do(httpReq)
+	latency := time.Since(start)
 	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
+		wrapped := fmt.Errorf("failed to send request: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return "", wrapped
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		wrapped := fmt.Errorf("failed to read response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return "", wrapped
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		wrapped := fmt.Errorf("OKX approve-transaction http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return "", wrapped
 	}
 
 	var approveResp ApproveTransactionResponse
 	if err := json.Unmarshal(body, &approveResp); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		wrapped := fmt.Errorf("failed to parse response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return "", wrapped
 	}
 
 	if approveResp.Code != "0" {
-		return "", &OKXAPIError{Endpoint: "approve-transaction", Code: approveResp.Code, Msg: approveResp.Msg}
+		err := &OKXAPIError{Endpoint: "approve-transaction", Code: approveResp.Code, Msg: approveResp.Msg}
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return "", err
 	}
 
 	if len(approveResp.Data) == 0 || approveResp.Data[0].DexContractAddress == "" {
-		return "", fmt.Errorf("OKX API returned empty approve address")
+		err := fmt.Errorf("OKX API returned empty approve address")
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return "", err
 	}
 
+	s.recordOKXSuccess(ctx, eff, latency)
 	return approveResp.Data[0].DexContractAddress, nil
 }

@@ -2,9 +2,13 @@ package exchange
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/models"
+	"TgLpBot/base/okxpool"
 	"context"
 	"io"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +22,135 @@ type stubTransport struct {
 
 func (s stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return s.fn(req)
+}
+
+type okxDexMemStore struct {
+	mu   sync.Mutex
+	rows []models.OKXAPIConfig
+}
+
+func (s *okxDexMemStore) ListAll(ctx context.Context) ([]models.OKXAPIConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]models.OKXAPIConfig, len(s.rows))
+	copy(out, s.rows)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsCurrent != out[j].IsCurrent {
+			return out[i].IsCurrent
+		}
+		if out[i].IsEnabled != out[j].IsEnabled {
+			return out[i].IsEnabled
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (s *okxDexMemStore) ListEnabled(ctx context.Context) ([]models.OKXAPIConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []models.OKXAPIConfig
+	for _, row := range s.rows {
+		if row.IsEnabled {
+			out = append(out, row)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsCurrent != out[j].IsCurrent {
+			return out[i].IsCurrent
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (s *okxDexMemStore) GetByID(ctx context.Context, id uint) (*models.OKXAPIConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, row := range s.rows {
+		if row.ID == id {
+			cp := row
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *okxDexMemStore) Create(ctx context.Context, row *models.OKXAPIConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var maxID uint
+	for _, existing := range s.rows {
+		if existing.ID > maxID {
+			maxID = existing.ID
+		}
+	}
+	if row.ID == 0 {
+		row.ID = maxID + 1
+	}
+	s.rows = append(s.rows, *row)
+	return nil
+}
+
+func (s *okxDexMemStore) UpdateByID(ctx context.Context, id uint, updates map[string]interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.rows {
+		if s.rows[i].ID != id {
+			continue
+		}
+		v := reflect.ValueOf(&s.rows[i]).Elem()
+		for k, raw := range updates {
+			f := v.FieldByName(k)
+			if !f.IsValid() || !f.CanSet() {
+				continue
+			}
+			if raw == nil {
+				f.Set(reflect.Zero(f.Type()))
+				continue
+			}
+			rv := reflect.ValueOf(raw)
+			if rv.Type().AssignableTo(f.Type()) {
+				f.Set(rv)
+				continue
+			}
+			if rv.Type().ConvertibleTo(f.Type()) {
+				f.Set(rv.Convert(f.Type()))
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
+func (s *okxDexMemStore) DeleteByID(ctx context.Context, id uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.rows {
+		if s.rows[i].ID == id {
+			s.rows = append(s.rows[:i], s.rows[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *okxDexMemStore) SetCurrent(ctx context.Context, id uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.rows {
+		s.rows[i].IsCurrent = s.rows[i].ID == id
+	}
+	return nil
+}
+
+func (s *okxDexMemStore) UnsetCurrent(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.rows {
+		s.rows[i].IsCurrent = false
+	}
+	return nil
 }
 
 func resetOKXReadCachesForTest() {
@@ -121,6 +254,106 @@ func TestGetSwapData_AppliesDefaultReferrerFee(t *testing.T) {
 	}
 	if resp == nil || len(resp.Data) != 1 {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetSwapData_UsesOKXPoolAndRetriesNextConfigOnRateLimit(t *testing.T) {
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{
+		EncryptionKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+	t.Cleanup(func() {
+		config.AppConfig = oldConfig
+	})
+
+	ctx := context.Background()
+	store := &okxDexMemStore{}
+	mgr := okxpool.NewManager(store, nil)
+	first, err := mgr.AddConfig(ctx, okxpool.Input{
+		Name:       "rate-limited",
+		BaseURL:    "https://okx-a.example/api/v6/dex/aggregator",
+		APIKey:     "key-a",
+		SecretKey:  "secret-a",
+		Passphrase: "pass-a",
+		SetCurrent: true,
+	})
+	if err != nil {
+		t.Fatalf("add first config failed: %v", err)
+	}
+	second, err := mgr.AddConfig(ctx, okxpool.Input{
+		Name:       "healthy",
+		BaseURL:    "https://okx-b.example/api/v6/dex/aggregator",
+		APIKey:     "key-b",
+		SecretKey:  "secret-b",
+		Passphrase: "pass-b",
+	})
+	if err != nil {
+		t.Fatalf("add second config failed: %v", err)
+	}
+
+	var hosts []string
+	svc := &OKXDexService{
+		usePool: true,
+		pool:    mgr,
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			hosts = append(hosts, req.URL.Host)
+			switch req.URL.Host {
+			case "okx-a.example":
+				if got := req.Header.Get("OK-ACCESS-KEY"); got != "key-a" {
+					t.Fatalf("expected first request key-a, got %q", got)
+				}
+				return &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Body:       io.NopCloser(strings.NewReader(`{"code":"50011","msg":"rate limit"}`)),
+					Header:     make(http.Header),
+				}, nil
+			case "okx-b.example":
+				if got := req.Header.Get("OK-ACCESS-KEY"); got != "key-b" {
+					t.Fatalf("expected second request key-b, got %q", got)
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"tx":{"from":"0x1111111111111111111111111111111111111111","to":"0x2222222222222222222222222222222222222222","data":"0x1234","value":"0","gas":"21000","gasPrice":"1"},"routerResult":{"fromTokenAmount":"100","toTokenAmount":"99","dexRouterList":[]}}]}`)),
+					Header:     make(http.Header),
+				}, nil
+			default:
+				t.Fatalf("unexpected host: %s", req.URL.Host)
+				return nil, nil
+			}
+		}}},
+	}
+
+	resp, err := svc.GetSwapData(SwapRequest{
+		ChainID:           "56",
+		FromTokenAddress:  "0x1111111111111111111111111111111111111111",
+		ToTokenAddress:    "0x2222222222222222222222222222222222222222",
+		Amount:            "100",
+		Slippage:          "0.005",
+		UserWalletAddress: "0x3333333333333333333333333333333333333333",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if resp == nil || len(resp.Data) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if strings.Join(hosts, ",") != "okx-a.example,okx-b.example" {
+		t.Fatalf("unexpected request hosts: %v", hosts)
+	}
+
+	firstRow, _ := store.GetByID(ctx, first.ID)
+	secondRow, _ := store.GetByID(ctx, second.ID)
+	if firstRow == nil || secondRow == nil {
+		t.Fatalf("expected both configs to exist")
+	}
+	if firstRow.IsCurrent {
+		t.Fatalf("expected rate-limited config current flag cleared")
+	}
+	if firstRow.DisabledReason != okxpool.ReasonRateLimited {
+		t.Fatalf("expected disabled_reason=%q, got %q", okxpool.ReasonRateLimited, firstRow.DisabledReason)
+	}
+	if !secondRow.IsCurrent {
+		t.Fatalf("expected healthy config promoted to current")
 	}
 }
 

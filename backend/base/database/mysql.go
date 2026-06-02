@@ -68,6 +68,7 @@ func autoMigrate() error {
 		&models.GlobalConfig{},
 		&models.SystemConfig{},
 		&models.RpcEndpoint{},
+		&models.OKXAPIConfig{},
 		&models.PoolDataSource{},
 		&models.Position{},
 		&models.Pool{},

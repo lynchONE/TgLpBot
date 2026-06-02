@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
+	"TgLpBot/base/okxpool"
 	"TgLpBot/base/rpcpool"
 	"TgLpBot/base/timeutil"
 	"TgLpBot/service/bot"
@@ -39,6 +40,8 @@ func main() {
 
 	rpcpool.StartDefaultHealthChecker(time.Hour)
 	defer rpcpool.StopDefaultHealthChecker()
+	okxpool.StartDefaultHealthChecker(30 * time.Minute)
+	defer okxpool.StopDefaultHealthChecker()
 
 	ws := wallet.NewWalletService()
 	if migrated, err := ws.MigratePlaintextPrivateKeys(); err != nil {
@@ -95,6 +98,7 @@ func main() {
 		}
 		telegramBot.Stop()
 		rpcpool.StopDefaultHealthChecker()
+		okxpool.StopDefaultHealthChecker()
 		database.CloseMySQL()
 		database.CloseRedis()
 		blockchain.StopRPCPoolRefresher()

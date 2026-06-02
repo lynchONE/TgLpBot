@@ -827,6 +827,7 @@ export default function KlineChart({
       layout: {
         background: { color: '#0b1018' },
         textColor: '#95a0b5',
+        attributionLogo: false,
       },
       localization: {
         locale: 'zh-CN',
