@@ -72,6 +72,49 @@ type geckoTokenPoolsResponse struct {
 			Address      string `json:"address"`
 			ReserveInUSD string `json:"reserve_in_usd"`
 		} `json:"attributes"`
+		Relationships struct {
+			BaseToken struct {
+				Data struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"base_token"`
+			QuoteToken struct {
+				Data struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"quote_token"`
+			Dex struct {
+				Data struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"dex"`
+		} `json:"relationships"`
+	} `json:"data"`
+}
+
+type geckoPoolResponse struct {
+	Data struct {
+		ID         string `json:"id"`
+		Attributes struct {
+			Address string `json:"address"`
+		} `json:"attributes"`
+		Relationships struct {
+			BaseToken struct {
+				Data struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"base_token"`
+			QuoteToken struct {
+				Data struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"quote_token"`
+			Dex struct {
+				Data struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"dex"`
+		} `json:"relationships"`
 	} `json:"data"`
 }
 
@@ -84,8 +127,18 @@ type geckoOHLCVResponse struct {
 }
 
 type geckoPoolCandidate struct {
-	address    string
-	reserveUSD float64
+	address           string
+	reserveUSD        float64
+	dexID             string
+	baseTokenAddress  string
+	quoteTokenAddress string
+}
+
+type geckoPoolDetails struct {
+	address           string
+	dexID             string
+	baseTokenAddress  string
+	quoteTokenAddress string
 }
 
 type geckoHTTPError struct {
@@ -214,6 +267,112 @@ func parseGeckoFloat(raw string) float64 {
 	return sanitizeFloat(v)
 }
 
+func fetchGeckoPoolDetails(ctx context.Context, client *http.Client, chain string, poolAddress string) (geckoPoolDetails, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 12 * time.Second}
+	}
+	poolAddress, ok := normalizeGeckoPoolAddress(poolAddress)
+	if !ok {
+		return geckoPoolDetails{}, fmt.Errorf("invalid geckoterminal pool address")
+	}
+	network := geckoNetworkForChain(chain)
+	endpoint := geckoAPIURL(
+		"/networks/%s/pools/%s",
+		url.PathEscape(network),
+		url.PathEscape(poolAddress),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return geckoPoolDetails{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return geckoPoolDetails{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return geckoPoolDetails{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return geckoPoolDetails{}, &geckoHTTPError{scope: "pool details", status: resp.StatusCode, body: string(body)}
+	}
+
+	var parsed geckoPoolResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return geckoPoolDetails{}, err
+	}
+	addr := strings.TrimSpace(parsed.Data.Attributes.Address)
+	if addr == "" {
+		addr = geckoPoolIDAddress(parsed.Data.ID)
+	}
+	normalized, ok := normalizeGeckoPoolAddress(addr)
+	if !ok {
+		return geckoPoolDetails{}, fmt.Errorf("geckoterminal did not return usable pool address for %s", poolAddress)
+	}
+	return geckoPoolDetails{
+		address:           normalized,
+		dexID:             strings.ToLower(strings.TrimSpace(parsed.Data.Relationships.Dex.Data.ID)),
+		baseTokenAddress:  geckoTokenIDAddress(parsed.Data.Relationships.BaseToken.Data.ID),
+		quoteTokenAddress: geckoTokenIDAddress(parsed.Data.Relationships.QuoteToken.Data.ID),
+	}, nil
+}
+
+func geckoPrimaryQuoteTokenAddresses(chain string) map[string]struct{} {
+	out := make(map[string]struct{})
+	add := func(raw string) {
+		addr, ok := normalizeTokenAddress(raw)
+		if ok {
+			out[addr] = struct{}{}
+		}
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	switch chain {
+	case "base":
+		add("0x4200000000000000000000000000000000000006") // WETH
+		add("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913") // USDC
+		add("0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA") // USDbC
+		add("0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2") // USDT
+	case "eth", "ethereum":
+		add("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") // WETH
+		add("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") // USDC
+		add("0xdAC17F958D2ee523a2206206994597C13D831ec7") // USDT
+		add("0x6B175474E89094C44Da98b954EedeAC495271d0F") // DAI
+	default:
+		add("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c") // WBNB
+		add("0x55d398326f99059fF775485246999027B3197955") // USDT
+		add("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d") // USDC
+		add("0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56") // BUSD
+		add("0x8fFf93E810a2eDaaFc326eDEE51071DA9d398E83") // BRL
+	}
+	return out
+}
+
+func pickGeckoKlineTokenAddress(chain string, requestedTokenAddress string, pool geckoPoolDetails) string {
+	requestedTokenAddress, _ = normalizeTokenAddress(requestedTokenAddress)
+	base := pool.baseTokenAddress
+	quote := pool.quoteTokenAddress
+	if base == "" || quote == "" {
+		return requestedTokenAddress
+	}
+	quoteTokens := geckoPrimaryQuoteTokenAddresses(chain)
+	_, baseIsQuote := quoteTokens[base]
+	_, quoteIsQuote := quoteTokens[quote]
+	switch {
+	case baseIsQuote && !quoteIsQuote:
+		return quote
+	case quoteIsQuote && !baseIsQuote:
+		return base
+	case requestedTokenAddress == base || requestedTokenAddress == quote:
+		return requestedTokenAddress
+	default:
+		return base
+	}
+}
+
 func fetchGeckoPoolCandidates(ctx context.Context, client *http.Client, chain string, tokenAddress string) ([]geckoPoolCandidate, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 12 * time.Second}
@@ -264,7 +423,13 @@ func fetchGeckoPoolCandidates(ctx context.Context, client *http.Client, chain st
 		}
 		seen[normalized] = struct{}{}
 		reserve := parseGeckoFloat(row.Attributes.ReserveInUSD)
-		candidates = append(candidates, geckoPoolCandidate{address: normalized, reserveUSD: reserve})
+		candidates = append(candidates, geckoPoolCandidate{
+			address:           normalized,
+			reserveUSD:        reserve,
+			dexID:             strings.ToLower(strings.TrimSpace(row.Relationships.Dex.Data.ID)),
+			baseTokenAddress:  geckoTokenIDAddress(row.Relationships.BaseToken.Data.ID),
+			quoteTokenAddress: geckoTokenIDAddress(row.Relationships.QuoteToken.Data.ID),
+		})
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].reserveUSD > candidates[j].reserveUSD
@@ -283,7 +448,7 @@ func fetchGeckoBestPoolAddress(ctx context.Context, client *http.Client, chain s
 	return candidates[0].address, nil
 }
 
-func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain string, poolAddress string, barParams geckoOHLCVParams, limit int, before string) ([]tokenCandle, error) {
+func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain string, poolAddress string, tokenAddress string, barParams geckoOHLCVParams, limit int, before string) ([]tokenCandle, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 12 * time.Second}
 	}
@@ -295,6 +460,9 @@ func fetchGeckoPoolCandles(ctx context.Context, client *http.Client, chain strin
 	values.Set("aggregate", strconv.Itoa(barParams.aggregate))
 	values.Set("limit", strconv.Itoa(limit))
 	values.Set("currency", "usd")
+	if tokenAddress != "" {
+		values.Set("token", strings.ToLower(strings.TrimSpace(tokenAddress)))
+	}
 	if before != "" {
 		values.Set("before_timestamp", before)
 	}
@@ -364,8 +532,8 @@ func shouldTryNextGeckoPool(err error) bool {
 	return false
 }
 
-func appendUniqueGeckoPoolCandidate(candidates []geckoPoolCandidate, seen map[string]struct{}, address string, reserveUSD float64) []geckoPoolCandidate {
-	normalized, ok := normalizeGeckoPoolAddress(address)
+func appendUniqueGeckoPoolCandidate(candidates []geckoPoolCandidate, seen map[string]struct{}, candidate geckoPoolCandidate) []geckoPoolCandidate {
+	normalized, ok := normalizeGeckoPoolAddress(candidate.address)
 	if !ok {
 		return candidates
 	}
@@ -373,58 +541,124 @@ func appendUniqueGeckoPoolCandidate(candidates []geckoPoolCandidate, seen map[st
 		return candidates
 	}
 	seen[normalized] = struct{}{}
-	return append(candidates, geckoPoolCandidate{address: normalized, reserveUSD: reserveUSD})
+	candidate.address = normalized
+	return append(candidates, candidate)
 }
 
-func fetchGeckoTokenCandles(ctx context.Context, client *http.Client, chain string, tokenAddress string, preferredPoolAddress string, barParams geckoOHLCVParams, limit int, before string) ([]tokenCandle, string, error) {
+func geckoPoolCandidateHasToken(candidate geckoPoolCandidate, tokenAddress string) bool {
+	return tokenAddress != "" && (candidate.baseTokenAddress == tokenAddress || candidate.quoteTokenAddress == tokenAddress)
+}
+
+func geckoPoolCandidatePairsWithPrimaryQuote(chain string, candidate geckoPoolCandidate, tokenAddress string) bool {
+	if !geckoPoolCandidateHasToken(candidate, tokenAddress) {
+		return false
+	}
+	quoteTokens := geckoPrimaryQuoteTokenAddresses(chain)
+	if candidate.baseTokenAddress == tokenAddress {
+		_, ok := quoteTokens[candidate.quoteTokenAddress]
+		return ok
+	}
+	if candidate.quoteTokenAddress == tokenAddress {
+		_, ok := quoteTokens[candidate.baseTokenAddress]
+		return ok
+	}
+	return false
+}
+
+func sortGeckoPoolCandidatesForKline(chain string, candidates []geckoPoolCandidate, tokenAddress string, preferredDexID string) {
+	tokenAddress, _ = normalizeTokenAddress(tokenAddress)
+	preferredDexID = strings.ToLower(strings.TrimSpace(preferredDexID))
+	score := func(candidate geckoPoolCandidate) int {
+		score := 0
+		if preferredDexID != "" && strings.EqualFold(candidate.dexID, preferredDexID) {
+			score += 100
+		}
+		if geckoPoolCandidatePairsWithPrimaryQuote(chain, candidate, tokenAddress) {
+			score += 20
+		}
+		if geckoPoolCandidateHasToken(candidate, tokenAddress) {
+			score += 5
+		}
+		return score
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		leftScore := score(candidates[i])
+		rightScore := score(candidates[j])
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		return candidates[i].reserveUSD > candidates[j].reserveUSD
+	})
+}
+
+func fetchGeckoTokenCandles(ctx context.Context, client *http.Client, chain string, tokenAddress string, preferredPoolAddress string, barParams geckoOHLCVParams, limit int, before string) ([]tokenCandle, string, string, error) {
+	tokenAddress, _ = normalizeTokenAddress(tokenAddress)
+	klineTokenAddress := tokenAddress
+	preferredDexID := ""
 	preferredPoolAddress, hasPreferredPool := normalizeGeckoPoolAddress(preferredPoolAddress)
 	if hasPreferredPool {
-		candles, err := fetchGeckoPoolCandles(ctx, client, chain, preferredPoolAddress, barParams, limit, before)
-		if err == nil {
-			return candles, preferredPoolAddress, nil
+		if details, err := fetchGeckoPoolDetails(ctx, client, chain, preferredPoolAddress); err == nil {
+			klineTokenAddress = pickGeckoKlineTokenAddress(chain, tokenAddress, details)
+			preferredDexID = details.dexID
+			preferredPoolAddress = details.address
 		}
-		if !shouldTryNextGeckoPool(err) {
-			return nil, preferredPoolAddress, err
+		candles, err := fetchGeckoPoolCandles(ctx, client, chain, preferredPoolAddress, klineTokenAddress, barParams, limit, before)
+		if err == nil && len(candles) > 0 {
+			return candles, preferredPoolAddress, klineTokenAddress, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("geckoterminal returned empty candles for pool %s", preferredPoolAddress)
+		}
+		if !shouldTryNextGeckoPool(err) && !isEmptyGeckoCandlesError(err) {
+			return nil, preferredPoolAddress, klineTokenAddress, err
 		}
 	}
 
-	poolCandidates, poolErr := fetchGeckoPoolCandidates(ctx, client, chain, tokenAddress)
+	poolCandidates, poolErr := fetchGeckoPoolCandidates(ctx, client, chain, klineTokenAddress)
 	if poolErr != nil {
-		return nil, "", poolErr
+		return nil, "", klineTokenAddress, poolErr
 	}
+	sortGeckoPoolCandidatesForKline(chain, poolCandidates, klineTokenAddress, preferredDexID)
 	candidates := make([]geckoPoolCandidate, 0, 8)
 	seen := make(map[string]struct{}, len(poolCandidates)+1)
 	if hasPreferredPool {
 		seen[preferredPoolAddress] = struct{}{}
 	}
 	for _, candidate := range poolCandidates {
-		candidates = appendUniqueGeckoPoolCandidate(candidates, seen, candidate.address, candidate.reserveUSD)
+		candidates = appendUniqueGeckoPoolCandidate(candidates, seen, candidate)
 		if len(candidates) >= 8 {
 			break
 		}
 	}
 	if len(candidates) == 0 {
 		if poolErr != nil {
-			return nil, "", poolErr
+			return nil, "", klineTokenAddress, poolErr
 		}
-		return nil, "", fmt.Errorf("geckoterminal did not return usable pools for token %s", tokenAddress)
+		return nil, "", klineTokenAddress, fmt.Errorf("geckoterminal did not return usable pools for token %s", klineTokenAddress)
 	}
 
 	var lastErr error
 	for _, candidate := range candidates {
-		candles, err := fetchGeckoPoolCandles(ctx, client, chain, candidate.address, barParams, limit, before)
+		candles, err := fetchGeckoPoolCandles(ctx, client, chain, candidate.address, klineTokenAddress, barParams, limit, before)
+		if err == nil && len(candles) > 0 {
+			return candles, candidate.address, klineTokenAddress, nil
+		}
 		if err == nil {
-			return candles, candidate.address, nil
+			err = fmt.Errorf("geckoterminal returned empty candles for pool %s", candidate.address)
 		}
 		lastErr = err
-		if !shouldTryNextGeckoPool(err) {
-			return nil, candidate.address, err
+		if !shouldTryNextGeckoPool(err) && !isEmptyGeckoCandlesError(err) {
+			return nil, candidate.address, klineTokenAddress, err
 		}
 	}
 	if lastErr != nil {
-		return nil, "", lastErr
+		return nil, "", klineTokenAddress, lastErr
 	}
-	return nil, "", fmt.Errorf("geckoterminal did not return candles for token %s", tokenAddress)
+	return nil, "", klineTokenAddress, fmt.Errorf("geckoterminal did not return candles for token %s", klineTokenAddress)
+}
+
+func isEmptyGeckoCandlesError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "returned empty candles")
 }
 
 func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
@@ -514,7 +748,7 @@ func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
 		poolAddress = normalizedPoolAddress
 	}
 
-	candles, usedPoolAddress, err := fetchGeckoTokenCandles(ctx, nil, chain, tokenAddress, poolAddress, barParams, limit, before)
+	candles, usedPoolAddress, usedTokenAddress, err := fetchGeckoTokenCandles(ctx, nil, chain, tokenAddress, poolAddress, barParams, limit, before)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -522,7 +756,7 @@ func (s *Server) handleTokenCandles(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, tokenCandlesEnvelope{
 		Chain:        chain,
-		TokenAddress: tokenAddress,
+		TokenAddress: usedTokenAddress,
 		PoolAddress:  usedPoolAddress,
 		Bar:          bar,
 		Limit:        limit,

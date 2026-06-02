@@ -66,6 +66,9 @@ type smartMoneyMarkerReplayState struct {
 	Ambiguous bool
 }
 
+const smartMoneyMarkerEstimateLookback = 14 * 24 * time.Hour
+const smartMoneyMarkerEstimateHistoryLimit = 5000
+
 func normalizeSmartMoneyPoolID(raw string) string {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -278,6 +281,7 @@ func buildSmartMoneyMarkerEstimates(
 	chainID int,
 	poolID string,
 	poolVersion string,
+	queryStart time.Time,
 	queryEnd time.Time,
 	visibleEvents []models.SmartMoneyLPEvent,
 ) (map[string]smartMoneyMarkerEstimate, []string) {
@@ -309,11 +313,12 @@ func buildSmartMoneyMarkerEstimates(
 		return nil, nil
 	}
 
+	historyStart := queryStart.Add(-smartMoneyMarkerEstimateLookback)
 	var historyEvents []models.SmartMoneyLPEvent
 	db := database.DB.WithContext(ctx).
 		Model(&models.SmartMoneyLPEvent{}).
 		Where("chain_id = ? AND pool_address = ?", chainID, poolID).
-		Where("tx_timestamp <= ?", queryEnd).
+		Where("tx_timestamp BETWEEN ? AND ?", historyStart, queryEnd).
 		Where("wallet_address IN ?", wallets).
 		Where("event_type IN ?", []string{"add", "remove"})
 	if protocolFilter := poolVersionProtocolFilter(poolVersion); protocolFilter != "" {
@@ -323,15 +328,60 @@ func buildSmartMoneyMarkerEstimates(
 		Order("tx_timestamp ASC").
 		Order("block_number ASC").
 		Order("log_index ASC").
+		Limit(smartMoneyMarkerEstimateHistoryLimit + 1).
 		Find(&historyEvents).Error; err != nil {
 		return nil, []string{"smart money remove pnl unavailable: failed to load historical position events"}
 	}
 	if len(historyEvents) == 0 {
 		return nil, nil
 	}
+	if len(historyEvents) > smartMoneyMarkerEstimateHistoryLimit {
+		return nil, []string{"smart money remove pnl unavailable: historical position events exceeded safety limit"}
+	}
 
 	estimates, warnings := replaySmartMoneyMarkerEstimates(historyEvents, targetKeys)
 	return estimates, warnings
+}
+
+func loadSmartMoneyMarkerWallets(ctx context.Context, chainID int, events []models.SmartMoneyLPEvent) map[string]*models.MonitoredWallet {
+	out := make(map[string]*models.MonitoredWallet)
+	if len(events) == 0 {
+		return out
+	}
+	seen := make(map[string]struct{})
+	addresses := make([]string, 0, len(events))
+	for i := range events {
+		wallet := strings.ToLower(strings.TrimSpace(events[i].WalletAddress))
+		if wallet == "" {
+			continue
+		}
+		if _, ok := seen[wallet]; ok {
+			continue
+		}
+		seen[wallet] = struct{}{}
+		addresses = append(addresses, wallet)
+		out[wallet] = nil
+	}
+	if len(addresses) == 0 {
+		return out
+	}
+
+	var wallets []models.MonitoredWallet
+	if err := database.DB.WithContext(ctx).
+		Model(&models.MonitoredWallet{}).
+		Where("chain_id = ? AND address IN ?", chainID, addresses).
+		Find(&wallets).Error; err != nil {
+		return out
+	}
+	for i := range wallets {
+		wallet := wallets[i]
+		addr := strings.ToLower(strings.TrimSpace(wallet.Address))
+		if addr == "" {
+			continue
+		}
+		out[addr] = &wallet
+	}
+	return out
 }
 
 func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Request) {
@@ -412,7 +462,8 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	queryStart := rangeStart.Add(-time.Duration(bucketSec) * time.Second)
 	queryEnd := rangeEnd.Add(time.Duration(bucketSec) * time.Second)
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
 	var events []models.SmartMoneyLPEvent
 	db := database.DB.WithContext(ctx).
 		Model(&models.SmartMoneyLPEvent{}).
@@ -482,10 +533,9 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		token1Symbol,
 	)
 
-	repo := smService.Repo()
-	walletCache := make(map[string]*models.MonitoredWallet)
 	explorerBase := scanExplorerBase(chain)
-	estimates, warnings := buildSmartMoneyMarkerEstimates(ctx, int(cc.ChainID), poolID, poolVersion, queryEnd, events)
+	walletsByAddress := loadSmartMoneyMarkerWallets(ctx, int(cc.ChainID), events)
+	estimates, warnings := buildSmartMoneyMarkerEstimates(ctx, int(cc.ChainID), poolID, poolVersion, queryStart, queryEnd, events)
 	out := make([]smartMoneyPoolMarkerEvent, 0, len(events))
 
 	for _, event := range events {
@@ -499,34 +549,16 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		walletAvatarURL := ""
 		walletSource := ""
 		walletSourceContract := ""
-		if cached, ok := walletCache[walletAddress]; ok {
-			if cached != nil && cached.Label != nil {
-				walletLabel = strings.TrimSpace(*cached.Label)
-			}
-			if cached != nil && cached.AvatarURL != nil {
-				walletAvatarURL = strings.TrimSpace(*cached.AvatarURL)
-			}
-			if cached != nil {
-				walletSource = smartMoneyWalletSourceValue(cached)
-				walletSourceContract = smartMoneyWalletSourceContractValue(cached)
-			}
-		} else {
-			wallet, err := repo.GetMonitoredWalletByAddress(ctx, walletAddress, event.ChainID)
-			if err == nil {
-				walletCache[walletAddress] = wallet
-				if wallet != nil && wallet.Label != nil {
-					walletLabel = strings.TrimSpace(*wallet.Label)
-				}
-				if wallet != nil && wallet.AvatarURL != nil {
-					walletAvatarURL = strings.TrimSpace(*wallet.AvatarURL)
-				}
-				if wallet != nil {
-					walletSource = smartMoneyWalletSourceValue(wallet)
-					walletSourceContract = smartMoneyWalletSourceContractValue(wallet)
-				}
-			} else {
-				walletCache[walletAddress] = nil
-			}
+		wallet := walletsByAddress[walletAddress]
+		if wallet != nil && wallet.Label != nil {
+			walletLabel = strings.TrimSpace(*wallet.Label)
+		}
+		if wallet != nil && wallet.AvatarURL != nil {
+			walletAvatarURL = strings.TrimSpace(*wallet.AvatarURL)
+		}
+		if wallet != nil {
+			walletSource = smartMoneyWalletSourceValue(wallet)
+			walletSourceContract = smartMoneyWalletSourceContractValue(wallet)
 		}
 
 		priceLowerText, priceUpperText := smartMoneyFormatPositionPriceBounds(

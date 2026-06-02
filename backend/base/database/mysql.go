@@ -350,6 +350,7 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_time", "`wallet_address`, `chain_id`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_type_time", "`wallet_address`, `chain_id`, `event_type`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_pool_time", "`chain_id`, `pool_address`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_chain_pool_wallet_type_time", "`chain_id`, `pool_address`, `wallet_address`, `event_type`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_type_time", "`chain_id`, `event_type`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_type_chain_protocol_nft", "`event_type`, `chain_id`, `protocol`, `nft_token_id`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_protocol_nft_time", "`chain_id`, `protocol`, `nft_token_id`, `tx_timestamp`")

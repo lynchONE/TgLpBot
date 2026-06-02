@@ -87,9 +87,22 @@ function safeOverlayLabel(value) {
 
 function removeChartAttribution(host) {
   if (!host) return;
+  const attributionPatterns = [/tradingview/i, /target\s*=/i, /href\s*=/i];
   host
-    .querySelectorAll('#tv-attr-logo, a[href*="tradingview.com"], a[title*="TradingView"]')
+    .querySelectorAll('#tv-attr-logo, a[href*="tradingview.com"], a[title*="TradingView"], [title*="TradingView"], [aria-label*="TradingView"]')
     .forEach((node) => node.remove());
+
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const text = String(node.nodeValue || '').trim();
+    if (!text) continue;
+    if (attributionPatterns.some((pattern) => pattern.test(text))) {
+      textNodes.push(node);
+    }
+  }
+  textNodes.forEach((node) => node.remove());
 }
 
 function formatUSD(v) {
@@ -389,9 +402,11 @@ function projectDrawing(chart, candleSeries, drawing, hostWidth, hostHeight) {
 function projectClusters(chart, candleSeries, candleData, candleMap, clusters, hostWidth, hostHeight, userAvatarUrl) {
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
+  const priceScaleWidth = Math.max(0, Number(chart.priceScale?.('right')?.width?.() || 0));
   const projected = [];
   const userAvatarSrc = safeImageSrc(userAvatarUrl);
   const width = Math.max(0, Number(hostWidth || 0));
+  const plotWidth = Math.max(0, width - priceScaleWidth);
   const height = Math.max(0, Number(hostHeight || 0));
   const xPad = 18;
   const yPad = 18;
@@ -404,7 +419,8 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters, h
   const visibleFrom = visibleRange ? toUnixSeconds(visibleRange.from) : 0;
   const visibleTo = visibleRange ? toUnixSeconds(visibleRange.to) : 0;
   const hasVisibleRange = visibleFrom > 0 && visibleTo > 0;
-  const edgeBuffer = 24;
+  const minX = xPad;
+  const maxX = plotWidth > 0 ? Math.max(minX, plotWidth - xPad) : Math.max(minX, width - xPad);
 
   for (const cluster of clusters) {
     const located =
@@ -419,7 +435,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters, h
 
     let x = timeScale.timeToCoordinate(time);
     if (!Number.isFinite(x)) continue;
-    if (width > 0 && (x < -edgeBuffer || x > width + edgeBuffer)) continue;
+    if (plotWidth > 0 && (x < minX || x > maxX)) continue;
 
     const anchorPrice = cluster.action === 'remove'
       ? Number(candle?.l ?? candle?.low ?? 0)
@@ -433,7 +449,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters, h
 
     projected.push({
       ...cluster,
-      x: clamp(x, xPad, Math.max(xPad, width - xPad)),
+      x,
       y: clamp(y, yPad, height > 0 ? Math.max(yPad, height - yPad) : Number.POSITIVE_INFINITY),
       anchorY: clamp(y, yPad, height > 0 ? Math.max(yPad, height - yPad) : Number.POSITIVE_INFINITY),
       rail: cluster.action === 'remove' ? 'bottom' : 'top',

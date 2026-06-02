@@ -997,6 +997,7 @@ export default function App() {
   const [klineMarkers, setKlineMarkers] = useState([]);
   const [klineMarkersLoading, setKlineMarkersLoading] = useState(false);
   const [klineMarkersError, setKlineMarkersError] = useState('');
+  const klineMarkerRequestSeqRef = useRef(0);
   const [klineActiveMarkerId, setKlineActiveMarkerId] = useState('');
   const [klineFocusedWalletAddress, setKlineFocusedWalletAddress] = useState('');
   const [klineWatchedWallets, setKlineWatchedWallets] = useState(() =>
@@ -1827,6 +1828,8 @@ export default function App() {
         return;
       }
 
+      const seq = klineMarkerRequestSeqRef.current + 1;
+      klineMarkerRequestSeqRef.current = seq;
       setKlineMarkersLoading(true);
       setKlineMarkersError('');
       try {
@@ -1862,7 +1865,7 @@ export default function App() {
 
         if (smartResp.status === 'fulfilled') {
           nextMarkers.push(...(Array.isArray(smartResp.value?.events) ? smartResp.value.events : []));
-        } else {
+        } else if (smartResp.reason?.name !== 'AbortError') {
           nextError = String(smartResp.reason?.message || smartResp.reason || '');
         }
 
@@ -1882,15 +1885,18 @@ export default function App() {
           return String(a?.action || '').localeCompare(String(b?.action || ''));
         });
 
+        if (signal?.aborted || klineMarkerRequestSeqRef.current !== seq) return;
         setKlineMarkers(nextMarkers);
         setKlineMarkersError(nextError);
       } catch (e) {
-        if (e?.name !== 'AbortError') {
+        if (e?.name !== 'AbortError' && klineMarkerRequestSeqRef.current === seq) {
           setKlineMarkers([]);
           setKlineMarkersError(String(e?.message || e));
         }
       } finally {
-        setKlineMarkersLoading(false);
+        if (klineMarkerRequestSeqRef.current === seq) {
+          setKlineMarkersLoading(false);
+        }
       }
     },
     [

@@ -411,7 +411,7 @@ func buildPosterSeries(chain string, tokenAddress string, openedAt, now time.Tim
 	if err != nil {
 		return nil, []string{"未能获取 GeckoTerminal 走势池子，已降级为纯摘要海报"}
 	}
-	candles, err := fetchGeckoPoolCandles(ctx, nil, chain, poolAddress, barParams, limit, "")
+	candles, err := fetchGeckoPoolCandles(ctx, nil, chain, poolAddress, "", barParams, limit, "")
 	if err != nil {
 		return nil, []string{"未能获取 GeckoTerminal 走势数据，已降级为纯摘要海报"}
 	}
