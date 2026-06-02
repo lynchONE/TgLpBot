@@ -429,6 +429,7 @@ function buildAddLiquidityPresetOptions(referenceAmount) {
 const defaultHotPoolsFilter = {
     enabled: true,
     keyword: '',
+    riskFilter: 'all',
     minFees: 60,
     minFeeRate: 0.3,
     minActiveFeeRate: null,
@@ -436,6 +437,22 @@ const defaultHotPoolsFilter = {
     minVolume: 2000,
     minTxCount: null,
 };
+const HOT_POOLS_RISK_FILTER_ALL = 'all';
+const HOT_POOLS_RISK_FILTER_OPTIONS = [
+    { value: HOT_POOLS_RISK_FILTER_ALL, label: '全部' },
+    { value: 'low_or_better', label: '低风险及以下' },
+    { value: 'medium_or_lower', label: '中风险及以下' },
+    { value: 'high_or_above', label: '中高/高风险' },
+    { value: 'honeypot', label: '仅貔貅盘' },
+    { value: 'unknown', label: '未知/待刷新' },
+];
+
+function normalizeHotPoolsRiskFilter(value) {
+    const key = String(value || '').trim();
+    return HOT_POOLS_RISK_FILTER_OPTIONS.some((item) => item.value === key)
+        ? key
+        : HOT_POOLS_RISK_FILTER_ALL;
+}
 
 function parseNullableNumber(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -474,6 +491,9 @@ function normalizeHotPoolsFilter(value) {
         const raw = String(value.keyword ?? '').trim();
         base.keyword = raw.length > 64 ? raw.slice(0, 64) : raw;
     }
+    if (Object.prototype.hasOwnProperty.call(value, 'riskFilter')) {
+        base.riskFilter = normalizeHotPoolsRiskFilter(value.riskFilter);
+    }
     if (Object.prototype.hasOwnProperty.call(value, 'minFees')) {
         base.minFees = parseNullableNumber(value.minFees);
     }
@@ -507,6 +527,34 @@ function parseDraftNumber(raw) {
 
 function formatDraftNumber(value) {
     return Number.isFinite(value) ? String(value) : '';
+}
+
+function hotPoolMatchesRiskFilter(pool, filterKey) {
+    const key = normalizeHotPoolsRiskFilter(filterKey);
+    if (key === HOT_POOLS_RISK_FILTER_ALL) return true;
+
+    const risk = normalizeTokenRisk(pool?.token_risk);
+    if (!risk) return key === 'unknown';
+
+    const level = Number(risk.risk_control_level);
+    const hasLevel = Number.isFinite(level);
+    const hasError = String(risk.error || '').trim().length > 0;
+    const tone = tokenRiskToneClass(risk);
+
+    switch (key) {
+        case 'low_or_better':
+            return !hasError && !risk.has_honeypot && !risk.has_low_liquidity && hasLevel && level <= 1;
+        case 'medium_or_lower':
+            return !hasError && !risk.has_honeypot && !risk.has_low_liquidity && hasLevel && level <= 2;
+        case 'high_or_above':
+            return risk.has_honeypot || risk.has_low_liquidity || (hasLevel && level >= 3) || tone === 'high' || tone === 'critical';
+        case 'honeypot':
+            return Boolean(risk.has_honeypot);
+        case 'unknown':
+            return hasError || tone === 'unknown';
+        default:
+            return true;
+    }
 }
 
 function parseOptionalPercent(raw) {
@@ -1092,6 +1140,7 @@ export default function App() {
     const [hotPoolsFilterDraft, setHotPoolsFilterDraft] = useState(() => ({
         enabled: defaultHotPoolsFilter.enabled,
         keyword: String(defaultHotPoolsFilter.keyword || ''),
+        riskFilter: defaultHotPoolsFilter.riskFilter,
         minFees: String(defaultHotPoolsFilter.minFees),
         minFeeRate: String(defaultHotPoolsFilter.minFeeRate),
         minActiveFeeRate: formatDraftNumber(defaultHotPoolsFilter.minActiveFeeRate),
@@ -1757,8 +1806,9 @@ export default function App() {
     const hotPoolsFilterEnabled = useMemo(() => {
         if (!hotPoolsFilter.enabled) return false;
         const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
+        const hasRiskFilter = normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter) !== HOT_POOLS_RISK_FILTER_ALL;
         const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minActiveFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume, hotPoolsFilter.minTxCount].some((v) => Number.isFinite(v));
-        return hasKeyword || hasNumbers;
+        return hasKeyword || hasRiskFilter || hasNumbers;
     }, [hotPoolsFilter]);
 
     const hotPoolsVisibleRows = useMemo(() => {
@@ -1770,6 +1820,7 @@ export default function App() {
             const minTvl = hotPoolsFilter.minTvl;
             const minVolume = hotPoolsFilter.minVolume;
             const minTxCount = hotPoolsFilter.minTxCount;
+            const riskFilter = normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter);
             const keyword = String(hotPoolsFilter.keyword || '').trim().toLowerCase();
             filtered = hotPoolsRows.filter((row) => {
                 const fees = parseMetricNumber(row?.total_fees);
@@ -1794,6 +1845,7 @@ export default function App() {
                 if (Number.isFinite(minTvl) && tvl < minTvl) return false;
                 if (Number.isFinite(minVolume) && volume < minVolume) return false;
                 if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
+                if (!hotPoolMatchesRiskFilter(row, riskFilter)) return false;
                 return true;
             });
         }
@@ -1998,6 +2050,7 @@ export default function App() {
         setHotPoolsFilterDraft({
             enabled: hotPoolsFilter.enabled,
             keyword: String(hotPoolsFilter.keyword || ''),
+            riskFilter: normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter),
             minFees: formatDraftNumber(hotPoolsFilter.minFees),
             minFeeRate: formatDraftNumber(hotPoolsFilter.minFeeRate),
             minActiveFeeRate: formatDraftNumber(hotPoolsFilter.minActiveFeeRate),
@@ -2271,6 +2324,7 @@ export default function App() {
         const next = normalizeHotPoolsFilter({
             enabled: hotPoolsFilterDraft.enabled,
             keyword,
+            riskFilter: hotPoolsFilterDraft.riskFilter,
             minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
             minActiveFeeRate: parseDraftNumber(hotPoolsFilterDraft.minActiveFeeRate),
@@ -2293,6 +2347,7 @@ export default function App() {
         const cleared = normalizeHotPoolsFilter({
             enabled: false,
             keyword: '',
+            riskFilter: HOT_POOLS_RISK_FILTER_ALL,
             minFees: null,
             minFeeRate: null,
             minActiveFeeRate: null,
@@ -4777,6 +4832,15 @@ export default function App() {
                                             placeholder="例如 USDT / WBNB / 0x..."
                                         />
                                     </div>
+                                    <div className="mt-3">
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">OKX 风险</div>
+                                        <CustomSelect
+                                            value={hotPoolsFilterDraft.riskFilter}
+                                            onChange={(value) => setHotPoolsFilterDraft((prev) => ({ ...prev, riskFilter: value }))}
+                                            options={HOT_POOLS_RISK_FILTER_OPTIONS}
+                                            className="mt-1"
+                                        />
+                                    </div>
                                     <div className="mt-3 grid grid-cols-2 gap-3">
                                         <div>
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">累计费用 &gt;= (USD)</div>
@@ -5203,16 +5267,14 @@ export default function App() {
                             ) : null}
 
                             {openPositionTokenRisk ? (
-                                <div className={`rounded-xl border px-3 py-2.5 ${tokenRiskPanelClass(openPositionTokenRiskTone)}`}>
-                                    <div className="flex items-center gap-2">
-                                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
-                                        <span className="text-xs font-bold">{tokenRiskLabel(openPositionTokenRisk)}</span>
-                                        {openPositionTokenRisk.has_honeypot ? <span className="shrink-0 rounded-full bg-white/35 px-1.5 py-0.5 text-[10px] font-bold dark:bg-black/20">貔貅盘</span> : null}
-                                        <span className="ml-auto shrink-0 rounded-full bg-white/35 px-2 py-0.5 text-[10px] font-bold dark:bg-black/20">等级 {openPositionTokenRisk.risk_control_label}</span>
-                                    </div>
-                                    <div className="mt-1 text-[11px] leading-4 opacity-80">
-                                        {(openPositionTokenRiskSymbol || 'Token')} · {tokenRiskSummary(openPositionTokenRisk)}
-                                    </div>
+                                <div
+                                    className={`flex min-h-8 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] leading-none ${tokenRiskPanelClass(openPositionTokenRiskTone)}`}
+                                    title={tokenRiskSummary(openPositionTokenRisk)}
+                                >
+                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
+                                    <span className="shrink-0 font-bold">{tokenRiskLabel(openPositionTokenRisk)}</span>
+                                    <span className="min-w-0 flex-1 truncate opacity-80">{openPositionTokenRiskSymbol || 'Token'} · OKX 风控 · {tokenRiskSummary(openPositionTokenRisk)}</span>
+                                    <span className="shrink-0 rounded-full bg-white/35 px-1.5 py-0.5 text-[10px] font-bold dark:bg-black/20">等级 {openPositionTokenRisk.risk_control_label}</span>
                                 </div>
                             ) : null}
 

@@ -2490,20 +2490,14 @@ export default function OpenPositionModal({
             ) : null}
 
             {tokenRisk ? (
-              <div className={`opm-section token-risk-card is-${tokenRiskTone}`}>
-                <div className="token-risk-card-head">
-                  <AlertTriangle size={15} />
-                  <div>
-                    <strong>{tokenRiskTitle}</strong>
-                    <span>{tokenRiskSymbol || 'Token'} · OKX 风控</span>
-                  </div>
-                </div>
-                <div className="token-risk-card-detail">{tokenRiskDetail}</div>
-                <div className="token-risk-card-tags">
-                  <span>等级 {tokenRisk.risk_control_label}</span>
-                  {tokenRisk.has_honeypot ? <span>貔貅盘</span> : null}
-                  {tokenRisk.has_low_liquidity ? <span>低流动性</span> : null}
-                </div>
+              <div
+                className={`opm-section token-risk-card is-${tokenRiskTone}`}
+                title={tokenRiskDetail}
+              >
+                <AlertTriangle size={14} />
+                <strong>{tokenRiskTitle}</strong>
+                <span>{tokenRiskSymbol || 'Token'} · OKX 风控 · {tokenRiskDetail}</span>
+                <b>等级 {tokenRisk.risk_control_label}</b>
               </div>
             ) : null}
 

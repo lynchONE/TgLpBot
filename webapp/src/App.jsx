@@ -711,12 +711,29 @@ const HOT_POOLS_FILTER_DEFAULTS = {
   minVolume: 2000,
   minTxCount: null,
 };
+const HOT_POOLS_RISK_FILTER_ALL = 'all';
+const HOT_POOLS_RISK_FILTER_OPTIONS = [
+  { key: HOT_POOLS_RISK_FILTER_ALL, label: '全部' },
+  { key: 'low_or_better', label: '低风险及以下' },
+  { key: 'medium_or_lower', label: '中风险及以下' },
+  { key: 'high_or_above', label: '中高/高风险' },
+  { key: 'honeypot', label: '仅貔貅盘' },
+  { key: 'unknown', label: '未知/待刷新' },
+];
 
 const defaultHotPoolsFilter = {
   enabled: false,
   keyword: '',
+  riskFilter: HOT_POOLS_RISK_FILTER_ALL,
   ...HOT_POOLS_FILTER_DEFAULTS,
 };
+
+function normalizeHotPoolsRiskFilter(value) {
+  const key = String(value || '').trim();
+  return HOT_POOLS_RISK_FILTER_OPTIONS.some((item) => item.key === key)
+    ? key
+    : HOT_POOLS_RISK_FILTER_ALL;
+}
 
 function parseNullableNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -745,6 +762,9 @@ function normalizeHotPoolsFilter(value) {
   if (Object.prototype.hasOwnProperty.call(value, 'keyword')) {
     const raw = String(value.keyword ?? '').trim();
     base.keyword = raw.length > 64 ? raw.slice(0, 64) : raw;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'riskFilter')) {
+    base.riskFilter = normalizeHotPoolsRiskFilter(value.riskFilter);
   }
   if (Object.prototype.hasOwnProperty.call(value, 'minFees')) {
     base.minFees = parseNullableNumber(value.minFees);
@@ -784,10 +804,39 @@ function formatDraftNumber(value) {
   return Number.isFinite(value) ? String(value) : '';
 }
 
+function hotPoolMatchesRiskFilter(pool, filterKey) {
+  const key = normalizeHotPoolsRiskFilter(filterKey);
+  if (key === HOT_POOLS_RISK_FILTER_ALL) return true;
+
+  const risk = normalizeTokenRisk(pool?.token_risk);
+  if (!risk) return key === 'unknown';
+
+  const level = Number(risk.risk_control_level);
+  const hasLevel = Number.isFinite(level);
+  const hasError = String(risk.error || '').trim().length > 0;
+  const tone = tokenRiskToneClass(risk);
+
+  switch (key) {
+    case 'low_or_better':
+      return !hasError && !risk.has_honeypot && !risk.has_low_liquidity && hasLevel && level <= 1;
+    case 'medium_or_lower':
+      return !hasError && !risk.has_honeypot && !risk.has_low_liquidity && hasLevel && level <= 2;
+    case 'high_or_above':
+      return risk.has_honeypot || risk.has_low_liquidity || (hasLevel && level >= 3) || tone === 'high' || tone === 'critical';
+    case 'honeypot':
+      return Boolean(risk.has_honeypot);
+    case 'unknown':
+      return hasError || tone === 'unknown';
+    default:
+      return true;
+  }
+}
+
 function buildHotPoolsFilterDraft(filter) {
   return {
     enabled: Boolean(filter?.enabled),
     keyword: String(filter?.keyword || ''),
+    riskFilter: normalizeHotPoolsRiskFilter(filter?.riskFilter),
     minFees: formatDraftNumber(filter?.minFees),
     minFeeRate: formatDraftNumber(filter?.minFeeRate),
     maxFeeRate: formatDraftNumber(filter?.maxFeeRate),
@@ -1070,6 +1119,7 @@ export default function App() {
   const hotPoolsFilterEnabled = useMemo(() => {
     if (!hotPoolsFilter.enabled) return false;
     const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
+    const hasRiskFilter = normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter) !== HOT_POOLS_RISK_FILTER_ALL;
     const hasNumbers = [
       hotPoolsFilter.minFees,
       hotPoolsFilter.minFeeRate,
@@ -1079,7 +1129,7 @@ export default function App() {
       hotPoolsFilter.minVolume,
       hotPoolsFilter.minTxCount,
     ].some((value) => Number.isFinite(value));
-    return hasKeyword || hasNumbers;
+    return hasKeyword || hasRiskFilter || hasNumbers;
   }, [hotPoolsFilter]);
   const klineActiveTokenSide = useMemo(() => {
     if (!klineTokenOptions.length) return '';
@@ -1113,6 +1163,9 @@ export default function App() {
     const minTvl = hotPoolsFilterEnabled ? hotPoolsFilter.minTvl : null;
     const minVolume = hotPoolsFilterEnabled ? hotPoolsFilter.minVolume : null;
     const minTxCount = hotPoolsFilterEnabled ? hotPoolsFilter.minTxCount : null;
+    const riskFilter = hotPoolsFilterEnabled
+      ? normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter)
+      : HOT_POOLS_RISK_FILTER_ALL;
     const positionPoolMap = new Map();
     const positionRows = Array.isArray(positions?.positions) ? positions.positions : [];
     positionRows.forEach((row) => {
@@ -1162,6 +1215,7 @@ export default function App() {
         if (Number.isFinite(minTvl) && tvl < minTvl) return false;
         if (Number.isFinite(minVolume) && volume < minVolume) return false;
         if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
+        if (!hotPoolMatchesRiskFilter(row, riskFilter)) return false;
         return true;
       })
       .map((row, index) => {
@@ -1429,6 +1483,7 @@ export default function App() {
     const next = normalizeHotPoolsFilter({
       enabled: hotPoolsFilterDraft.enabled,
       keyword: String(hotPoolsFilterDraft.keyword || '').trim(),
+      riskFilter: hotPoolsFilterDraft.riskFilter,
       minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
       minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
       maxFeeRate: parseDraftNumber(hotPoolsFilterDraft.maxFeeRate),
@@ -1445,6 +1500,7 @@ export default function App() {
     const next = normalizeHotPoolsFilter({
       enabled: true,
       keyword: '',
+      riskFilter: HOT_POOLS_RISK_FILTER_ALL,
       ...HOT_POOLS_FILTER_DEFAULTS,
     });
     setHotPoolsFilter(next);
@@ -1456,6 +1512,7 @@ export default function App() {
     const next = normalizeHotPoolsFilter({
       enabled: false,
       keyword: '',
+      riskFilter: HOT_POOLS_RISK_FILTER_ALL,
       minFees: null,
       minFeeRate: null,
       maxFeeRate: null,
@@ -2687,6 +2744,18 @@ export default function App() {
                     inputMode="decimal"
                     placeholder="可选"
                   />
+                </label>
+
+                <label className="kline-filter-field hot-pools-filter-field-wide">
+                  <span>OKX 风险</span>
+                  <select
+                    value={hotPoolsFilterDraft.riskFilter}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, riskFilter: e.target.value }))}
+                  >
+                    {HOT_POOLS_RISK_FILTER_OPTIONS.map((item) => (
+                      <option key={item.key} value={item.key}>{item.label}</option>
+                    ))}
+                  </select>
                 </label>
               </div>
 

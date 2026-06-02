@@ -1728,7 +1728,8 @@ body {
   letter-spacing: 0.05em;
 }
 
-.kline-filter-field input {
+.kline-filter-field input,
+.kline-filter-field select {
   width: 100%;
   border-radius: 8px;
   border: 1px solid rgba(136, 157, 191, 0.18);
@@ -1739,7 +1740,13 @@ body {
   outline: none;
 }
 
-.kline-filter-field input:focus {
+.kline-filter-field select {
+  appearance: none;
+  cursor: pointer;
+}
+
+.kline-filter-field input:focus,
+.kline-filter-field select:focus {
   border-color: rgba(var(--accent-rgb), 0.5);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
@@ -4056,6 +4063,9 @@ body {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.hot-pools-filter-field-wide {
+  grid-column: 1 / -1;
 }
 .hot-pools-filter-toggle-row {
   display: flex;
@@ -14032,13 +14042,17 @@ img.swap-token-glyph {
   color: var(--text-color);
 }
 .token-risk-card {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 9px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.18);
   color: var(--text-color);
+  font-size: 11px;
+  line-height: 1.2;
 }
 .token-risk-card.is-neutral,
 .token-risk-card.is-low {
@@ -14055,52 +14069,30 @@ img.swap-token-glyph {
   border-color: rgba(239, 68, 68, 0.34);
   background: rgba(127, 29, 29, 0.16);
 }
-.token-risk-card-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-}
-.token-risk-card-head svg {
+.token-risk-card svg {
   flex: 0 0 auto;
-  margin-top: 2px;
   color: #f59e0b;
 }
-.token-risk-card.is-high .token-risk-card-head svg,
-.token-risk-card.is-critical .token-risk-card-head svg {
+.token-risk-card.is-high svg,
+.token-risk-card.is-critical svg {
   color: #ef4444;
 }
-.token-risk-card-head div {
+.token-risk-card strong,
+.token-risk-card b {
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+.token-risk-card span {
   min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-.token-risk-card-head strong {
-  font-size: 13px;
-  line-height: 1.25;
-}
-.token-risk-card-head span,
-.token-risk-card-detail {
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-.token-risk-card-detail {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: rgba(255, 255, 255, 0.78);
 }
-.token-risk-card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.token-risk-card-tags span {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+.token-risk-card b {
   font-size: 10px;
-  font-weight: 700;
+  color: var(--text-muted);
 }
 .opm-compact-fields {
   display: grid;
