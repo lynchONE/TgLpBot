@@ -4,6 +4,9 @@ import (
 	"TgLpBot/base/models"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,6 +29,14 @@ func (f fakeMetadataProvider) GetBatch(ctx context.Context, chain string, addres
 		}
 	}
 	return out, nil
+}
+
+type tokenMetadataRoundTripper struct {
+	fn func(req *http.Request) (*http.Response, error)
+}
+
+func (t tokenMetadataRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.fn(req)
 }
 
 func TestNormalizeTokenAddress(t *testing.T) {
@@ -176,5 +187,120 @@ func TestGetBatch_ReturnsPartialDataWhenRefreshFails(t *testing.T) {
 	}
 	if meta.LogoURL != "https://img.example/test.png" {
 		t.Fatalf("unexpected cached logo url: %#v", meta)
+	}
+}
+
+func TestChainedDisplayMetadataProvider_UsesDexScreenerAfterGeckoMiss(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	gecko := fakeMetadataProvider{data: map[string]models.TokenMetadata{}}
+	dex := fakeMetadataProvider{data: map[string]models.TokenMetadata{
+		token: {LogoURL: "https://img.example/dex.png", Source: sourceDex, Status: statusOK},
+	}}
+	trust := fakeMetadataProvider{data: map[string]models.TokenMetadata{
+		token: {LogoURL: "https://img.example/trust.png", Source: sourceTrust, Status: statusOK},
+	}}
+	provider := chainedDisplayMetadataProvider{providers: []displayMetadataProvider{gecko, dex, trust}}
+
+	got, err := provider.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	meta := got[token]
+	if meta.LogoURL != "https://img.example/dex.png" {
+		t.Fatalf("expected dexscreener logo, got %#v", meta)
+	}
+}
+
+func TestDexScreenerDisplayMetadataProvider_ParsesBatchPairs(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	var gotURL string
+	provider := dexScreenerDisplayMetadataProvider{
+		client: &http.Client{Transport: tokenMetadataRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+			gotURL = req.URL.String()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(`[
+					{
+						"baseToken":{"address":"0x1111111111111111111111111111111111111111","name":"Test Token","symbol":"TEST"},
+						"quoteToken":{"address":"0x55d398326f99059ff775485246999027b3197955","name":"Tether","symbol":"USDT"},
+						"info":{"imageUrl":"https://img.example/test.png"},
+						"liquidity":{"usd":1000}
+					}
+				]`)),
+			}, nil
+		}}},
+	}
+
+	got, err := provider.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	if !strings.Contains(gotURL, "/tokens/v1/bsc/") {
+		t.Fatalf("unexpected request url: %s", gotURL)
+	}
+	meta := got[token]
+	if meta.LogoURL != "https://img.example/test.png" || meta.Symbol != "TEST" || meta.Source != sourceDex {
+		t.Fatalf("unexpected dex metadata: %#v", meta)
+	}
+}
+
+func TestDexScreenerDisplayMetadataProvider_DoesNotApplyBaseLogoToQuoteToken(t *testing.T) {
+	quote := "0x55d398326f99059ff775485246999027b3197955"
+	provider := dexScreenerDisplayMetadataProvider{
+		client: &http.Client{Transport: tokenMetadataRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(`[
+					{
+						"baseToken":{"address":"0x1111111111111111111111111111111111111111","name":"Test Token","symbol":"TEST"},
+						"quoteToken":{"address":"0x55d398326f99059ff775485246999027b3197955","name":"Tether","symbol":"USDT"},
+						"info":{"imageUrl":"https://img.example/base-token.png"},
+						"liquidity":{"usd":1000}
+					}
+				]`)),
+			}, nil
+		}}},
+	}
+
+	got, err := provider.GetBatch(context.Background(), "bsc", []string{quote})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	if _, ok := got[quote]; ok {
+		t.Fatalf("expected quote token to remain without logo, got %#v", got[quote])
+	}
+}
+
+func TestTrustWalletDisplayMetadataProvider_ChecksStaticLogo(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	var method string
+	var gotURL string
+	provider := trustWalletDisplayMetadataProvider{
+		client: &http.Client{Transport: tokenMetadataRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+			method = req.Method
+			gotURL = req.URL.String()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}}},
+	}
+
+	got, err := provider.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	if method != http.MethodHead {
+		t.Fatalf("expected HEAD request, got %s", method)
+	}
+	if !strings.Contains(gotURL, "/blockchains/smartchain/assets/0x1111111111111111111111111111111111111111/logo.png") {
+		t.Fatalf("unexpected trustwallet url: %s", gotURL)
+	}
+	meta := got[token]
+	if meta.LogoURL == "" || meta.Source != sourceTrust {
+		t.Fatalf("unexpected trust metadata: %#v", meta)
 	}
 }

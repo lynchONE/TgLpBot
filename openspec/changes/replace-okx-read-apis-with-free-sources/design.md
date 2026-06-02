@@ -26,7 +26,7 @@ K 线使用 GeckoTerminal pool OHLCV：
 
 metadata 拆成两类：
 - 链上静态 metadata：`decimals/symbol/name` 通过 RPC 合约调用读取，并持久化缓存。
-- 展示增强 metadata：logo 等从 GeckoTerminal token 接口补充，失败时保留 RPC metadata 并暴露缺失展示信息。
+- 展示增强 metadata：logo 等优先从 GeckoTerminal token 接口补充，缺失时继续尝试 DexScreener 批量 token 接口和 Trust Wallet 静态资产；全部失败时保留 RPC metadata 并暴露缺失展示信息。
 
 ## 风控方案
 token 风控继续使用 OKX `market/token/advanced-info`。原因是当前调用量不高，且 GoPlus 等免费风控源额度较低，贸然替换会增加风控不确定性。本次仅确认不改动 `token_risk.go` 的 OKX 风控链路。

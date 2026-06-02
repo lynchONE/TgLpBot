@@ -9,7 +9,7 @@ OKX DEX API 开始收费后，当前价格、K 线、metadata、钱包余额、S
 - 价格、K 线、metadata 读数据链路不再依赖 OKX market API，改为 GeckoTerminal 等免费市场数据源与 RPC 组合。
 - 价格查询使用批量查询和极短请求合并，不做会影响实时查询的长缓存；交易执行仍以 swap quote 为准。
 - K 线查询使用免费 OHLCV 数据源；已收盘 K 线可缓存，正在形成的最后一根 K 线不做长缓存。
-- token metadata 使用 RPC 读取 `symbol/name/decimals`，logo 等展示信息使用免费市场数据源补充。
+- token metadata 使用 RPC 读取 `symbol/name/decimals`，logo 等展示信息使用 GeckoTerminal、DexScreener 和 Trust Wallet 静态资产等免费来源补充。
 - 钱包余额预览不再调用 OKX balance API，默认使用 RPC 扫描项目已知 token 集；第三方钱包 API 不作为默认依赖。
 - 删除 SmartMoney 的 OKX DeFi 仓位功能，包括 OKX DeFi client、后端接口、前端入口和相关展示代码。
 - 保留 OKX swap/approve 交易执行链路，保留 OKX advanced-info token 风控链路。

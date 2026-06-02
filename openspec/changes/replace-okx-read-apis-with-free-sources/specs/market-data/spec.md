@@ -45,4 +45,5 @@ token 的链上静态 metadata MUST 通过 RPC 合约调用读取；展示增强
 #### Scenario: 读取 token 展示增强信息
 - **WHEN** 系统需要 logo 等展示字段
 - **THEN** 后端 MAY 调用非 OKX 免费市场数据源
+- **AND** MAY 按顺序尝试 GeckoTerminal、DexScreener、Trust Wallet 静态资产等来源补充 logo
 - **AND** MUST 在 provider 失败时暴露缺失或错误状态，而不是生成误导性默认值

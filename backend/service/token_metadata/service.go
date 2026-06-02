@@ -25,6 +25,8 @@ const (
 	cachePrefix    = "token:meta"
 	sourceRPC      = "rpc"
 	sourceGecko    = "geckoterminal"
+	sourceDex      = "dexscreener"
+	sourceTrust    = "trustwallet"
 	statusOK       = "ok"
 	statusNotFound = "not_found"
 	positiveTTL    = 7 * 24 * time.Hour
@@ -60,9 +62,14 @@ type cacheEntry struct {
 }
 
 func NewService() *Service {
+	displayClient := &http.Client{Timeout: 12 * time.Second}
 	return &Service{
-		chainProvider:   evmChainMetadataProvider{},
-		displayProvider: geckoDisplayMetadataProvider{client: &http.Client{Timeout: 12 * time.Second}},
+		chainProvider: evmChainMetadataProvider{},
+		displayProvider: chainedDisplayMetadataProvider{providers: []displayMetadataProvider{
+			geckoDisplayMetadataProvider{client: displayClient},
+			dexScreenerDisplayMetadataProvider{client: displayClient},
+			trustWalletDisplayMetadataProvider{client: displayClient},
+		}},
 	}
 }
 
@@ -279,13 +286,23 @@ func (s *Service) fetchFreshMetadata(ctx context.Context, chain string, addresse
 		}
 		if strings.TrimSpace(extra.LogoURL) != "" {
 			meta.LogoURL = strings.TrimSpace(extra.LogoURL)
-			if strings.TrimSpace(meta.Source) == "" || meta.Source == sourceRPC {
-				meta.Source = sourceRPC + "+" + sourceGecko
-			}
+			meta.Source = mergeMetadataSource(meta.Source, extra.Source)
 		}
 		out[addr] = meta
 	}
 	return out, nil
+}
+
+func mergeMetadataSource(primary string, display string) string {
+	primary = strings.TrimSpace(primary)
+	display = strings.TrimSpace(display)
+	if primary == "" {
+		primary = sourceRPC
+	}
+	if display == "" || strings.Contains(primary, display) {
+		return primary
+	}
+	return primary + "+" + display
 }
 
 type evmChainMetadataProvider struct{}
@@ -340,6 +357,45 @@ func (evmChainMetadataProvider) GetBatch(ctx context.Context, chain string, addr
 
 type geckoDisplayMetadataProvider struct {
 	client *http.Client
+}
+
+type chainedDisplayMetadataProvider struct {
+	providers []displayMetadataProvider
+}
+
+func (p chainedDisplayMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	addresses = normalizeAddresses(addresses)
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	if len(addresses) == 0 {
+		return out, nil
+	}
+
+	missing := make(map[string]struct{}, len(addresses))
+	for _, addr := range addresses {
+		missing[addr] = struct{}{}
+	}
+	var firstErr error
+	for _, provider := range p.providers {
+		if provider == nil || len(missing) == 0 {
+			continue
+		}
+		fetched, err := provider.GetBatch(ctx, chain, mapKeys(missing))
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		for addr, meta := range fetched {
+			addr = NormalizeTokenAddress(addr)
+			if addr == "" || strings.TrimSpace(meta.LogoURL) == "" {
+				continue
+			}
+			out[addr] = meta
+			delete(missing, addr)
+		}
+	}
+	if len(out) == 0 && firstErr != nil {
+		return out, firstErr
+	}
+	return out, nil
 }
 
 type geckoTokenMetadataResponse struct {
@@ -424,6 +480,232 @@ func (p geckoDisplayMetadataProvider) fetchOne(ctx context.Context, client *http
 		Source:       sourceGecko,
 		Status:       statusOK,
 	}, nil
+}
+
+type dexScreenerDisplayMetadataProvider struct {
+	client *http.Client
+}
+
+type dexScreenerTokenResponse struct {
+	Pairs []dexScreenerTokenPair `json:"pairs"`
+}
+
+type dexScreenerTokenPair struct {
+	BaseToken struct {
+		Address string `json:"address"`
+		Name    string `json:"name"`
+		Symbol  string `json:"symbol"`
+	} `json:"baseToken"`
+	QuoteToken struct {
+		Address string `json:"address"`
+		Name    string `json:"name"`
+		Symbol  string `json:"symbol"`
+	} `json:"quoteToken"`
+	Info struct {
+		ImageURL string `json:"imageUrl"`
+	} `json:"info"`
+	Liquidity struct {
+		USD float64 `json:"usd"`
+	} `json:"liquidity"`
+}
+
+const dexScreenerBatchSize = 30
+
+func (p dexScreenerDisplayMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	addresses = normalizeAddresses(addresses)
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	if len(addresses) == 0 {
+		return out, nil
+	}
+	chainID := dexScreenerChainID(chain)
+	if chainID == "" {
+		return out, fmt.Errorf("unsupported dexscreener chain: %s", chain)
+	}
+	client := p.client
+	if client == nil {
+		client = &http.Client{Timeout: 12 * time.Second}
+	}
+
+	var firstErr error
+	for start := 0; start < len(addresses); start += dexScreenerBatchSize {
+		end := start + dexScreenerBatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		part, err := p.fetchBatch(ctx, client, chainID, config.NormalizeChain(chain), addresses[start:end])
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		for addr, meta := range part {
+			out[addr] = meta
+		}
+	}
+	if len(out) == 0 && firstErr != nil {
+		return out, firstErr
+	}
+	return out, nil
+}
+
+func (p dexScreenerDisplayMetadataProvider) fetchBatch(ctx context.Context, client *http.Client, chainID string, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	addresses = normalizeAddresses(addresses)
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	if len(addresses) == 0 {
+		return out, nil
+	}
+	lookup := make(map[string]struct{}, len(addresses))
+	for _, addr := range addresses {
+		lookup[addr] = struct{}{}
+	}
+	endpoint := fmt.Sprintf(
+		"https://api.dexscreener.com/tokens/v1/%s/%s",
+		url.PathEscape(chainID),
+		url.PathEscape(strings.Join(addresses, ",")),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("dexscreener token metadata http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var pairs []dexScreenerTokenPair
+	if err := json.Unmarshal(body, &pairs); err != nil {
+		var envelope dexScreenerTokenResponse
+		if envErr := json.Unmarshal(body, &envelope); envErr != nil {
+			return nil, err
+		}
+		pairs = envelope.Pairs
+	}
+
+	bestLiquidity := make(map[string]float64, len(addresses))
+	for _, pair := range pairs {
+		imageURL := strings.TrimSpace(pair.Info.ImageURL)
+		if imageURL == "" {
+			continue
+		}
+		addr := NormalizeTokenAddress(pair.BaseToken.Address)
+		if addr == "" {
+			continue
+		}
+		if _, ok := lookup[addr]; !ok {
+			continue
+		}
+		if existing, ok := bestLiquidity[addr]; ok && existing > pair.Liquidity.USD {
+			continue
+		}
+		bestLiquidity[addr] = pair.Liquidity.USD
+		out[addr] = models.TokenMetadata{
+			Chain:        chain,
+			TokenAddress: addr,
+			Symbol:       strings.TrimSpace(pair.BaseToken.Symbol),
+			Name:         strings.TrimSpace(pair.BaseToken.Name),
+			LogoURL:      imageURL,
+			Source:       sourceDex,
+			Status:       statusOK,
+		}
+	}
+	return out, nil
+}
+
+func dexScreenerChainID(chain string) string {
+	switch strings.ToLower(strings.TrimSpace(chain)) {
+	case "", "bsc", "bnb":
+		return "bsc"
+	case "base":
+		return "base"
+	case "eth", "ethereum":
+		return "ethereum"
+	default:
+		return strings.ToLower(strings.TrimSpace(chain))
+	}
+}
+
+type trustWalletDisplayMetadataProvider struct {
+	client *http.Client
+}
+
+func (p trustWalletDisplayMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	addresses = normalizeAddresses(addresses)
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	if len(addresses) == 0 {
+		return out, nil
+	}
+	assetChain := trustWalletAssetChain(chain)
+	if assetChain == "" {
+		return out, fmt.Errorf("unsupported trustwallet chain: %s", chain)
+	}
+	client := p.client
+	if client == nil {
+		client = &http.Client{Timeout: 12 * time.Second}
+	}
+
+	var firstErr error
+	for _, addr := range addresses {
+		meta, err := p.fetchOne(ctx, client, assetChain, config.NormalizeChain(chain), addr)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		out[addr] = meta
+	}
+	if len(out) == 0 && firstErr != nil {
+		return out, firstErr
+	}
+	return out, nil
+}
+
+func (p trustWalletDisplayMetadataProvider) fetchOne(ctx context.Context, client *http.Client, assetChain string, chain string, addr string) (models.TokenMetadata, error) {
+	checksummed := common.HexToAddress(addr).Hex()
+	logoURL := fmt.Sprintf(
+		"https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/%s/assets/%s/logo.png",
+		url.PathEscape(assetChain),
+		url.PathEscape(checksummed),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, logoURL, nil)
+	if err != nil {
+		return models.TokenMetadata{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return models.TokenMetadata{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return models.TokenMetadata{}, fmt.Errorf("trustwallet token logo http %d", resp.StatusCode)
+	}
+	return models.TokenMetadata{
+		Chain:        chain,
+		TokenAddress: NormalizeTokenAddress(addr),
+		LogoURL:      logoURL,
+		Source:       sourceTrust,
+		Status:       statusOK,
+	}, nil
+}
+
+func trustWalletAssetChain(chain string) string {
+	switch strings.ToLower(strings.TrimSpace(chain)) {
+	case "", "bsc", "bnb":
+		return "smartchain"
+	case "base":
+		return "base"
+	case "eth", "ethereum":
+		return "ethereum"
+	default:
+		return ""
+	}
 }
 
 func geckoNetwork(chain string) string {
