@@ -244,6 +244,7 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 	resp := buildPoolCatalogResponse(poolRows, opts)
 	s.enrichHotPoolDisplayTokens(ctx, opts.Chain, resp.Data)
 	s.enrichHotPoolTokenRisks(ctx, opts.Chain, resp.Data)
+	s.enrichHotPoolBinanceAlpha(ctx, opts.Chain, resp.Data)
 	b, err := marshalJSONPayload(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

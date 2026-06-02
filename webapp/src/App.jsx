@@ -714,11 +714,8 @@ const HOT_POOLS_FILTER_DEFAULTS = {
 const HOT_POOLS_RISK_FILTER_ALL = 'all';
 const HOT_POOLS_RISK_FILTER_OPTIONS = [
   { key: HOT_POOLS_RISK_FILTER_ALL, label: '全部' },
-  { key: 'low_or_better', label: '低风险及以下' },
-  { key: 'medium_or_lower', label: '中风险及以下' },
-  { key: 'high_or_above', label: '中高/高风险' },
-  { key: 'honeypot', label: '仅貔貅盘' },
-  { key: 'unknown', label: '未知/待刷新' },
+  { key: 'exclude_low_liquidity', label: '排除低流动性' },
+  { key: 'only_low_liquidity', label: '仅低流动性' },
 ];
 
 const defaultHotPoolsFilter = {
@@ -809,24 +806,13 @@ function hotPoolMatchesRiskFilter(pool, filterKey) {
   if (key === HOT_POOLS_RISK_FILTER_ALL) return true;
 
   const risk = normalizeTokenRisk(pool?.token_risk);
-  if (!risk) return key === 'unknown';
-
-  const level = Number(risk.risk_control_level);
-  const hasLevel = Number.isFinite(level);
-  const hasError = String(risk.error || '').trim().length > 0;
-  const tone = tokenRiskToneClass(risk);
+  const isLowLiquidity = Boolean(risk?.has_low_liquidity);
 
   switch (key) {
-    case 'low_or_better':
-      return !hasError && !risk.has_honeypot && !risk.has_low_liquidity && hasLevel && level <= 1;
-    case 'medium_or_lower':
-      return !hasError && !risk.has_honeypot && !risk.has_low_liquidity && hasLevel && level <= 2;
-    case 'high_or_above':
-      return risk.has_honeypot || risk.has_low_liquidity || (hasLevel && level >= 3) || tone === 'high' || tone === 'critical';
-    case 'honeypot':
-      return Boolean(risk.has_honeypot);
-    case 'unknown':
-      return hasError || tone === 'unknown';
+    case 'exclude_low_liquidity':
+      return !isLowLiquidity;
+    case 'only_low_liquidity':
+      return isLowLiquidity;
     default:
       return true;
   }
@@ -2747,7 +2733,7 @@ export default function App() {
                 </label>
 
                 <label className="kline-filter-field hot-pools-filter-field-wide">
-                  <span>OKX 风险</span>
+                  <span>OKX 低流动性</span>
                   <select
                     value={hotPoolsFilterDraft.riskFilter}
                     onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, riskFilter: e.target.value }))}

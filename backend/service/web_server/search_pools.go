@@ -431,6 +431,7 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 
 	s.enrichHotPoolDisplayTokens(ctx, chain, rows)
 	s.enrichHotPoolTokenRisks(ctx, chain, rows)
+	s.enrichHotPoolBinanceAlpha(ctx, chain, rows)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(searchPoolsEnvelope{
