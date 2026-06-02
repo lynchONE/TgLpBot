@@ -1,21 +1,21 @@
 package web_server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
-	"TgLpBot/service/exchange"
 	"TgLpBot/service/realtime"
+	"TgLpBot/service/token_metadata"
 
 	"gorm.io/gorm"
 )
@@ -196,28 +196,27 @@ func (s *Server) handlePositionProfitPoster(w http.ResponseWriter, r *http.Reque
 	}
 
 	warnings := make([]string, 0, 4)
-	okxSvc := exchange.NewOKXDexService()
 	if themeCandidate.address != "" {
-		metaResp, metaErr := okxSvc.GetMarketTokenBasicInfos([]exchange.MarketTokenBasicInfoRequest{{
-			ChainIndex:           strconv.FormatInt(cc.ChainID, 10),
-			TokenContractAddress: themeCandidate.address,
-		}})
+		if s.TokenMeta == nil {
+			s.TokenMeta = token_metadata.NewService()
+		}
+		metaByAddr, metaErr := s.TokenMeta.GetBatch(r.Context(), chain, []string{themeCandidate.address})
 		if metaErr != nil {
-			warnings = append(warnings, "未能获取 OKX 代币头像，已使用占位样式")
-		} else if info := pickMatchingBasicInfo(metaResp, themeCandidate.address); info != nil {
-			if strings.TrimSpace(info.TokenSymbol) != "" {
-				themeToken.Symbol = strings.TrimSpace(info.TokenSymbol)
+			warnings = append(warnings, "未能获取代币展示信息，已使用占位样式")
+		} else if meta, ok := metaByAddr[strings.ToLower(strings.TrimSpace(themeCandidate.address))]; ok {
+			if strings.TrimSpace(meta.Symbol) != "" {
+				themeToken.Symbol = strings.TrimSpace(meta.Symbol)
 			}
-			if strings.TrimSpace(info.TokenName) != "" {
-				themeToken.Name = strings.TrimSpace(info.TokenName)
+			if strings.TrimSpace(meta.Name) != "" {
+				themeToken.Name = strings.TrimSpace(meta.Name)
 			}
-			if strings.TrimSpace(info.TokenLogoURL) != "" {
-				themeToken.LogoURL = strings.TrimSpace(info.TokenLogoURL)
+			if strings.TrimSpace(meta.LogoURL) != "" {
+				themeToken.LogoURL = strings.TrimSpace(meta.LogoURL)
 			}
 		}
 	}
 
-	series, seriesWarnings := buildPosterSeries(okxSvc, cc, themeCandidate.address, openTime, now)
+	series, seriesWarnings := buildPosterSeries(chain, themeCandidate.address, openTime, now)
 	warnings = append(warnings, seriesWarnings...)
 
 	resp := positionProfitPosterResponse{
@@ -231,7 +230,7 @@ func (s *Server) handlePositionProfitPoster(w http.ResponseWriter, r *http.Reque
 		OpenedAt:        &openTime,
 		GeneratedAt:     now,
 		WindowLabel:     "开单以来价格收益",
-		PriceSource:     "okx",
+		PriceSource:     "geckoterminal",
 		InvestUSD:       investUSD,
 		CurrentValueUSD: currentValueUSD,
 		ProfitUSD:       profitUSD,
@@ -391,24 +390,7 @@ func isPosterBaseLikeToken(chain, symbol, address string) bool {
 		addr == strings.ToLower(strings.TrimSpace(cc.WrappedNativeAddress)))
 }
 
-func pickMatchingBasicInfo(resp *exchange.MarketTokenBasicInfoResponse, tokenAddress string) *exchange.MarketTokenBasicInfo {
-	if resp == nil || len(resp.Data) == 0 {
-		return nil
-	}
-	want := strings.ToLower(strings.TrimSpace(tokenAddress))
-	for i := range resp.Data {
-		got := strings.ToLower(strings.TrimSpace(resp.Data[i].TokenContractAddress))
-		if want != "" && got == want {
-			return &resp.Data[i]
-		}
-	}
-	return &resp.Data[0]
-}
-
-func buildPosterSeries(okxSvc *exchange.OKXDexService, cc config.ChainConfig, tokenAddress string, openedAt, now time.Time) ([]positionProfitPosterPoint, []string) {
-	if okxSvc == nil {
-		return nil, []string{"走势服务暂不可用"}
-	}
+func buildPosterSeries(chain string, tokenAddress string, openedAt, now time.Time) ([]positionProfitPosterPoint, []string) {
 	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
 	if tokenAddress == "" {
 		return nil, []string{"当前仓位缺少可用代币地址，无法生成走势曲线"}
@@ -418,41 +400,47 @@ func buildPosterSeries(okxSvc *exchange.OKXDexService, cc config.ChainConfig, to
 	}
 
 	bar, barStep, limit := choosePosterBar(openedAt, now)
-	resp, err := okxSvc.GetMarketCandles(exchange.MarketCandlesRequest{
-		ChainIndex:           strconv.FormatInt(cc.ChainID, 10),
-		TokenContractAddress: tokenAddress,
-		Bar:                  bar,
-		Limit:                limit,
-	})
-	if err != nil {
-		return nil, []string{"未能获取 OKX 走势数据，已降级为纯摘要海报"}
-	}
-	if len(resp.Rows) == 0 {
-		return nil, []string{"暂无 OKX 走势数据，已降级为纯摘要海报"}
+	_, barParams, ok := normalizeGeckoBar(bar)
+	if !ok {
+		return nil, []string{"走势时间粒度不受支持，已降级为纯摘要海报"}
 	}
 
-	rows := make([]exchange.MarketCandle, 0, len(resp.Rows))
-	startMS := openedAt.UnixMilli() - barStep.Milliseconds()
-	for _, row := range resp.Rows {
-		if row.TimestampMS <= 0 || row.Close <= 0 || math.IsNaN(row.Close) || math.IsInf(row.Close, 0) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	poolAddress, err := fetchGeckoBestPoolAddress(ctx, nil, chain, tokenAddress)
+	if err != nil {
+		return nil, []string{"未能获取 GeckoTerminal 走势池子，已降级为纯摘要海报"}
+	}
+	candles, err := fetchGeckoPoolCandles(ctx, nil, chain, poolAddress, barParams, limit, "")
+	if err != nil {
+		return nil, []string{"未能获取 GeckoTerminal 走势数据，已降级为纯摘要海报"}
+	}
+	if len(candles) == 0 {
+		return nil, []string{"暂无 GeckoTerminal 走势数据，已降级为纯摘要海报"}
+	}
+
+	rows := make([]tokenCandle, 0, len(candles))
+	startSec := openedAt.Add(-barStep).Unix()
+	for _, row := range candles {
+		if row.T <= 0 || row.C <= 0 || math.IsNaN(row.C) || math.IsInf(row.C, 0) {
 			continue
 		}
-		if row.TimestampMS < startMS {
+		if row.T < startSec {
 			continue
 		}
 		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
-		rows = append(rows, resp.Rows...)
+		rows = append(rows, candles...)
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].TimestampMS < rows[j].TimestampMS
+		return rows[i].T < rows[j].T
 	})
 
 	baseline := 0.0
 	for _, row := range rows {
-		if row.Close > 0 {
-			baseline = row.Close
+		if row.C > 0 {
+			baseline = row.C
 			break
 		}
 	}
@@ -464,13 +452,13 @@ func buildPosterSeries(okxSvc *exchange.OKXDexService, cc config.ChainConfig, to
 	points = append(points, positionProfitPosterPoint{T: openedAt.Unix(), Value: 0})
 	lastT := openedAt.Unix()
 	for _, row := range rows {
-		ts := row.TimestampMS / 1000
+		ts := row.T
 		if ts <= 0 || ts < lastT {
 			continue
 		}
 		points = append(points, positionProfitPosterPoint{
 			T:     ts,
-			Value: ((row.Close / baseline) - 1) * 100,
+			Value: ((row.C / baseline) - 1) * 100,
 		})
 		lastT = ts
 	}
@@ -488,11 +476,11 @@ func choosePosterBar(openedAt, now time.Time) (string, time.Duration, int) {
 	case duration <= 24*time.Hour:
 		return "5m", 5 * time.Minute, clampPosterLimit(int(math.Ceil(duration.Minutes()/5)) + 8)
 	case duration <= 14*24*time.Hour:
-		return "1H", time.Hour, clampPosterLimit(int(math.Ceil(duration.Hours())) + 8)
+		return "1h", time.Hour, clampPosterLimit(int(math.Ceil(duration.Hours())) + 8)
 	case duration <= 240*24*time.Hour:
-		return "1D", 24 * time.Hour, clampPosterLimit(int(math.Ceil(duration.Hours()/24)) + 4)
+		return "1d", 24 * time.Hour, clampPosterLimit(int(math.Ceil(duration.Hours()/24)) + 4)
 	default:
-		return "1W", 7 * 24 * time.Hour, clampPosterLimit(int(math.Ceil(duration.Hours()/(24*7))) + 4)
+		return "1w", 7 * 24 * time.Hour, clampPosterLimit(int(math.Ceil(duration.Hours()/(24*7))) + 4)
 	}
 }
 

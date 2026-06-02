@@ -1,25 +1,31 @@
 package token_metadata
 
 import (
-	"TgLpBot/base/config"
 	"TgLpBot/base/models"
-	"TgLpBot/service/exchange"
 	"context"
 	"errors"
 	"testing"
 	"time"
 )
 
-type fakeOKXClient struct {
-	resp *exchange.MarketTokenBasicInfoResponse
+type fakeMetadataProvider struct {
+	data map[string]models.TokenMetadata
 	err  error
 }
 
-func (f fakeOKXClient) GetMarketTokenBasicInfos(reqs []exchange.MarketTokenBasicInfoRequest) (*exchange.MarketTokenBasicInfoResponse, error) {
+func (f fakeMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.resp, nil
+	out := make(map[string]models.TokenMetadata)
+	for _, addr := range normalizeAddresses(addresses) {
+		if meta, ok := f.data[addr]; ok {
+			meta.Chain = chain
+			meta.TokenAddress = addr
+			out[addr] = meta
+		}
+	}
+	return out, nil
 }
 
 func TestNormalizeTokenAddress(t *testing.T) {
@@ -43,45 +49,55 @@ func TestNormalizeAddresses_DedupesAndSorts(t *testing.T) {
 	}
 }
 
-func TestGetBatch_FetchesFromOKXWithoutStorage(t *testing.T) {
-	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{
-		Chains: map[string]config.ChainConfig{
-			"bsc": {Chain: "bsc", ChainID: 56},
-		},
-	}
-	defer func() {
-		config.AppConfig = prevCfg
-	}()
+func TestGetBatch_FetchesFromProvidersWithoutStorage(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	svc := NewServiceWithProviders(
+		fakeMetadataProvider{data: map[string]models.TokenMetadata{
+			token: {Symbol: "TEST", Name: "Test Token", Source: sourceRPC, Status: statusOK},
+		}},
+		fakeMetadataProvider{data: map[string]models.TokenMetadata{
+			token: {LogoURL: "https://img.example/test.png", Source: sourceGecko, Status: statusOK},
+		}},
+	)
 
-	svc := NewServiceWithClient(fakeOKXClient{
-		resp: &exchange.MarketTokenBasicInfoResponse{
-			Code: "0",
-			Data: []exchange.MarketTokenBasicInfo{
-				{
-					ChainIndex:           "56",
-					TokenContractAddress: "0x1111111111111111111111111111111111111111",
-					TokenSymbol:          "TEST",
-					TokenName:            "Test Token",
-					TokenLogoURL:         "https://img.example/test.png",
-				},
-			},
-		},
-	})
-
-	got, err := svc.GetBatch(context.Background(), "bsc", []string{"0x1111111111111111111111111111111111111111"})
+	got, err := svc.GetBatch(context.Background(), "bsc", []string{token})
 	if err != nil {
 		t.Fatalf("GetBatch error: %v", err)
 	}
-	meta, ok := got["0x1111111111111111111111111111111111111111"]
+	meta, ok := got[token]
 	if !ok {
 		t.Fatalf("expected metadata result, got %#v", got)
 	}
 	if meta.Symbol != "TEST" || meta.Name != "Test Token" || meta.LogoURL != "https://img.example/test.png" {
 		t.Fatalf("unexpected metadata: %#v", meta)
 	}
+	if meta.Source != sourceRPC+"+"+sourceGecko {
+		t.Fatalf("expected merged source, got %s", meta.Source)
+	}
 	if meta.Status != statusOK {
 		t.Fatalf("expected status %s, got %s", statusOK, meta.Status)
+	}
+}
+
+func TestGetBatch_UsesRPCWhenDisplayProviderFails(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	svc := NewServiceWithProviders(
+		fakeMetadataProvider{data: map[string]models.TokenMetadata{
+			token: {Symbol: "TEST", Name: "Test Token", Source: sourceRPC, Status: statusOK},
+		}},
+		fakeMetadataProvider{err: errors.New("gecko unavailable")},
+	)
+
+	got, err := svc.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	meta, ok := got[token]
+	if !ok {
+		t.Fatalf("expected metadata result, got %#v", got)
+	}
+	if meta.Symbol != "TEST" || meta.Name != "Test Token" || meta.LogoURL != "" {
+		t.Fatalf("unexpected metadata: %#v", meta)
 	}
 }
 
@@ -92,7 +108,7 @@ func TestCacheFromModel_RoundTrip(t *testing.T) {
 		Symbol:       "ABC",
 		Name:         "ABC Token",
 		LogoURL:      "https://img.example/abc.png",
-		Source:       sourceOKX,
+		Source:       sourceRPC,
 		Status:       statusOK,
 	}
 	entry := cacheFromModel(meta)
@@ -103,30 +119,19 @@ func TestCacheFromModel_RoundTrip(t *testing.T) {
 }
 
 func TestShouldRefreshMetadata_RequiresLogoBackfill(t *testing.T) {
-	if !shouldRefreshMetadata(models.TokenMetadata{
-		Status: statusOK,
-	}) {
+	if !shouldRefreshMetadata(models.TokenMetadata{Status: statusOK}) {
 		t.Fatalf("expected empty-logo ok metadata to require refresh")
 	}
 
-	if shouldRefreshMetadata(models.TokenMetadata{
-		Status:  statusOK,
-		LogoURL: "https://img.example/a.png",
-	}) {
+	if shouldRefreshMetadata(models.TokenMetadata{Status: statusOK, LogoURL: "https://img.example/a.png"}) {
 		t.Fatalf("expected metadata with logo to skip refresh")
 	}
 
-	if shouldRefreshMetadata(models.TokenMetadata{
-		Status:    statusNotFound,
-		FetchedAt: time.Now(),
-	}) {
+	if shouldRefreshMetadata(models.TokenMetadata{Status: statusNotFound, FetchedAt: time.Now()}) {
 		t.Fatalf("expected fresh negative cache metadata to skip refresh")
 	}
 
-	if !shouldRefreshMetadata(models.TokenMetadata{
-		Status:    statusNotFound,
-		FetchedAt: time.Now().Add(-negativeRetry).Add(-time.Minute),
-	}) {
+	if !shouldRefreshMetadata(models.TokenMetadata{Status: statusNotFound, FetchedAt: time.Now().Add(-negativeRetry).Add(-time.Minute)}) {
 		t.Fatalf("expected stale negative cache metadata to refresh")
 	}
 
@@ -135,20 +140,8 @@ func TestShouldRefreshMetadata_RequiresLogoBackfill(t *testing.T) {
 	}
 }
 
-func TestGetBatch_ReturnsPartialDataWhenOKXRefreshFails(t *testing.T) {
-	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{
-		Chains: map[string]config.ChainConfig{
-			"bsc": {Chain: "bsc", ChainID: 56},
-		},
-	}
-	defer func() {
-		config.AppConfig = prevCfg
-	}()
-
-	svc := NewServiceWithClient(fakeOKXClient{
-		err: errors.New("okx unavailable"),
-	})
+func TestGetBatch_ReturnsPartialDataWhenRefreshFails(t *testing.T) {
+	svc := NewServiceWithProviders(fakeMetadataProvider{err: errors.New("rpc unavailable")}, nil)
 
 	now := time.Now()
 	originalReadCacheBatch := readCacheBatchFn

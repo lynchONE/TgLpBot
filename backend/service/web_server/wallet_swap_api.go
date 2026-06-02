@@ -1,6 +1,7 @@
 package web_server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,10 +11,12 @@ import (
 
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
-	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
+	"TgLpBot/service/pricing"
+	"TgLpBot/service/token_metadata"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
 
@@ -105,9 +108,9 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 		minVal = 0.1
 	}
 
-	rows, err := s.getTokenBalancesFromOKX(user.ID, req.WalletID, chain, minVal)
+	rows, err := s.getTokenBalancesFromRPC(r.Context(), user.ID, req.WalletID, chain, minVal)
 	if err != nil {
-		http.Error(w, "okx balance query failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "rpc balance query failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -119,7 +122,7 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain string, minValueUSD float64) ([]walletSwapTokenRow, error) {
+func (s *Server) getTokenBalancesFromRPC(ctx context.Context, userID uint, walletID uint, chain string, minValueUSD float64) ([]walletSwapTokenRow, error) {
 	walletService := wallet.NewWalletService()
 	wlt, err := walletService.ResolveTaskWallet(userID, walletID, "")
 	if err != nil || wlt == nil {
@@ -140,136 +143,95 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 	}
 	walletAddr := common.HexToAddress(wlt.Address)
 
-	chainIndex := config.ChainToOKXChainIndex(chain)
-	if chainIndex == "" {
-		return nil, fmt.Errorf("unsupported chain: %s", chain)
-	}
-
-	okxService := exchange.NewOKXDexService()
-	resp, err := okxService.GetAllTokenBalances(chainIndex, wlt.Address)
+	tokenAddresses, err := s.walletSwapKnownTokenAddresses(ctx, userID, chain, cc)
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Data) == 0 {
-		return []walletSwapTokenRow{}, nil
+	priceAddresses := append([]string(nil), tokenAddresses...)
+	if wrapped := token_metadata.NormalizeTokenAddress(cc.WrappedNativeAddress); wrapped != "" {
+		priceAddresses = append(priceAddresses, wrapped)
+	}
+	prices, err := pricing.DefaultTokenPriceService().GetUSDPrices(chain, priceAddresses)
+	if err != nil {
+		return nil, fmt.Errorf("price query failed: %w", err)
 	}
 
-	rows := make([]walletSwapTokenRow, 0, len(resp.Data[0].TokenAssets))
-	tokenRequests := make([]exchange.MarketTokenBasicInfoRequest, 0, len(resp.Data[0].TokenAssets))
+	if s.TokenMeta == nil {
+		s.TokenMeta = token_metadata.NewService()
+	}
+	metaByAddr, err := s.TokenMeta.GetBatch(ctx, chain, tokenAddresses)
+	if err != nil {
+		return nil, fmt.Errorf("token metadata query failed: %w", err)
+	}
+
+	rows := make([]walletSwapTokenRow, 0, len(tokenAddresses)+1)
 	nativeSymbol := nativeSymbolForChainConfig(chain, cc)
 	wrappedNativeSymbol := strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
 
-	for _, token := range resp.Data[0].TokenAssets {
-		balance := strings.TrimSpace(token.Balance)
-		priceStr := strings.TrimSpace(token.TokenPrice)
-		if balance == "" || balance == "0" {
-			continue
-		}
-
-		balanceFloat, _ := strconv.ParseFloat(balance, 64)
-		priceFloat, _ := strconv.ParseFloat(priceStr, 64)
-		valueUSD := balanceFloat * priceFloat
-
-		symbol := strings.TrimSpace(token.Symbol)
-		name := symbol
-		tokenAddr := strings.ToLower(strings.TrimSpace(token.TokenContractAddress))
-		isNative := tokenAddr == ""
-		canSwap := true
-		disabledReason := ""
-		decimals := 18
-		balanceRaw := ""
-		displayBalance := balance
-
-		if isNative {
-			tokenAddr = nativePseudoTokenAddress
-			canSwap = true
-			if rawBalance, berr := walletSwapAssetBalance(client, common.HexToAddress(nativePseudoTokenAddress), walletAddr); berr == nil && rawBalance != nil {
-				if rawBalance.Sign() == 0 {
-					continue
-				}
-				balanceRaw = rawBalance.String()
-				displayBalance = formatWalletSwapRawAmount(rawBalance, decimals)
-				balanceFloat, _ = strconv.ParseFloat(displayBalance, 64)
-				valueUSD = balanceFloat * priceFloat
-			}
-			if valueUSD < minValueUSD {
-				continue
-			}
-			if symbol == "" {
-				symbol = nativeSymbol
-			}
-			if name == "" {
-				name = fmt.Sprintf("%s (原生)", nativeSymbol)
-			}
+	nativeBalance, err := walletSwapAssetBalance(client, common.HexToAddress(nativePseudoTokenAddress), walletAddr)
+	if err != nil {
+		return nil, fmt.Errorf("native balance query failed: %w", err)
+	}
+	if nativeBalance != nil && nativeBalance.Sign() > 0 {
+		displayBalance := formatWalletSwapRawAmount(nativeBalance, 18)
+		balanceFloat, _ := strconv.ParseFloat(displayBalance, 64)
+		valueUSD := balanceFloat * pricing.GetNativePriceUSD(chain)
+		if valueUSD >= minValueUSD {
+			disabledReason := fmt.Sprintf("原生 %s 暂不支持直接兑换", nativeSymbol)
 			if wrappedNativeSymbol != "" {
-				disabledReason = fmt.Sprintf("原生 %s 暂不支持直接兑换，请先换成 %s。", nativeSymbol, wrappedNativeSymbol)
-			} else {
-				disabledReason = fmt.Sprintf("原生 %s 暂不支持直接兑换。", nativeSymbol)
+				disabledReason = fmt.Sprintf("原生 %s 暂不支持直接兑换，请先换成 %s", nativeSymbol, wrappedNativeSymbol)
 			}
-		} else {
-			if symbol == "" && strings.EqualFold(tokenAddr, cc.StableAddress) {
-				symbol = stableSymbolForChainConfig(cc)
-			}
-			if name == "" {
-				name = symbol
-			}
-			if tokenAddr == "" {
-				continue
-			}
-			tokenAddress := common.HexToAddress(tokenAddr)
-			decimals = int(tokenDecimals(client, tokenAddress))
-			if rawBalance, berr := blockchain.GetTokenBalanceWithClient(client, tokenAddress, walletAddr); berr == nil && rawBalance != nil {
-				if rawBalance.Sign() == 0 {
-					continue
-				}
-				balanceRaw = rawBalance.String()
-				displayBalance = formatWalletSwapRawAmount(rawBalance, decimals)
-				balanceFloat, _ = strconv.ParseFloat(displayBalance, 64)
-				valueUSD = balanceFloat * priceFloat
-				if valueUSD < minValueUSD {
-					continue
-				}
-			}
-			if valueUSD < minValueUSD {
-				continue
-			}
-			tokenRequests = append(tokenRequests, exchange.MarketTokenBasicInfoRequest{
-				ChainIndex:           chainIndex,
-				TokenContractAddress: tokenAddr,
+			rows = append(rows, walletSwapTokenRow{
+				Address:        nativePseudoTokenAddress,
+				Symbol:         nativeSymbol,
+				Name:           fmt.Sprintf("%s (原生)", nativeSymbol),
+				Balance:        displayBalance,
+				BalanceRaw:     nativeBalance.String(),
+				Decimals:       18,
+				ValueUSDT:      valueUSD,
+				CanSwap:        true,
+				IsNative:       true,
+				DisabledReason: disabledReason,
 			})
 		}
-
-		rows = append(rows, walletSwapTokenRow{
-			Address:        tokenAddr,
-			Symbol:         symbol,
-			Name:           name,
-			Balance:        displayBalance,
-			BalanceRaw:     balanceRaw,
-			Decimals:       decimals,
-			ValueUSDT:      valueUSD,
-			CanSwap:        canSwap,
-			IsNative:       isNative,
-			DisabledReason: disabledReason,
-		})
 	}
 
-	if len(tokenRequests) > 0 {
-		logoResp, err := okxService.GetMarketTokenBasicInfos(tokenRequests)
-		if err == nil && len(logoResp.Data) > 0 {
-			logoMap := make(map[string]string, len(logoResp.Data))
-			for _, info := range logoResp.Data {
-				addr := strings.ToLower(strings.TrimSpace(info.TokenContractAddress))
-				if addr == "" {
-					continue
-				}
-				logoMap[addr] = strings.TrimSpace(info.TokenLogoURL)
-			}
-			for i := range rows {
-				if logoURL, ok := logoMap[rows[i].Address]; ok {
-					rows[i].LogoURL = logoURL
-				}
-			}
+	for _, tokenAddr := range tokenAddresses {
+		tokenAddress := common.HexToAddress(tokenAddr)
+		rawBalance, err := blockchain.GetTokenBalanceWithClient(client, tokenAddress, walletAddr)
+		if err != nil || rawBalance == nil || rawBalance.Sign() <= 0 {
+			continue
 		}
+		decimals := int(tokenDecimals(client, tokenAddress))
+		displayBalance := formatWalletSwapRawAmount(rawBalance, decimals)
+		balanceFloat, _ := strconv.ParseFloat(displayBalance, 64)
+		valueUSD := balanceFloat * prices[tokenAddr]
+		if valueUSD < minValueUSD {
+			continue
+		}
+		meta := metaByAddr[tokenAddr]
+		symbol := strings.TrimSpace(meta.Symbol)
+		if symbol == "" && strings.EqualFold(tokenAddr, cc.StableAddress) {
+			symbol = stableSymbolForChainConfig(cc)
+		}
+		if symbol == "" {
+			symbol = shortTokenSymbol(tokenAddr)
+		}
+		name := strings.TrimSpace(meta.Name)
+		if name == "" {
+			name = symbol
+		}
+		rows = append(rows, walletSwapTokenRow{
+			Address:    tokenAddr,
+			Symbol:     symbol,
+			Name:       name,
+			Balance:    displayBalance,
+			BalanceRaw: rawBalance.String(),
+			Decimals:   decimals,
+			ValueUSDT:  valueUSD,
+			LogoURL:    strings.TrimSpace(meta.LogoURL),
+			CanSwap:    true,
+		})
 	}
 
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -280,6 +242,112 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 	})
 
 	return rows, nil
+}
+
+func (s *Server) walletSwapKnownTokenAddresses(ctx context.Context, userID uint, chain string, cc config.ChainConfig) ([]string, error) {
+	seen := make(map[string]struct{})
+	add := func(raw string) {
+		addr := token_metadata.NormalizeTokenAddress(raw)
+		if addr == "" || strings.EqualFold(addr, nativePseudoTokenAddress) {
+			return
+		}
+		seen[addr] = struct{}{}
+	}
+
+	add(cc.StableAddress)
+	add(cc.USDCAddress)
+	add(cc.BUSDAddress)
+	add(cc.WrappedNativeAddress)
+
+	if database.DB != nil {
+		var taskRows []struct {
+			Token0Address string
+			Token1Address string
+		}
+		if err := database.DB.WithContext(ctx).Model(&models.StrategyTask{}).
+			Select("token0_address, token1_address").
+			Where("user_id = ? AND chain = ?", userID, chain).
+			Find(&taskRows).Error; err != nil {
+			return nil, fmt.Errorf("load strategy token candidates failed: %w", err)
+		}
+		for _, row := range taskRows {
+			add(row.Token0Address)
+			add(row.Token1Address)
+		}
+
+		var txRows []struct {
+			TokenInAddress  string
+			TokenOutAddress string
+		}
+		if err := database.DB.WithContext(ctx).Model(&models.Transaction{}).
+			Select("token_in_address, token_out_address").
+			Where("user_id = ? AND chain = ?", userID, chain).
+			Order("id DESC").
+			Limit(200).
+			Find(&txRows).Error; err != nil {
+			return nil, fmt.Errorf("load swap history token candidates failed: %w", err)
+		}
+		for _, row := range txRows {
+			add(row.TokenInAddress)
+			add(row.TokenOutAddress)
+		}
+
+		var orderRows []struct {
+			FromTokenAddress string
+			ToTokenAddress   string
+		}
+		if err := database.DB.WithContext(ctx).Model(&models.WalletSwapLimitOrder{}).
+			Select("from_token_address, to_token_address").
+			Where("user_id = ? AND chain = ?", userID, chain).
+			Order("id DESC").
+			Limit(200).
+			Find(&orderRows).Error; err != nil {
+			return nil, fmt.Errorf("load limit order token candidates failed: %w", err)
+		}
+		for _, row := range orderRows {
+			add(row.FromTokenAddress)
+			add(row.ToTokenAddress)
+		}
+
+		var poolRows []struct {
+			BaseTokenID        string
+			QuoteTokenID       string
+			PricedTokenAddress string
+			StableCoinPosition string
+		}
+		if err := database.DB.WithContext(ctx).Model(&models.Pool{}).
+			Select("base_token_id, quote_token_id, priced_token_address, stable_coin_position").
+			Where("(chain = ? OR source_requested_chain = ?)", chain, chain).
+			Order("current_pool_value DESC, total_volume DESC, volume_h24 DESC").
+			Limit(150).
+			Find(&poolRows).Error; err != nil {
+			return nil, fmt.Errorf("load pool token candidates failed: %w", err)
+		}
+		for _, row := range poolRows {
+			add(row.PricedTokenAddress)
+			add(geckoTokenIDAddress(row.BaseTokenID))
+			add(geckoTokenIDAddress(row.QuoteTokenID))
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for addr := range seen {
+		out = append(out, addr)
+	}
+	sort.Strings(out)
+	const maxRPCBalanceTokens = 300
+	if len(out) > maxRPCBalanceTokens {
+		out = out[:maxRPCBalanceTokens]
+	}
+	return out, nil
+}
+
+func shortTokenSymbol(addr string) string {
+	addr = token_metadata.NormalizeTokenAddress(addr)
+	if len(addr) < 10 {
+		return "TOKEN"
+	}
+	return strings.ToUpper(addr[:6] + "..." + addr[len(addr)-4:])
 }
 
 type walletSwapExecuteRequest struct {

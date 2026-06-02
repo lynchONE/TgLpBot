@@ -1,14 +1,18 @@
 package token_metadata
 
 import (
+	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
-	"TgLpBot/service/exchange"
+	"TgLpBot/service/chainexec"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +23,8 @@ import (
 
 const (
 	cachePrefix    = "token:meta"
-	sourceOKX      = "okx"
+	sourceRPC      = "rpc"
+	sourceGecko    = "geckoterminal"
 	statusOK       = "ok"
 	statusNotFound = "not_found"
 	positiveTTL    = 7 * 24 * time.Hour
@@ -27,12 +32,17 @@ const (
 	negativeRetry  = 30 * time.Minute
 )
 
-type okxMarketClient interface {
-	GetMarketTokenBasicInfos(reqs []exchange.MarketTokenBasicInfoRequest) (*exchange.MarketTokenBasicInfoResponse, error)
+type chainMetadataProvider interface {
+	GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error)
+}
+
+type displayMetadataProvider interface {
+	GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error)
 }
 
 type Service struct {
-	okx okxMarketClient
+	chainProvider   chainMetadataProvider
+	displayProvider displayMetadataProvider
 }
 
 var readCacheBatchFn = readCacheBatch
@@ -50,14 +60,14 @@ type cacheEntry struct {
 }
 
 func NewService() *Service {
-	if config.AppConfig == nil {
-		return &Service{}
+	return &Service{
+		chainProvider:   evmChainMetadataProvider{},
+		displayProvider: geckoDisplayMetadataProvider{client: &http.Client{Timeout: 12 * time.Second}},
 	}
-	return &Service{okx: exchange.NewOKXDexService()}
 }
 
-func NewServiceWithClient(okx okxMarketClient) *Service {
-	return &Service{okx: okx}
+func NewServiceWithProviders(chainProvider chainMetadataProvider, displayProvider displayMetadataProvider) *Service {
+	return &Service{chainProvider: chainProvider, displayProvider: displayProvider}
 }
 
 func NormalizeTokenAddress(raw string) string {
@@ -186,14 +196,14 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 		}
 	}
 
-	if len(pending) == 0 || s == nil || s.okx == nil {
+	if len(pending) == 0 || s == nil || s.chainProvider == nil {
 		return out, nil
 	}
 
-	fetched, err := s.fetchFromOKX(chain, mapKeys(pending))
+	fetched, err := s.fetchFreshMetadata(ctx, chain, mapKeys(pending))
 	if err != nil {
 		if len(out) > 0 {
-			log.Printf("[TokenMetadata] warning: okx refresh failed chain=%s pending=%d cached=%d err=%v", chain, len(pending), len(out), err)
+			log.Printf("[TokenMetadata] warning: metadata refresh failed chain=%s pending=%d cached=%d err=%v", chain, len(pending), len(out), err)
 			return out, nil
 		}
 		return out, err
@@ -206,7 +216,9 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 		if ok {
 			meta.Chain = chain
 			meta.TokenAddress = addr
-			meta.Source = sourceOKX
+			if strings.TrimSpace(meta.Source) == "" {
+				meta.Source = sourceRPC
+			}
 			meta.Status = statusOK
 			meta.FetchedAt = now
 			meta.ExpiresAt = now.Add(positiveTTL)
@@ -215,7 +227,7 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 			meta = models.TokenMetadata{
 				Chain:        chain,
 				TokenAddress: addr,
-				Source:       sourceOKX,
+				Source:       sourceRPC,
 				Status:       statusNotFound,
 				FetchedAt:    now,
 				ExpiresAt:    now.Add(negativeTTL),
@@ -234,52 +246,197 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 	return out, nil
 }
 
-func (s *Service) fetchFromOKX(chain string, addresses []string) (map[string]models.TokenMetadata, error) {
-	if s == nil || s.okx == nil {
+func (s *Service) fetchFreshMetadata(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	if s == nil || s.chainProvider == nil {
 		return map[string]models.TokenMetadata{}, nil
 	}
-	if config.AppConfig == nil {
-		return nil, fmt.Errorf("config not loaded")
-	}
-	cc, ok := config.AppConfig.GetChainConfig(chain)
-	if !ok || cc.ChainID <= 0 {
-		return nil, fmt.Errorf("invalid chain config: %s", chain)
-	}
-
-	reqs := make([]exchange.MarketTokenBasicInfoRequest, 0, len(addresses))
-	chainIndex := fmt.Sprintf("%d", cc.ChainID)
-	for _, addr := range normalizeAddresses(addresses) {
-		reqs = append(reqs, exchange.MarketTokenBasicInfoRequest{
-			ChainIndex:           chainIndex,
-			TokenContractAddress: addr,
-		})
-	}
-	if len(reqs) == 0 {
+	addresses = normalizeAddresses(addresses)
+	if len(addresses) == 0 {
 		return map[string]models.TokenMetadata{}, nil
 	}
-
-	resp, err := s.okx.GetMarketTokenBasicInfos(reqs)
+	out, err := s.chainProvider.GetBatch(ctx, chain, addresses)
 	if err != nil {
 		return nil, err
 	}
-
-	out := make(map[string]models.TokenMetadata, len(resp.Data))
-	for _, item := range resp.Data {
-		addr := NormalizeTokenAddress(item.TokenContractAddress)
-		if addr == "" {
+	if s.displayProvider == nil {
+		return out, nil
+	}
+	display, err := s.displayProvider.GetBatch(ctx, chain, addresses)
+	if err != nil {
+		log.Printf("[TokenMetadata] warning: display metadata refresh failed chain=%s err=%v", chain, err)
+		return out, nil
+	}
+	for addr, extra := range display {
+		meta, ok := out[addr]
+		if !ok {
 			continue
 		}
+		if strings.TrimSpace(meta.Symbol) == "" {
+			meta.Symbol = strings.TrimSpace(extra.Symbol)
+		}
+		if strings.TrimSpace(meta.Name) == "" {
+			meta.Name = strings.TrimSpace(extra.Name)
+		}
+		if strings.TrimSpace(extra.LogoURL) != "" {
+			meta.LogoURL = strings.TrimSpace(extra.LogoURL)
+			if strings.TrimSpace(meta.Source) == "" || meta.Source == sourceRPC {
+				meta.Source = sourceRPC + "+" + sourceGecko
+			}
+		}
+		out[addr] = meta
+	}
+	return out, nil
+}
+
+type evmChainMetadataProvider struct{}
+
+func (evmChainMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	chain = config.NormalizeChain(chain)
+	exec, err := chainexec.GetEVM(chain)
+	if err != nil {
+		return nil, err
+	}
+	client := exec.Client()
+	if client == nil {
+		return nil, fmt.Errorf("rpc client unavailable for chain %s", chain)
+	}
+
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	var firstErr error
+	for _, addr := range normalizeAddresses(addresses) {
+		token := common.HexToAddress(addr)
+		erc20, err := blockchain.NewERC20(token, client)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+
+		symbol, symErr := erc20.Symbol(nil)
+		name, nameErr := erc20.Name(nil)
+		_, decErr := erc20.Decimals(nil)
+		if symErr != nil || nameErr != nil || decErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("read token metadata failed token=%s symbol=%v name=%v decimals=%v", addr, symErr, nameErr, decErr)
+			}
+			continue
+		}
+
 		out[addr] = models.TokenMetadata{
 			Chain:        chain,
 			TokenAddress: addr,
-			Symbol:       strings.TrimSpace(item.TokenSymbol),
-			Name:         strings.TrimSpace(item.TokenName),
-			LogoURL:      strings.TrimSpace(item.TokenLogoURL),
-			Source:       sourceOKX,
+			Symbol:       strings.TrimSpace(symbol),
+			Name:         strings.TrimSpace(name),
+			Source:       sourceRPC,
 			Status:       statusOK,
 		}
 	}
+	if len(out) == 0 && firstErr != nil {
+		return out, firstErr
+	}
 	return out, nil
+}
+
+type geckoDisplayMetadataProvider struct {
+	client *http.Client
+}
+
+type geckoTokenMetadataResponse struct {
+	Data struct {
+		Attributes struct {
+			Address  string `json:"address"`
+			Name     string `json:"name"`
+			Symbol   string `json:"symbol"`
+			ImageURL string `json:"image_url"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
+func (p geckoDisplayMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	addresses = normalizeAddresses(addresses)
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	if len(addresses) == 0 {
+		return out, nil
+	}
+	client := p.client
+	if client == nil {
+		client = &http.Client{Timeout: 12 * time.Second}
+	}
+	network := geckoNetwork(chain)
+	var firstErr error
+	for _, addr := range addresses {
+		meta, err := p.fetchOne(ctx, client, network, chain, addr)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if meta.TokenAddress != "" {
+			out[meta.TokenAddress] = meta
+		}
+	}
+	if len(out) == 0 && firstErr != nil {
+		return out, firstErr
+	}
+	return out, nil
+}
+
+func (p geckoDisplayMetadataProvider) fetchOne(ctx context.Context, client *http.Client, network string, chain string, addr string) (models.TokenMetadata, error) {
+	endpoint := fmt.Sprintf(
+		"https://api.geckoterminal.com/api/v2/networks/%s/tokens/%s",
+		url.PathEscape(network),
+		url.PathEscape(addr),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return models.TokenMetadata{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return models.TokenMetadata{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return models.TokenMetadata{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return models.TokenMetadata{}, fmt.Errorf("geckoterminal token metadata http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var parsed geckoTokenMetadataResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return models.TokenMetadata{}, err
+	}
+	gotAddr := NormalizeTokenAddress(parsed.Data.Attributes.Address)
+	if gotAddr == "" {
+		gotAddr = NormalizeTokenAddress(addr)
+	}
+	return models.TokenMetadata{
+		Chain:        config.NormalizeChain(chain),
+		TokenAddress: gotAddr,
+		Symbol:       strings.TrimSpace(parsed.Data.Attributes.Symbol),
+		Name:         strings.TrimSpace(parsed.Data.Attributes.Name),
+		LogoURL:      strings.TrimSpace(parsed.Data.Attributes.ImageURL),
+		Source:       sourceGecko,
+		Status:       statusOK,
+	}, nil
+}
+
+func geckoNetwork(chain string) string {
+	switch strings.ToLower(strings.TrimSpace(chain)) {
+	case "", "bsc", "bnb":
+		return "bsc"
+	case "base":
+		return "base"
+	case "eth", "ethereum":
+		return "eth"
+	default:
+		return strings.ToLower(strings.TrimSpace(chain))
+	}
 }
 
 func readCacheBatch(chain string, addresses []string) (map[string]models.TokenMetadata, error) {

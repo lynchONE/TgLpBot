@@ -1,13 +1,10 @@
 package pricing
 
 import (
-	"TgLpBot/base/config"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 type stubRoundTripper struct {
@@ -49,16 +46,19 @@ func TestGetUSDPrices_StableFallback_NoNetworkCall(t *testing.T) {
 	}
 }
 
-func TestGetUSDPrices_UsesStaleCacheOnRateLimit(t *testing.T) {
+func TestGetUSDPrices_ReturnsErrorWithoutStalePriceOnRateLimit(t *testing.T) {
 	svc := NewTokenPriceService()
 	token := "0x1111111111111111111111111111111111111111"
-	now := time.Now()
-	svc.cache[tokenPriceCacheKey("bsc", token)] = cachedTokenPrice{
-		priceUSD: 2.5,
-		expires:  now.Add(-time.Minute),
-		staleTil: now.Add(10 * time.Minute),
-	}
+	called := 0
 	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+		called++
+		if called == 1 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{"0x1111111111111111111111111111111111111111":"2.5"}}}}`)),
+				Header:     make(http.Header),
+			}, nil
+		}
 		return &http.Response{
 			StatusCode: http.StatusTooManyRequests,
 			Body:       io.NopCloser(strings.NewReader(`{"status":{"error_code":429}}`)),
@@ -66,48 +66,58 @@ func TestGetUSDPrices_UsesStaleCacheOnRateLimit(t *testing.T) {
 		}, nil
 	}}}
 
+	first, err := svc.GetUSDPrices("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected first request to succeed, got %v", err)
+	}
+	if first[token] != 2.5 {
+		t.Fatalf("expected first price=2.5, got %+v", first)
+	}
+
 	prices, err := svc.GetUSDPrices("bsc", []string{token})
 	if err == nil {
 		t.Fatalf("expected rate-limit error, got nil")
 	}
-	if prices[token] != 2.5 {
-		t.Fatalf("expected stale cache price 2.5, got %+v", prices)
+	if _, ok := prices[token]; ok {
+		t.Fatalf("expected no stale price on rate limit, got %+v", prices)
 	}
 }
 
-func TestGetUSDPrices_CacheIsNetworkScoped(t *testing.T) {
+func TestGetUSDPrices_DoesNotCacheSuccessfulPrice(t *testing.T) {
 	svc := NewTokenPriceService()
 	token := "0x1111111111111111111111111111111111111111"
-	now := time.Now()
-	svc.cache[tokenPriceCacheKey("base", token)] = cachedTokenPrice{
-		priceUSD: 9.9,
-		expires:  now.Add(time.Minute),
-		staleTil: now.Add(10 * time.Minute),
-	}
 
 	called := 0
 	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
 		called++
+		price := "1.23"
+		if called == 2 {
+			price = "4.56"
+		}
 		return &http.Response{
-			StatusCode: http.StatusTooManyRequests,
-			Body:       io.NopCloser(strings.NewReader(`{"status":{"error_code":429}}`)),
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{"0x1111111111111111111111111111111111111111":"` + price + `"}}}}`)),
 			Header:     make(http.Header),
 		}, nil
 	}}}
 
-	prices, err := svc.GetUSDPrices("bsc", []string{token})
-	if err == nil {
-		t.Fatalf("expected rate-limit error, got nil")
+	first, err := svc.GetUSDPrices("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected first request to succeed, got %v", err)
 	}
-	if prices[token] == 9.9 {
-		t.Fatalf("unexpectedly reused base cache for bsc: %+v", prices)
+	second, err := svc.GetUSDPrices("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected second request to succeed, got %v", err)
 	}
-	if called == 0 {
-		t.Fatalf("expected network call because bsc cache was empty")
+	if first[token] != 1.23 || second[token] != 4.56 {
+		t.Fatalf("expected fresh prices from both requests, first=%+v second=%+v", first, second)
+	}
+	if called != 2 {
+		t.Fatalf("expected no successful-price cache, called=%d", called)
 	}
 }
 
-func TestGetUSDPrices_CachesMissingPriceBriefly(t *testing.T) {
+func TestGetUSDPrices_DoesNotCacheMissingPrice(t *testing.T) {
 	svc := NewTokenPriceService()
 	token := "0x1111111111111111111111111111111111111111"
 	called := 0
@@ -128,11 +138,14 @@ func TestGetUSDPrices_CachesMissingPriceBriefly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if first[token] != 0 || second[token] != 0 {
-		t.Fatalf("expected missing price to remain zero, got first=%+v second=%+v", first, second)
+	if _, ok := first[token]; ok {
+		t.Fatalf("expected first response to omit missing price, got %+v", first)
 	}
-	if called != 1 {
-		t.Fatalf("expected missing price cache to avoid second network call, called=%d", called)
+	if _, ok := second[token]; ok {
+		t.Fatalf("expected second response to omit missing price, got %+v", second)
+	}
+	if called != 2 {
+		t.Fatalf("expected no missing-price cache, called=%d", called)
 	}
 }
 
@@ -159,85 +172,7 @@ func TestFetchGeckoTokenPrices_ReturnsProviderHTTPError(t *testing.T) {
 	}
 }
 
-func TestFetchOKXTokenPrices_UsesMarketPricePostEndpoint(t *testing.T) {
-	oldConfig := config.AppConfig
-	config.AppConfig = &config.Config{
-		OKXDexAPIURL:  "https://www.okx.com/api/v6/dex/aggregator",
-		OKXAPIKey:     "test-key",
-		OKXSecretKey:  "test-secret",
-		OKXPassphrase: "test-pass",
-		Chains: map[string]config.ChainConfig{
-			"bsc": {Chain: "bsc", ChainID: 56},
-		},
-	}
-	t.Cleanup(func() {
-		config.AppConfig = oldConfig
-	})
-
-	svc := NewTokenPriceService()
-	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodPost {
-			t.Fatalf("expected POST request, got %s", req.Method)
-		}
-		if got := req.URL.String(); got != "https://web3.okx.com/api/v6/dex/market/price" {
-			t.Fatalf("unexpected request url: %s", got)
-		}
-		if ct := req.Header.Get("Content-Type"); ct != "application/json" {
-			t.Fatalf("expected application/json, got %s", ct)
-		}
-		if req.Header.Get("OK-ACCESS-SIGN") == "" {
-			t.Fatalf("expected OK-ACCESS-SIGN header")
-		}
-
-		rawBody, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var payload []map[string]string
-		if err := json.Unmarshal(rawBody, &payload); err != nil {
-			t.Fatalf("failed to parse request body: %v", err)
-		}
-		if len(payload) != 1 {
-			t.Fatalf("expected single-item payload, got %+v", payload)
-		}
-		if payload[0]["chainIndex"] != "56" {
-			t.Fatalf("expected chainIndex=56, got %+v", payload[0])
-		}
-		if payload[0]["tokenContractAddress"] != "0x1111111111111111111111111111111111111111" {
-			t.Fatalf("unexpected tokenContractAddress: %+v", payload[0])
-		}
-
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"price":"1.23"}]}`)),
-			Header:     make(http.Header),
-		}, nil
-	}}}
-
-	prices, err := svc.fetchOKXTokenPrices("bsc", []string{"0x1111111111111111111111111111111111111111"})
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if prices["0x1111111111111111111111111111111111111111"] != 1.23 {
-		t.Fatalf("expected price 1.23, got %+v", prices)
-	}
-}
-
-func TestFetchOKXTokenPrices_BatchesMultipleTokensInOneRequest(t *testing.T) {
-	oldConfig := config.AppConfig
-	config.AppConfig = &config.Config{
-		OKXDexAPIURL:  "https://www.okx.com/api/v6/dex/aggregator",
-		OKXAPIKey:     "test-key",
-		OKXSecretKey:  "test-secret",
-		OKXPassphrase: "test-pass",
-		Chains: map[string]config.ChainConfig{
-			"bsc": {Chain: "bsc", ChainID: 56},
-		},
-	}
-	t.Cleanup(func() {
-		config.AppConfig = oldConfig
-	})
-
+func TestFetchPrices_UsesGeckoBatchEndpoint(t *testing.T) {
 	tokens := []string{
 		"0x1111111111111111111111111111111111111111",
 		"0x2222222222222222222222222222222222222222",
@@ -246,42 +181,34 @@ func TestFetchOKXTokenPrices_BatchesMultipleTokensInOneRequest(t *testing.T) {
 	svc := NewTokenPriceService()
 	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
 		calls++
-		rawBody, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", req.Method)
 		}
-		var payload []map[string]string
-		if err := json.Unmarshal(rawBody, &payload); err != nil {
-			t.Fatalf("failed to parse request body: %v", err)
+		if !strings.Contains(req.URL.String(), "/api/v2/simple/networks/bsc/token_price/") {
+			t.Fatalf("unexpected request url: %s", req.URL.String())
 		}
-		if len(payload) != len(tokens) {
-			t.Fatalf("expected batched payload len=%d, got %+v", len(tokens), payload)
-		}
-		for i, token := range tokens {
-			if payload[i]["chainIndex"] != "56" {
-				t.Fatalf("expected chainIndex=56, got %+v", payload[i])
-			}
-			if payload[i]["tokenContractAddress"] != token {
-				t.Fatalf("unexpected tokenContractAddress: %+v", payload[i])
+		for _, token := range tokens {
+			if !strings.Contains(req.URL.Path, token) {
+				t.Fatalf("expected token %s in path: %s", token, req.URL.Path)
 			}
 		}
 
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body: io.NopCloser(strings.NewReader(`{"code":"0","data":[` +
-				`{"tokenContractAddress":"0x1111111111111111111111111111111111111111","price":"1.11"},` +
-				`{"tokenContractAddress":"0x2222222222222222222222222222222222222222","price":"2.22"}` +
-				`]}`)),
+			Body: io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{` +
+				`"0x1111111111111111111111111111111111111111":"1.11",` +
+				`"0x2222222222222222222222222222222222222222":"2.22"` +
+				`}}}}`)),
 			Header: make(http.Header),
 		}, nil
 	}}}
 
-	prices, err := svc.fetchOKXTokenPrices("bsc", tokens)
+	prices, err := svc.fetchPrices("bsc", tokens)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 	if calls != 1 {
-		t.Fatalf("expected one OKX request, got %d", calls)
+		t.Fatalf("expected one Gecko request, got %d", calls)
 	}
 	if prices[tokens[0]] != 1.11 || prices[tokens[1]] != 2.22 {
 		t.Fatalf("unexpected prices: %+v", prices)
