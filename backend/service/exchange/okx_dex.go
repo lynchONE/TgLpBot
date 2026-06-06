@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,17 +36,25 @@ type OKXDexService struct {
 
 const (
 	okxAdvancedInfoCacheTTL   = 10 * time.Minute
+	okxCandlesLiveCacheTTL    = 10 * time.Second
+	okxCandlesHistoryCacheTTL = 2 * time.Minute
 	okxApproveSpenderCacheTTL = 24 * time.Hour
 )
 
 var (
 	okxReadGroup           singleflight.Group
 	okxAdvancedInfoCache   sync.Map
+	okxCandlesCache        sync.Map
 	okxApproveSpenderCache sync.Map
 )
 
 type okxAdvancedInfoCacheEntry struct {
 	value     MarketTokenAdvancedInfoResponse
+	expiresAt time.Time
+}
+
+type okxCandlesCacheEntry struct {
+	value     MarketCandlesResponse
 	expiresAt time.Time
 }
 
@@ -261,9 +270,49 @@ type OKXAPIError struct {
 	Msg      string
 }
 
+type MarketCandlesRequest struct {
+	ChainIndex           string
+	TokenContractAddress string
+	Bar                  string
+	Limit                int
+	Before               string
+	After                string
+}
+
+type MarketTokenBasicInfoRequest struct {
+	ChainIndex           string `json:"chainIndex"`
+	TokenContractAddress string `json:"tokenContractAddress"`
+}
+
 type MarketTokenAdvancedInfoRequest struct {
 	ChainIndex           string
 	TokenContractAddress string
+}
+
+type MarketCandle struct {
+	TimestampMS int64
+	Open        float64
+	High        float64
+	Low         float64
+	Close       float64
+	Volume      float64
+	VolumeUSD   float64
+	Confirm     bool
+}
+
+type MarketCandlesResponse struct {
+	Code string         `json:"code"`
+	Msg  string         `json:"msg"`
+	Data [][]string     `json:"data"`
+	Rows []MarketCandle `json:"-"`
+}
+
+type MarketTokenBasicInfo struct {
+	ChainIndex           string `json:"chainIndex"`
+	TokenContractAddress string `json:"tokenContractAddress"`
+	TokenSymbol          string `json:"tokenSymbol"`
+	TokenName            string `json:"tokenName"`
+	TokenLogoURL         string `json:"tokenLogoUrl"`
 }
 
 type MarketTokenAdvancedInfo struct {
@@ -299,6 +348,12 @@ type MarketTokenAdvancedInfoResponse struct {
 	Code string                    `json:"code"`
 	Msg  string                    `json:"msg"`
 	Data []MarketTokenAdvancedInfo `json:"data"`
+}
+
+type MarketTokenBasicInfoResponse struct {
+	Code string                 `json:"code"`
+	Msg  string                 `json:"msg"`
+	Data []MarketTokenBasicInfo `json:"data"`
 }
 
 func (r *MarketTokenAdvancedInfoResponse) UnmarshalJSON(body []byte) error {
@@ -583,6 +638,22 @@ func cloneMarketTokenAdvancedInfoResponse(resp MarketTokenAdvancedInfoResponse) 
 	return &MarketTokenAdvancedInfoResponse{Code: resp.Code, Msg: resp.Msg, Data: rows}
 }
 
+func cloneMarketCandlesResponse(resp MarketCandlesResponse) *MarketCandlesResponse {
+	data := make([][]string, len(resp.Data))
+	for i := range resp.Data {
+		data[i] = append([]string(nil), resp.Data[i]...)
+	}
+	rows := make([]MarketCandle, len(resp.Rows))
+	copy(rows, resp.Rows)
+	return &MarketCandlesResponse{Code: resp.Code, Msg: resp.Msg, Data: data, Rows: rows}
+}
+
+func cloneMarketTokenBasicInfoResponse(resp MarketTokenBasicInfoResponse) *MarketTokenBasicInfoResponse {
+	rows := make([]MarketTokenBasicInfo, len(resp.Data))
+	copy(rows, resp.Data)
+	return &MarketTokenBasicInfoResponse{Code: resp.Code, Msg: resp.Msg, Data: rows}
+}
+
 func okxAdvancedInfoCacheKey(baseURL string, req MarketTokenAdvancedInfoRequest) string {
 	chainIndex := strings.TrimSpace(req.ChainIndex)
 	tokenAddress := strings.ToLower(strings.TrimSpace(req.TokenContractAddress))
@@ -592,6 +663,24 @@ func okxAdvancedInfoCacheKey(baseURL string, req MarketTokenAdvancedInfoRequest)
 	return okxReadCacheBaseKey("advanced-info", strings.TrimRight(baseURL, "/"), chainIndex, tokenAddress)
 }
 
+func okxCandlesCacheKey(baseURL string, req MarketCandlesRequest) string {
+	chainIndex := strings.TrimSpace(req.ChainIndex)
+	tokenAddress := strings.ToLower(strings.TrimSpace(req.TokenContractAddress))
+	if chainIndex == "" || tokenAddress == "" {
+		return ""
+	}
+	return okxReadCacheBaseKey(
+		"candles",
+		strings.TrimRight(baseURL, "/"),
+		chainIndex,
+		tokenAddress,
+		strings.TrimSpace(req.Bar),
+		strconv.Itoa(req.Limit),
+		strings.TrimSpace(req.Before),
+		strings.TrimSpace(req.After),
+	)
+}
+
 func okxApproveSpenderCacheKey(baseURL, chainID, tokenAddress string) string {
 	chainID = strings.TrimSpace(chainID)
 	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
@@ -599,6 +688,355 @@ func okxApproveSpenderCacheKey(baseURL, chainID, tokenAddress string) string {
 		return ""
 	}
 	return okxReadCacheBaseKey("approve-transaction", strings.TrimRight(baseURL, "/"), chainID, tokenAddress)
+}
+
+func parseOKXFloat(raw string) float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func parseOKXInt64(raw string) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func parseOKXBool(raw string) bool {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "1", "true", "yes", "y":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeMarketCandlesRows(rawRows [][]string) []MarketCandle {
+	out := make([]MarketCandle, 0, len(rawRows))
+	for _, row := range rawRows {
+		if len(row) < 8 {
+			continue
+		}
+		ts := parseOKXInt64(row[0])
+		if ts <= 0 {
+			continue
+		}
+		out = append(out, MarketCandle{
+			TimestampMS: ts,
+			Open:        parseOKXFloat(row[1]),
+			High:        parseOKXFloat(row[2]),
+			Low:         parseOKXFloat(row[3]),
+			Close:       parseOKXFloat(row[4]),
+			Volume:      parseOKXFloat(row[5]),
+			VolumeUSD:   parseOKXFloat(row[6]),
+			Confirm:     parseOKXBool(row[7]),
+		})
+	}
+	return out
+}
+
+func normalizeMarketTokenBasicInfoRequests(reqs []MarketTokenBasicInfoRequest) []MarketTokenBasicInfoRequest {
+	out := make([]MarketTokenBasicInfoRequest, 0, len(reqs))
+	seen := make(map[string]struct{}, len(reqs))
+	for _, req := range reqs {
+		chainIndex := strings.TrimSpace(req.ChainIndex)
+		tokenAddress := strings.ToLower(strings.TrimSpace(req.TokenContractAddress))
+		if chainIndex == "" || tokenAddress == "" {
+			continue
+		}
+		key := chainIndex + "|" + tokenAddress
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, MarketTokenBasicInfoRequest{
+			ChainIndex:           chainIndex,
+			TokenContractAddress: tokenAddress,
+		})
+	}
+	return out
+}
+
+func normalizeMarketCandlesRequest(req MarketCandlesRequest) (MarketCandlesRequest, error) {
+	normalized := MarketCandlesRequest{
+		ChainIndex:           strings.TrimSpace(req.ChainIndex),
+		TokenContractAddress: strings.ToLower(strings.TrimSpace(req.TokenContractAddress)),
+		Bar:                  strings.TrimSpace(req.Bar),
+		Limit:                req.Limit,
+		Before:               strings.TrimSpace(req.Before),
+		After:                strings.TrimSpace(req.After),
+	}
+	if normalized.ChainIndex == "" {
+		return MarketCandlesRequest{}, fmt.Errorf("chainIndex is required")
+	}
+	if normalized.TokenContractAddress == "" {
+		return MarketCandlesRequest{}, fmt.Errorf("tokenContractAddress is required")
+	}
+	if normalized.Bar == "" {
+		normalized.Bar = "1m"
+	}
+	if normalized.Limit <= 0 {
+		normalized.Limit = 240
+	}
+	if normalized.Limit > 299 {
+		normalized.Limit = 299
+	}
+	return normalized, nil
+}
+
+func (s *OKXDexService) GetMarketTokenBasicInfos(reqs []MarketTokenBasicInfoRequest) (*MarketTokenBasicInfoResponse, error) {
+	return s.GetMarketTokenBasicInfosWithContext(context.Background(), reqs)
+}
+
+func (s *OKXDexService) GetMarketTokenBasicInfosWithContext(ctx context.Context, reqs []MarketTokenBasicInfoRequest) (*MarketTokenBasicInfoResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload := normalizeMarketTokenBasicInfoRequests(reqs)
+	if len(payload) == 0 {
+		return &MarketTokenBasicInfoResponse{
+			Code: "0",
+			Msg:  "",
+			Data: []MarketTokenBasicInfo{},
+		}, nil
+	}
+
+	eff, err := s.effectiveConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		nextEff := eff
+		if attempt > 1 {
+			var cfgErr error
+			nextEff, cfgErr = s.effectiveConfig(ctx)
+			if cfgErr != nil {
+				return nil, cfgErr
+			}
+		}
+		baseURL := s.marketAPIURLForBase(nextEff.BaseURL)
+		resp, err := s.getMarketTokenBasicInfosUncached(ctx, nextEff, baseURL, payload)
+		if err == nil {
+			return cloneMarketTokenBasicInfoResponse(*resp), nil
+		}
+		lastErr = err
+		if !s.shouldRetryWithNextOKXConfig(nextEff, err, attempt) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func (s *OKXDexService) getMarketTokenBasicInfosUncached(ctx context.Context, eff okxpool.EffectiveConfig, baseURL string, reqs []MarketTokenBasicInfoRequest) (*MarketTokenBasicInfoResponse, error) {
+	body, err := json.Marshal(reqs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/token/basic-info", baseURL)
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] basic-info request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeadersWithConfig(httpReq, string(body), timestamp, eff)
+
+	start := time.Now()
+	resp, err := s.httpClient().Do(httpReq)
+	latency := time.Since(start)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to send request: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		wrapped := fmt.Errorf("failed to read response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		wrapped := fmt.Errorf("OKX market/token/basic-info http %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] basic-info raw response: %s", string(respBody))
+	}
+
+	var out MarketTokenBasicInfoResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		wrapped := fmt.Errorf("failed to parse response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if out.Code != "0" {
+		err := &OKXAPIError{Endpoint: "market/token/basic-info", Code: out.Code, Msg: out.Msg}
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return nil, err
+	}
+	s.recordOKXSuccess(ctx, eff, latency)
+	return &out, nil
+}
+
+func (s *OKXDexService) GetMarketCandles(req MarketCandlesRequest) (*MarketCandlesResponse, error) {
+	return s.GetMarketCandlesWithContext(context.Background(), req)
+}
+
+func (s *OKXDexService) GetMarketCandlesWithContext(ctx context.Context, req MarketCandlesRequest) (*MarketCandlesResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	normalized, err := normalizeMarketCandlesRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	eff, err := s.effectiveConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	baseURL := s.marketAPIURLForBase(eff.BaseURL)
+	cacheKey := okxCandlesCacheKey(baseURL, normalized)
+	now := time.Now()
+	if cacheKey != "" {
+		if raw, ok := okxCandlesCache.Load(cacheKey); ok {
+			if entry, ok := raw.(okxCandlesCacheEntry); ok && entry.expiresAt.After(now) {
+				return cloneMarketCandlesResponse(entry.value), nil
+			}
+			okxCandlesCache.Delete(cacheKey)
+		}
+	}
+
+	fetchedAny, err, _ := okxReadGroup.Do("candles-fetch|"+cacheKey, func() (any, error) {
+		var lastErr error
+		for attempt := 1; attempt <= 2; attempt++ {
+			nextEff := eff
+			if attempt > 1 {
+				var cfgErr error
+				nextEff, cfgErr = s.effectiveConfig(ctx)
+				if cfgErr != nil {
+					return nil, cfgErr
+				}
+			}
+			nextBaseURL := s.marketAPIURLForBase(nextEff.BaseURL)
+			resp, err := s.getMarketCandlesUncached(ctx, nextEff, nextBaseURL, normalized)
+			if err == nil {
+				return resp, nil
+			}
+			lastErr = err
+			if !s.shouldRetryWithNextOKXConfig(nextEff, err, attempt) {
+				return nil, err
+			}
+		}
+		return nil, lastErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	fetched, ok := fetchedAny.(*MarketCandlesResponse)
+	if !ok || fetched == nil {
+		return nil, fmt.Errorf("unexpected OKX candles response")
+	}
+
+	ttl := okxCandlesLiveCacheTTL
+	if strings.TrimSpace(normalized.Before) != "" || strings.TrimSpace(normalized.After) != "" {
+		ttl = okxCandlesHistoryCacheTTL
+	}
+	if cacheKey != "" {
+		okxCandlesCache.Store(cacheKey, okxCandlesCacheEntry{value: *cloneMarketCandlesResponse(*fetched), expiresAt: now.Add(ttl)})
+	}
+	return cloneMarketCandlesResponse(*fetched), nil
+}
+
+func (s *OKXDexService) getMarketCandlesUncached(ctx context.Context, eff okxpool.EffectiveConfig, baseURL string, req MarketCandlesRequest) (*MarketCandlesResponse, error) {
+	query := url.Values{}
+	query.Set(s.chainQueryKeyForBase(eff.BaseURL), strings.TrimSpace(req.ChainIndex))
+	query.Set("tokenContractAddress", strings.TrimSpace(req.TokenContractAddress))
+	query.Set("bar", strings.TrimSpace(req.Bar))
+	query.Set("limit", strconv.Itoa(req.Limit))
+	if before := strings.TrimSpace(req.Before); before != "" {
+		query.Set("before", before)
+	}
+	if after := strings.TrimSpace(req.After); after != "" {
+		query.Set("after", after)
+	}
+
+	endpoint := fmt.Sprintf("%s/candles?%s", baseURL, query.Encode())
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] candles request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeadersWithConfig(httpReq, "", timestamp, eff)
+
+	start := time.Now()
+	resp, err := s.httpClient().Do(httpReq)
+	latency := time.Since(start)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to send request: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		wrapped := fmt.Errorf("failed to read response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		wrapped := fmt.Errorf("OKX market/candles http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] candles raw response: %s", string(body))
+	}
+
+	var out MarketCandlesResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		wrapped := fmt.Errorf("failed to parse response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if out.Code != "0" {
+		err := &OKXAPIError{Endpoint: "market/candles", Code: out.Code, Msg: out.Msg}
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return nil, err
+	}
+	out.Rows = normalizeMarketCandlesRows(out.Data)
+	s.recordOKXSuccess(ctx, eff, latency)
+	return &out, nil
 }
 
 func (s *OKXDexService) GetMarketTokenAdvancedInfo(ctx context.Context, req MarketTokenAdvancedInfoRequest) (*MarketTokenAdvancedInfoResponse, error) {

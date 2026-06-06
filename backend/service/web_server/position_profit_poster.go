@@ -230,7 +230,7 @@ func (s *Server) handlePositionProfitPoster(w http.ResponseWriter, r *http.Reque
 		OpenedAt:        &openTime,
 		GeneratedAt:     now,
 		WindowLabel:     "开单以来价格收益",
-		PriceSource:     "geckoterminal",
+		PriceSource:     "okx",
 		InvestUSD:       investUSD,
 		CurrentValueUSD: currentValueUSD,
 		ProfitUSD:       profitUSD,
@@ -400,23 +400,19 @@ func buildPosterSeries(chain string, tokenAddress string, openedAt, now time.Tim
 	}
 
 	bar, barStep, limit := choosePosterBar(openedAt, now)
-	_, barParams, ok := normalizeGeckoBar(bar)
-	if !ok {
+	okxBar := normalizeOKXBar(bar)
+	if okxBar == "" {
 		return nil, []string{"走势时间粒度不受支持，已降级为纯摘要海报"}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	poolAddress, err := fetchGeckoBestPoolAddress(ctx, nil, chain, tokenAddress)
+	candles, err := fetchOKXTokenCandles(ctx, chain, tokenAddress, okxBar, limit, "", "")
 	if err != nil {
-		return nil, []string{"未能获取 GeckoTerminal 走势池子，已降级为纯摘要海报"}
-	}
-	candles, err := fetchGeckoPoolCandles(ctx, nil, chain, poolAddress, "", barParams, limit, "")
-	if err != nil {
-		return nil, []string{"未能获取 GeckoTerminal 走势数据，已降级为纯摘要海报"}
+		return nil, []string{"未能获取 OKX 走势数据，已降级为纯摘要海报"}
 	}
 	if len(candles) == 0 {
-		return nil, []string{"暂无 GeckoTerminal 走势数据，已降级为纯摘要海报"}
+		return nil, []string{"暂无 OKX 走势数据，已降级为纯摘要海报"}
 	}
 
 	rows := make([]tokenCandle, 0, len(candles))

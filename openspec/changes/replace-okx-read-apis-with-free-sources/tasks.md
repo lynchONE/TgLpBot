@@ -1,9 +1,9 @@
 ## 1. 市场数据
-- [x] 1.1 梳理现有 OKX price/K 线/metadata 调用点，确认不触碰 OKX swap/approve。
+- [x] 1.1 梳理现有 OKX price/K 线/metadata 调用点，确认不触碰 OKX swap/approve，并保留 OKX K 线。
 - [x] 1.2 复用免费市场数据 provider，支持批量价格查询和错误透传。
 - [x] 1.3 修改 `token_price` 服务：移除 OKX market price 依赖，使用批量查询、请求合并和 2 秒短缓存。
-- [x] 1.4 修改 K 线接口：使用免费 OHLCV，最后一根 K 线实时刷新或仅秒级合并。
-- [x] 1.5 修改 token metadata：RPC 读取链上静态字段，GeckoTerminal、DexScreener、Trust Wallet 等免费来源补充 logo。
+- [x] 1.4 K 线接口切回 OKX Market candles，最后一根 K 线实时刷新或仅秒级合并。
+- [x] 1.5 修改 token metadata：RPC 读取链上静态字段，OKX `token/basic-info` 优先补充 logo，GeckoTerminal、DexScreener、Trust Wallet 等免费来源继续作为补充。
 
 ## 2. 风控
 - [x] 2.1 按最新范围确认 token 风控继续保留 OKX `market/token/advanced-info`。
@@ -25,4 +25,4 @@
 - [x] 5.1 运行 Go 相关测试或针对性编译检查。
 - [x] 5.2 运行前端相关 build/test。
 - [x] 5.3 做针对性 diff 检查，确认 OKX swap/approve 执行链路未被改动。
-- [x] 5.4 搜索确认不再存在 OKX market price/K 线/metadata、OKX balance、OKX DeFi 调用；OKX advanced-info 风控按要求保留。
+- [x] 5.4 搜索确认不再存在 OKX market price、OKX balance、OKX DeFi 调用；OKX candles、OKX basic-info 与 OKX advanced-info 按要求保留。

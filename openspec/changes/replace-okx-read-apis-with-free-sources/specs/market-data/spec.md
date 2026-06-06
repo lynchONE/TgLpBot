@@ -21,21 +21,26 @@
 - **THEN** 后端 MUST 查询当前 provider 数据或复用正在飞行中的同批请求
 - **AND** MUST NOT 因分钟级或更长缓存返回明显过期的实时价格
 
-### Requirement: K 线查询使用免费 OHLCV 数据源
-K 线查询 MUST 使用非 OKX 免费 OHLCV 数据源。已收盘 K 线 MAY 缓存，正在形成的最后一根 K 线 MUST 保持实时或仅秒级请求合并。
+### Requirement: K 线查询使用 OKX candles
+K 线查询 MUST 使用 OKX Market candles 作为数据源。已收盘 K 线 MAY 短缓存，正在形成的最后一根 K 线 MUST 保持实时或仅秒级请求合并。
 
 #### Scenario: 查询已收盘 K 线
 - **WHEN** 用户查询历史时间范围内已经收盘的 K 线
 - **THEN** 后端 MAY 使用本地缓存返回已确认历史 K 线
-- **AND** MUST 保持缓存 key 至少包含 `chain + pool + interval + time_range`
+- **AND** MUST 保持缓存 key 至少包含 `chain + token + interval + time_range`
 
 #### Scenario: 查询包含最新 K 线
 - **WHEN** 用户查询包含当前正在形成 K 线的时间范围
 - **THEN** 后端 MUST 刷新最后一根 K 线或仅复用秒级合并请求
 - **AND** MUST NOT 用长缓存覆盖最后一根 K 线
 
-### Requirement: token metadata 使用 RPC 和免费市场数据源
-token 的链上静态 metadata MUST 通过 RPC 合约调用读取；展示增强 metadata MAY 使用免费市场数据源补充。
+#### Scenario: 通过 token_candles 获取 OKX K 线
+- **WHEN** 前端请求 `GET /api/token_candles` 并提供有效链与 token 地址
+- **THEN** 后端 MUST 调用 OKX Market candles 获取该 token 的 K 线
+- **AND** MUST 将 OKX 返回的毫秒时间戳与字符串价格归一化为前端使用的 candles JSON
+
+### Requirement: token metadata 使用 RPC 和展示 metadata 来源
+token 的链上静态 metadata MUST 通过 RPC 合约调用读取；展示增强 metadata MUST 优先使用 OKX `market/token/basic-info` 补充 logo，并 MAY 使用免费市场数据源继续补充。
 
 #### Scenario: 读取 token 链上静态信息
 - **WHEN** 系统需要 token `decimals`、`symbol` 或 `name`
@@ -44,6 +49,7 @@ token 的链上静态 metadata MUST 通过 RPC 合约调用读取；展示增强
 
 #### Scenario: 读取 token 展示增强信息
 - **WHEN** 系统需要 logo 等展示字段
-- **THEN** 后端 MAY 调用非 OKX 免费市场数据源
-- **AND** MAY 按顺序尝试 GeckoTerminal、DexScreener、Trust Wallet 静态资产等来源补充 logo
+- **THEN** 后端 MUST 优先调用 OKX `market/token/basic-info`
+- **AND** MAY 在 OKX 未返回有效 logo 时按顺序尝试 GeckoTerminal、DexScreener、Trust Wallet 静态资产等来源补充 logo
+- **AND** MUST 将展示 metadata 与 RPC metadata 独立合并，不得因为 RPC 未返回某个 token 就丢弃 provider 已返回的有效 logo
 - **AND** MUST 在 provider 失败时暴露缺失或错误状态，而不是生成误导性默认值

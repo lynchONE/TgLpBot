@@ -2,6 +2,7 @@ package token_metadata
 
 import (
 	"TgLpBot/base/models"
+	"TgLpBot/service/exchange"
 	"context"
 	"errors"
 	"io"
@@ -37,6 +38,18 @@ type tokenMetadataRoundTripper struct {
 
 func (t tokenMetadataRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.fn(req)
+}
+
+type fakeOKXTokenBasicInfoClient struct {
+	resp *exchange.MarketTokenBasicInfoResponse
+	err  error
+}
+
+func (f fakeOKXTokenBasicInfoClient) GetMarketTokenBasicInfosWithContext(ctx context.Context, reqs []exchange.MarketTokenBasicInfoRequest) (*exchange.MarketTokenBasicInfoResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
 }
 
 func TestNormalizeTokenAddress(t *testing.T) {
@@ -112,6 +125,31 @@ func TestGetBatch_UsesRPCWhenDisplayProviderFails(t *testing.T) {
 	}
 }
 
+func TestGetBatch_UsesDisplayMetadataWhenRPCFails(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	svc := NewServiceWithProviders(
+		fakeMetadataProvider{err: errors.New("rpc unavailable")},
+		fakeMetadataProvider{data: map[string]models.TokenMetadata{
+			token: {Symbol: "TEST", Name: "Test Token", LogoURL: "https://img.example/test.png", Source: sourceOKX, Status: statusOK},
+		}},
+	)
+
+	got, err := svc.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	meta, ok := got[token]
+	if !ok {
+		t.Fatalf("expected metadata result, got %#v", got)
+	}
+	if meta.LogoURL != "https://img.example/test.png" || meta.Source != sourceOKX || meta.Status != statusOK {
+		t.Fatalf("unexpected display-only metadata: %#v", meta)
+	}
+	if meta.Symbol != "" || meta.Name != "" {
+		t.Fatalf("expected display-only metadata to avoid symbol/name backfill, got %#v", meta)
+	}
+}
+
 func TestCacheFromModel_RoundTrip(t *testing.T) {
 	meta := models.TokenMetadata{
 		Chain:        "bsc",
@@ -134,8 +172,26 @@ func TestShouldRefreshMetadata_RequiresLogoBackfill(t *testing.T) {
 		t.Fatalf("expected empty-logo ok metadata to require refresh")
 	}
 
-	if shouldRefreshMetadata(models.TokenMetadata{Status: statusOK, LogoURL: "https://img.example/a.png"}) {
+	if shouldRefreshMetadata(models.TokenMetadata{Status: statusOK, Source: sourceRPC, LogoURL: "https://img.example/a.png"}) {
 		t.Fatalf("expected metadata with logo to skip refresh")
+	}
+
+	if !shouldRefreshMetadata(models.TokenMetadata{
+		Status:    statusOK,
+		Source:    sourceOKX,
+		LogoURL:   "https://img.example/a.png",
+		FetchedAt: time.Now().Add(-negativeRetry).Add(-time.Minute),
+	}) {
+		t.Fatalf("expected stale display-only metadata to refresh")
+	}
+
+	if shouldRefreshMetadata(models.TokenMetadata{
+		Status:    statusOK,
+		Source:    sourceOKX,
+		LogoURL:   "https://img.example/a.png",
+		FetchedAt: time.Now(),
+	}) {
+		t.Fatalf("expected fresh display-only metadata to skip refresh")
 	}
 
 	if shouldRefreshMetadata(models.TokenMetadata{Status: statusNotFound, FetchedAt: time.Now()}) {
@@ -208,6 +264,53 @@ func TestChainedDisplayMetadataProvider_UsesDexScreenerAfterGeckoMiss(t *testing
 	meta := got[token]
 	if meta.LogoURL != "https://img.example/dex.png" {
 		t.Fatalf("expected dexscreener logo, got %#v", meta)
+	}
+}
+
+func TestChainedDisplayMetadataProvider_UsesOKXBeforeGecko(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	okx := fakeMetadataProvider{data: map[string]models.TokenMetadata{
+		token: {LogoURL: "https://img.example/okx.png", Source: sourceOKX, Status: statusOK},
+	}}
+	gecko := fakeMetadataProvider{data: map[string]models.TokenMetadata{
+		token: {LogoURL: "https://img.example/gecko.png", Source: sourceGecko, Status: statusOK},
+	}}
+	provider := chainedDisplayMetadataProvider{providers: []displayMetadataProvider{okx, gecko}}
+
+	got, err := provider.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	meta := got[token]
+	if meta.LogoURL != "https://img.example/okx.png" || meta.Source != sourceOKX {
+		t.Fatalf("expected OKX logo, got %#v", meta)
+	}
+}
+
+func TestOKXDisplayMetadataProvider_ParsesBasicInfo(t *testing.T) {
+	token := "0x1111111111111111111111111111111111111111"
+	provider := okxDisplayMetadataProvider{
+		client: fakeOKXTokenBasicInfoClient{resp: &exchange.MarketTokenBasicInfoResponse{
+			Code: "0",
+			Data: []exchange.MarketTokenBasicInfo{
+				{
+					ChainIndex:           "56",
+					TokenContractAddress: token,
+					TokenSymbol:          "TEST",
+					TokenName:            "Test Token",
+					TokenLogoURL:         "https://static.okx.example/test.png",
+				},
+			},
+		}},
+	}
+
+	got, err := provider.GetBatch(context.Background(), "bsc", []string{token})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	meta := got[token]
+	if meta.Symbol != "TEST" || meta.Name != "Test Token" || meta.LogoURL != "https://static.okx.example/test.png" || meta.Source != sourceOKX {
+		t.Fatalf("unexpected OKX metadata: %#v", meta)
 	}
 }
 

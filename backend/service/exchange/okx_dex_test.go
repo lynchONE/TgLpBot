@@ -155,6 +155,7 @@ func (s *okxDexMemStore) UnsetCurrent(ctx context.Context) error {
 
 func resetOKXReadCachesForTest() {
 	okxAdvancedInfoCache = sync.Map{}
+	okxCandlesCache = sync.Map{}
 	okxApproveSpenderCache = sync.Map{}
 	okxReadGroup = singleflight.Group{}
 }
@@ -404,5 +405,116 @@ func TestGetMarketTokenAdvancedInfo_UsesOfficialEndpoint(t *testing.T) {
 	row := resp.Data[0]
 	if row.RiskControlLevel != "4" || len(row.TokenTags) != 2 || row.Top10HoldPercent != "0.82" {
 		t.Fatalf("unexpected response row: %+v", row)
+	}
+}
+
+func TestGetMarketTokenBasicInfos_UsesOfficialEndpoint(t *testing.T) {
+	resetOKXReadCachesForTest()
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("expected POST request, got %s", req.Method)
+			}
+			if req.URL.Scheme != "https" || req.URL.Host != "web3.okx.com" {
+				t.Fatalf("unexpected request host: %s", req.URL.String())
+			}
+			if req.URL.Path != "/api/v6/dex/market/token/basic-info" {
+				t.Fatalf("unexpected request path: %s", req.URL.Path)
+			}
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read request body failed: %v", err)
+			}
+			if !strings.Contains(string(body), `"chainIndex":"56"`) || !strings.Contains(string(body), `"tokenContractAddress":"0x1111111111111111111111111111111111111111"`) {
+				t.Fatalf("unexpected request body: %s", string(body))
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"chainIndex":"56","tokenContractAddress":"0x1111111111111111111111111111111111111111","tokenSymbol":"TEST","tokenName":"Test Token","tokenLogoUrl":"https://static.okx.example/test.png"}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetMarketTokenBasicInfosWithContext(context.Background(), []MarketTokenBasicInfoRequest{
+		{ChainIndex: "56", TokenContractAddress: "0x1111111111111111111111111111111111111111"},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected one data row, got %+v", resp.Data)
+	}
+	row := resp.Data[0]
+	if row.TokenSymbol != "TEST" || row.TokenName != "Test Token" || row.TokenLogoURL != "https://static.okx.example/test.png" {
+		t.Fatalf("unexpected response row: %+v", row)
+	}
+}
+
+func TestGetMarketCandles_UsesOfficialEndpointAndParsesRows(t *testing.T) {
+	resetOKXReadCachesForTest()
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET request, got %s", req.Method)
+			}
+			if req.URL.Scheme != "https" || req.URL.Host != "web3.okx.com" {
+				t.Fatalf("unexpected request host: %s", req.URL.String())
+			}
+			if req.URL.Path != "/api/v6/dex/market/candles" {
+				t.Fatalf("unexpected request path: %s", req.URL.Path)
+			}
+			query := req.URL.Query()
+			if got := query.Get("chainIndex"); got != "56" {
+				t.Fatalf("expected chainIndex=56, got %q", got)
+			}
+			if got := query.Get("tokenContractAddress"); got != "0x1111111111111111111111111111111111111111" {
+				t.Fatalf("unexpected tokenContractAddress: %q", got)
+			}
+			if got := query.Get("bar"); got != "1H" {
+				t.Fatalf("expected bar=1H, got %q", got)
+			}
+			if got := query.Get("limit"); got != "2" {
+				t.Fatalf("expected limit=2, got %q", got)
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[["1700000000000","1","2","0.5","1.5","100","150","1"],["1700003600000","1.5","2.5","1.2","2","120","240","0"]]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetMarketCandles(MarketCandlesRequest{
+		ChainIndex:           "56",
+		TokenContractAddress: "0x1111111111111111111111111111111111111111",
+		Bar:                  "1H",
+		Limit:                2,
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Rows) != 2 {
+		t.Fatalf("expected two rows, got %+v", resp.Rows)
+	}
+	if resp.Rows[0].TimestampMS != 1700000000000 || resp.Rows[0].Close != 1.5 || !resp.Rows[0].Confirm {
+		t.Fatalf("unexpected first row: %+v", resp.Rows[0])
+	}
+	if resp.Rows[1].TimestampMS != 1700003600000 || resp.Rows[1].VolumeUSD != 240 || resp.Rows[1].Confirm {
+		t.Fatalf("unexpected second row: %+v", resp.Rows[1])
 	}
 }

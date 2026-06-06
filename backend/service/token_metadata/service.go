@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
+	"TgLpBot/service/exchange"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 
 const (
 	cachePrefix    = "token:meta"
+	sourceOKX      = "okx"
 	sourceRPC      = "rpc"
 	sourceGecko    = "geckoterminal"
 	sourceDex      = "dexscreener"
@@ -66,6 +68,7 @@ func NewService() *Service {
 	return &Service{
 		chainProvider: evmChainMetadataProvider{},
 		displayProvider: chainedDisplayMetadataProvider{providers: []displayMetadataProvider{
+			okxDisplayMetadataProvider{client: exchange.NewOKXDexService()},
 			geckoDisplayMetadataProvider{client: displayClient},
 			dexScreenerDisplayMetadataProvider{client: displayClient},
 			trustWalletDisplayMetadataProvider{client: displayClient},
@@ -139,7 +142,16 @@ func shouldRefreshMetadata(meta models.TokenMetadata) bool {
 	status := strings.ToLower(strings.TrimSpace(meta.Status))
 	switch status {
 	case statusOK:
-		return strings.TrimSpace(meta.LogoURL) == ""
+		if strings.TrimSpace(meta.LogoURL) == "" {
+			return true
+		}
+		if !metadataSourceContains(meta.Source, sourceRPC) {
+			if meta.FetchedAt.IsZero() {
+				return true
+			}
+			return time.Since(meta.FetchedAt) >= negativeRetry
+		}
+		return false
 	case statusNotFound:
 		if meta.FetchedAt.IsZero() {
 			return true
@@ -254,43 +266,88 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 }
 
 func (s *Service) fetchFreshMetadata(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
-	if s == nil || s.chainProvider == nil {
-		return map[string]models.TokenMetadata{}, nil
-	}
 	addresses = normalizeAddresses(addresses)
 	if len(addresses) == 0 {
 		return map[string]models.TokenMetadata{}, nil
 	}
-	out, err := s.chainProvider.GetBatch(ctx, chain, addresses)
-	if err != nil {
-		return nil, err
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	var chainErr error
+	if s != nil && s.chainProvider != nil {
+		fetched, err := s.chainProvider.GetBatch(ctx, chain, addresses)
+		if fetched != nil {
+			out = fetched
+		}
+		if err != nil {
+			chainErr = err
+			log.Printf("[TokenMetadata] warning: chain metadata refresh failed chain=%s err=%v", chain, err)
+		}
 	}
-	if s.displayProvider == nil {
+
+	if s == nil || s.displayProvider == nil {
+		if len(out) == 0 && chainErr != nil {
+			return out, chainErr
+		}
 		return out, nil
 	}
 	display, err := s.displayProvider.GetBatch(ctx, chain, addresses)
 	if err != nil {
 		log.Printf("[TokenMetadata] warning: display metadata refresh failed chain=%s err=%v", chain, err)
+		if len(out) == 0 && chainErr != nil {
+			return out, chainErr
+		}
 		return out, nil
 	}
 	for addr, extra := range display {
-		meta, ok := out[addr]
-		if !ok {
+		addr = NormalizeTokenAddress(addr)
+		if addr == "" {
 			continue
 		}
-		if strings.TrimSpace(meta.Symbol) == "" {
+		meta, ok := out[addr]
+		if !ok {
+			if strings.TrimSpace(extra.LogoURL) == "" {
+				continue
+			}
+			meta = models.TokenMetadata{
+				Chain:        config.NormalizeChain(chain),
+				TokenAddress: addr,
+				Source:       strings.TrimSpace(extra.Source),
+				Status:       statusOK,
+			}
+		}
+		if ok && strings.TrimSpace(meta.Symbol) == "" {
 			meta.Symbol = strings.TrimSpace(extra.Symbol)
 		}
-		if strings.TrimSpace(meta.Name) == "" {
+		if ok && strings.TrimSpace(meta.Name) == "" {
 			meta.Name = strings.TrimSpace(extra.Name)
 		}
 		if strings.TrimSpace(extra.LogoURL) != "" {
 			meta.LogoURL = strings.TrimSpace(extra.LogoURL)
-			meta.Source = mergeMetadataSource(meta.Source, extra.Source)
+			if ok {
+				meta.Source = mergeMetadataSource(meta.Source, extra.Source)
+			}
+		}
+		if strings.TrimSpace(meta.Source) == "" {
+			meta.Source = strings.TrimSpace(extra.Source)
 		}
 		out[addr] = meta
 	}
+	if len(out) == 0 && chainErr != nil {
+		return out, chainErr
+	}
 	return out, nil
+}
+
+func metadataSourceContains(source string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, part := range strings.Split(source, "+") {
+		if strings.EqualFold(strings.TrimSpace(part), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeMetadataSource(primary string, display string) string {
@@ -299,7 +356,7 @@ func mergeMetadataSource(primary string, display string) string {
 	if primary == "" {
 		primary = sourceRPC
 	}
-	if display == "" || strings.Contains(primary, display) {
+	if display == "" || metadataSourceContains(primary, display) {
 		return primary
 	}
 	return primary + "+" + display
@@ -357,6 +414,68 @@ func (evmChainMetadataProvider) GetBatch(ctx context.Context, chain string, addr
 
 type geckoDisplayMetadataProvider struct {
 	client *http.Client
+}
+
+type okxTokenBasicInfoClient interface {
+	GetMarketTokenBasicInfosWithContext(ctx context.Context, reqs []exchange.MarketTokenBasicInfoRequest) (*exchange.MarketTokenBasicInfoResponse, error)
+}
+
+type okxDisplayMetadataProvider struct {
+	client okxTokenBasicInfoClient
+}
+
+func (p okxDisplayMetadataProvider) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+	addresses = normalizeAddresses(addresses)
+	out := make(map[string]models.TokenMetadata, len(addresses))
+	if len(addresses) == 0 {
+		return out, nil
+	}
+	chainIndex := config.ChainToOKXChainIndex(chain)
+	if chainIndex == "" {
+		return out, fmt.Errorf("unsupported OKX token basic-info chain: %s", chain)
+	}
+	client := p.client
+	if client == nil {
+		client = exchange.NewOKXDexService()
+	}
+
+	reqs := make([]exchange.MarketTokenBasicInfoRequest, 0, len(addresses))
+	for _, addr := range addresses {
+		reqs = append(reqs, exchange.MarketTokenBasicInfoRequest{
+			ChainIndex:           chainIndex,
+			TokenContractAddress: addr,
+		})
+	}
+	resp, err := client.GetMarketTokenBasicInfosWithContext(ctx, reqs)
+	if err != nil {
+		return out, err
+	}
+	if resp == nil {
+		return out, fmt.Errorf("empty OKX token basic-info response")
+	}
+
+	for _, item := range resp.Data {
+		addr := NormalizeTokenAddress(item.TokenContractAddress)
+		if addr == "" {
+			continue
+		}
+		symbol := strings.TrimSpace(item.TokenSymbol)
+		name := strings.TrimSpace(item.TokenName)
+		logoURL := strings.TrimSpace(item.TokenLogoURL)
+		if symbol == "" && name == "" && logoURL == "" {
+			continue
+		}
+		out[addr] = models.TokenMetadata{
+			Chain:        config.NormalizeChain(chain),
+			TokenAddress: addr,
+			Symbol:       symbol,
+			Name:         name,
+			LogoURL:      logoURL,
+			Source:       sourceOKX,
+			Status:       statusOK,
+		}
+	}
+	return out, nil
 }
 
 type chainedDisplayMetadataProvider struct {

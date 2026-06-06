@@ -482,7 +482,9 @@ func (s *Server) enrichHotPoolDisplayTokens(ctx context.Context, chain string, i
 		if strings.TrimSpace(items[i].DisplayTokenName) == "" {
 			items[i].DisplayTokenName = strings.TrimSpace(info.Name)
 		}
-		items[i].DisplayTokenLogoURL = strings.TrimSpace(info.LogoURL)
+		if logoURL := strings.TrimSpace(info.LogoURL); logoURL != "" {
+			items[i].DisplayTokenLogoURL = logoURL
+		}
 	}
 }
 
