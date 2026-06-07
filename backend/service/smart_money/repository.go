@@ -203,9 +203,11 @@ func (r *Repository) UpdateMonitoredWallet(ctx context.Context, address string, 
 }
 
 func (r *Repository) DeleteMonitoredWallet(ctx context.Context, address string, chainID int) error {
-	return database.DB.WithContext(ctx).
-		Where("address = ? AND chain_id = ?", strings.ToLower(address), chainID).
-		Delete(&models.MonitoredWallet{}).Error
+	_, err := r.DeleteMonitoredWalletsWithHistory(ctx, []WalletRef{{
+		Address: strings.ToLower(strings.TrimSpace(address)),
+		ChainID: chainID,
+	}})
+	return err
 }
 
 // --- Scan State ---
@@ -2212,6 +2214,34 @@ type WalletStatsRow struct {
 	TotalPositionAmountUSD float64    `json:"total_position_amount_usd"`
 }
 
+type WalletRef struct {
+	Address string `json:"address"`
+	ChainID int    `json:"chain_id"`
+}
+
+type ZombieWalletCandidate struct {
+	Address             string     `json:"address"`
+	Label               *string    `json:"label"`
+	AvatarURL           *string    `json:"avatar_url"`
+	Source              string     `json:"source"`
+	SourceContract      *string    `json:"source_contract"`
+	IsActive            bool       `json:"is_active"`
+	ChainID             int        `json:"chain_id"`
+	LastActiveAt        *time.Time `json:"last_active_at"`
+	WindowAddCount      int        `json:"window_add_count"`
+	WindowRemoveCount   int        `json:"window_remove_count"`
+	TotalEventCount     int        `json:"total_event_count"`
+	PositionCount       int        `json:"position_count"`
+	ActivePositionCount int        `json:"active_position_count"`
+	SnapshotCount       int        `json:"snapshot_count"`
+	TransferEventCount  int        `json:"transfer_event_count"`
+	DailyStatCount      int        `json:"daily_stat_count"`
+	LiveStateCount      int        `json:"live_state_count"`
+	WatchWalletCount    int        `json:"watch_wallet_count"`
+	FollowRefCount      int        `json:"follow_ref_count"`
+	CreatedAt           time.Time  `json:"created_at"`
+}
+
 func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, keyword, source string, activeOnly *bool) ([]WalletStatsRow, int64, error) {
 	countDB := database.DB.WithContext(ctx).Model(&models.MonitoredWallet{})
 	if keyword != "" {
@@ -2318,4 +2348,307 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+func (r *Repository) ListZombieWalletCandidates(ctx context.Context, inactiveDays int, chainID int) ([]ZombieWalletCandidate, error) {
+	if inactiveDays <= 0 {
+		inactiveDays = 30
+	}
+	if chainID <= 0 {
+		chainID = 56
+	}
+	cutoff := time.Now().AddDate(0, 0, -inactiveDays)
+	chain := chainSlugForID(chainID)
+
+	eventSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_events").
+		Select(`
+			wallet_address,
+			chain_id,
+			MAX(tx_timestamp) AS last_active_at,
+			SUM(CASE WHEN tx_timestamp >= ? AND event_type = 'add' THEN 1 ELSE 0 END) AS window_add_count,
+			SUM(CASE WHEN tx_timestamp >= ? AND event_type = 'remove' THEN 1 ELSE 0 END) AS window_remove_count,
+			COUNT(*) AS total_event_count
+		`, cutoff, cutoff).
+		Where("event_type IN ?", []string{"add", "remove"}).
+		Group("wallet_address, chain_id")
+
+	positionSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_positions").
+		Select("wallet_address, chain_id, COUNT(*) AS position_count").
+		Group("wallet_address, chain_id")
+
+	activePositionSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_active_positions").
+		Select("wallet_address, chain_id, COUNT(*) AS active_position_count").
+		Group("wallet_address, chain_id")
+
+	snapshotSubQuery := database.DB.WithContext(ctx).
+		Table("sm_wallet_daily_snapshots").
+		Select("wallet_address, chain_id, COUNT(*) AS snapshot_count").
+		Group("wallet_address, chain_id")
+
+	transferSubQuery := database.DB.WithContext(ctx).
+		Table("sm_wallet_transfer_events").
+		Select("wallet_address, chain_id, COUNT(*) AS transfer_event_count").
+		Group("wallet_address, chain_id")
+
+	dailyStatSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_daily_stats").
+		Select("wallet_address, chain_id, COUNT(*) AS daily_stat_count").
+		Group("wallet_address, chain_id")
+
+	liveStateSubQuery := database.DB.WithContext(ctx).
+		Table("sm_wallet_live_states").
+		Select("wallet_address, chain_id, COUNT(*) AS live_state_count").
+		Group("wallet_address, chain_id")
+
+	watchWalletSubQuery := database.DB.WithContext(ctx).
+		Table("smart_money_user_watch_wallets").
+		Select("wallet_address, COUNT(*) AS watch_wallet_count").
+		Where("chain = ?", chain).
+		Group("wallet_address")
+
+	followRefSubQuery := database.DB.WithContext(ctx).
+		Table("smart_money_follow_configs").
+		Select("target_wallet_address, COUNT(*) AS follow_ref_count").
+		Where("chain_id = ?", chainID).
+		Group("target_wallet_address")
+
+	rows := make([]ZombieWalletCandidate, 0)
+	err := database.DB.WithContext(ctx).
+		Table("monitored_wallets w").
+		Select(`
+			w.address,
+			w.label,
+			w.avatar_url,
+			w.source,
+			w.source_contract,
+			w.is_active,
+			w.chain_id,
+			ev.last_active_at,
+			COALESCE(ev.window_add_count, 0) AS window_add_count,
+			COALESCE(ev.window_remove_count, 0) AS window_remove_count,
+			COALESCE(ev.total_event_count, 0) AS total_event_count,
+			COALESCE(pos.position_count, 0) AS position_count,
+			COALESCE(ap.active_position_count, 0) AS active_position_count,
+			COALESCE(snap.snapshot_count, 0) AS snapshot_count,
+			COALESCE(tx.transfer_event_count, 0) AS transfer_event_count,
+			COALESCE(stat.daily_stat_count, 0) AS daily_stat_count,
+			COALESCE(live.live_state_count, 0) AS live_state_count,
+			COALESCE(watch.watch_wallet_count, 0) AS watch_wallet_count,
+			COALESCE(follow.follow_ref_count, 0) AS follow_ref_count,
+			w.created_at
+		`).
+		Joins("LEFT JOIN (?) ev ON ev.wallet_address = w.address AND ev.chain_id = w.chain_id", eventSubQuery).
+		Joins("LEFT JOIN (?) pos ON pos.wallet_address = w.address AND pos.chain_id = w.chain_id", positionSubQuery).
+		Joins("LEFT JOIN (?) ap ON ap.wallet_address = w.address AND ap.chain_id = w.chain_id", activePositionSubQuery).
+		Joins("LEFT JOIN (?) snap ON snap.wallet_address = w.address AND snap.chain_id = w.chain_id", snapshotSubQuery).
+		Joins("LEFT JOIN (?) tx ON tx.wallet_address = w.address AND tx.chain_id = w.chain_id", transferSubQuery).
+		Joins("LEFT JOIN (?) stat ON stat.wallet_address = w.address AND stat.chain_id = w.chain_id", dailyStatSubQuery).
+		Joins("LEFT JOIN (?) live ON live.wallet_address = w.address AND live.chain_id = w.chain_id", liveStateSubQuery).
+		Joins("LEFT JOIN (?) watch ON watch.wallet_address = w.address", watchWalletSubQuery).
+		Joins("LEFT JOIN (?) follow ON follow.target_wallet_address = w.address", followRefSubQuery).
+		Where("w.is_active = ? AND w.chain_id = ?", true, chainID).
+		Where("ev.last_active_at IS NULL OR ev.last_active_at < ?", cutoff).
+		Order("ev.last_active_at ASC").
+		Order("w.created_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *Repository) DeleteMonitoredWalletsWithHistory(ctx context.Context, wallets []WalletRef) (int64, error) {
+	wallets = normalizeWalletRefs(wallets)
+	if len(wallets) == 0 {
+		return 0, nil
+	}
+
+	var deleted int64
+	err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := cleanupFollowReferencesForWallets(tx, wallets); err != nil {
+			return err
+		}
+		for _, wallet := range wallets {
+			removed, err := deleteMonitoredWalletHistory(tx, wallet)
+			if err != nil {
+				return err
+			}
+			deleted += removed
+		}
+		return nil
+	})
+	return deleted, err
+}
+
+func normalizeWalletRefs(wallets []WalletRef) []WalletRef {
+	if len(wallets) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(wallets))
+	out := make([]WalletRef, 0, len(wallets))
+	for _, wallet := range wallets {
+		address := strings.ToLower(strings.TrimSpace(wallet.Address))
+		if address == "" {
+			continue
+		}
+		chainID := wallet.ChainID
+		if chainID <= 0 {
+			chainID = 56
+		}
+		key := strconv.Itoa(chainID) + "|" + address
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, WalletRef{Address: address, ChainID: chainID})
+	}
+	return out
+}
+
+func deleteMonitoredWalletHistory(tx *gorm.DB, wallet WalletRef) (int64, error) {
+	chain := chainSlugForID(wallet.ChainID)
+	if err := tx.Where(`
+		chain = ?
+		AND EXISTS (
+			SELECT 1
+			FROM sm_lp_events e
+			WHERE e.wallet_address = ?
+			  AND e.chain_id = ?
+			  AND e.tx_hash = smart_money_watch_open_alert_receipts.tx_hash
+			  AND e.log_index = smart_money_watch_open_alert_receipts.log_index
+		)
+	`, chain, wallet.Address, wallet.ChainID).
+		Delete(&models.SmartMoneyWatchOpenAlertReceipt{}).Error; err != nil {
+		return 0, err
+	}
+
+	if err := tx.Where("chain = ? AND wallet_address = ?", chain, wallet.Address).
+		Delete(&models.SmartMoneyWatchWallet{}).Error; err != nil {
+		return 0, err
+	}
+
+	deletes := []struct {
+		model any
+	}{
+		{model: &models.SmartMoneyLPDailyStat{}},
+		{model: &models.SmartMoneyWalletLiveState{}},
+		{model: &models.SmartMoneyWalletDailySnapshot{}},
+		{model: &models.SmartMoneyWalletTransferEvent{}},
+		{model: &models.SmartMoneyActivePosition{}},
+		{model: &models.SmartMoneyLPPosition{}},
+		{model: &models.SmartMoneyLPEvent{}},
+	}
+	for _, item := range deletes {
+		if err := tx.Where("wallet_address = ? AND chain_id = ?", wallet.Address, wallet.ChainID).
+			Delete(item.model).Error; err != nil {
+			return 0, err
+		}
+	}
+
+	result := tx.Where("address = ? AND chain_id = ?", wallet.Address, wallet.ChainID).
+		Delete(&models.MonitoredWallet{})
+	return result.RowsAffected, result.Error
+}
+
+func cleanupFollowReferencesForWallets(tx *gorm.DB, wallets []WalletRef) error {
+	if len(wallets) == 0 {
+		return nil
+	}
+	byChain := make(map[int]map[string]struct{})
+	for _, wallet := range wallets {
+		if _, ok := byChain[wallet.ChainID]; !ok {
+			byChain[wallet.ChainID] = make(map[string]struct{})
+		}
+		byChain[wallet.ChainID][wallet.Address] = struct{}{}
+	}
+
+	for chainID, addresses := range byChain {
+		list := make([]string, 0, len(addresses))
+		for address := range addresses {
+			list = append(list, address)
+		}
+		sort.Strings(list)
+
+		if err := tx.Where("chain_id = ? AND target_wallet_address IN ?", chainID, list).
+			Delete(&models.SmartMoneyFollowJob{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("chain_id = ? AND target_wallet_address IN ?", chainID, list).
+			Delete(&models.SmartMoneyFollowTask{}).Error; err != nil {
+			return err
+		}
+
+		var configs []models.SmartMoneyFollowConfig
+		if err := tx.Where("chain_id = ?", chainID).Find(&configs).Error; err != nil {
+			return err
+		}
+		for _, cfg := range configs {
+			targets := normalizeFollowConfigWallets(cfg.TargetWalletAddress, []string(cfg.TargetWallets))
+			if len(targets) == 0 {
+				continue
+			}
+			filtered := make([]string, 0, len(targets))
+			changed := false
+			for _, target := range targets {
+				if _, remove := addresses[target]; remove {
+					changed = true
+					continue
+				}
+				filtered = append(filtered, target)
+			}
+			if !changed {
+				continue
+			}
+			if len(filtered) == 0 {
+				if err := tx.Where("config_id = ?", cfg.ID).Delete(&models.SmartMoneyFollowJob{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("config_id = ?", cfg.ID).Delete(&models.SmartMoneyFollowTask{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Delete(&models.SmartMoneyFollowConfig{}, cfg.ID).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err := tx.Model(&models.SmartMoneyFollowConfig{}).
+				Where("id = ?", cfg.ID).
+				Updates(map[string]any{
+					"target_wallet_address":   filtered[0],
+					"target_wallet_addresses": models.StringArray(filtered),
+				}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeFollowConfigWallets(primary string, extra []string) []string {
+	seen := make(map[string]struct{}, len(extra)+1)
+	out := make([]string, 0, len(extra)+1)
+	for _, value := range append([]string{primary}, extra...) {
+		address := strings.ToLower(strings.TrimSpace(value))
+		if address == "" {
+			continue
+		}
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		out = append(out, address)
+	}
+	return out
+}
+
+func chainSlugForID(chainID int) string {
+	switch chainID {
+	case 8453:
+		return "base"
+	default:
+		return "bsc"
+	}
 }

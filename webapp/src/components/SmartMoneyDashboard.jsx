@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
-    fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
+    fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet, fetchSMZombieWallets, deleteSMZombieWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     buildSMEventsWsUrl,
@@ -760,6 +760,90 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
                     <button type="button" onClick={onCancel} disabled={busy} className="smd-modal-cancel">取消</button>
                     <button type="button" onClick={onConfirm} disabled={busy} className="smd-modal-submit">
                         {busy ? '处理中...' : confirmLabel}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function formatZombieLastActive(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '从未活动';
+    return relativeTime(raw) || raw.slice(0, 10);
+}
+
+function zombieHistoryCount(item) {
+    return Number(item?.total_event_count || 0)
+        + Number(item?.position_count || 0)
+        + Number(item?.active_position_count || 0)
+        + Number(item?.snapshot_count || 0)
+        + Number(item?.transfer_event_count || 0)
+        + Number(item?.daily_stat_count || 0)
+        + Number(item?.live_state_count || 0);
+}
+
+function ZombieWalletModal({ open, candidates, selectedMap, busy, onToggle, onToggleAll, onClose, onDelete }) {
+    if (!open) return null;
+    const list = Array.isArray(candidates) ? candidates : [];
+    const selectedCount = list.filter((item) => selectedMap[`${item.address}:${item.chain_id}`]).length;
+    const allSelected = list.length > 0 && selectedCount === list.length;
+
+    return (
+        <div className="smd-modal-overlay" onClick={busy ? undefined : onClose}>
+            <div className="smd-modal smd-zombie-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="smd-modal-header">
+                    <h3 className="smd-modal-title">僵尸钱包</h3>
+                    <button type="button" onClick={onClose} disabled={busy} className="smd-modal-close">
+                        <X size={18} />
+                    </button>
+                </div>
+                <div className="smd-confirm-copy">
+                    最近 30 天没有 LP 开仓或撤仓的钱包。确认删除后会同时删除该钱包的聪明钱历史数据。
+                </div>
+                {list.length > 0 ? (
+                    <>
+                        <div className="smd-zombie-toolbar">
+                            <button type="button" className="smd-modal-cancel" disabled={busy} onClick={() => onToggleAll(!allSelected)}>
+                                {allSelected ? '取消全选' : '全选'}
+                            </button>
+                            <span>{selectedCount} / {list.length} 已选择</span>
+                        </div>
+                        <div className="smd-zombie-list">
+                            {list.map((item) => {
+                                const key = `${item.address}:${item.chain_id}`;
+                                const checked = Boolean(selectedMap[key]);
+                                return (
+                                    <label key={key} className={`smd-zombie-row${checked ? ' selected' : ''}`}>
+                                        <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            disabled={busy}
+                                            onChange={() => onToggle(key)}
+                                        />
+                                        <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={26} />
+                                        <div className="smd-zombie-main">
+                                            <div className="smd-zombie-title">{item.label || shortAddr(item.address)}</div>
+                                            <div className="smd-zombie-sub">
+                                                {shortAddr(item.address)} / {walletSourceLabel(item.source)} / 最后活动 {formatZombieLastActive(item.last_active_at)}
+                                            </div>
+                                        </div>
+                                        <div className="smd-zombie-meta">
+                                            <strong>{zombieHistoryCount(item)}</strong>
+                                            <span>历史项</span>
+                                        </div>
+                                    </label>
+                                );
+                            })}
+                        </div>
+                    </>
+                ) : (
+                    <div className="smd-empty" style={{ marginTop: 12 }}>没有找到僵尸钱包</div>
+                )}
+                <div className="smd-modal-actions">
+                    <button type="button" onClick={onClose} disabled={busy} className="smd-modal-cancel">关闭</button>
+                    <button type="button" onClick={onDelete} disabled={busy || selectedCount === 0} className="smd-modal-submit danger">
+                        {busy ? '删除中...' : `删除 ${selectedCount} 个`}
                     </button>
                 </div>
             </div>
@@ -2104,6 +2188,9 @@ function WalletList({
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
     const [editingWallet, setEditingWallet] = useState(null);
+    const [zombieOpen, setZombieOpen] = useState(false);
+    const [zombieCandidates, setZombieCandidates] = useState([]);
+    const [zombieSelected, setZombieSelected] = useState({});
     const loadSeqRef = useRef(0);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
@@ -2175,6 +2262,58 @@ function WalletList({
         }
     };
 
+    const findZombieWallets = async () => {
+        setBusyKey('wallet-zombies:find');
+        setActionError('');
+        try {
+            const data = await fetchSMZombieWallets({ apiBaseUrl, days: 30 });
+            const list = Array.isArray(data?.list) ? data.list : [];
+            const selected = {};
+            list.forEach((item) => {
+                selected[`${item.address}:${item.chain_id}`] = true;
+            });
+            setZombieCandidates(list);
+            setZombieSelected(selected);
+            setZombieOpen(true);
+        } catch (err) {
+            setActionError(String(err?.message || err || '查找僵尸钱包失败'));
+        } finally {
+            setBusyKey('');
+        }
+    };
+
+    const toggleZombieWallet = (key) => {
+        setZombieSelected((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const toggleAllZombieWallets = (checked) => {
+        const next = {};
+        zombieCandidates.forEach((item) => {
+            next[`${item.address}:${item.chain_id}`] = checked;
+        });
+        setZombieSelected(next);
+    };
+
+    const deleteSelectedZombieWallets = async () => {
+        const walletsToDelete = zombieCandidates
+            .filter((item) => zombieSelected[`${item.address}:${item.chain_id}`])
+            .map((item) => ({ address: item.address, chain_id: item.chain_id }));
+        if (walletsToDelete.length === 0) return;
+        setBusyKey('wallet-zombies:delete');
+        setActionError('');
+        try {
+            await deleteSMZombieWallets({ apiBaseUrl, wallets: walletsToDelete });
+            setZombieOpen(false);
+            setZombieCandidates([]);
+            setZombieSelected({});
+            await load();
+        } catch (err) {
+            setActionError(String(err?.message || err || '删除僵尸钱包失败'));
+        } finally {
+            setBusyKey('');
+        }
+    };
+
     return (
         <div>
             <div className="smd-search-row">
@@ -2189,6 +2328,15 @@ function WalletList({
                         }}
                     />
                 </div>
+                <button
+                    type="button"
+                    onClick={findZombieWallets}
+                    disabled={busyKey === 'wallet-zombies:find' || busyKey === 'wallet-zombies:delete'}
+                    className="smd-add-btn smd-zombie-btn"
+                    title="查找最近 30 天没有 LP 开仓或撤仓的钱包"
+                >
+                    <Activity size={14} /> 僵尸钱包
+                </button>
                 <button onClick={onAdd} className="smd-add-btn">
                     <Plus size={14} /> 添加钱包
                 </button>
@@ -2266,7 +2414,7 @@ function WalletList({
                                                 setConfirmState({
                                                     key: `wallet-delete:${w.address}`,
                                                     title: '删除钱包',
-                                                    description: `确认删除钱包 ${shortAddr(w.address)} 吗？`,
+                                                    description: `确认删除钱包 ${shortAddr(w.address)} 吗？该钱包的聪明钱历史数据也会删除。`,
                                                     action: () => deleteSMWallet({ apiBaseUrl, address: w.address }),
                                                 });
                                             }}><Trash2 size={14} /></button>
@@ -2288,6 +2436,18 @@ function WalletList({
                 busy={busyKey.startsWith('wallet-delete:')}
                 onCancel={() => { if (!busyKey.startsWith('wallet-delete:')) setConfirmState(null); }}
                 onConfirm={confirmDelete}
+            />
+            <ZombieWalletModal
+                open={zombieOpen}
+                candidates={zombieCandidates}
+                selectedMap={zombieSelected}
+                busy={busyKey === 'wallet-zombies:delete'}
+                onToggle={toggleZombieWallet}
+                onToggleAll={toggleAllZombieWallets}
+                onClose={() => {
+                    if (busyKey !== 'wallet-zombies:delete') setZombieOpen(false);
+                }}
+                onDelete={deleteSelectedZombieWallets}
             />
             <EditWalletModal
                 open={Boolean(editingWallet)}

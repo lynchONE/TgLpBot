@@ -2,9 +2,55 @@ package smart_money
 
 import (
 	"TgLpBot/base/models"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestNormalizeWalletRefsDefaultsChainAndDedupes(t *testing.T) {
+	got := normalizeWalletRefs([]WalletRef{
+		{Address: " 0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD "},
+		{Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", ChainID: 56},
+		{Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", ChainID: 8453},
+		{Address: " "},
+	})
+
+	want := []WalletRef{
+		{Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", ChainID: 56},
+		{Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", ChainID: 8453},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeWalletRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeFollowConfigWalletsKeepsPrimaryFirstAndDedupes(t *testing.T) {
+	got := normalizeFollowConfigWallets(
+		" 0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD ",
+		[]string{
+			"0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+			"0x1111111111111111111111111111111111111111",
+			"",
+		},
+	)
+
+	want := []string{
+		"0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+		"0x1111111111111111111111111111111111111111",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeFollowConfigWallets() = %#v, want %#v", got, want)
+	}
+}
+
+func TestChainSlugForID(t *testing.T) {
+	if got := chainSlugForID(8453); got != "base" {
+		t.Fatalf("chainSlugForID(8453) = %q, want base", got)
+	}
+	if got := chainSlugForID(56); got != "bsc" {
+		t.Fatalf("chainSlugForID(56) = %q, want bsc", got)
+	}
+}
 
 func TestSortPoolAggRowsPrioritizesRecentOperations(t *testing.T) {
 	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)

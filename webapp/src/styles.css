@@ -7689,6 +7689,16 @@ body {
   cursor: pointer;
 }
 .smd-add-btn:hover { background: var(--accent-strong); }
+.smd-add-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.smd-zombie-btn {
+  background: rgba(255, 183, 77, 0.14);
+  border: 1px solid rgba(255, 183, 77, 0.28);
+  color: #ffd79b;
+}
+.smd-zombie-btn:hover { background: rgba(255, 183, 77, 0.22); }
 .smd-action-row {
   display: flex;
   gap: 4px;
@@ -8062,6 +8072,10 @@ body {
   font-size: 13px;
   cursor: pointer;
 }
+.smd-modal-submit.danger {
+  background: rgba(255, 107, 107, 0.95);
+  color: #1b0d0d;
+}
 .smd-modal-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 .smd-confirm-modal {
   max-width: 360px;
@@ -8071,6 +8085,78 @@ body {
   font-size: 14px;
   line-height: 1.6;
   margin-bottom: 18px;
+}
+.smd-zombie-modal {
+  max-width: 720px;
+  max-height: min(760px, 90vh);
+  display: flex;
+  flex-direction: column;
+}
+.smd-zombie-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 0 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.smd-zombie-list {
+  min-height: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid rgba(136, 157, 191, 0.16);
+  border-radius: 12px;
+  background: rgba(7, 11, 17, 0.28);
+  margin-bottom: 16px;
+}
+.smd-zombie-row {
+  display: grid;
+  grid-template-columns: 18px 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(136, 157, 191, 0.1);
+  cursor: pointer;
+}
+.smd-zombie-row:last-child { border-bottom: none; }
+.smd-zombie-row:hover,
+.smd-zombie-row.selected {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+.smd-zombie-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.smd-zombie-main { min-width: 0; }
+.smd-zombie-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smd-zombie-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smd-zombie-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: var(--text-muted);
+  font-size: 11px;
+  min-width: 58px;
+}
+.smd-zombie-meta strong {
+  color: var(--text);
+  font-size: 13px;
 }
 
 .module-slot.module-smart_money .smd-search-input,

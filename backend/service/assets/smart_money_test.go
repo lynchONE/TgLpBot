@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestBuildSmartMoneySnapshotLeaderboard_UsesTransferAdjustedBalanceDelta(t *testing.T) {
+func TestBuildSmartMoneySnapshotLeaderboard_UsesDailyStatPnLWhenAvailable(t *testing.T) {
 	timeutil.Init()
 
 	label := "Alpha"
@@ -15,7 +15,7 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesTransferAdjustedBalanceDelta(t *
 	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
-	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 20, []smartMoneyLeaderboardSnapshotInput{
+	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 1, 20, []smartMoneyLeaderboardSnapshotInput{
 		{
 			Wallet: models.MonitoredWallet{
 				Address:   "0x00000000000000000000000000000000000000a1",
@@ -33,10 +33,12 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesTransferAdjustedBalanceDelta(t *
 				TotalUSD: 100,
 			},
 			DailyStat: &models.SmartMoneyLPDailyStat{
-				AddCount:             1,
-				RemoveCount:          2,
-				ActivePoolCount:      3,
-				UnmatchedRemoveCount: 1,
+				EstimatedRealizedPnLUSD: 25.5,
+				MatchedCostUSD:          100,
+				AddCount:                1,
+				RemoveCount:             2,
+				ActivePoolCount:         3,
+				UnmatchedRemoveCount:    1,
 			},
 		},
 		{
@@ -54,9 +56,11 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesTransferAdjustedBalanceDelta(t *
 				TotalUSD: 100,
 			},
 			DailyStat: &models.SmartMoneyLPDailyStat{
-				AddCount:        4,
-				RemoveCount:     1,
-				ActivePoolCount: 2,
+				EstimatedRealizedPnLUSD: 38.75,
+				MatchedCostUSD:          100,
+				AddCount:                4,
+				RemoveCount:             1,
+				ActivePoolCount:         2,
 			},
 		},
 		{
@@ -222,7 +226,7 @@ func TestBuildSmartMoneySnapshotLeaderboard_ParticipationMetricRanksByDailyOps(t
 	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
-	resp := buildSmartMoneySnapshotLeaderboard("participation", snapshotDay, comparedDay, 20, []smartMoneyLeaderboardSnapshotInput{
+	resp := buildSmartMoneySnapshotLeaderboard("participation", snapshotDay, comparedDay, 1, 20, []smartMoneyLeaderboardSnapshotInput{
 		{
 			Wallet: models.MonitoredWallet{
 				Address: "0x00000000000000000000000000000000000000d4",
@@ -231,8 +235,10 @@ func TestBuildSmartMoneySnapshotLeaderboard_ParticipationMetricRanksByDailyOps(t
 			Current:  &models.SmartMoneyWalletDailySnapshot{TotalUSD: 150},
 			Previous: &models.SmartMoneyWalletDailySnapshot{TotalUSD: 100},
 			DailyStat: &models.SmartMoneyLPDailyStat{
-				AddCount:    1,
-				RemoveCount: 1,
+				EstimatedRealizedPnLUSD: 50,
+				MatchedCostUSD:          100,
+				AddCount:                1,
+				RemoveCount:             1,
 			},
 		},
 		{
@@ -243,8 +249,10 @@ func TestBuildSmartMoneySnapshotLeaderboard_ParticipationMetricRanksByDailyOps(t
 			Current:  &models.SmartMoneyWalletDailySnapshot{TotalUSD: 110},
 			Previous: &models.SmartMoneyWalletDailySnapshot{TotalUSD: 100},
 			DailyStat: &models.SmartMoneyLPDailyStat{
-				AddCount:    3,
-				RemoveCount: 2,
+				EstimatedRealizedPnLUSD: 10,
+				MatchedCostUSD:          100,
+				AddCount:                3,
+				RemoveCount:             2,
 			},
 		},
 	})
@@ -260,20 +268,22 @@ func TestBuildSmartMoneySnapshotLeaderboard_ParticipationMetricRanksByDailyOps(t
 	}
 }
 
-func TestBuildSmartMoneySnapshotLeaderboard_FallsBackToSnapshotDeltaWithoutDailyStat(t *testing.T) {
+func TestBuildSmartMoneySnapshotLeaderboard_FallsBackToTransferAdjustedSnapshotDeltaWithoutDailyStat(t *testing.T) {
 	timeutil.Init()
 
 	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
-	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 20, []smartMoneyLeaderboardSnapshotInput{
+	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 1, 20, []smartMoneyLeaderboardSnapshotInput{
 		{
 			Wallet: models.MonitoredWallet{
 				Address: "0x00000000000000000000000000000000000000f6",
 				ChainID: 56,
 			},
 			Current: &models.SmartMoneyWalletDailySnapshot{
-				TotalUSD: 145,
+				TotalUSD:       155,
+				TransferInUSD:  20,
+				TransferOutUSD: 10,
 			},
 			Previous: &models.SmartMoneyWalletDailySnapshot{
 				TotalUSD: 100,
@@ -289,6 +299,60 @@ func TestBuildSmartMoneySnapshotLeaderboard_FallsBackToSnapshotDeltaWithoutDaily
 	}
 	if got, want := resp.List[0].YieldRate, 0.45; got != want {
 		t.Fatalf("fallback yield = %.4f, want %.4f", got, want)
+	}
+	if got, want := resp.List[0].TransferNetUSD, 10.0; got != want {
+		t.Fatalf("fallback transfer net usd = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildSmartMoneySnapshotLeaderboard_UsesWindowDailyStatPnL(t *testing.T) {
+	timeutil.Init()
+
+	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
+	comparedDay := snapshotDay.AddDate(0, 0, -7)
+
+	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 7, 20, []smartMoneyLeaderboardSnapshotInput{
+		{
+			Wallet: models.MonitoredWallet{
+				Address: "0x00000000000000000000000000000000000000a1",
+				ChainID: 56,
+			},
+			Current: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD:       1200,
+				TransferInUSD:  100,
+				TransferOutUSD: 20,
+			},
+			Previous: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD: 1000,
+			},
+			DailyStat: &models.SmartMoneyLPDailyStat{
+				EstimatedRealizedPnLUSD: 42.5,
+				MatchedCostUSD:          250,
+				AddCount:                2,
+				RemoveCount:             1,
+				ActivePoolCount:         3,
+			},
+		},
+	})
+
+	if got, want := resp.Days, 7; got != want {
+		t.Fatalf("days = %d, want %d", got, want)
+	}
+	if got, want := resp.StartDay, "2026-03-16"; got != want {
+		t.Fatalf("start day = %s, want %s", got, want)
+	}
+	if got, want := len(resp.List), 1; got != want {
+		t.Fatalf("leaderboard size = %d, want %d", got, want)
+	}
+	entry := resp.List[0]
+	if got, want := entry.EstimatedRealizedPnLUSD, 42.5; got != want {
+		t.Fatalf("pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := entry.YieldRate, 0.17; got != want {
+		t.Fatalf("yield = %.4f, want %.4f", got, want)
+	}
+	if got, want := entry.ParticipationCount, 3; got != want {
+		t.Fatalf("participation = %d, want %d", got, want)
 	}
 }
 
@@ -332,7 +396,7 @@ func TestPaginateSmartMoneyLeaderboardResponse_FiltersAndSlicesFromBackend(t *te
 	}
 }
 
-func TestBuildSmartMoneyHistoryPoints_UsesPreviousDayBalanceDelta(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_FallsBackToTransferAdjustedBalanceDelta(t *testing.T) {
 	rows := []smartMoneyHistoryDayRow{
 		{Day: "2026-03-25", TotalUSD: 100, NativeUSD: 10},
 		{Day: "2026-03-26", TotalUSD: 140, NativeUSD: 11},
@@ -349,11 +413,57 @@ func TestBuildSmartMoneyHistoryPoints_UsesPreviousDayBalanceDelta(t *testing.T) 
 	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
 		t.Fatalf("second day pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := points[2].EstimatedRealizedPnLUSD, -50.0; got != want {
+	if got, want := points[2].EstimatedRealizedPnLUSD, 0.0; got != want {
 		t.Fatalf("third day pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := points[2].TransferNetUSD, -50.0; got != want {
 		t.Fatalf("transfer net usd = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildSmartMoneyHistoryPoints_UsesDailyStatPnLWhenAvailable(t *testing.T) {
+	rows := []smartMoneyHistoryDayRow{
+		{
+			Day:                     "2026-03-25",
+			TotalUSD:                100,
+			SnapshotCount:           1,
+			DailyStatCount:          1,
+			EstimatedRealizedPnLUSD: 7.25,
+		},
+		{
+			Day:                     "2026-03-26",
+			TotalUSD:                140,
+			TransferInUSD:           100,
+			SnapshotCount:           1,
+			DailyStatCount:          1,
+			EstimatedRealizedPnLUSD: -3.5,
+		},
+	}
+
+	points := buildSmartMoneyHistoryPoints(rows)
+	if got, want := len(points), 2; got != want {
+		t.Fatalf("history points = %d, want %d", got, want)
+	}
+	if got, want := points[0].EstimatedRealizedPnLUSD, 7.25; got != want {
+		t.Fatalf("first day pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := points[1].EstimatedRealizedPnLUSD, -3.5; got != want {
+		t.Fatalf("second day pnl = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildSmartMoneyHistoryPoints_FallsBackWhenDailyStatsArePartial(t *testing.T) {
+	rows := []smartMoneyHistoryDayRow{
+		{Day: "2026-03-25", TotalUSD: 100, SnapshotCount: 2, DailyStatCount: 2, EstimatedRealizedPnLUSD: 4},
+		{Day: "2026-03-26", TotalUSD: 150, SnapshotCount: 2, DailyStatCount: 1, EstimatedRealizedPnLUSD: 999, TransferInUSD: 10},
+	}
+
+	points := buildSmartMoneyHistoryPoints(rows)
+	if got, want := len(points), 2; got != want {
+		t.Fatalf("history points = %d, want %d", got, want)
+	}
+	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
+		t.Fatalf("partial stat pnl = %.2f, want fallback %.2f", got, want)
 	}
 }
 

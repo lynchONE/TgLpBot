@@ -87,6 +87,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm", s.handleSMCompat)
 	mux.HandleFunc("/api/sm_upload", s.handleSMUploadCompat)
 	mux.HandleFunc("/api/sm/wallets", s.handleSMWallets)
+	mux.HandleFunc("/api/sm/wallet_zombies", s.handleSMWalletZombies)
 	mux.HandleFunc("/api/sm/wallet_avatar", s.handleSMWalletAvatar)
 	mux.HandleFunc("/api/sm/contracts", s.handleSMContracts)
 	mux.HandleFunc("/api/sm/pools", s.handleSMPools)
@@ -121,6 +122,8 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 		switch endpoint {
 		case "wallets":
 			s.handleSMWallets(w, r)
+		case "wallet_zombies":
+			s.handleSMWalletZombies(w, r)
 		case "contracts":
 			s.handleSMContracts(w, r)
 		case "pools":
@@ -156,7 +159,7 @@ func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
 
 func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
-	case "wallets", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
+	case "wallets", "wallet_zombies", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
 	case "watch_activity":
 		return "/api/smart_money_watch_activity", true
@@ -475,11 +478,90 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid address", http.StatusBadRequest)
 			return
 		}
-		if err := repo.DeleteMonitoredWallet(ctx, addr, chainID); err != nil {
+		wallets := []sm.WalletRef{{Address: strings.ToLower(strings.TrimSpace(addr)), ChainID: chainID}}
+		if _, err := repo.DeleteMonitoredWalletsWithHistory(ctx, wallets); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if s.Assets != nil {
+			s.Assets.InvalidateSmartMoneyWalletCaches(wallets)
+		}
 		jsonOK(w, map[string]interface{}{"ok": true})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSMWalletZombies(w http.ResponseWriter, r *http.Request) {
+	repo := smService.Repo()
+	ctx := r.Context()
+	chainID := resolveSmartMoneyRequestChainID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days <= 0 {
+			days = 30
+		}
+		if days > 365 {
+			jsonError(w, "days too large", http.StatusBadRequest)
+			return
+		}
+		rows, err := repo.ListZombieWalletCandidates(ctx, days, chainID)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]interface{}{
+			"days":     days,
+			"chain_id": chainID,
+			"total":    len(rows),
+			"list":     rows,
+		})
+
+	case http.MethodDelete:
+		var req struct {
+			Wallets []struct {
+				Address string `json:"address"`
+				ChainID int    `json:"chain_id"`
+			} `json:"wallets"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		wallets := make([]sm.WalletRef, 0, len(req.Wallets))
+		for _, item := range req.Wallets {
+			if !isValidAddress(item.Address) {
+				jsonError(w, "invalid wallet address", http.StatusBadRequest)
+				return
+			}
+			itemChainID := item.ChainID
+			if itemChainID <= 0 {
+				itemChainID = chainID
+			}
+			wallets = append(wallets, sm.WalletRef{
+				Address: strings.ToLower(strings.TrimSpace(item.Address)),
+				ChainID: itemChainID,
+			})
+		}
+		if len(wallets) == 0 {
+			jsonError(w, "wallets is required", http.StatusBadRequest)
+			return
+		}
+		deleted, err := repo.DeleteMonitoredWalletsWithHistory(ctx, wallets)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if s.Assets != nil {
+			s.Assets.InvalidateSmartMoneyWalletCaches(wallets)
+		}
+		jsonOK(w, map[string]interface{}{
+			"ok":      true,
+			"deleted": deleted,
+		})
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

@@ -127,11 +127,28 @@ export async function updateSMWallet({ apiBaseUrl, address, updates, signal }) {
     });
 }
 
-export async function deleteSMWallet({ apiBaseUrl, address, signal }) {
+export async function deleteSMWallet({ apiBaseUrl, address, chain, signal }) {
     const params = new URLSearchParams();
     params.set('address', String(address));
+    if (chain) params.set('chain', String(chain));
     return smRequest(buildSMUrl(apiBaseUrl, 'wallets', params.toString()), {
         method: 'DELETE',
+        signal,
+    });
+}
+
+export async function fetchSMZombieWallets({ apiBaseUrl, days = 30, chain, signal }) {
+    const params = new URLSearchParams();
+    params.set('days', String(days));
+    if (chain) params.set('chain', String(chain));
+    return smRequest(buildSMUrl(apiBaseUrl, 'wallet_zombies', params.toString()), { signal });
+}
+
+export async function deleteSMZombieWallets({ apiBaseUrl, wallets, signal }) {
+    return smRequest(buildSMUrl(apiBaseUrl, 'wallet_zombies', ''), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallets }),
         signal,
     });
 }

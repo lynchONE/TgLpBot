@@ -10,6 +10,7 @@ import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositions, fetchSMWallets,
     fetchSMPositionDetail,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
+    fetchSMZombieWallets, deleteSMZombieWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
@@ -1754,6 +1755,129 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
     );
 }
 
+function formatZombieLastActive(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '从未活动';
+    return relativeTime(raw) || raw.slice(0, 10);
+}
+
+function zombieHistoryCount(item) {
+    return Number(item?.total_event_count || 0)
+        + Number(item?.position_count || 0)
+        + Number(item?.active_position_count || 0)
+        + Number(item?.snapshot_count || 0)
+        + Number(item?.transfer_event_count || 0)
+        + Number(item?.daily_stat_count || 0)
+        + Number(item?.live_state_count || 0);
+}
+
+function ZombieWalletSheet({ open, candidates, selectedMap, busy, onToggle, onToggleAll, onClose, onDelete }) {
+    if (!open) return null;
+    const list = Array.isArray(candidates) ? candidates : [];
+    const selectedCount = list.filter((item) => selectedMap[`${item.address}:${item.chain_id}`]).length;
+    const allSelected = list.length > 0 && selectedCount === list.length;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center" onClick={busy ? undefined : onClose}>
+            <div
+                className="flex max-h-[88vh] w-full max-w-xl flex-col rounded-[28px] border border-white/[0.06] bg-zinc-950/95 p-4 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.95)]"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-base font-semibold text-zinc-100">僵尸钱包</h3>
+                        <p className="mt-1 text-xs leading-5 text-zinc-400">
+                            最近 30 天没有 LP 开仓或撤仓的钱包。确认删除后会同时删除该钱包的聪明钱历史数据。
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        disabled={busy}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-zinc-900/70 text-zinc-400 transition hover:text-zinc-200 disabled:opacity-50"
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
+
+                {list.length > 0 ? (
+                    <>
+                        <div className="mt-4 flex items-center justify-between gap-3 text-xs text-zinc-400">
+                            <button
+                                type="button"
+                                onClick={() => onToggleAll(!allSelected)}
+                                disabled={busy}
+                                className="rounded-xl border border-white/[0.06] bg-zinc-900/70 px-3 py-1.5 text-zinc-300 transition hover:bg-zinc-800/80 disabled:opacity-50"
+                            >
+                                {allSelected ? '取消全选' : '全选'}
+                            </button>
+                            <span>{selectedCount} / {list.length} 已选择</span>
+                        </div>
+                        <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                            {list.map((item) => {
+                                const key = `${item.address}:${item.chain_id}`;
+                                const checked = Boolean(selectedMap[key]);
+                                return (
+                                    <label
+                                        key={key}
+                                        className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition ${
+                                            checked
+                                                ? 'border-amber-300/25 bg-amber-300/10'
+                                                : 'border-white/[0.05] bg-zinc-900/60 hover:bg-zinc-900/80'
+                                        }`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            disabled={busy}
+                                            onChange={() => onToggle(key)}
+                                            className="h-4 w-4 accent-amber-300"
+                                        />
+                                        <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={34} />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="truncate text-sm font-semibold text-zinc-100">{item.label || shortAddr(item.address)}</div>
+                                            <div className="mt-0.5 truncate text-[11px] text-zinc-500">
+                                                {shortAddr(item.address)} · {walletSourceLabel(item.source)} · 最后活动 {formatZombieLastActive(item.last_active_at)}
+                                            </div>
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <div className="text-sm font-semibold text-zinc-100">{zombieHistoryCount(item)}</div>
+                                            <div className="text-[10px] text-zinc-500">历史项</div>
+                                        </div>
+                                    </label>
+                                );
+                            })}
+                        </div>
+                    </>
+                ) : (
+                    <div className="mt-4 rounded-2xl border border-dashed border-white/[0.06] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
+                        没有找到僵尸钱包
+                    </div>
+                )}
+
+                <div className="mt-4 flex gap-2">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        disabled={busy}
+                        className="flex-1 rounded-2xl border border-white/[0.06] bg-zinc-900/70 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-zinc-800/80 disabled:opacity-50"
+                    >
+                        关闭
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onDelete}
+                        disabled={busy || selectedCount === 0}
+                        className="flex-1 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-200 transition hover:bg-red-500/15 disabled:opacity-50"
+                    >
+                        {busy ? '删除中...' : `删除 ${selectedCount} 个`}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ============ PAGES ============
 
 function buildPoolFromWatchActivity(event) {
@@ -2849,6 +2973,9 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
     const [editingWallet, setEditingWallet] = useState(null);
+    const [zombieOpen, setZombieOpen] = useState(false);
+    const [zombieCandidates, setZombieCandidates] = useState([]);
+    const [zombieSelected, setZombieSelected] = useState({});
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
@@ -2921,9 +3048,61 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
         }
     };
 
+    const findZombieWallets = async () => {
+        setBusyKey('wallet-zombies:find');
+        setActionError('');
+        try {
+            const data = await fetchSMZombieWallets({ apiBaseUrl, days: 30 });
+            const list = Array.isArray(data?.list) ? data.list : [];
+            const selected = {};
+            list.forEach((item) => {
+                selected[`${item.address}:${item.chain_id}`] = true;
+            });
+            setZombieCandidates(list);
+            setZombieSelected(selected);
+            setZombieOpen(true);
+        } catch (err) {
+            setActionError(err?.message || '查找僵尸钱包失败');
+        } finally {
+            setBusyKey('');
+        }
+    };
+
+    const toggleZombieWallet = (key) => {
+        setZombieSelected((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const toggleAllZombieWallets = (checked) => {
+        const next = {};
+        zombieCandidates.forEach((item) => {
+            next[`${item.address}:${item.chain_id}`] = checked;
+        });
+        setZombieSelected(next);
+    };
+
+    const deleteSelectedZombieWallets = async () => {
+        const walletsToDelete = zombieCandidates
+            .filter((item) => zombieSelected[`${item.address}:${item.chain_id}`])
+            .map((item) => ({ address: item.address, chain_id: item.chain_id }));
+        if (walletsToDelete.length === 0) return;
+        setBusyKey('wallet-zombies:delete');
+        setActionError('');
+        try {
+            await deleteSMZombieWallets({ apiBaseUrl, wallets: walletsToDelete });
+            setZombieOpen(false);
+            setZombieCandidates([]);
+            setZombieSelected({});
+            await load();
+        } catch (err) {
+            setActionError(err?.message || '删除僵尸钱包失败');
+        } finally {
+            setBusyKey('');
+        }
+    };
+
     return (
         <div>
-            <div className="mb-3 flex gap-2">
+            <div className="mb-3 flex flex-wrap gap-2">
                 <div className="relative flex-1">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                     <input
@@ -2937,6 +3116,15 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                     />
                 </div>
                 <button
+                    type="button"
+                    onClick={findZombieWallets}
+                    disabled={busyKey === 'wallet-zombies:find' || busyKey === 'wallet-zombies:delete'}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/15 disabled:opacity-50"
+                >
+                    <Activity size={14} /> 僵尸
+                </button>
+                <button
+                    type="button"
                     onClick={onAddWallet}
                     className={`${brand.solidButtonClass} ${brand.solidRingClass} inline-flex shrink-0 items-center gap-1 rounded-2xl px-3 py-2 text-sm`}
                 >
@@ -3039,7 +3227,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                             setConfirmState({
                                                 key: `wallet-delete:${w.address}`,
                                                 title: '删除钱包',
-                                                description: `确认删除钱包 ${shortAddr(w.address)} 吗？`,
+                                                description: `确认删除钱包 ${shortAddr(w.address)} 吗？该钱包的聪明钱历史数据也会删除。`,
                                                 action: () => deleteSMWallet({ apiBaseUrl, address: w.address }),
                                             });
                                         }}
@@ -3071,6 +3259,18 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                     if (!busyKey.startsWith('wallet-delete:')) setConfirmState(null);
                 }}
                 onConfirm={confirmDelete}
+            />
+            <ZombieWalletSheet
+                open={zombieOpen}
+                candidates={zombieCandidates}
+                selectedMap={zombieSelected}
+                busy={busyKey === 'wallet-zombies:delete'}
+                onToggle={toggleZombieWallet}
+                onToggleAll={toggleAllZombieWallets}
+                onClose={() => {
+                    if (busyKey !== 'wallet-zombies:delete') setZombieOpen(false);
+                }}
+                onDelete={deleteSelectedZombieWallets}
             />
             <EditWalletModal
                 open={Boolean(editingWallet)}
@@ -4559,9 +4759,8 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
             <ConfirmDialog
                 open={Boolean(deleteTarget)}
                 title="删除钱包"
-                message={`确认删除钱包 ${shortAddr(deleteTarget?.address)}？`}
-                confirmText="删除"
-                danger
+                description={`确认删除钱包 ${shortAddr(deleteTarget?.address)}？该钱包的聪明钱历史数据也会删除。`}
+                confirmLabel="删除"
                 onCancel={() => setDeleteTarget(null)}
                 onConfirm={confirmDelete}
             />
