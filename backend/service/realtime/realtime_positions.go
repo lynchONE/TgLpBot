@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/exchange"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/strategy"
@@ -16,6 +17,7 @@ import (
 	"math"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1017,8 +1019,8 @@ func (s *RealtimePositionsService) buildV3Position(
 	prices, _ := s.priceService.GetUSDPrices(chain, []string{token0.Hex(), token1.Hex()})
 	price0 := prices[strings.ToLower(token0.Hex())]
 	price1 := prices[strings.ToLower(token1.Hex())]
-	meta0 = s.getTokenMeta(chain, token0)
-	meta1 = s.getTokenMeta(chain, token1)
+	price0, price1 = deriveRealtimePoolTokenPrices(chain, token0, token1, meta0, meta1, currentTick, hasSlot0, price0, price1)
+	price0, price1 = s.fillRealtimeTokenPricesFromOKX(chain, walletAddr, token0, token1, meta0, meta1, currentTick, hasSlot0, price0, price1)
 
 	row0 := buildTokenRow(token0, meta0, price0, w0, amt0Raw, owed0)
 	row1 := buildTokenRow(token1, meta1, price1, w1, amt1Raw, owed1)
@@ -1414,6 +1416,8 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	prices := s.getV4CurrencyUSDPrices(chain, c0, c1)
 	price0 := prices[c0]
 	price1 := prices[c1]
+	price0, price1 = deriveRealtimePoolTokenPrices(chain, c0, c1, meta0, meta1, currentTick, true, price0, price1)
+	price0, price1 = s.fillRealtimeTokenPricesFromOKX(chain, walletAddr, c0, c1, meta0, meta1, currentTick, true, price0, price1)
 
 	row0 := buildTokenRow(c0, meta0, price0, w0, amt0Raw, owed0)
 	row1 := buildTokenRow(c1, meta1, price1, w1, amt1Raw, owed1)
@@ -1852,6 +1856,214 @@ func realtimeNativeSymbol(chain string) string {
 	default:
 		return "NATIVE"
 	}
+}
+
+const realtimeOKXNativePseudoTokenAddress = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func realtimeStableTokenPrice(chain string, token common.Address, meta realtimeTokenMeta) (float64, bool) {
+	symbol := strings.TrimSpace(meta.symbol)
+	if pricing.IsStableSymbol(symbol) {
+		return 1, true
+	}
+	if token != (common.Address{}) && pricing.IsStableAddress(chain, token.Hex()) {
+		return 1, true
+	}
+	return 0, false
+}
+
+func realtimeNativeTokenPrice(chain string, token common.Address, meta realtimeTokenMeta) (float64, bool) {
+	symbol := strings.ToUpper(strings.TrimSpace(meta.symbol))
+	nativeSymbol := strings.ToUpper(realtimeNativeSymbol(chain))
+	wrappedSymbol := ""
+	if cc, ok := realtimeChainConfig(chain); ok {
+		wrappedSymbol = strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+		if common.IsHexAddress(cc.WrappedNativeAddress) && strings.EqualFold(token.Hex(), cc.WrappedNativeAddress) {
+			price := pricing.GetNativePriceUSD(chain)
+			return price, price > 0
+		}
+	}
+	if symbol != "" && (symbol == nativeSymbol || symbol == wrappedSymbol) {
+		price := pricing.GetNativePriceUSD(chain)
+		return price, price > 0
+	}
+	switch config.NormalizeChain(chain) {
+	case "bsc":
+		if symbol == "WBNB" || symbol == "BNB" {
+			price := pricing.GetNativePriceUSD(chain)
+			return price, price > 0
+		}
+	case "base":
+		if symbol == "WETH" || symbol == "ETH" {
+			price := pricing.GetNativePriceUSD(chain)
+			return price, price > 0
+		}
+	}
+	return 0, false
+}
+
+func realtimeKnownAnchorPrice(chain string, token common.Address, meta realtimeTokenMeta, currentPrice float64) (float64, bool) {
+	if currentPrice > 0 && !math.IsNaN(currentPrice) && !math.IsInf(currentPrice, 0) {
+		return currentPrice, true
+	}
+	if price, ok := realtimeStableTokenPrice(chain, token, meta); ok {
+		return price, true
+	}
+	if price, ok := realtimeNativeTokenPrice(chain, token, meta); ok {
+		return price, true
+	}
+	return 0, false
+}
+
+func deriveRealtimePoolTokenPrices(
+	chain string,
+	token0 common.Address,
+	token1 common.Address,
+	meta0 realtimeTokenMeta,
+	meta1 realtimeTokenMeta,
+	currentTick int,
+	hasSlot0 bool,
+	price0 float64,
+	price1 float64,
+) (float64, float64) {
+	if !hasSlot0 {
+		return price0, price1
+	}
+	poolPrice := priceToken1PerToken0(currentTick, meta0.decimals, meta1.decimals)
+	if poolPrice <= 0 || math.IsNaN(poolPrice) || math.IsInf(poolPrice, 0) {
+		return price0, price1
+	}
+
+	if price0 <= 0 {
+		if anchor0, ok := realtimeKnownAnchorPrice(chain, token0, meta0, price0); ok && anchor0 > 0 {
+			price0 = anchor0
+		}
+	}
+	if price1 <= 0 {
+		if anchor1, ok := realtimeKnownAnchorPrice(chain, token1, meta1, price1); ok && anchor1 > 0 {
+			price1 = anchor1
+		}
+	}
+	if price0 <= 0 {
+		if anchor1, ok := realtimeKnownAnchorPrice(chain, token1, meta1, price1); ok && anchor1 > 0 {
+			price0 = anchor1 * poolPrice
+		}
+	}
+	if price1 <= 0 {
+		if anchor0, ok := realtimeKnownAnchorPrice(chain, token0, meta0, price0); ok && anchor0 > 0 {
+			price1 = anchor0 / poolPrice
+		}
+	}
+	return price0, price1
+}
+
+func priceToken1PerToken0(tick int, dec0 int, dec1 int) float64 {
+	if dec0 <= 0 {
+		dec0 = pricing.DefaultTokenDecimals
+	}
+	if dec1 <= 0 {
+		dec1 = pricing.DefaultTokenDecimals
+	}
+	raw := math.Pow(1.0001, float64(tick))
+	if raw <= 0 || math.IsNaN(raw) || math.IsInf(raw, 0) {
+		return 0
+	}
+	scale := math.Pow(10, float64(dec0-dec1))
+	price := raw * scale
+	if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+		return 0
+	}
+	return price
+}
+
+func (s *RealtimePositionsService) fillRealtimeTokenPricesFromOKX(
+	chain string,
+	walletAddr common.Address,
+	token0 common.Address,
+	token1 common.Address,
+	meta0 realtimeTokenMeta,
+	meta1 realtimeTokenMeta,
+	currentTick int,
+	hasSlot0 bool,
+	price0 float64,
+	price1 float64,
+) (float64, float64) {
+	if walletAddr == (common.Address{}) {
+		return price0, price1
+	}
+	if price0 <= 0 {
+		if price, err := realtimeOKXTokenPriceUSD(chain, walletAddr, token0, meta0); err == nil && price > 0 {
+			price0 = price
+			price0, price1 = deriveRealtimePoolTokenPrices(chain, token0, token1, meta0, meta1, currentTick, hasSlot0, price0, price1)
+		} else if err != nil {
+			log.Printf("[Realtime] OKX last-resort price failed: chain=%s token=%s err=%v", chain, token0.Hex(), err)
+		}
+	}
+	if price1 <= 0 {
+		if price, err := realtimeOKXTokenPriceUSD(chain, walletAddr, token1, meta1); err == nil && price > 0 {
+			price1 = price
+			price0, price1 = deriveRealtimePoolTokenPrices(chain, token0, token1, meta0, meta1, currentTick, hasSlot0, price0, price1)
+		} else if err != nil {
+			log.Printf("[Realtime] OKX last-resort price failed: chain=%s token=%s err=%v", chain, token1.Hex(), err)
+		}
+	}
+	return price0, price1
+}
+
+func realtimeOKXTokenPriceUSD(chain string, walletAddr common.Address, token common.Address, meta realtimeTokenMeta) (float64, error) {
+	decimals := meta.decimals
+	if decimals <= 0 {
+		decimals = pricing.DefaultTokenDecimals
+	}
+	oneToken := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	if oneToken.Sign() <= 0 {
+		return 0, fmt.Errorf("invalid token decimals: %d", decimals)
+	}
+
+	chain = config.NormalizeChain(chain)
+	cc, ok := realtimeChainConfig(chain)
+	if !ok {
+		return 0, fmt.Errorf("chain config not found: %s", chain)
+	}
+	if cc.ChainID <= 0 {
+		return 0, fmt.Errorf("invalid chain id")
+	}
+	stable := common.HexToAddress(cc.StableAddress)
+	if !common.IsHexAddress(cc.StableAddress) {
+		return 0, fmt.Errorf("stable address not configured")
+	}
+	if strings.EqualFold(token.Hex(), stable.Hex()) || pricing.IsStableAddress(chain, token.Hex()) {
+		return 1, nil
+	}
+	fromTokenAddress := token.Hex()
+	if token == (common.Address{}) {
+		fromTokenAddress = realtimeOKXNativePseudoTokenAddress
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	resp, err := exchange.NewOKXDexService().GetSwapDataWithContext(ctx, exchange.SwapRequest{
+		ChainID:           strconv.FormatInt(cc.ChainID, 10),
+		FromTokenAddress:  fromTokenAddress,
+		ToTokenAddress:    stable.Hex(),
+		Amount:            oneToken.String(),
+		Slippage:          "0.01",
+		UserWalletAddress: walletAddr.Hex(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil || len(resp.Data) == 0 {
+		return 0, fmt.Errorf("empty OKX quote response")
+	}
+	toAmountText := strings.TrimSpace(resp.Data[0].RouterResult.ToTokenAmount)
+	if toAmountText == "" {
+		return 0, fmt.Errorf("empty OKX quote output")
+	}
+	toAmount, ok := new(big.Int).SetString(toAmountText, 10)
+	if !ok || toAmount == nil || toAmount.Sign() <= 0 {
+		return 0, fmt.Errorf("invalid OKX quote output")
+	}
+	return toFloat(toAmount, cc.StableDecimals), nil
 }
 
 func (s *RealtimePositionsService) getV4CurrencyMeta(chain string, currency common.Address) realtimeTokenMeta {

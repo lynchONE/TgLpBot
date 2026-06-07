@@ -2,10 +2,12 @@ package pricing
 
 import (
 	"TgLpBot/base/config"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -22,11 +24,17 @@ type TokenPriceService struct {
 
 	rateLimitCooldown time.Duration
 
-	mu               sync.RWMutex
-	rateLimitedUntil time.Time
+	mu                          sync.RWMutex
+	rateLimitedUntil            time.Time
+	dexScreenerRateLimitedUntil time.Time
 
 	fetchGroup singleflight.Group
 }
+
+const (
+	tokenPriceProviderGecko       = "geckoterminal"
+	tokenPriceProviderDexScreener = "dexscreener"
+)
 
 type ProviderHTTPError struct {
 	Provider string
@@ -82,7 +90,6 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 		return map[string]float64{}, nil
 	}
 
-	now := time.Now()
 	out := make(map[string]float64, len(addresses))
 
 	missing := make([]string, 0, len(addresses))
@@ -98,21 +105,8 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 		return out, nil
 	}
 
-	s.mu.RLock()
-	cooldownUntil := s.rateLimitedUntil
-	s.mu.RUnlock()
-	if cooldownUntil.After(now) {
-		return out, &ProviderHTTPError{Provider: "geckoterminal", Status: http.StatusTooManyRequests}
-	}
-
 	fetched, err := s.fetchPrices(network, missing)
 	if err != nil {
-		var httpErr *ProviderHTTPError
-		if errors.As(err, &httpErr) && httpErr.IsRateLimit() {
-			s.mu.Lock()
-			s.rateLimitedUntil = time.Now().Add(s.rateLimitCooldown)
-			s.mu.Unlock()
-		}
 		for _, addr := range missing {
 			if p, ok := fetched[addr]; ok && p > 0 {
 				out[addr] = p
@@ -160,25 +154,28 @@ func (s *TokenPriceService) fetchPrices(network string, tokenAddresses []string)
 	v, err, _ := s.fetchGroup.Do(key, func() (any, error) {
 		out := make(map[string]float64, len(addresses))
 
-		const chunkSize = 25
-		var geckoErr error
-		for start := 0; start < len(addresses); start += chunkSize {
-			end := start + chunkSize
-			if end > len(addresses) {
-				end = len(addresses)
-			}
-			batch := addresses[start:end]
-			part, ferr := s.fetchGeckoTokenPrices(network, batch)
-			if ferr != nil {
-				geckoErr = ferr
-			}
-			for addr, price := range part {
-				if price > 0 {
-					out[addr] = price
-				}
-			}
+		geckoErr := s.fetchProviderBatches(
+			tokenPriceProviderGecko,
+			25,
+			network,
+			addresses,
+			out,
+			s.fetchGeckoTokenPrices,
+		)
+		missing := missingTokenPrices(addresses, out)
+		dexErr := s.fetchProviderBatches(
+			tokenPriceProviderDexScreener,
+			dexScreenerBatchSize,
+			network,
+			missing,
+			out,
+			s.fetchDexScreenerTokenPrices,
+		)
+		missing = missingTokenPrices(addresses, out)
+		if len(missing) == 0 {
+			return out, nil
 		}
-		return out, geckoErr
+		return out, errors.Join(geckoErr, dexErr)
 	})
 	if err != nil {
 		if partial, ok := v.(map[string]float64); ok {
@@ -195,6 +192,107 @@ func (s *TokenPriceService) fetchPrices(network string, tokenAddresses []string)
 		out[addr] = p
 	}
 	return out, nil
+}
+
+func (s *TokenPriceService) fetchProviderBatches(
+	provider string,
+	chunkSize int,
+	network string,
+	addresses []string,
+	out map[string]float64,
+	fetch func(string, []string) (map[string]float64, error),
+) error {
+	if len(addresses) == 0 {
+		return nil
+	}
+	if s.isProviderRateLimited(provider) {
+		return &ProviderHTTPError{Provider: provider, Status: http.StatusTooManyRequests}
+	}
+	if chunkSize <= 0 {
+		return fmt.Errorf("%s token_price batch size is invalid", provider)
+	}
+
+	var providerErr error
+	for start := 0; start < len(addresses); start += chunkSize {
+		end := start + chunkSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[start:end]
+		part, err := fetch(network, batch)
+		if err != nil {
+			providerErr = errors.Join(providerErr, err)
+			if isProviderRateLimitError(err, provider) {
+				s.markProviderRateLimited(provider)
+				break
+			}
+			continue
+		}
+		for addr, price := range part {
+			if isUsablePrice(price) {
+				out[addr] = price
+			}
+		}
+	}
+	return providerErr
+}
+
+func missingTokenPrices(addresses []string, prices map[string]float64) []string {
+	missing := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		if p, ok := prices[addr]; ok && isUsablePrice(p) {
+			continue
+		}
+		missing = append(missing, addr)
+	}
+	return missing
+}
+
+func isUsablePrice(price float64) bool {
+	return price > 0 && !math.IsNaN(price) && !math.IsInf(price, 0)
+}
+
+func isProviderRateLimitError(err error, provider string) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *ProviderHTTPError
+	if !errors.As(err, &httpErr) || !httpErr.IsRateLimit() {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(httpErr.Provider), provider)
+}
+
+func (s *TokenPriceService) isProviderRateLimited(provider string) bool {
+	if s == nil {
+		return false
+	}
+	now := time.Now()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	switch provider {
+	case tokenPriceProviderGecko:
+		return s.rateLimitedUntil.After(now)
+	case tokenPriceProviderDexScreener:
+		return s.dexScreenerRateLimitedUntil.After(now)
+	default:
+		return false
+	}
+}
+
+func (s *TokenPriceService) markProviderRateLimited(provider string) {
+	if s == nil {
+		return
+	}
+	until := time.Now().Add(s.rateLimitCooldown)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch provider {
+	case tokenPriceProviderGecko:
+		s.rateLimitedUntil = until
+	case tokenPriceProviderDexScreener:
+		s.dexScreenerRateLimitedUntil = until
+	}
 }
 
 var defaultBSCStableAddresses = map[string]float64{
@@ -312,4 +410,102 @@ func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses
 	}
 
 	return out, nil
+}
+
+type dexScreenerTokenPair struct {
+	ChainID   string `json:"chainId"`
+	BaseToken struct {
+		Address string `json:"address"`
+	} `json:"baseToken"`
+	PriceUSD  string `json:"priceUsd"`
+	Liquidity struct {
+		USD float64 `json:"usd"`
+	} `json:"liquidity"`
+}
+
+const dexScreenerBatchSize = 30
+
+func (s *TokenPriceService) fetchDexScreenerTokenPrices(network string, tokenAddresses []string) (map[string]float64, error) {
+	tokenAddresses = normalizeTokenAddresses(tokenAddresses)
+	if len(tokenAddresses) == 0 {
+		return map[string]float64{}, nil
+	}
+	chainID := dexScreenerChainID(network)
+	if chainID == "" {
+		return map[string]float64{}, fmt.Errorf("unsupported dexscreener chain: %s", network)
+	}
+
+	lookup := make(map[string]struct{}, len(tokenAddresses))
+	for _, addr := range tokenAddresses {
+		lookup[addr] = struct{}{}
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://api.dexscreener.com/tokens/v1/%s/%s",
+		url.PathEscape(chainID),
+		url.PathEscape(strings.Join(tokenAddresses, ",")),
+	)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyText := strings.TrimSpace(string(body))
+		if len(bodyText) > 320 {
+			bodyText = bodyText[:320]
+		}
+		return nil, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: resp.StatusCode, Body: bodyText}
+	}
+
+	var pairs []dexScreenerTokenPair
+	if err := json.Unmarshal(body, &pairs); err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]float64, len(tokenAddresses))
+	bestLiquidity := make(map[string]float64, len(tokenAddresses))
+	for _, pair := range pairs {
+		if !strings.EqualFold(strings.TrimSpace(pair.ChainID), chainID) {
+			continue
+		}
+		addr := strings.ToLower(strings.TrimSpace(pair.BaseToken.Address))
+		if _, ok := lookup[addr]; !ok {
+			continue
+		}
+		price, err := strconv.ParseFloat(strings.TrimSpace(pair.PriceUSD), 64)
+		if err != nil || !isUsablePrice(price) {
+			continue
+		}
+		if existing, ok := bestLiquidity[addr]; ok && existing > pair.Liquidity.USD {
+			continue
+		}
+		bestLiquidity[addr] = pair.Liquidity.USD
+		out[addr] = price
+	}
+	return out, nil
+}
+
+func dexScreenerChainID(chain string) string {
+	switch strings.ToLower(strings.TrimSpace(chain)) {
+	case "", "bsc", "bnb":
+		return "bsc"
+	case "base":
+		return "base"
+	case "eth", "ethereum":
+		return "ethereum"
+	default:
+		return strings.ToLower(strings.TrimSpace(chain))
+	}
 }

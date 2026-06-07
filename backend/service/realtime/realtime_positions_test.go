@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
 	"github.com/ethereum/go-ethereum/common"
+	"math"
 	"testing"
 	"time"
 )
@@ -189,6 +190,52 @@ func TestV4CurrencyMetaUsesNativeSymbolForZeroAddress(t *testing.T) {
 	}
 	if got.decimals != 18 {
 		t.Fatalf("decimals = %d, want 18", got.decimals)
+	}
+}
+
+func TestDeriveRealtimePoolTokenPricesFromStableSide(t *testing.T) {
+	t.Parallel()
+
+	price0, price1 := deriveRealtimePoolTokenPrices(
+		"bsc",
+		common.HexToAddress("0x0000000000000000000000000000000000000001"),
+		common.HexToAddress("0x55d398326f99059ff775485246999027b3197955"),
+		realtimeTokenMeta{symbol: "TEST", decimals: 18},
+		realtimeTokenMeta{symbol: "USDT", decimals: 18},
+		6932,
+		true,
+		0,
+		0,
+	)
+
+	if math.Abs(price0-1.9998) > 0.01 {
+		t.Fatalf("price0 = %.6f, want about 2", price0)
+	}
+	if price1 != 1 {
+		t.Fatalf("price1 = %.6f, want 1", price1)
+	}
+}
+
+func TestDeriveRealtimePoolTokenPricesFromKnownTokenSide(t *testing.T) {
+	t.Parallel()
+
+	price0, price1 := deriveRealtimePoolTokenPrices(
+		"bsc",
+		common.HexToAddress("0x0000000000000000000000000000000000000001"),
+		common.HexToAddress("0x0000000000000000000000000000000000000002"),
+		realtimeTokenMeta{symbol: "WBNB", decimals: 18},
+		realtimeTokenMeta{symbol: "TEST", decimals: 18},
+		6932,
+		true,
+		700,
+		0,
+	)
+
+	if price0 != 700 {
+		t.Fatalf("price0 = %.6f, want 700", price0)
+	}
+	if math.Abs(price1-350.03) > 0.5 {
+		t.Fatalf("price1 = %.6f, want about 350", price1)
 	}
 }
 

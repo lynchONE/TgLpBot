@@ -22,16 +22,56 @@ func (s stubRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return s.fn(req)
 }
 
+func geckoPriceResponse(token string, price string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{"` +
+			strings.ToLower(token) + `":"` + price + `"}}}}`)),
+		Header: make(http.Header),
+	}
+}
+
+func geckoEmptyPriceResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{}}}}`)),
+		Header:     make(http.Header),
+	}
+}
+
+func dexEmptyPriceResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`[]`)),
+		Header:     make(http.Header),
+	}
+}
+
+func dexPriceResponse(chain string, token string, price string, liquidity string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(`[{"chainId":"` + chain +
+			`","baseToken":{"address":"` + strings.ToLower(token) +
+			`"},"priceUsd":"` + price +
+			`","liquidity":{"usd":` + liquidity + `}}]`)),
+		Header: make(http.Header),
+	}
+}
+
+func isGeckoPriceRequest(req *http.Request) bool {
+	return strings.Contains(req.URL.Path, "/api/v2/simple/networks/")
+}
+
+func isDexScreenerTokenRequest(req *http.Request) bool {
+	return strings.Contains(req.URL.Path, "/tokens/v1/")
+}
+
 func TestGetUSDPrices_StableFallback_NoNetworkCall(t *testing.T) {
 	svc := NewTokenPriceService()
 	called := 0
 	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
 		called++
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{}}}}`)),
-			Header:     make(http.Header),
-		}, nil
+		return geckoEmptyPriceResponse(), nil
 	}}}
 
 	prices, err := svc.GetUSDPrices("bsc", []string{"0x55d398326f99059ff775485246999027b3197955"})
@@ -53,11 +93,7 @@ func TestGetUSDPrices_ReturnsErrorWithoutStalePriceOnRateLimit(t *testing.T) {
 	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
 		called++
 		if called == 1 {
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{"0x1111111111111111111111111111111111111111":"2.5"}}}}`)),
-				Header:     make(http.Header),
-			}, nil
+			return geckoPriceResponse(token, "2.5"), nil
 		}
 		return &http.Response{
 			StatusCode: http.StatusTooManyRequests,
@@ -94,11 +130,7 @@ func TestGetUSDPrices_DoesNotCacheSuccessfulPrice(t *testing.T) {
 		if called == 2 {
 			price = "4.56"
 		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{"0x1111111111111111111111111111111111111111":"` + price + `"}}}}`)),
-			Header:     make(http.Header),
-		}, nil
+		return geckoPriceResponse(token, price), nil
 	}}}
 
 	first, err := svc.GetUSDPrices("bsc", []string{token})
@@ -120,14 +152,20 @@ func TestGetUSDPrices_DoesNotCacheSuccessfulPrice(t *testing.T) {
 func TestGetUSDPrices_DoesNotCacheMissingPrice(t *testing.T) {
 	svc := NewTokenPriceService()
 	token := "0x1111111111111111111111111111111111111111"
-	called := 0
+	geckoCalls := 0
+	dexCalls := 0
 	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
-		called++
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"data":{"attributes":{"token_prices":{}}}}`)),
-			Header:     make(http.Header),
-		}, nil
+		switch {
+		case isGeckoPriceRequest(req):
+			geckoCalls++
+			return geckoEmptyPriceResponse(), nil
+		case isDexScreenerTokenRequest(req):
+			dexCalls++
+			return dexEmptyPriceResponse(), nil
+		default:
+			t.Fatalf("unexpected request url: %s", req.URL.String())
+			return nil, nil
+		}
 	}}}
 
 	first, err := svc.GetUSDPrices("bsc", []string{token})
@@ -144,8 +182,78 @@ func TestGetUSDPrices_DoesNotCacheMissingPrice(t *testing.T) {
 	if _, ok := second[token]; ok {
 		t.Fatalf("expected second response to omit missing price, got %+v", second)
 	}
-	if called != 2 {
-		t.Fatalf("expected no missing-price cache, called=%d", called)
+	if geckoCalls != 2 || dexCalls != 2 {
+		t.Fatalf("expected no missing-price cache, geckoCalls=%d dexCalls=%d", geckoCalls, dexCalls)
+	}
+}
+
+func TestGetUSDPrices_UsesDexScreenerAfterGeckoMiss(t *testing.T) {
+	svc := NewTokenPriceService()
+	token := "0x1111111111111111111111111111111111111111"
+	geckoCalls := 0
+	dexCalls := 0
+	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+		switch {
+		case isGeckoPriceRequest(req):
+			geckoCalls++
+			return geckoEmptyPriceResponse(), nil
+		case isDexScreenerTokenRequest(req):
+			dexCalls++
+			return dexPriceResponse("bsc", token, "3.21", "1000"), nil
+		default:
+			t.Fatalf("unexpected request url: %s", req.URL.String())
+			return nil, nil
+		}
+	}}}
+
+	prices, err := svc.GetUSDPrices("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if prices[token] != 3.21 {
+		t.Fatalf("expected DexScreener price=3.21, got %+v", prices)
+	}
+	if geckoCalls != 1 || dexCalls != 1 {
+		t.Fatalf("unexpected provider calls: gecko=%d dex=%d", geckoCalls, dexCalls)
+	}
+}
+
+func TestGetUSDPrices_UsesDexScreenerAfterGeckoRateLimit(t *testing.T) {
+	svc := NewTokenPriceService()
+	token := "0x1111111111111111111111111111111111111111"
+	geckoCalls := 0
+	dexCalls := 0
+	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+		switch {
+		case isGeckoPriceRequest(req):
+			geckoCalls++
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Body:       io.NopCloser(strings.NewReader(`{"status":{"error_code":429}}`)),
+				Header:     make(http.Header),
+			}, nil
+		case isDexScreenerTokenRequest(req):
+			dexCalls++
+			return dexPriceResponse("bsc", token, "7.89", "1000"), nil
+		default:
+			t.Fatalf("unexpected request url: %s", req.URL.String())
+			return nil, nil
+		}
+	}}}
+
+	first, err := svc.GetUSDPrices("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected nil error from DexScreener fallback, got %v", err)
+	}
+	second, err := svc.GetUSDPrices("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected nil error while Gecko is cooling down, got %v", err)
+	}
+	if first[token] != 7.89 || second[token] != 7.89 {
+		t.Fatalf("expected DexScreener fallback price, first=%+v second=%+v", first, second)
+	}
+	if geckoCalls != 1 || dexCalls != 2 {
+		t.Fatalf("expected second call to skip Gecko cooldown and use Dex, gecko=%d dex=%d", geckoCalls, dexCalls)
 	}
 }
 
