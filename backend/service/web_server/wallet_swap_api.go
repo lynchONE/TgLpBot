@@ -4,18 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"math/big"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
+	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
-	"TgLpBot/service/pricing"
 	"TgLpBot/service/token_metadata"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
@@ -24,6 +27,7 @@ import (
 )
 
 const nativePseudoTokenAddress = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+const walletSwapOKXQuoteTimeout = 6 * time.Second
 
 type walletSwapPreviewRequest struct {
 	InitData    string  `json:"initData"`
@@ -147,14 +151,6 @@ func (s *Server) getTokenBalancesFromRPC(ctx context.Context, userID uint, walle
 	if err != nil {
 		return nil, err
 	}
-	priceAddresses := append([]string(nil), tokenAddresses...)
-	if wrapped := token_metadata.NormalizeTokenAddress(cc.WrappedNativeAddress); wrapped != "" {
-		priceAddresses = append(priceAddresses, wrapped)
-	}
-	prices, err := pricing.DefaultTokenPriceService().GetUSDPrices(chain, priceAddresses)
-	if err != nil {
-		return nil, fmt.Errorf("price query failed: %w", err)
-	}
 
 	if s.TokenMeta == nil {
 		s.TokenMeta = token_metadata.NewService()
@@ -167,6 +163,7 @@ func (s *Server) getTokenBalancesFromRPC(ctx context.Context, userID uint, walle
 	rows := make([]walletSwapTokenRow, 0, len(tokenAddresses)+1)
 	nativeSymbol := nativeSymbolForChainConfig(chain, cc)
 	wrappedNativeSymbol := strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+	okxService := exchange.NewOKXDexService()
 
 	nativeBalance, err := walletSwapAssetBalance(client, common.HexToAddress(nativePseudoTokenAddress), walletAddr)
 	if err != nil {
@@ -174,8 +171,11 @@ func (s *Server) getTokenBalancesFromRPC(ctx context.Context, userID uint, walle
 	}
 	if nativeBalance != nil && nativeBalance.Sign() > 0 {
 		displayBalance := formatWalletSwapRawAmount(nativeBalance, 18)
-		balanceFloat, _ := strconv.ParseFloat(displayBalance, 64)
-		valueUSD := balanceFloat * pricing.GetNativePriceUSD(chain)
+		valueUSD, quoteErr := walletSwapOKXValueUSDT(ctx, okxService, cc, common.HexToAddress(nativePseudoTokenAddress), nativeBalance, walletAddr)
+		if quoteErr != nil {
+			log.Printf("[WalletSwap] OKX native value quote failed: chain=%s wallet=%s amount=%s err=%v",
+				chain, walletAddr.Hex(), nativeBalance.String(), quoteErr)
+		}
 		if valueUSD >= minValueUSD {
 			disabledReason := fmt.Sprintf("原生 %s 暂不支持直接兑换", nativeSymbol)
 			if wrappedNativeSymbol != "" {
@@ -204,8 +204,12 @@ func (s *Server) getTokenBalancesFromRPC(ctx context.Context, userID uint, walle
 		}
 		decimals := int(tokenDecimals(client, tokenAddress))
 		displayBalance := formatWalletSwapRawAmount(rawBalance, decimals)
-		balanceFloat, _ := strconv.ParseFloat(displayBalance, 64)
-		valueUSD := balanceFloat * prices[tokenAddr]
+		valueUSD, err := walletSwapTokenValueUSDT(ctx, okxService, cc, tokenAddress, rawBalance, decimals, walletAddr)
+		if err != nil {
+			log.Printf("[WalletSwap] OKX value quote failed: chain=%s token=%s wallet=%s amount=%s err=%v",
+				chain, tokenAddr, walletAddr.Hex(), rawBalance.String(), err)
+			continue
+		}
 		if valueUSD < minValueUSD {
 			continue
 		}
@@ -242,6 +246,76 @@ func (s *Server) getTokenBalancesFromRPC(ctx context.Context, userID uint, walle
 	})
 
 	return rows, nil
+}
+
+func walletSwapTokenValueUSDT(ctx context.Context, okxService *exchange.OKXDexService, cc config.ChainConfig, tokenAddr common.Address, amount *big.Int, decimals int, walletAddr common.Address) (float64, error) {
+	if amount == nil || amount.Sign() <= 0 {
+		return 0, nil
+	}
+	if walletSwapIsStableToken(tokenAddr.Hex(), cc) {
+		return amountToFloat(amount.String(), decimals), nil
+	}
+	return walletSwapOKXValueUSDT(ctx, okxService, cc, tokenAddr, amount, walletAddr)
+}
+
+func walletSwapIsStableToken(addr string, cc config.ChainConfig) bool {
+	normalized := token_metadata.NormalizeTokenAddress(addr)
+	if normalized == "" {
+		return false
+	}
+	for _, candidate := range []string{cc.StableAddress, cc.USDTAddress, cc.USDCAddress, cc.BUSDAddress} {
+		candidate = token_metadata.NormalizeTokenAddress(candidate)
+		if candidate != "" && normalized == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func walletSwapOKXValueUSDT(ctx context.Context, okxService *exchange.OKXDexService, cc config.ChainConfig, tokenAddr common.Address, amount *big.Int, walletAddr common.Address) (float64, error) {
+	if amount == nil || amount.Sign() <= 0 {
+		return 0, nil
+	}
+	if okxService == nil {
+		return 0, fmt.Errorf("OKX service unavailable")
+	}
+	if cc.ChainID <= 0 {
+		return 0, fmt.Errorf("invalid chain id")
+	}
+	if !common.IsHexAddress(cc.StableAddress) {
+		return 0, fmt.Errorf("stable address not configured")
+	}
+	if ctx == nil {
+		return 0, fmt.Errorf("context is nil")
+	}
+
+	quoteCtx, cancel := context.WithTimeout(ctx, walletSwapOKXQuoteTimeout)
+	defer cancel()
+
+	resp, err := okxService.GetSwapDataWithContext(quoteCtx, exchange.SwapRequest{
+		ChainID:           strconv.FormatInt(cc.ChainID, 10),
+		FromTokenAddress:  okxWalletSwapTokenAddress(tokenAddr.Hex(), tokenAddr),
+		ToTokenAddress:    common.HexToAddress(cc.StableAddress).Hex(),
+		Amount:            amount.String(),
+		Slippage:          "0.01",
+		UserWalletAddress: walletAddr.Hex(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil || len(resp.Data) == 0 {
+		return 0, fmt.Errorf("empty OKX quote response")
+	}
+
+	toAmountText := strings.TrimSpace(resp.Data[0].RouterResult.ToTokenAmount)
+	if toAmountText == "" {
+		return 0, fmt.Errorf("empty OKX quote output")
+	}
+	toAmount, ok := new(big.Int).SetString(toAmountText, 10)
+	if !ok || toAmount == nil || toAmount.Sign() <= 0 {
+		return 0, fmt.Errorf("invalid OKX quote output")
+	}
+	return amountToFloat(toAmount.String(), cc.StableDecimals), nil
 }
 
 func (s *Server) walletSwapKnownTokenAddresses(ctx context.Context, userID uint, chain string, cc config.ChainConfig) ([]string, error) {

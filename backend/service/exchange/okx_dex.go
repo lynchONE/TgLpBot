@@ -525,7 +525,14 @@ func (s *OKXDexService) swapEndpointForBase(baseURL string, req SwapRequest) (st
 
 // GetSwapData gets swap transaction data
 func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
-	ctx := context.Background()
+	return s.GetSwapDataWithContext(context.Background(), req)
+}
+
+// GetSwapDataWithContext gets swap transaction data with a caller-controlled context.
+func (s *OKXDexService) GetSwapDataWithContext(ctx context.Context, req SwapRequest) (*SwapResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("context is nil")
+	}
 	var lastErr error
 	for attempt := 1; attempt <= 2; attempt++ {
 		eff, err := s.effectiveConfig(ctx)
