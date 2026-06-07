@@ -562,11 +562,15 @@ const MAX_REFRESH_INTERVAL_SEC = 300;
 const POSITIONS_ACTIVE_REFRESH_KEY = 'positions_active';
 const POSITIONS_IDLE_REFRESH_KEY = 'positions_idle';
 const LEGACY_POSITIONS_REFRESH_KEY = 'positions';
+const KLINE_POSITION_REFRESH_KEY = 'kline_position';
+const KLINE_IDLE_REFRESH_KEY = 'kline_idle';
+const LEGACY_KLINE_REFRESH_KEY = 'gmgn_kline';
 const REFRESH_MODULE_CONFIG = [
   { key: 'hot_pools', label: '热门池子', defaultSec: 10, minSec: 2 },
   { key: POSITIONS_ACTIVE_REFRESH_KEY, label: '仓位(有仓位)', defaultSec: 10, minSec: 2 },
   { key: POSITIONS_IDLE_REFRESH_KEY, label: '仓位(无仓位)', defaultSec: 30, minSec: 5 },
-  { key: 'gmgn_kline', label: 'K线', defaultSec: 20, minSec: 5 },
+  { key: KLINE_POSITION_REFRESH_KEY, label: 'K线(有对应仓位)', defaultSec: 20, minSec: 5 },
+  { key: KLINE_IDLE_REFRESH_KEY, label: 'K线(无对应仓位)', defaultSec: 45, minSec: 10 },
   { key: 'assets', label: '我的资产', defaultSec: 60, minSec: 60 },
   { key: 'smart_money', label: '聪明钱', defaultSec: 10, minSec: 2 },
   { key: 'admin_panel', label: '管理面板', defaultSec: 10, minSec: 2 },
@@ -635,6 +639,9 @@ function normalizeRefreshIntervals(raw, legacyValue) {
   const legacyPositionsValue = parsed && Object.prototype.hasOwnProperty.call(parsed, LEGACY_POSITIONS_REFRESH_KEY)
     ? parsed[LEGACY_POSITIONS_REFRESH_KEY]
     : null;
+  const legacyKlineValue = parsed && Object.prototype.hasOwnProperty.call(parsed, LEGACY_KLINE_REFRESH_KEY)
+    ? parsed[LEGACY_KLINE_REFRESH_KEY]
+    : null;
   const out = {};
   REFRESH_MODULE_CONFIG.forEach((item) => {
     let value = item.defaultSec;
@@ -642,12 +649,34 @@ function normalizeRefreshIntervals(raw, legacyValue) {
       value = parsed[item.key];
     } else if (item.key === POSITIONS_ACTIVE_REFRESH_KEY && legacyPositionsValue !== null) {
       value = legacyPositionsValue;
-    } else if (item.key !== POSITIONS_IDLE_REFRESH_KEY && hasLegacy) {
+    } else if (item.key === KLINE_POSITION_REFRESH_KEY && legacyKlineValue !== null) {
+      value = legacyKlineValue;
+    } else if (
+      item.key !== POSITIONS_IDLE_REFRESH_KEY &&
+      item.key !== KLINE_IDLE_REFRESH_KEY &&
+      hasLegacy
+    ) {
       value = legacy;
     }
     out[item.key] = clampRefreshInterval(value, item);
   });
   return out;
+}
+
+function positionHasKlineTrackedValue(position) {
+  if (position?.has_liquidity) return true;
+  const positionUsd = Number(position?.totals?.position_usd);
+  if (Number.isFinite(positionUsd) && positionUsd > 0) return true;
+  const feeUsd = Number(position?.totals?.fee_usd);
+  return Number.isFinite(feeUsd) && feeUsd > 0;
+}
+
+function positionMatchesChain(position, activeChain) {
+  const rawChain = position?.chain;
+  if (rawChain === undefined || rawChain === null) return false;
+  const text = String(rawChain).trim();
+  if (!text) return false;
+  return normalizeChain(text) === activeChain;
 }
 
 function normalizeChain(value) {
@@ -1056,7 +1085,6 @@ export default function App() {
   const positionsRefreshInterval = hasTrackedPositions
     ? refreshIntervals[POSITIONS_ACTIVE_REFRESH_KEY]
     : refreshIntervals[POSITIONS_IDLE_REFRESH_KEY];
-  const klineRefreshInterval = refreshIntervals.gmgn_kline;
   const assetsRefreshInterval = refreshIntervals.assets;
   const smartMoneyRefreshInterval = refreshIntervals.smart_money;
   const adminRefreshInterval = refreshIntervals.admin_panel;
@@ -1135,6 +1163,27 @@ export default function App() {
     () => normalizeHexAddress(klineActiveToken?.address),
     [klineActiveToken]
   );
+  const klinePositionTokenAddresses = useMemo(() => {
+    const activeChain = normalizeChain(selectedPool?.chain || chain);
+    const rows = Array.isArray(positions?.positions) ? positions.positions : [];
+    const seen = new Set();
+    rows.forEach((position) => {
+      if (!positionHasKlineTrackedValue(position)) return;
+      if (!positionMatchesChain(position, activeChain)) return;
+      if (!Array.isArray(position?.token_rows)) return;
+      position.token_rows.forEach((token) => {
+        const address = normalizeHexAddress(token?.address);
+        if (address) seen.add(address);
+      });
+    });
+    return seen;
+  }, [chain, positions, selectedPool?.chain]);
+  const klineHasTrackedPositionToken = Boolean(
+    klineTokenAddress && klinePositionTokenAddresses.has(klineTokenAddress)
+  );
+  const klineRefreshInterval = klineHasTrackedPositionToken
+    ? refreshIntervals[KLINE_POSITION_REFRESH_KEY]
+    : refreshIntervals[KLINE_IDLE_REFRESH_KEY];
   const klineIntervalMeta = useMemo(() => getKlineIntervalMeta(klineInterval), [klineInterval]);
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
   const activeHotPoolRankSort = hotInlineSort || hotSort;
@@ -3911,7 +3960,8 @@ export default function App() {
                     </div>
                     <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
                     <div className="settings-hint">各模块独立保存到当前浏览器；仓位会按当前是否有仓位自动切换，当前是{hasTrackedPositions ? '有仓位' : '无仓位'}档。</div>
-                    <div className="settings-hint">我的资产最低 60 秒，K 线最低 5 秒，无仓位档默认 30 秒。</div>
+                    <div className="settings-hint">K 线会按当前展示代币是否命中仓位代币自动切换，当前是{klineHasTrackedPositionToken ? '有对应仓位' : '无对应仓位'}档。</div>
+                    <div className="settings-hint">我的资产最低 60 秒，K 线有仓位档最低 5 秒，无仓位档最低 10 秒。</div>
                     <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
                   </div>
                 )}
