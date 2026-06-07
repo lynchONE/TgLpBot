@@ -9,12 +9,14 @@
 
 ## 3. 第二阶段：开仓向导拆分
 - [x] 3.1 拆出开仓 draft 状态与重置逻辑
-- [ ] 3.2 拆出开仓 prepare / preview / submit 流程 hook
-- [ ] 3.3 拆出开仓 Sheet 与步骤内容组件
+- [x] 3.2 拆出开仓 prepare / preview / submit 流程 hook
+- [x] 3.3 拆出开仓 Sheet 与步骤内容组件
+- [x] 3.4 拆出开仓 Sheet 低风险 UI 子组件
 
 ## 4. 后续阶段
 - [x] 4.1 拆出 `SmartMoneyPage.jsx` 的 shared 纯工具子集
-- [ ] 4.2 按业务域拆分 `lib/api.js` 并保留兼容导出
+- [x] 4.2 按业务域拆分 `lib/api.js` 并保留兼容导出
+- [x] 4.3 拆出 API 公共请求工具
 
 ## 5. Validation
 - [x] 5.1 `cd miniapp && npm run build`

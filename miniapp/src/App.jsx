@@ -1,4 +1,4 @@
-﻿import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
@@ -12,7 +12,7 @@ import GlobalConfigPage from './components/GlobalConfigPage.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
-import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye, Wallet, ArrowLeftRight } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -22,11 +22,7 @@ import {
     fetchHotPools,
     fetchSearchPools,
     fetchMe,
-    fetchPoolLiquidityDistribution,
     fetchRealtimePositions,
-    openPosition,
-    prepareOpenPosition,
-    previewOpenPosition,
     updateTaskRange,
     setTaskPaused,
     stopTask,
@@ -44,7 +40,7 @@ import {
     getBrandTheme,
     normalizeAccentTheme,
 } from './lib/brand';
-import { TASK_MODE_OPTIONS, getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary, normalizeTaskMode } from './lib/taskModes';
+import { getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary, normalizeTaskMode } from './lib/taskModes';
 import useScrollMemory from './hooks/useScrollMemory';
 import useGlobalSettings from './hooks/useGlobalSettings';
 import useAuthData from './hooks/useAuthData';
@@ -56,8 +52,6 @@ import {
     formatSignedPercentCompact,
     normalizeTokenRisk,
     shortAddress,
-    tokenRiskLabel,
-    tokenRiskSummary,
     tokenRiskToneClass,
 } from './lib/format';
 import { resolveAllowEmptyInitData, resolveApiBaseUrl, localizeWebAppError } from './lib/apiBase';
@@ -108,7 +102,6 @@ import {
     buildAddLiquidityPresetOptions,
     buildDCASummaryItems,
     formatAmountInput,
-    formatDCAIntervalHint,
     formatPercentValue,
     formatPriceInputValue,
     formatPriceValue,
@@ -129,16 +122,25 @@ import {
     tickToPoolPrice,
 } from './features/openPosition/tickMath';
 import {
-    buildEntrySwapConfirmKey,
-    extractOpenPositionErrorChecks,
     normalizeOpenPositionPoolVersion,
     normalizePoolKey,
     normalizePositionSmartMoneyGroups,
-    resolveOpenPositionErrorPayload,
     resolveOpenPositionPoolChain,
 } from './features/openPosition/safety';
+import { parseRangeInput } from './features/openPosition/range';
 import useOpenPositionDraft from './features/openPosition/useOpenPositionDraft';
-import { tokenRiskPanelClass } from './features/openPosition/tokenRiskClass';
+import useOpenPositionFlow from './features/openPosition/useOpenPositionFlow';
+import useOpenPositionMarketData from './features/openPosition/useOpenPositionMarketData';
+import {
+    OpenPositionEntrySwapPreviewPanel,
+    OpenPositionFooter,
+    OpenPositionFundingStep,
+    OpenPositionDCAPanel,
+    OpenPositionOrderSummary,
+    OpenPositionPrecheckPanel,
+    OpenPositionStepIndicator,
+    OpenPositionTaskModePanel,
+} from './features/openPosition/OpenPositionSheetParts.jsx';
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
 const LazySwapModule = lazy(() => import('./components/SwapModule.jsx'));
@@ -224,6 +226,7 @@ export default function App() {
     const poolSearchControllerRef = useRef(null);
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
+    const openPositionDraft = useOpenPositionDraft();
     const {
         openPositionPool,
         setOpenPositionPool,
@@ -256,7 +259,6 @@ export default function App() {
         openPositionError,
         setOpenPositionError,
         openPositionPrepareChecks,
-        setOpenPositionPrepareChecks,
         openPositionChecks,
         setOpenPositionChecks,
         openPositionRiskAck,
@@ -275,17 +277,12 @@ export default function App() {
         openPositionPreviewResumeTimerRef,
         openPositionAutoSingleSideRangeRef,
         openPositionPreparePrivateZapInfo,
-        setOpenPositionPreparePrivateZapInfo,
         openPositionPrivateZapInfo,
         setOpenPositionPrivateZapInfo,
         openPositionPrepareTokenRisk,
-        setOpenPositionPrepareTokenRisk,
         openPositionPreviewTokenRisk,
-        setOpenPositionPreviewTokenRisk,
         openPositionRangeEditor,
-        setOpenPositionRangeEditor,
         openPositionPreviewRangeEditor,
-        setOpenPositionPreviewRangeEditor,
         openPositionSizingAdvice,
         setOpenPositionSizingAdvice,
         openPositionEntrySwapSlippage,
@@ -293,7 +290,6 @@ export default function App() {
         openPositionEntrySwapSlippageDirty,
         setOpenPositionEntrySwapSlippageDirty,
         openPositionEntrySwapConfirm,
-        setOpenPositionEntrySwapConfirm,
         openPositionLoading,
         setOpenPositionLoading,
         openPositionSmartRanges,
@@ -321,7 +317,7 @@ export default function App() {
         openPositionWalletId,
         setOpenPositionWalletId,
         resetOpenPositionDraft,
-    } = useOpenPositionDraft();
+    } = openPositionDraft;
     const [operationProgress, setOperationProgress] = useState(null);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
@@ -353,7 +349,6 @@ export default function App() {
     const adminSelectedRef = useRef(null);
     const confirmResolveRef = useRef(null);
     const noticeTimerRef = useRef(null);
-    const lastOpenPositionRequestRef = useRef(null);
 
     const { theme, setTheme, toggleTheme, accentTheme, setAccentTheme } = useGlobalSettings();
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1600,18 +1595,6 @@ export default function App() {
         openPositionEffectiveRangeEditor?.range_upper_pct ?? openPositionRangeUpper,
     );
 
-    const parseRangeInput = (lowerRaw, upperRaw) => {
-        const lower = Number(String(lowerRaw || '').trim());
-        const upper = Number(String(upperRaw || '').trim());
-        if (!Number.isFinite(lower) || !Number.isFinite(upper)) return null;
-        return { lower: Math.abs(lower), upper: Math.abs(upper) };
-    };
-
-    const openPositionEntrySwapConfirmKey = useMemo(
-        () => buildEntrySwapConfirmKey(openPositionEntrySwapPreview, openPositionEntrySwapSlippage),
-        [openPositionEntrySwapPreview, openPositionEntrySwapSlippage],
-    );
-
     const suppressOpenPositionPreview = useCallback((delay = 900) => {
         setOpenPositionPreviewSuspended(true);
         setOpenPositionEntrySwapPreviewLoading(false);
@@ -1906,136 +1889,19 @@ export default function App() {
         setOpenPositionDCAExpanded(false);
     };
 
-    // Refresh config when opening the modal so toggles from the bot take effect without a full reload.
-    useEffect(() => {
-        if (!openPositionPool || !hasInitData) return;
-
-        let aborted = false;
-        const controller = new AbortController();
-
-        fetchGlobalConfig({ apiBaseUrl, initData, signal: controller.signal })
-            .then((resp) => {
-                if (aborted) return;
-                setGlobalConfig(resp?.config || resp || null);
-            })
-            .catch(() => {
-                // ignore; keep existing config
-            });
-
-        return () => {
-            aborted = true;
-            controller.abort();
-        };
-    }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
-
-    useEffect(() => {
-        if (!openPositionPool) return;
-
-        let aborted = false;
-        const controller = new AbortController();
-        const poolAddress = String(openPositionPool?.pool_address || '').trim();
-        if (!poolAddress) {
-            setOpenPositionSmartRanges([]);
-            setOpenPositionSmartRangesLoading(false);
-            return undefined;
-        }
-
-        setOpenPositionSmartRangesLoading(true);
-        fetchSMPoolStats({ apiBaseUrl, poolAddress, signal: controller.signal })
-            .then((resp) => {
-                if (aborted) return;
-                const nextGroups = Array.isArray(resp?.range_groups) ? resp.range_groups : [];
-                setOpenPositionSmartRanges((prev) => (nextGroups.length > 0 ? nextGroups : prev));
-            })
-            .catch(() => {
-                if (aborted) return;
-            })
-            .finally(() => {
-                if (aborted) return;
-                setOpenPositionSmartRangesLoading(false);
-            });
-
-        return () => {
-            aborted = true;
-            controller.abort();
-        };
-    }, [apiBaseUrl, openPositionPool]);
-
-    const openPositionLiqInFlightRef = useRef(false);
-
-    useEffect(() => {
-        if (!openPositionPool || !hasInitData || !openPositionShowLiquidityChart) {
-            setOpenPositionLiqProfile(null);
-            setOpenPositionLiqProfileError('');
-            return undefined;
-        }
-        const poolAddress = String(openPositionPool?.pool_address || '').trim();
-        const chain = resolveOpenPositionPoolChain(openPositionPool, 'bsc');
-        const protocol = normalizeOpenPositionPoolVersion(openPositionPool);
-        if (!poolAddress || !protocol) {
-            setOpenPositionLiqProfile(null);
-            return undefined;
-        }
-        // Reset stale liquidity data before loading the selected pool.
-        setOpenPositionLiqProfile(null);
-        const ctrl = new AbortController();
-        setOpenPositionLiqProfileLoading(true);
-        setOpenPositionLiqProfileError('');
-        fetchPoolLiquidityDistribution({
-            apiBaseUrl,
-            initData,
-            chain,
-            protocol,
-            address: poolAddress,
-            radius: 24,
-            signal: ctrl.signal,
-        })
-            .then((data) => {
-                if (ctrl.signal.aborted) return;
-                setOpenPositionLiqProfile(data);
-            })
-            .catch((err) => {
-                if (ctrl.signal.aborted) return;
-                const msg = String(err?.message || err || '');
-                if (/page could not be found|<html|<!doctype/i.test(msg)) {
-                    // eslint-disable-next-line no-console
-                    console.warn('[liquidity_distribution] endpoint unavailable', msg.slice(0, 200));
-                    setOpenPositionLiqProfileError('流动性分布接口不可用');
-                } else {
-                    setOpenPositionLiqProfileError(msg.slice(0, 60));
-                }
-                setOpenPositionLiqProfile(null);
-            })
-            .finally(() => {
-                if (!ctrl.signal.aborted) setOpenPositionLiqProfileLoading(false);
-            });
-
-        // Refresh every 3s while avoiding duplicate in-flight requests.
-        const timer = setInterval(() => {
-            if (document.hidden) return;
-            if (openPositionLiqInFlightRef.current) return;
-            openPositionLiqInFlightRef.current = true;
-            fetchPoolLiquidityDistribution({
-                apiBaseUrl, initData, chain, protocol, address: poolAddress, radius: 24,
-            })
-                .then((data) => { setOpenPositionLiqProfile(data); setOpenPositionLiqProfileError(''); })
-                .catch((err) => {
-                    const msg = String(err?.message || err || '');
-                    if (/page could not be found|<html|<!doctype/i.test(msg)) {
-                        setOpenPositionLiqProfileError('流动性分布接口不可用');
-                    } else {
-                        setOpenPositionLiqProfileError(msg.slice(0, 60));
-                    }
-                })
-                .finally(() => { openPositionLiqInFlightRef.current = false; });
-        }, 3000);
-
-        return () => {
-            ctrl.abort();
-            clearInterval(timer);
-        };
-    }, [apiBaseUrl, initData, hasInitData, openPositionPool, openPositionShowLiquidityChart]);
-
+    useOpenPositionMarketData({
+        apiBaseUrl,
+        initData,
+        hasInitData,
+        openPositionPool,
+        openPositionShowLiquidityChart,
+        setGlobalConfig,
+        setOpenPositionSmartRanges,
+        setOpenPositionSmartRangesLoading,
+        setOpenPositionLiqProfile,
+        setOpenPositionLiqProfileLoading,
+        setOpenPositionLiqProfileError,
+    });
     const openPositionChartLowerTick = useMemo(() => {
         if (openPositionRangeInputMode !== 'percentage') {
             return Number.isInteger(openPositionSelectedManualTickLower)
@@ -2148,562 +2014,30 @@ export default function App() {
         applyOpenPositionTickRange(lower, upper);
     }, [applyOpenPositionTickRange, suppressOpenPositionPreview]);
 
-    useEffect(() => {
-        if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
-
-        let aborted = false;
-        const controller = new AbortController();
-
-        setWalletsLoading(true);
-        setWalletsError('');
-
-        const chain = String(openPositionPool?.chain || '').trim().toLowerCase();
-        fetchWallets({ apiBaseUrl, initData, chain, signal: controller.signal })
-            .then((resp) => {
-                if (aborted) return;
-                setWalletsData(resp || null);
-
-                const list = Array.isArray(resp?.wallets) ? resp.wallets : [];
-                if (list.length === 0) {
-                    setOpenPositionWalletId('');
-                    storage.remove(STORAGE_OPEN_POSITION_WALLET_ID);
-                    return;
-                }
-
-                const saved = String(storage.get(STORAGE_OPEN_POSITION_WALLET_ID) || '').trim();
-                const savedOk = saved && list.some((w) => String(w?.id) === saved);
-                const next = savedOk ? saved : String((list.find((w) => w?.is_default) || list[0])?.id || '');
-                setOpenPositionWalletId(next);
-                if (next) storage.set(STORAGE_OPEN_POSITION_WALLET_ID, next);
-            })
-            .catch((e) => {
-                if (aborted) return;
-                setWalletsData(null);
-                setWalletsError(String(e?.message || e));
-            })
-            .finally(() => {
-                if (aborted) return;
-                setWalletsLoading(false);
-            });
-
-        return () => {
-            aborted = true;
-            controller.abort();
-        };
-    }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, openPositionPool]);
-
-    useEffect(() => {
-        if (!openPositionPool || !hasInitData) {
-            setOpenPositionPrepareChecks([]);
-            setOpenPositionPreparePrivateZapInfo(null);
-            setOpenPositionPrepareTokenRisk(null);
-            setOpenPositionRangeEditor(null);
-            return undefined;
-        }
-
-        let walletId;
-        if (multiWalletEnabled && !walletsLoading && !walletsError) {
-            const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
-            if (list.length === 1) {
-                const onlyId = Number(list[0]?.id);
-                if (Number.isFinite(onlyId) && onlyId > 0) {
-                    walletId = onlyId;
-                }
-            } else if (list.length > 1) {
-                const wid = Number(openPositionWalletId);
-                if (Number.isFinite(wid) && wid > 0) {
-                    walletId = wid;
-                }
-            }
-        }
-
-        let active = true;
-        const controller = new AbortController();
-        prepareOpenPosition({
-            apiBaseUrl,
-            initData,
-            chain: openPositionPool?.chain || 'bsc',
-            poolAddress: openPositionPool?.pool_address,
-            poolVersion: openPositionPool?.protocol_version,
-            walletId,
-            signal: controller.signal,
-        })
-            .then((resp) => {
-                if (!active) return;
-                setOpenPositionPrepareChecks(Array.isArray(resp?.checks) ? resp.checks : []);
-                setOpenPositionPreparePrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
-                setOpenPositionPrepareTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
-                setOpenPositionRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
-            })
-            .catch(() => {
-                if (!active || controller.signal.aborted) return;
-                setOpenPositionPrepareChecks([]);
-                setOpenPositionPreparePrivateZapInfo(null);
-                setOpenPositionPrepareTokenRisk(null);
-                setOpenPositionRangeEditor(null);
-            });
-
-        return () => {
-            active = false;
-            controller.abort();
-        };
-    }, [
+    const { handleOpenPosition, openPositionRetryAction } = useOpenPositionFlow({
         apiBaseUrl,
         initData,
         hasInitData,
-        openPositionPool,
         multiWalletEnabled,
-        walletsLoading,
-        walletsError,
         walletsData,
-        openPositionWalletId,
-    ]);
-
-    useEffect(() => {
-        if (!openPositionEntrySwapPreview?.required || openPositionEntrySwapSlippageDirty) return;
-        const recommended = Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance);
-        const current = Number(openPositionEntrySwapPreview?.current_slippage_tolerance);
-        const next = Number.isFinite(recommended) ? recommended : current;
-        if (!Number.isFinite(next)) return;
-        setOpenPositionEntrySwapSlippage(String(next));
-    }, [openPositionEntrySwapPreview, openPositionEntrySwapSlippageDirty]);
-
-    useEffect(() => {
-        setOpenPositionEntrySwapConfirm(true);
-    }, [openPositionEntrySwapConfirmKey]);
-
-    useEffect(() => {
-        if (openPositionPreviewSuspended) {
-            setOpenPositionEntrySwapPreviewLoading(false);
-            setOpenPositionPreviewPending(false);
-            return undefined;
-        }
-        if (!openPositionPool || !hasInitData) {
-            setOpenPositionEntrySwapPreview(null);
-            setOpenPositionEntrySwapPreviewLoading(false);
-            setOpenPositionPreviewPending(false);
-            setOpenPositionEntrySwapPreviewError('');
-            setOpenPositionPrivateZapInfo(null);
-            setOpenPositionSizingAdvice(null);
-            setOpenPositionPreviewRangeEditor(null);
-            setOpenPositionPreviewTokenRisk(null);
-            return undefined;
-        }
-
-        const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
-        void poolAddr;
-
-        const amount = Number(String(openPositionAmount || '').trim());
-        const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
-        const taskSlippage = parseOptionalPercent(openPositionSlippage);
-        const entrySwapSlippage = parseOptionalPercent(openPositionEntrySwapSlippage);
-        const invalidPercentageRange = !range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100;
-        const invalidManualTickRange = !Number.isInteger(openPositionSelectedManualTickLower)
-            || !Number.isInteger(openPositionSelectedManualTickUpper)
-            || openPositionSelectedManualTickLower >= openPositionSelectedManualTickUpper;
-        if (
-            !Number.isFinite(amount) ||
-            amount <= 0 ||
-            !taskSlippage.valid ||
-            !entrySwapSlippage.valid ||
-            (openPositionRangeInputMode === 'percentage' ? invalidPercentageRange : invalidManualTickRange)
-        ) {
-            setOpenPositionEntrySwapPreview(null);
-            setOpenPositionEntrySwapPreviewLoading(false);
-            setOpenPositionPreviewPending(false);
-            setOpenPositionEntrySwapPreviewError('');
-            setOpenPositionPrivateZapInfo(null);
-            setOpenPositionSizingAdvice(null);
-            setOpenPositionChecks([]);
-            setOpenPositionPreviewRangeEditor(null);
-            setOpenPositionPreviewTokenRisk(null);
-            return undefined;
-        }
-
-        let walletId = openPositionWalletId;
-        if (multiWalletEnabled) {
-            if (walletsLoading) {
-                setOpenPositionEntrySwapPreview(null);
-                setOpenPositionEntrySwapPreviewLoading(false);
-                setOpenPositionPreviewPending(false);
-                setOpenPositionEntrySwapPreviewError('');
-                setOpenPositionPrivateZapInfo(null);
-                setOpenPositionSizingAdvice(null);
-                setOpenPositionPreviewRangeEditor(null);
-                setOpenPositionPreviewTokenRisk(null);
-                return undefined;
-            }
-            if (walletsError) {
-                setOpenPositionEntrySwapPreview(null);
-                setOpenPositionEntrySwapPreviewLoading(false);
-                setOpenPositionPreviewPending(false);
-                setOpenPositionEntrySwapPreviewError('');
-                setOpenPositionPrivateZapInfo(null);
-                setOpenPositionSizingAdvice(null);
-                setOpenPositionPreviewRangeEditor(null);
-                setOpenPositionPreviewTokenRisk(null);
-                return undefined;
-            }
-            const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
-            if (list.length === 0) {
-                setOpenPositionEntrySwapPreview(null);
-                setOpenPositionEntrySwapPreviewLoading(false);
-                setOpenPositionPreviewPending(false);
-                setOpenPositionEntrySwapPreviewError('');
-                setOpenPositionPrivateZapInfo(null);
-                setOpenPositionSizingAdvice(null);
-                setOpenPositionPreviewRangeEditor(null);
-                setOpenPositionPreviewTokenRisk(null);
-                return undefined;
-            }
-            if (list.length > 1) {
-                const wid = Number(openPositionWalletId);
-                walletId = wid;
-                if (!Number.isFinite(wid) || wid <= 0) {
-                    setOpenPositionEntrySwapPreview(null);
-                    setOpenPositionEntrySwapPreviewLoading(false);
-                    setOpenPositionPreviewPending(false);
-                    setOpenPositionEntrySwapPreviewError('');
-                    setOpenPositionPrivateZapInfo(null);
-                    setOpenPositionSizingAdvice(null);
-                    setOpenPositionPreviewRangeEditor(null);
-                    setOpenPositionPreviewTokenRisk(null);
-                    return undefined;
-                }
-            } else {
-                const onlyId = Number(list[0]?.id);
-                if (Number.isFinite(onlyId) && onlyId > 0) {
-                    walletId = onlyId;
-                }
-            }
-        }
-
-        let active = true;
-        const controller = new AbortController();
-        setOpenPositionPreviewPending(true);
-        setOpenPositionEntrySwapPreviewLoading(false);
-        setOpenPositionEntrySwapPreviewError('');
-
-        const timer = setTimeout(async () => {
-            try {
-                const previewPayload = {
-                    apiBaseUrl,
-                    initData,
-                    chain: openPositionPool?.chain || 'bsc',
-                    poolAddress: openPositionPool?.pool_address,
-                    poolVersion: openPositionPool?.protocol_version,
-                    amount,
-                    rangeInputMode: openPositionRangeInputMode === 'price' ? 'tick' : openPositionRangeInputMode,
-                    slippageTolerance: taskSlippage.value,
-                    entrySwapSlippageTolerance: entrySwapSlippage.value,
-                    allowEntrySwap: true,
-                    walletId,
-                    ackLiquidityRisk: openPositionRiskAck,
-                    taskMode: openPositionTaskMode,
-                    signal: controller.signal,
-                };
-                if (openPositionRangeInputMode === 'percentage') {
-                    previewPayload.rangeLowerPct = range.lower;
-                    previewPayload.rangeUpperPct = range.upper;
-                } else {
-                    previewPayload.tickLower = openPositionSelectedManualTickLower;
-                    previewPayload.tickUpper = openPositionSelectedManualTickUpper;
-                }
-                const resp = await previewOpenPosition(previewPayload);
-                if (!active) return;
-                setOpenPositionChecks(Array.isArray(resp?.checks) ? resp.checks : []);
-                setOpenPositionEntrySwapPreview(resp?.entry_swap || { required: false });
-                setOpenPositionPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
-                setOpenPositionSizingAdvice(resp?.sizing_advice && typeof resp.sizing_advice === 'object' ? resp.sizing_advice : null);
-                setOpenPositionPreviewRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
-                setOpenPositionPreviewTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
-            } catch (e) {
-                if (!active || controller.signal.aborted) return;
-                const msg = String(e?.message || e || '').trim();
-                const payload = resolveOpenPositionErrorPayload(e);
-                const failChecks = extractOpenPositionErrorChecks(e, 'preview_safety');
-                const entrySwapInfo = payload?.entry_swap && typeof payload.entry_swap === 'object'
-                    ? payload.entry_swap
-                    : null;
-                setOpenPositionEntrySwapPreview(entrySwapInfo);
-                setOpenPositionPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
-                setOpenPositionSizingAdvice(payload?.sizing_advice && typeof payload.sizing_advice === 'object' ? payload.sizing_advice : null);
-                setOpenPositionChecks(failChecks);
-                setOpenPositionPreviewRangeEditor(payload?.range_editor && typeof payload.range_editor === 'object' ? payload.range_editor : null);
-                setOpenPositionPreviewTokenRisk(payload?.token_risk && typeof payload.token_risk === 'object' ? payload.token_risk : null);
-                setOpenPositionEntrySwapPreviewError(failChecks.length > 0 ? '' : (msg || '获取前置兑换预览失败'));
-            } finally {
-                if (active) {
-                    setOpenPositionEntrySwapPreviewLoading(false);
-                    setOpenPositionPreviewPending(false);
-                }
-            }
-        }, 350);
-
-        return () => {
-            active = false;
-            clearTimeout(timer);
-            controller.abort();
-        };
-    }, [
-        apiBaseUrl,
-        initData,
-        hasInitData,
-        openPositionPool,
-        openPositionAmount,
-        openPositionRangeInputMode,
-        openPositionRangeLower,
-        openPositionRangeUpper,
-        openPositionTickLower,
-        openPositionTickUpper,
-        openPositionPriceLower,
-        openPositionPriceUpper,
-        openPositionSlippage,
-        openPositionEntrySwapSlippage,
-        openPositionRiskAck,
-        multiWalletEnabled,
-        walletsLoading,
         walletsError,
-        walletsData,
-        openPositionWalletId,
+        walletsLoading,
+        setWalletsData,
+        setWalletsError,
+        setWalletsLoading,
+        draft: openPositionDraft,
+        activeOpenPositionChecks,
+        openPositionTickLowerValue,
+        openPositionTickUpperValue,
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
-        openPositionTaskMode,
-        openPositionPreviewSuspended,
-    ]);
-
-    const submitOpenPositionRequest = async ({ submitPayload, totalBatches, pairTitle, dcaEnabled, closeDraft = false }) => {
-        lastOpenPositionRequestRef.current = { submitPayload, totalBatches, pairTitle, dcaEnabled };
-        setOperationProgress({
-            operation: 'open_position',
-            currentStep: 1,
-            totalSteps: totalBatches,
-            status: 'active',
-            error: '',
-            pair: pairTitle,
-            dca: dcaEnabled,
-        });
-        if (closeDraft) {
-            setOpenPositionPool(null);
-            resetOpenPositionDraft();
-        }
-        try {
-            const resp = await openPosition(submitPayload);
-            const taskId = Number(resp?.task_id);
-            lastOpenPositionRequestRef.current = null;
-            setOpenPositionError('');
-            setOpenPositionChecks([]);
-            setOpenPositionEntrySwapPreview(null);
-            setOpenPositionEntrySwapPreviewError('');
-            setOpenPositionEntrySwapConfirm(true);
-            setOpenPositionPreviewTokenRisk(null);
-            setOperationProgress((prev) => (prev?.operation === 'open_position'
-                ? {
-                    ...prev,
-                    taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : prev.taskId,
-                    currentStep: dcaEnabled ? 1 : totalBatches,
-                    status: dcaEnabled ? 'active_dca' : 'done',
-                    error: '',
-                }
-                : prev));
-            try {
-                await refreshRealtimePositionsNow({ setBusy: false, updateError: false });
-            } catch (refreshErr) {
-                console.error('[OpenPosition] Immediate position refresh failed:', refreshErr);
-            }
-            return true;
-        } catch (e) {
-            const msg = String(e?.message || e || '').trim();
-            const payload = resolveOpenPositionErrorPayload(e);
-            setOpenPositionPreviewTokenRisk(payload?.token_risk && typeof payload.token_risk === 'object' ? payload.token_risk : null);
-            const entrySwapInfo = payload?.entry_swap && typeof payload.entry_swap === 'object'
-                ? payload.entry_swap
-                : null;
-            const failChecks = extractOpenPositionErrorChecks(e, 'submit_safety');
-            if (entrySwapInfo) {
-                setOpenPositionEntrySwapPreview(entrySwapInfo);
-                setOpenPositionEntrySwapPreviewError('');
-            }
-            if (failChecks.length > 0) {
-                setOpenPositionChecks((prev) => {
-                    const merged = Array.isArray(prev)
-                        ? prev.filter((item) => !failChecks.some((next) => next?.key === item?.key))
-                        : [];
-                    return [...merged, ...failChecks];
-                });
-            }
-            setOpenPositionError(msg || '开仓执行失败。');
-            setOperationProgress((prev) => (prev?.operation === 'open_position'
-                ? { ...prev, status: 'error', error: msg || '开仓执行失败。' }
-                : prev));
-            return false;
-        }
-    };
-
-    const handleOpenPosition = async () => {
-        if (!openPositionPool) return;
-        if (!hasInitData) {
-            setOpenPositionError('缺少 Telegram initData，请从 Mini App 内重新打开。');
-            return;
-        }
-        const amount = Number(String(openPositionAmount || '').trim());
-        if (!Number.isFinite(amount) || amount <= 0) {
-            setOpenPositionError('请输入有效的开仓金额。');
-            return;
-        }
-        const warnChecks = activeOpenPositionChecks.filter(c => c.status === 'warn');
-        const failChecks = activeOpenPositionChecks.filter(c => c.status === 'fail');
-        if (failChecks.length > 0) {
-            setOpenPositionError(failChecks.map(c => c.detail || c.label).join('; '));
-            return;
-        }
-        const requiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
-        const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
-        if (openPositionRangeInputMode === 'percentage') {
-            if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-                setOpenPositionError('请输入 0 到 100 之间的有效百分比区间。');
-                return;
-            }
-        } else if (openPositionRangeInputMode !== 'price' && (!Number.isInteger(openPositionTickLowerValue) || !Number.isInteger(openPositionTickUpperValue) || openPositionTickLowerValue >= openPositionTickUpperValue)) {
-            setOpenPositionError('请输入有效的 Tick 区间。');
-            return;
-        }
-
-        if (openPositionRangeInputMode !== 'percentage' && (!Number.isInteger(openPositionSelectedManualTickLower) || !Number.isInteger(openPositionSelectedManualTickUpper) || openPositionSelectedManualTickLower >= openPositionSelectedManualTickUpper)) {
-            setOpenPositionError(openPositionRangeInputMode === 'price' ? '请输入有效的价格区间。' : '请输入有效的 Tick 区间。');
-            return;
-        }
-
-        const slippageParsed = parseOptionalPercent(openPositionSlippage);
-        if (!slippageParsed.valid) {
-            setOpenPositionError('请输入 0 到 100 之间的有效滑点。');
-            return;
-        }
-        const entrySwapSlippageParsed = parseOptionalPercent(openPositionEntrySwapSlippage);
-        if (!entrySwapSlippageParsed.valid) {
-            setOpenPositionError('请输入 0 到 100 之间的有效前置兑换滑点。');
-            return;
-        }
-        let walletId = openPositionWalletId;
-
-        if (multiWalletEnabled) {
-            if (walletsLoading) {
-                setOpenPositionError('钱包列表仍在加载，请稍后再试。');
-                return;
-            }
-            if (walletsError) {
-                setOpenPositionError(walletsError);
-                return;
-            }
-            const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
-            if (list.length === 0) {
-                setOpenPositionError('当前没有可用钱包。');
-                return;
-            }
-            if (list.length > 1) {
-                const wid = Number(openPositionWalletId);
-                walletId = wid;
-                if (!Number.isFinite(wid) || wid <= 0) {
-                    setOpenPositionError('请选择开仓钱包。');
-                    return;
-                }
-            } else {
-                const onlyId = String(list[0]?.id || '').trim();
-                walletId = onlyId;
-                if (onlyId && String(openPositionWalletId || '') !== onlyId) {
-                    setOpenPositionWalletId(onlyId);
-                    storage.set(STORAGE_OPEN_POSITION_WALLET_ID, onlyId);
-                }
-            }
-        }
-
-        if (openPositionPreviewPending || openPositionPreviewSuspended) {
-            setOpenPositionError('前置兑换预览仍在更新，请稍后再试。');
-            return;
-        }
-        if (openPositionEntrySwapPreviewError) {
-            setOpenPositionError(openPositionEntrySwapPreviewError);
-            return;
-        }
-
-        const effectiveOpenPositionDCAEnabled = openPositionDCAEnabled
-            && !openPositionIsSingleSidedSelection
-            && !(openPositionGlobalDCAMinSplitAmount > 0 && amount < openPositionGlobalDCAMinSplitAmount);
-
-        if (effectiveOpenPositionDCAEnabled) {
-            if (openPositionDCAPercentages.length < 2 || openPositionDCAPercentages.length > 5) {
-                setOpenPositionError('分批数量必须在 2 到 5 批之间。');
-                return;
-            }
-            if (openPositionDCAPercentages.some((v) => !(Number(v) >= 5))) {
-                setOpenPositionError('每批比例不能低于 5%。');
-                return;
-            }
-            const sum = openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0);
-            if (Math.abs(sum - 100) > 0.01) {
-                setOpenPositionError(`分批比例总和必须等于 100%，当前为 ${sum.toFixed(2)}%。`);
-                return;
-            }
-            const iv = Number(openPositionDCAInterval);
-            if (!(Number.isFinite(iv) && iv >= 0 && iv <= 300)) {
-                setOpenPositionError('分批间隔必须在 0 到 300 秒之间。');
-                return;
-            }
-        }
-
-        if (Number.isFinite(slippageParsed.value) && slippageParsed.value > 1) {
-            const ok = await requestConfirm({
-                title: '高滑点确认',
-                message: `当前任务滑点为 ${slippageParsed.value}% ，已超过 1%，请确认是否继续。`,
-                confirmText: '继续提交',
-                cancelText: '返回修改',
-                tone: 'danger',
-            });
-            if (!ok) return;
-        }
-
-        const totalBatches = effectiveOpenPositionDCAEnabled ? openPositionDCAPercentages.length : 1;
-        const pairTitle = openPositionPool?.trading_pair || '';
-        const submitPayload = {
-            apiBaseUrl,
-            initData,
-            chain: openPositionPool?.chain || 'bsc',
-            poolAddress: openPositionPool?.pool_address,
-            poolVersion: openPositionPool?.protocol_version,
-            amount,
-            rangeInputMode: openPositionRangeInputMode === 'price' ? 'tick' : openPositionRangeInputMode,
-            slippageTolerance: slippageParsed.value,
-            entrySwapSlippageTolerance: openPositionEntrySwapPreview?.required ? entrySwapSlippageParsed.value : undefined,
-            allowEntrySwap: true,
-            confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required),
-            walletId,
-            ackLiquidityRisk: requiresAck && openPositionRiskAck,
-            dcaEnabled: effectiveOpenPositionDCAEnabled,
-            dcaPercentages: effectiveOpenPositionDCAEnabled ? openPositionDCAPercentages.map((v) => Number(v) || 0) : undefined,
-            dcaIntervalSeconds: effectiveOpenPositionDCAEnabled ? Number(openPositionDCAInterval) : undefined,
-            taskMode: openPositionTaskMode,
-        };
-        if (openPositionRangeInputMode === 'percentage') {
-            submitPayload.rangeLowerPct = range.lower;
-            submitPayload.rangeUpperPct = range.upper;
-        } else {
-            submitPayload.tickLower = openPositionSelectedManualTickLower;
-            submitPayload.tickUpper = openPositionSelectedManualTickUpper;
-        }
-        setOpenPositionLoading(true);
-        setOpenPositionError('');
-        try {
-            await submitOpenPositionRequest({
-                submitPayload,
-                totalBatches,
-                pairTitle,
-                dcaEnabled: effectiveOpenPositionDCAEnabled,
-                closeDraft: true,
-            });
-        } finally {
-            setOpenPositionLoading(false);
-        }
-    };
+        openPositionIsSingleSidedSelection,
+        openPositionGlobalDCAMinSplitAmount,
+        operationProgress,
+        setOperationProgress,
+        requestConfirm,
+        refreshRealtimePositionsNow,
+    });
 
     // Load once on boot so chain-mode settings can affect UX (single-chain mode hides chain selectors).
     useEffect(() => {
@@ -3255,16 +2589,6 @@ export default function App() {
     const confirmButtonClass = confirmState?.tone === 'danger'
         ? 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
         : brand.solidButtonClass;
-    const openPositionRetryAction = operationProgress?.operation === 'open_position'
-        && operationProgress?.status === 'error'
-        && lastOpenPositionRequestRef.current
-        ? async () => {
-            const attempt = lastOpenPositionRequestRef.current;
-            if (!attempt) return;
-            await submitOpenPositionRequest({ ...attempt, closeDraft: false });
-        }
-        : undefined;
-
     const hotPoolsErrorText = useMemo(
         () => localizeWebAppError(hotPoolsError, allowEmptyInitData),
         [hotPoolsError, allowEmptyInitData],
@@ -4152,59 +3476,18 @@ export default function App() {
                         contentClassName="px-4 pb-5"
                         footerClassName="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.85rem)]"
                         footer={
-                            <div className="space-y-3">
-                                {openPositionError ? (
-                                    <div className="rounded-2xl border border-red-500/40 bg-gradient-to-br from-red-500/10 to-transparent p-4 text-red-800 shadow-sm dark:border-red-500/30 dark:text-red-200">
-                                        <div className="flex items-start gap-3">
-                                            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-red-600 dark:text-red-400">
-                                                <X className="h-3 w-3" strokeWidth={3} />
-                                            </div>
-                                            <div className="text-[12px] font-medium leading-relaxed">
-                                                {openPositionError}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : null}
-                                <div className="flex items-center gap-2">
-                                    {openPositionStep > 0 ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => setOpenPositionStep((s) => Math.max(0, s - 1))}
-                                            disabled={openPositionLoading}
-                                            className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                        >
-                                            <ChevronLeft className="h-4 w-4" />
-                                            上一步
-                                        </button>
-                                    ) : null}
-                                    {openPositionStep < 2 ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => setOpenPositionStep((s) => Math.min(2, s + 1))}
-                                            disabled={openPositionStep === 0 ? !openPositionStep0Valid : !openPositionStep1Valid}
-                                            className={`inline-flex flex-1 items-center justify-center gap-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] ${(openPositionStep === 0 ? !openPositionStep0Valid : !openPositionStep1Valid)
-                                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
-                                                : brand.solidButtonClass
-                                                }`}
-                                        >
-                                            下一步
-                                            <ChevronRight className="h-4 w-4" />
-                                        </button>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={handleOpenPosition}
-                                            disabled={openPositionSubmitDisabled}
-                                            className={`flex-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
-                                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
-                                                : brand.solidButtonClass
-                                                }`}
-                                        >
-                                            {openPositionLoading ? '开仓中...' : '确认开仓'}
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
+                            <OpenPositionFooter
+                                openPositionError={openPositionError}
+                                openPositionStep={openPositionStep}
+                                openPositionLoading={openPositionLoading}
+                                openPositionStep0Valid={openPositionStep0Valid}
+                                openPositionStep1Valid={openPositionStep1Valid}
+                                openPositionSubmitDisabled={openPositionSubmitDisabled}
+                                brand={brand}
+                                onPrevious={() => setOpenPositionStep((s) => Math.max(0, s - 1))}
+                                onNext={() => setOpenPositionStep((s) => Math.min(2, s + 1))}
+                                onSubmit={handleOpenPosition}
+                            />
                         }
                         title={
                             <div className="min-w-0">
@@ -4217,205 +3500,53 @@ export default function App() {
                     >
                         <div className="pb-2">
                             {/* 步骤指示器 */}
-                            <div className="mb-3 flex items-center gap-1.5">
-                                {[{ k: 0, label: '资金' }, { k: 1, label: '区间' }, { k: 2, label: '确认' }].map((s, i) => {
-                                    const active = openPositionStep === s.k;
-                                    const done = openPositionStep > s.k;
-                                    return (
-                                        <React.Fragment key={s.k}>
-                                            <button
-                                                type="button"
-                                                onClick={() => { if (s.k < openPositionStep) setOpenPositionStep(s.k); }}
-                                                disabled={s.k > openPositionStep}
-                                                className={`flex items-center gap-1.5 rounded-full px-1.5 py-1 text-[12px] font-semibold transition ${active ? brand.textClass : done ? 'text-zinc-500 dark:text-white/55' : 'text-zinc-400 dark:text-white/30'}`}
-                                            >
-                                                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${active ? brand.solidButtonClass : done ? 'bg-zinc-300 text-white dark:bg-white/25 dark:text-white' : 'bg-zinc-200 text-zinc-400 dark:bg-white/10 dark:text-white/40'}`}>
-                                                    {done ? <Check className="h-3 w-3" strokeWidth={3} /> : i + 1}
-                                                </span>
-                                                {s.label}
-                                            </button>
-                                            {i < 2 ? <div className={`h-px flex-1 ${done ? 'bg-zinc-300 dark:bg-white/20' : 'bg-zinc-200 dark:bg-white/10'}`} /> : null}
-                                        </React.Fragment>
-                                    );
-                                })}
-                            </div>
+                            <OpenPositionStepIndicator
+                                openPositionStep={openPositionStep}
+                                brand={brand}
+                                onStepClick={setOpenPositionStep}
+                            />
                             {/* Step 0 · 资金 */}
-                            <div className={`space-y-3 ${openPositionStep === 0 ? '' : 'hidden'}`}>
-                            {multiWalletEnabled ? (
-                                <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">钱包</div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">
-                                            {walletsLoading
-                                                ? '加载中...'
-                                                : [
-                                                    String(walletsData?.chain || '').toUpperCase(),
-                                                    walletsData?.native_symbol && walletsData?.stable_symbol
-                                                        ? `${walletsData.native_symbol}/${walletsData.stable_symbol}`
-                                                        : '',
-                                                ].filter(Boolean).join(' | ')}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setOpenPositionWalletBalancesHidden((prev) => !prev)}
-                                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white/80 text-zinc-600 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:bg-white/10"
-                                            title={openPositionWalletBalancesHidden ? '显示钱包余额' : '隐藏钱包余额'}
-                                            aria-label={openPositionWalletBalancesHidden ? '显示钱包余额' : '隐藏钱包余额'}
-                                        >
-                                            {openPositionWalletBalancesHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                                        </button>
-                                    </div>
-
-                                    {walletsError ? (
-                                        <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-200">
-                                            {walletsError}
-                                        </div>
-                                    ) : null}
-
-                                    {!walletsLoading && !walletsError && openPositionWalletOptions.length === 0 ? (
-                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">当前没有可用钱包。</div>
-                                    ) : null}
-
-                                    <div
-                                        className="mt-2 grid gap-2"
-                                        style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(openPositionWalletOptions.length, 1), 3)}, minmax(0, 1fr))` }}
-                                    >
-                                        {openPositionWalletOptions.map((w) => {
-                                            const id = String(w?.id || '').trim();
-                                            const addr = String(w?.address || '').trim();
-                                            const name = String(w?.name || '').trim();
-                                            const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}..${addr.slice(-4)}` : addr;
-                                            const selected = id && id === String(openPositionWalletId || '').trim();
-
-                                            return (
-                                                <button
-                                                    key={id || addr}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        if (!id) return;
-                                                        setOpenPositionWalletId(id);
-                                                        storage.set(STORAGE_OPEN_POSITION_WALLET_ID, id);
-                                                        setOpenPositionError('');
-                                                        hapticSelection();
-                                                    }}
-                                                    className={`flex min-h-[38px] w-full min-w-0 items-center rounded-xl border px-2.5 py-1.5 text-left transition ${selected
-                                                        ? `${brand.selectionClass} shadow-sm`
-                                                        : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
-                                                        }`}
-                                                >
-                                                    <div className="flex min-w-0 flex-1 items-center gap-1">
-                                                        <span className="truncate text-[11px] font-semibold leading-tight">{name || shortAddr || `钱包 ${id}`}</span>
-                                                        {w?.is_default ? (
-                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[9px] font-bold text-zinc-500 dark:text-white/50">默认</span>
-                                                        ) : null}
-                                                    </div>
-                                                    <span className="shrink-0 pl-1 text-[10px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
-                                                        {openPositionWalletBalancesHidden ? '****' : `$${String(w?.stable_balance ?? '--')}`}
-                                                    </span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ) : null}
-
-                            {openPositionShowPrivateZapProtectionHint ? (
-                                <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/12 to-transparent p-3 dark:border-emerald-400/20 dark:from-emerald-400/10">
-                                    <div className="flex items-start gap-3">
-                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
-                                            <Check className="h-3 w-3" strokeWidth={3} />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">智能建议金额</div>
-                                            <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
-                                                系统会结合池子深度、钱包余额和当前模式给出建议金额，你也可以直接手动输入。</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : null}
-
-                            {openPositionTokenRisk ? (
-                                <div
-                                    className={`flex min-h-8 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] leading-none ${tokenRiskPanelClass(openPositionTokenRiskTone)}`}
-                                    title={tokenRiskSummary(openPositionTokenRisk)}
-                                >
-                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
-                                    <span className="shrink-0 font-bold">{tokenRiskLabel(openPositionTokenRisk)}</span>
-                                    <span className="min-w-0 flex-1 truncate opacity-80">{openPositionTokenRiskSymbol || 'Token'} · OKX 风控 · {tokenRiskSummary(openPositionTokenRisk)}</span>
-                                    <span className="shrink-0 rounded-full bg-white/35 px-1.5 py-0.5 text-[10px] font-bold dark:bg-black/20">等级 {openPositionTokenRisk.risk_control_label}</span>
-                                </div>
-                            ) : null}
-
-                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
-                                {/* 金额：大字主输入 */}
-                                <div className="flex items-baseline justify-between gap-2">
-                                    <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">开仓金额</span>
-                                    <span className="text-[11px] font-medium text-zinc-400 dark:text-white/35">USDT</span>
-                                </div>
-                                <input
-                                    value={openPositionAmount}
-                                    onChange={(e) => {
-                                        setOpenPositionAmount(e.target.value);
-                                        setOpenPositionError('');
-                                    }}
-                                    inputMode="decimal"
-                                    placeholder="0.00"
-                                    className="mt-1 w-full border-0 bg-transparent p-0 text-[26px] font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-white/20"
-                                />
-                                {/* 滑点：紧凑次级一行 */}
-                                <div className="mt-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">滑点容差</span>
-                                        <div className="relative w-28">
-                                            <input
-                                                value={openPositionSlippage}
-                                                onChange={(e) => {
-                                                    setOpenPositionSlippage(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="decimal"
-                                                className={`w-full rounded-lg border border-zinc-200/60 bg-white/80 py-1.5 pl-3 pr-8 text-sm text-right tabular-nums text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder={openPositionSlippagePlaceholder}
-                                            />
-                                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-400 dark:text-white/40">%</span>
-                                        </div>
-                                    </div>
-                                    <div className="mt-1.5 text-[11px] leading-4 text-zinc-400 dark:text-white/40">{openPositionGlobalSlippageHint}</div>
-                                </div>
-                                {openPositionNeedsHighSlippageConfirm ? (
-                                    <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
-                                        滑点 {openPositionTaskSlippage.value}% 较高，可能成交价较差。
-                                    </div>
-                                ) : null}
-                            </div>
-
-                            {openPositionRecommendedPositions.length > 0 ? (
-                                <div className="mt-2 flex flex-wrap gap-1.5 text-zinc-900 dark:text-white/80">
-                                    {openPositionRecommendedPositions.map((item, index) => {
-                                        const tone = item?.mode === 'conservative'
-                                            ? { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', icon: '稳' }
-                                            : item?.mode === 'neutral'
-                                                ? { border: 'border-amber-500/30', bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', icon: '均' }
-                                                : { border: 'border-red-500/30', bg: 'bg-red-500/10', text: 'text-red-700 dark:text-red-400', icon: '进' };
-                                        return (
-                                            <button
-                                                key={`${item?.mode || 'mode'}-${index}`}
-                                                type="button"
-                                                onClick={() => {
-                                                    setOpenPositionAmount(String(item?.liquidity_to_add || ''));
-                                                    setOpenPositionError('');
-                                                }}
-                                                className={`flex items-center gap-1 rounded-full border px-2 py-1 text-left text-[10px] font-bold ${tone.border} ${tone.bg} ${tone.text} transition-all duration-150 hover:brightness-110 active:scale-[0.99]`}
-                                            >
-                                                <span className="grayscale-[0.2] overflow-hidden">{tone.icon}</span>
-                                                <span className="shrink-0">{formatUsdCompact(item?.liquidity_to_add)}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            ) : null}
-
-                            </div>{/* /Step0 资金 */}
+                            <OpenPositionFundingStep
+                                active={openPositionStep === 0}
+                                multiWalletEnabled={multiWalletEnabled}
+                                walletsLoading={walletsLoading}
+                                walletsData={walletsData}
+                                walletsError={walletsError}
+                                walletOptions={openPositionWalletOptions}
+                                walletBalancesHidden={openPositionWalletBalancesHidden}
+                                walletId={openPositionWalletId}
+                                privateZapHintVisible={openPositionShowPrivateZapProtectionHint}
+                                tokenRisk={openPositionTokenRisk}
+                                tokenRiskTone={openPositionTokenRiskTone}
+                                tokenRiskSymbol={openPositionTokenRiskSymbol}
+                                amount={openPositionAmount}
+                                slippage={openPositionSlippage}
+                                slippagePlaceholder={openPositionSlippagePlaceholder}
+                                globalSlippageHint={openPositionGlobalSlippageHint}
+                                needsHighSlippageConfirm={openPositionNeedsHighSlippageConfirm}
+                                taskSlippage={openPositionTaskSlippage}
+                                recommendedPositions={openPositionRecommendedPositions}
+                                brand={brand}
+                                onToggleWalletBalancesHidden={() => setOpenPositionWalletBalancesHidden((prev) => !prev)}
+                                onSelectWallet={(id) => {
+                                    setOpenPositionWalletId(id);
+                                    storage.set(STORAGE_OPEN_POSITION_WALLET_ID, id);
+                                    setOpenPositionError('');
+                                    hapticSelection();
+                                }}
+                                onAmountChange={(value) => {
+                                    setOpenPositionAmount(value);
+                                    setOpenPositionError('');
+                                }}
+                                onSlippageChange={(value) => {
+                                    setOpenPositionSlippage(value);
+                                    setOpenPositionError('');
+                                }}
+                                onApplyRecommendedAmount={(value) => {
+                                    setOpenPositionAmount(value);
+                                    setOpenPositionError('');
+                                }}
+                            />
                             {/* Step 1 · 区间 */}
                             <div className={`${openPositionStep === 1 ? '' : 'hidden'}`}>
                             <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
@@ -4669,109 +3800,35 @@ export default function App() {
                             {/* Step 2 · 策略 & 确认 */}
                             <div className={`space-y-3 ${openPositionStep === 2 ? '' : 'hidden'}`}>
                             {/* 订单摘要 */}
-                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
-                                <div className="mb-2 text-xs font-semibold text-zinc-500 dark:text-white/50">本单概览</div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">交易对</span>
-                                        <span className="text-[13px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPool?.trading_pair || '--'}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">投入金额</span>
-                                        <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{openPositionAmount ? `${openPositionAmount} USDT` : '--'}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">价格区间</span>
-                                        <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{openPositionPriceRange ? `${openPositionPriceRange.lowerText} ~ ${openPositionPriceRange.upperText}` : '--'}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="text-[13px] text-zinc-500 dark:text-white/45">区间偏移</span>
-                                        <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{openPositionPriceRange ? `${openPositionPriceRange.lowerPctText} / ${openPositionPriceRange.upperPctText}` : '--'}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">本次开仓</div>
-                                    <div className="text-[10px] text-zinc-500 dark:text-white/45 truncate max-w-[200px]">上破:{openPositionOutOfRangeActions.above} 下破:{openPositionOutOfRangeActions.below}</div>
-                                </div>
-                                <div className="mt-3 flex overflow-x-auto gap-1.5 pb-1" style={{ scrollbarWidth: 'none' }}>
-                                    {TASK_MODE_OPTIONS.map((option) => (
-                                        <button
-                                            key={option.value}
-                                            type="button"
-                                            onClick={() => {
-                                                setOpenPositionTaskMode(option.value);
-                                                setOpenPositionError('');
-                                            }}
-                                            disabled={openPositionLoading}
-                                            title={option.description}
-                                            className={`shrink-0 rounded-xl px-3 py-1.5 text-center transition ${openPositionTaskMode === option.value
-                                                ? 'bg-zinc-800 text-white shadow-sm dark:bg-white dark:text-zinc-900 border border-transparent'
-                                                : 'border border-zinc-200/50 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                                }`}
-                                        >
-                                            <div className="text-[11px] font-semibold">{option.shortLabel}</div>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+                            <OpenPositionOrderSummary
+                                pool={openPositionPool}
+                                amount={openPositionAmount}
+                                priceRange={openPositionPriceRange}
+                            />
+                            <OpenPositionTaskModePanel
+                                taskMode={openPositionTaskMode}
+                                outOfRangeActions={openPositionOutOfRangeActions}
+                                loading={openPositionLoading}
+                                onChangeTaskMode={(value) => {
+                                    setOpenPositionTaskMode(value);
+                                    setOpenPositionError('');
+                                }}
+                            />
 
-                            <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-900 dark:text-white/80">
-                                        分批开仓
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[11px] font-medium text-zinc-500 dark:text-white/45">{openPositionIsSingleSidedSelection ? '单边不支持' : (openPositionDCAEnabled ? '已启用' : '已关闭')}</span>
-                                        <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={openPositionDCAEnabled}
-                                            onClick={() => {
-                                                setOpenPositionDCAEnabled(!openPositionDCAEnabled);
-                                                setOpenPositionError('');
-                                            }}
-                                            disabled={openPositionLoading || openPositionIsSingleSidedSelection}
-                                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ${openPositionDCAEnabled ? brand.solidButtonClass : 'bg-zinc-200 dark:bg-white/15'}`}
-                                        >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${openPositionDCAEnabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-                                        </button>
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setOpenPositionDCAExpanded((v) => !v)}
-                                    disabled={openPositionLoading}
-                                    className="mt-3 flex w-full items-center gap-2 rounded-xl border border-zinc-200/50 bg-white/70 px-3 py-2 text-left transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-                                >
-                                    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap" style={{ scrollbarWidth: 'none' }}>
-                                        {openPositionDCAEnabled ? (
-                                            <>
-                                                {openPositionDCASummaryItems.map((item) => (
-                                                    <span
-                                                        key={item.key}
-                                                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200/50 bg-zinc-50 px-2 py-1 text-[10px] font-semibold text-zinc-700 dark:border-white/10 dark:bg-[#14171c]/50 dark:text-white/70"
-                                                    >
-                                                        <span className="opacity-70">{item.label}</span>
-                                                        <span>{item.amount}</span>
-                                                    </span>
-                                                ))}
-                                                <span className="inline-flex items-center rounded-full border border-zinc-200/50 bg-zinc-50 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:border-white/10 dark:bg-[#14171c]/50 dark:text-white/70">
-                                                    间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
-                                                </span>
-                                            </>
-                                        ) : (
-                                            <span className="text-[11px] text-zinc-500 dark:text-white/45">
-                                                减少单次成交市场冲击
-                                            </span>
-                                        )}
-                                    </div>
-                                    <span className="shrink-0 text-[10px] font-medium text-zinc-500 dark:text-white/40">
-                                        {openPositionDCAExpanded ? '收起' : '展开'}
-                                    </span>
-                                </button>
-                                {openPositionDCAExpanded ? (
+                            <OpenPositionDCAPanel
+                                enabled={openPositionDCAEnabled}
+                                expanded={openPositionDCAExpanded}
+                                loading={openPositionLoading}
+                                singleSided={openPositionIsSingleSidedSelection}
+                                summaryItems={openPositionDCASummaryItems}
+                                interval={openPositionDCAInterval}
+                                brand={brand}
+                                onToggleEnabled={() => {
+                                    setOpenPositionDCAEnabled(!openPositionDCAEnabled);
+                                    setOpenPositionError('');
+                                }}
+                                onToggleExpanded={() => setOpenPositionDCAExpanded((v) => !v)}
+                            >
                                     <div className="mt-3">
                                         {openPositionGlobalDCAMinSplitAmount > 0 ? (
                                             <div className="text-[10px] leading-4 text-zinc-500 dark:text-white/45">
@@ -4831,7 +3888,7 @@ export default function App() {
                                                 </div>
                                                 <div className="mt-3 flex items-center justify-between gap-2">
                                                     <div className={`text-[10px] font-semibold ${openPositionDCASumValid ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
-                                                        合计：{openPositionDCASum.toFixed(2)}% {openPositionDCASumValid ? '✓' : '（需100%）'}
+                                                        合计：{openPositionDCASum.toFixed(2)}% {openPositionDCASumValid ? '?' : '（需100%）'}
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <button
@@ -4890,78 +3947,21 @@ export default function App() {
                                             </>
                                         ) : null}
                                     </div>
-                                ) : null}
-                            </div>
+                            </OpenPositionDCAPanel>
 
 
 
 
-                            {(openPositionEntrySwapPreviewLoading || openPositionDisplayChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
-                                <div className="mt-4">
-                                    <div className="mb-2 text-xs font-semibold text-zinc-900 dark:text-white/80">开仓前检查</div>
-                                    {openPositionEntrySwapPreviewLoading ? (
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">正在更新预检结果...</div>
-                                    ) : null}
-                                    {openPositionEntrySwapPreviewError ? (
-                                        <div className="mt-1 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:text-red-200">
-                                            {openPositionEntrySwapPreviewError}
-                                        </div>
-                                    ) : null}
-                                    {openPositionDisplayChecks.length > 0 ? (
-                                        <div className="space-y-2">
-                                            {openPositionDisplayChecks.map((item) => {
-                                                const isPass = item.status === 'pass';
-                                                const isWarn = item.status === 'warn';
-                                                const isFail = item.status === 'fail';
-                                                return (
-                                                    <div key={item.key} className="rounded-lg p-2 " style={{
-                                                        background: isFail ? 'rgba(239,68,68,0.07)' : isWarn ? 'rgba(234,179,8,0.07)' : 'rgba(34,197,94,0.07)'
-                                                    }}>
-                                                        <div className="flex items-start gap-2">
-                                                            <div className={`mt-0.5 shrink-0 ${isFail ? 'text-red-500' : isWarn ? 'text-amber-500' : 'text-emerald-500'}`}>
-                                                                {isFail ? <XCircle className="h-4 w-4" /> : isWarn ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center justify-between gap-2">
-                                                                    <span className={`text-[11px] font-semibold ${isFail ? 'text-red-700 dark:text-red-300' : isWarn ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{item.label}</span>
-                                                                    {item.detail ? <span className="text-[10px] text-zinc-500 dark:text-white/40 text-right">{item.detail}</span> : null}
-                                                                </div>
-                                                                {isWarn ? (
-                                                                    <div className="mt-2 text-[11px] leading-tight opacity-80">建议先确认价格、滑点和兑换路径，再决定是否继续开仓。</div>
-                                                                ) : null}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
+                            <OpenPositionPrecheckPanel
+                                loading={openPositionEntrySwapPreviewLoading}
+                                displayChecks={openPositionDisplayChecks}
+                                error={openPositionEntrySwapPreviewError}
+                            />
 
-                            {(openPositionEntrySwapPreviewLoading || openPositionEntrySwapPreview?.required) ? (
-                                <div className="rounded-xl border border-amber-400/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent px-3 py-2 dark:border-amber-400/25 dark:from-amber-400/10 dark:via-amber-400/5">
-                                    {openPositionEntrySwapPreviewLoading ? (
-                                        <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-200">
-                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-2.64-6.36"/></svg>
-                                            正在获取前置兑换预览...
-                                        </div>
-                                    ) : openPositionEntrySwapPreview?.required ? (
-                                        <div className="flex items-center justify-between gap-3">
-                                            <div className="flex min-w-0 items-center gap-1.5">
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-600 dark:text-amber-300"><path d="M7 17l5-5-5-5M13 17l5-5-5-5"/></svg>
-                                                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-200">需要前置兑换</span>
-                                                <span className="truncate text-[11px] text-zinc-600 dark:text-white/60">
-                                                    {openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</span>
-                                                </span>
-                                            </div>
-                                            <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
-                                                建议滑点 {Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
-                                            </span>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
+                            <OpenPositionEntrySwapPreviewPanel
+                                loading={openPositionEntrySwapPreviewLoading}
+                                preview={openPositionEntrySwapPreview}
+                            />
 
                             {/* footer action rendered above */}
                             </div>{/* /Step2 确认 */}
