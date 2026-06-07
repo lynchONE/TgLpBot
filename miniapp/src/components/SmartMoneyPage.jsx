@@ -30,6 +30,27 @@ import PositionCard from './PositionCard.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import gmgnIcon from '../image/gmgn.svg';
+import {
+    getBrandActionChipClass,
+    getBrandLinkClass,
+    getFilterButtonClass,
+    getIconButtonClass,
+    getInputClass,
+} from '../features/smartMoney/shared/brandClasses';
+import {
+    isHexAddressValue,
+    normalizeWalletAddress,
+    shortAddr,
+    tailAddr,
+} from '../features/smartMoney/shared/wallet';
+import { buildGmgnUrl } from '../features/smartMoney/shared/pools';
+import { formatOptionalNumber, parseOptionalNumber } from '../features/smartMoney/shared/poolFilterStorage';
+import {
+    formatHeatmapRate,
+    formatHeatmapUSD,
+    formatPreviewUsd,
+    getPositionSelectionKey,
+} from '../features/smartMoney/shared/format';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeIcon, color: '#d1884f' },
@@ -41,19 +62,6 @@ const WALLET_AVATAR_ICONS = Object.entries(
 ).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
 const SMART_MONEY_AVATAR_ACCEPT = 'image/png,image/jpeg,image/webp';
 const SMART_MONEY_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
-const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
-
-function getBrandLinkClass(brand) {
-    return brand?.key === 'emerald'
-        ? 'text-emerald-300 hover:text-emerald-200'
-        : 'text-[#dfff8b] hover:text-[#efffb8]';
-}
-
-function getBrandActionChipClass(brand) {
-    return brand?.key === 'emerald'
-        ? 'rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 font-semibold text-emerald-200 hover:bg-emerald-500/18'
-        : 'rounded-full border border-[#bcff2f]/25 bg-[#bcff2f]/14 px-2.5 py-1 font-semibold text-[#efffb8] hover:bg-[#bcff2f]/20';
-}
 
 function GoldenDogPageContent({
     apiBaseUrl,
@@ -861,37 +869,6 @@ async function playSmartMoneyBeep() {
     return true;
 }
 
-function normalizeWalletAddress(value) {
-    const raw = String(value || '').trim();
-    if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
-    return `0x${raw.slice(2).toLowerCase()}`;
-}
-
-function getBrandFocusRingClass(brand) {
-    return brand?.key === 'emerald'
-        ? 'focus:ring-emerald-500'
-        : 'focus:ring-[#bcff2f]';
-}
-
-function getInputClass(brand) {
-    return `w-full rounded-2xl border border-white/[0.04] bg-zinc-950/55 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:ring-1 ${getBrandFocusRingClass(brand)}`;
-}
-
-function getFilterButtonClass(active, brand) {
-    return active
-        ? brand.softButtonClass
-        : 'border border-white/[0.04] bg-zinc-900/55 text-zinc-400 hover:bg-zinc-800/70';
-}
-
-function getIconButtonClass(danger = false) {
-    return [
-        'inline-flex h-9 w-9 items-center justify-center rounded-xl border transition disabled:cursor-not-allowed disabled:opacity-50',
-        danger
-            ? 'border-red-500/20 bg-red-500/10 text-red-300 hover:bg-red-500/15'
-            : 'border-white/[0.05] bg-zinc-900/65 text-zinc-300 hover:bg-zinc-800/80',
-    ].join(' ');
-}
-
 function walletAvatarIdx(addr) {
     if (!addr || addr.length < 6) return 0;
     return parseInt(addr.slice(-4), 16) % WALLET_AVATAR_ICONS.length;
@@ -901,21 +878,6 @@ function resolveWalletAvatarSrc(address, avatarUrl) {
     const preferred = resolveSMAvatarAssetUrl(avatarUrl);
     if (preferred) return preferred;
     return WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0];
-}
-
-function shortAddr(addr) {
-    if (!addr || addr.length < 10) return addr || '';
-    return addr.slice(0, 6) + '...' + addr.slice(-4);
-}
-
-function tailAddr(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return '--';
-    return raw.slice(-4);
-}
-
-function isHexAddressValue(value) {
-    return /^0x[a-fA-F0-9]{40}$/.test(String(value || '').trim());
 }
 
 function walletSourceLabel(source) {
@@ -956,50 +918,12 @@ function resolvePoolChain(value) {
     return Number(value?.chain_id) === 8453 ? 'base' : 'bsc';
 }
 
-function pickGmgnTokenAddress(pool) {
-    const pair = String(pool?.trading_pair || '').trim();
-    const token0 = String(pool?.token0_address || '').trim();
-    const token1 = String(pool?.token1_address || '').trim();
-    if (!pair) return token0 || token1;
-
-    const symbols = pair.split('/').map((part) => String(part || '').trim().toLowerCase());
-    if (symbols.length !== 2) return token0 || token1;
-
-    const [leftSymbol, rightSymbol] = symbols;
-    const leftStable = GMGN_STABLE_SYMBOLS.has(leftSymbol);
-    const rightStable = GMGN_STABLE_SYMBOLS.has(rightSymbol);
-    if (leftStable && !rightStable) return token1 || token0;
-    if (rightStable && !leftStable) return token0 || token1;
-    return token0 || token1;
-}
-
-function buildGmgnUrl(pool, fallbackChain = 'bsc') {
-    const tokenAddress = pickGmgnTokenAddress(pool);
-    if (!tokenAddress) return '';
-    const chain = String(pool?.chain || fallbackChain || 'bsc').trim().toLowerCase() === 'base' ? 'base' : 'bsc';
-    return `https://gmgn.ai/${chain}/token/${tokenAddress}`;
-}
-
 function getPairInitials(value) {
     return getPairLabel(value)
         .split(/[/-]/)
         .map((part) => String(part || '').trim().charAt(0).toUpperCase())
         .join('')
         .slice(0, 2) || 'LP';
-}
-
-function parseOptionalNumber(value) {
-    const text = String(value ?? '').replace(/,/g, '').trim();
-    if (!text) return null;
-    const match = text.match(/-?\d+(\.\d+)?/);
-    if (!match) return null;
-    const num = Number(match[0]);
-    if (!Number.isFinite(num)) return null;
-    return Math.max(0, num);
-}
-
-function formatOptionalNumber(value) {
-    return Number.isFinite(value) ? String(value) : '';
 }
 
 const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
@@ -1090,44 +1014,6 @@ const POOL_HEATMAP_SORTS = [
     { key: 'rate', label: '速率' },
     { key: 'fee', label: '手续费' },
 ];
-const USD_PREVIEW_FORMATTER = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-});
-
-function getPositionSelectionKey(position) {
-    const positionRef = String(position?.position_ref || '').trim();
-    if (positionRef) return positionRef;
-    const id = String(position?.id || '').trim();
-    if (id) return id;
-    const wallet = String(position?.wallet_address || '').trim().toLowerCase();
-    const pool = String(position?.pool_address || '').trim().toLowerCase();
-    const nft = String(position?.nft_token_id || '').trim();
-    return [wallet, pool, nft].filter(Boolean).join(':');
-}
-
-function formatPreviewUsd(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '--';
-    return USD_PREVIEW_FORMATTER.format(num);
-}
-
-function formatHeatmapUSD(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '--';
-    if (Math.abs(num) < 0.005) return '$0';
-    return formatUSDCompact(num);
-}
-
-function formatHeatmapRate(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return '--';
-    if (num >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
-    if (num >= 1) return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
-    return `$${num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`;
-}
-
 function heatmapWindowLabel(value) {
     return POOL_HEATMAP_WINDOWS.find((item) => item.key === value)?.label || '1min';
 }

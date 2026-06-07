@@ -37,7 +37,7 @@ import {
     addLiquidity,
 } from './lib/api';
 import { fetchSMPoolStats } from './lib/smartMoneyApi';
-import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
+import { hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 import {
     ACCENT_THEME_OPTIONS,
@@ -48,18 +48,97 @@ import { TASK_MODE_OPTIONS, getTaskModeMeta, getOutOfRangeActionSummary as getTa
 import useScrollMemory from './hooks/useScrollMemory';
 import useGlobalSettings from './hooks/useGlobalSettings';
 import useAuthData from './hooks/useAuthData';
+import useInitData from './hooks/useInitData';
 import {
     formatUsd,
     formatUsdCompact,
     formatRangePercentCompact,
     formatSignedPercentCompact,
-    formatPercentInputValue,
     normalizeTokenRisk,
     shortAddress,
     tokenRiskLabel,
     tokenRiskSummary,
     tokenRiskToneClass,
 } from './lib/format';
+import { resolveAllowEmptyInitData, resolveApiBaseUrl, localizeWebAppError } from './lib/apiBase';
+import { storage } from './lib/storage';
+import { buildTopNavItems, hasModuleAccess } from './features/appShell/moduleAccess';
+import {
+    MODULE_POLL_CONFIG,
+    POSITIONS_ACTIVE_POLL_KEY,
+    POSITIONS_IDLE_POLL_KEY,
+    STORAGE_MODULE_POLL_SECS,
+    STORAGE_POLL_SEC,
+    clampModulePollSec,
+    getModulePollConfig,
+    getModulePollSec,
+    normalizeModulePollOverrides,
+} from './features/appShell/pollConfig';
+import {
+    DEFAULT_WEB_WORKBENCH_WIDGETS,
+    STORAGE_WEB_WORKBENCH_WIDGETS,
+    WEB_WORKBENCH_WIDGETS,
+    normalizeWebWorkbenchWidgets,
+} from './features/appShell/webWorkbench';
+import { formatUserLabel } from './features/admin/formatUser';
+import {
+    HOT_POOL_SORT_TABS,
+    HOT_POOLS_RISK_FILTER_ALL,
+    HOT_POOLS_RISK_FILTER_OPTIONS,
+    STORAGE_HOT_POOLS_FILTER,
+    computeHotPoolActiveFeeRate,
+    defaultHotPoolsFilter,
+    formatDraftNumber,
+    hotPoolMatchesRiskFilter,
+    normalizeHotPoolsFilter,
+    normalizeHotPoolsRiskFilter,
+    parseDraftNumber,
+    parseMetricNumber,
+} from './features/hotPools/filter';
+import { buildGmgnUrl } from './features/pools/gmgn';
+import { comparePositionsByCreatedAt } from './features/positions/sort';
+import {
+    OPEN_POSITION_RANGE_OPTIONS,
+    POSITION_SM_RANGE_BATCH_SIZE,
+    POSITION_SM_RANGE_STALE_MS,
+    STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES,
+    STORAGE_OPEN_POSITION_WALLET_ID,
+} from './features/openPosition/constants';
+import {
+    buildAddLiquidityPresetOptions,
+    buildDCASummaryItems,
+    formatAmountInput,
+    formatDCAIntervalHint,
+    formatPercentValue,
+    formatPriceInputValue,
+    formatPriceValue,
+    formatRatioCompact,
+    formatUSDTValue,
+    parseAmountInput,
+    parseOptionalPercent,
+    resolvePositionSlippage,
+} from './features/openPosition/format';
+import {
+    buildDefaultFocusedPercentageRange,
+    buildDefaultFocusedTickRange,
+    buildDisplayPriceRangeFromTicks,
+    buildGridBins,
+    estimateDisplayGridStepPercent,
+    normalizeDisplayPriceTickRange,
+    nudgeDisplayPriceBoundary,
+    tickToPoolPrice,
+} from './features/openPosition/tickMath';
+import {
+    buildEntrySwapConfirmKey,
+    extractOpenPositionErrorChecks,
+    normalizeOpenPositionPoolVersion,
+    normalizePoolKey,
+    normalizePositionSmartMoneyGroups,
+    resolveOpenPositionErrorPayload,
+    resolveOpenPositionPoolChain,
+} from './features/openPosition/safety';
+import useOpenPositionDraft from './features/openPosition/useOpenPositionDraft';
+import { tokenRiskPanelClass } from './features/openPosition/tokenRiskClass';
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
 const LazySwapModule = lazy(() => import('./components/SwapModule.jsx'));
@@ -69,938 +148,6 @@ const CHAIN_SELECT_OPTIONS = [
     { value: 'bsc', label: 'BSC' },
     { value: 'base', label: 'Base' },
 ];
-
-function resolveApiBaseUrl() {
-    const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
-    if (queryApiBase && queryApiBase.trim()) return queryApiBase.trim();
-
-    const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
-    if (envBase) {
-        try {
-            const pageProto = window.location.protocol;
-            const envProto = new URL(envBase).protocol;
-            if (pageProto === 'https:' && envProto === 'http:') {
-                return '';
-            }
-        } catch {
-            // ignore URL parse errors and keep envBase as-is
-        }
-        return envBase;
-    }
-
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
-        return 'http://localhost:8080';
-    }
-
-    // Production default: same-origin `/api/*` (e.g. via Vercel Function proxy)
-    return '';
-}
-
-function resolveAllowEmptyInitData() {
-    const queryAllow = new URLSearchParams(window.location.search).get('allowEmptyInitData');
-    if (queryAllow && ['1', 'true', 'yes', 'y', 'on'].includes(queryAllow.toLowerCase())) {
-        return true;
-    }
-
-    const envAllow = String(import.meta.env.VITE_ALLOW_EMPTY_INITDATA || '').trim().toLowerCase();
-    if (['1', 'true', 'yes', 'y', 'on'].includes(envAllow)) {
-        return true;
-    }
-
-    const host = window.location.hostname;
-    return host === 'localhost' || host === '127.0.0.1';
-}
-
-function parsePositionCreatedTime(position) {
-    const raw = String(position?.running_since || position?.created_at || '').trim();
-    if (!raw) return null;
-    const ts = Date.parse(raw);
-    return Number.isFinite(ts) ? ts : null;
-}
-
-function comparePositionsByCreatedAt(a, b) {
-    const aTime = parsePositionCreatedTime(a);
-    const bTime = parsePositionCreatedTime(b);
-    if (aTime !== null && bTime !== null && aTime !== bTime) return aTime - bTime;
-    if (aTime !== null && bTime === null) return -1;
-    if (aTime === null && bTime !== null) return 1;
-
-    const aTaskId = Number(a?.task_id || 0);
-    const bTaskId = Number(b?.task_id || 0);
-    if (aTaskId !== bTaskId) return aTaskId - bTaskId;
-
-    const aKey = [
-        String(a?.title || ''),
-        String(a?.pool_id || a?.pool_address || '').toLowerCase(),
-        String(a?.position_id || ''),
-        String(a?.version || ''),
-        String(a?.exchange || '').toLowerCase(),
-    ].join(':');
-    const bKey = [
-        String(b?.title || ''),
-        String(b?.pool_id || b?.pool_address || '').toLowerCase(),
-        String(b?.position_id || ''),
-        String(b?.version || ''),
-        String(b?.exchange || '').toLowerCase(),
-    ].join(':');
-    return aKey.localeCompare(bKey, undefined, { numeric: true });
-}
-
-function useInitData() {
-    const [initData, setInitData] = useState('');
-    useEffect(() => {
-        const tg = getTelegramWebApp();
-        if (!tg) {
-            const fromQuery = new URLSearchParams(window.location.search).get('initData');
-            if (fromQuery) setInitData(fromQuery);
-            return;
-        }
-        try {
-            tg.ready?.();
-            tg.expand?.();
-        } catch {
-            // ignore
-        }
-        setInitData(tg.initData || '');
-    }, []);
-    return initData;
-}
-
-function localizeWebAppError(message, allowEmptyInitData = false) {
-    const text = String(message || '').trim();
-    if (!text) return '';
-    if (text.includes('missing initData')) {
-        if (allowEmptyInitData) {
-            return '当前缺少 Telegram initData。若这是本地调试，可在 backend/.env 中设置 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1。';
-        }
-        return '当前缺少 Telegram initData，请从 Telegram Mini App 内打开。';
-    }
-    if (text.includes('invalid initData')) {
-        return 'Telegram initData 校验失败，请检查 backend 侧 TELEGRAM_BOT_TOKEN 配置。';
-    }
-    return text;
-}
-
-const storage = {
-    get(key) {
-        try {
-            return window.localStorage?.getItem(key) ?? null;
-        } catch {
-            return null;
-        }
-    },
-    set(key, value) {
-        try {
-            window.localStorage?.setItem(key, value);
-        } catch {
-            // ignore
-        }
-    },
-    remove(key) {
-        try {
-            window.localStorage?.removeItem(key);
-        } catch {
-            // ignore
-        }
-    },
-};
-
-const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
-const STORAGE_MODULE_POLL_SECS = 'tglp_module_poll_interval_secs_v1';
-const MIN_POLL_INTERVAL_SEC = 2;
-const MAX_POLL_INTERVAL_SEC = 300;
-const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
-const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
-const STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES = 'tglp_open_position_hide_wallet_balances';
-const STORAGE_WEB_WORKBENCH_WIDGETS = 'tglp_web_workbench_widgets_v1';
-const POSITIONS_ACTIVE_POLL_KEY = 'positions_active';
-const POSITIONS_IDLE_POLL_KEY = 'positions_idle';
-const LEGACY_POSITIONS_POLL_KEY = 'positions';
-
-const WEB_WORKBENCH_WIDGETS = [
-    { key: 'hot_pools', label: '热门池' },
-    { key: 'gmgn_kline', label: 'K线' },
-    { key: 'positions', label: '仓位' },
-];
-const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
-const MODULE_POLL_CONFIG = [
-    { key: POSITIONS_ACTIVE_POLL_KEY, label: '仓位(有仓位)', defaultSec: 10, minSec: 2 },
-    { key: POSITIONS_IDLE_POLL_KEY, label: '仓位(无仓位)', defaultSec: 30, minSec: 5 },
-    { key: 'hot_pools', label: '热门池', defaultSec: 10, minSec: 2 },
-    { key: 'assets', label: '我的资产', defaultSec: 60, minSec: 60 },
-    { key: 'smart_money', label: '聪明钱', defaultSec: 15, minSec: 2 },
-    { key: 'admin_page', label: '管理页', defaultSec: 15, minSec: 5 },
-    { key: 'admin', label: '管理工作台', defaultSec: 10, minSec: 3 },
-    { key: 'swap', label: '兑换', defaultSec: 8, minSec: 5 },
-];
-
-function getModulePollConfig(key) {
-    const config = MODULE_POLL_CONFIG.find((item) => item.key === key);
-    if (!config) {
-        throw new Error(`Unknown poll module: ${key}`);
-    }
-    return config;
-}
-
-function clampModulePollSec(value, config) {
-    if (!config || !Number.isFinite(Number(config.minSec)) || !Number.isFinite(Number(config.defaultSec))) {
-        throw new Error('Invalid poll module config');
-    }
-    const n = Number(value);
-    const minSec = Math.max(MIN_POLL_INTERVAL_SEC, Number(config.minSec));
-    const defaultSec = Math.max(minSec, Number(config.defaultSec));
-    if (!Number.isFinite(n)) return defaultSec;
-    return Math.max(minSec, Math.min(MAX_POLL_INTERVAL_SEC, Math.floor(n)));
-}
-
-function normalizeModulePollOverrides(raw, legacyValue) {
-    let parsed = null;
-    if (raw) {
-        try {
-            parsed = JSON.parse(raw);
-        } catch {
-            parsed = null;
-        }
-    }
-    const out = {};
-    const legacyPositionsValue = parsed && Object.prototype.hasOwnProperty.call(parsed, LEGACY_POSITIONS_POLL_KEY)
-        ? parsed[LEGACY_POSITIONS_POLL_KEY]
-        : null;
-    MODULE_POLL_CONFIG.forEach((item) => {
-        if (parsed && Object.prototype.hasOwnProperty.call(parsed, item.key)) {
-            out[item.key] = clampModulePollSec(parsed[item.key], item);
-        } else if (item.key === POSITIONS_ACTIVE_POLL_KEY && legacyPositionsValue !== null) {
-            out[item.key] = clampModulePollSec(legacyPositionsValue, item);
-        }
-    });
-    if (Object.keys(out).length > 0) return out;
-
-    const legacy = Number(legacyValue);
-    if (Number.isFinite(legacy) && legacy >= MIN_POLL_INTERVAL_SEC) {
-        MODULE_POLL_CONFIG.forEach((item) => {
-            if (item.key === POSITIONS_IDLE_POLL_KEY) {
-                return;
-            }
-            out[item.key] = clampModulePollSec(legacy, item);
-        });
-    }
-    return out;
-}
-
-function getModulePollSec(key, defaultSec, overrides) {
-    const config = getModulePollConfig(key);
-    if (overrides && Object.prototype.hasOwnProperty.call(overrides, key)) {
-        return clampModulePollSec(overrides[key], config);
-    }
-    return clampModulePollSec(defaultSec, config);
-}
-const OPEN_POSITION_RANGE_OPTIONS_UNUSED = [
-    { key: 'percentage', label: '百分比' },
-];
-const OPEN_POSITION_RANGE_OPTIONS = [
-    { key: 'percentage', label: '百分比区间' },
-    { key: 'grid', label: 'Tick/价格' },
-];
-const OPEN_POSITION_GRID_RADIUS = 8;
-const OPEN_POSITION_DEFAULT_GRID_OFFSET = 3;
-const OPEN_POSITION_MANUAL_OPTIONS = [
-    { key: 'percentage', label: '百分比' },
-    { key: 'grid', label: 'Tick网格' },
-    { key: 'tick', label: '直接 Tick' },
-    { key: 'price', label: '价格区间' },
-];
-
-const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
-
-function normalizeWebWorkbenchWidgets(value) {
-    if (!Array.isArray(value)) return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
-    const allow = new Set(DEFAULT_WEB_WORKBENCH_WIDGETS);
-    const seen = new Set();
-    const next = [];
-    for (const raw of value) {
-        const key = String(raw || '').trim();
-        if (!allow.has(key) || seen.has(key)) continue;
-        seen.add(key);
-        next.push(key);
-    }
-    if (next.length === 0) return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
-    return next;
-}
-
-function pickGmgnTokenAddress(pool) {
-    const pair = String(pool?.trading_pair || '').trim();
-    const token0 = String(pool?.token0_address || '').trim();
-    const token1 = String(pool?.token1_address || '').trim();
-    if (!pair) return token0 || token1;
-
-    const symbols = pair.split('/').map((part) => String(part || '').trim().toLowerCase());
-    if (symbols.length !== 2) return token0 || token1;
-
-    const [leftSymbol, rightSymbol] = symbols;
-    const leftStable = GMGN_STABLE_SYMBOLS.has(leftSymbol);
-    const rightStable = GMGN_STABLE_SYMBOLS.has(rightSymbol);
-    if (leftStable && !rightStable) return token1 || token0;
-    if (rightStable && !leftStable) return token0 || token1;
-    return token0 || token1;
-}
-
-function buildGmgnUrl(pool, fallbackChain = 'bsc') {
-    const tokenAddress = pickGmgnTokenAddress(pool);
-    if (!tokenAddress) return '';
-    const chain = String(pool?.chain || fallbackChain || 'bsc').trim().toLowerCase() === 'base' ? 'base' : 'bsc';
-    return `https://gmgn.ai/${chain}/token/${tokenAddress}`;
-}
-
-function parseAmountInput(value) {
-    return Number(String(value || '').replace(/,/g, '').trim());
-}
-
-function resolvePositionSlippage(position) {
-    const candidates = [
-        position?.task_slippage_tolerance,
-        position?.slippage_tolerance,
-        position?.task?.slippage_tolerance,
-    ];
-    for (const candidate of candidates) {
-        const n = Number(candidate);
-        if (Number.isFinite(n) && n >= 0 && n <= 100) {
-            return n;
-        }
-    }
-    return undefined;
-}
-
-function roundPresetAmount(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return 0;
-    if (num >= 1000) return Math.round(num / 50) * 50;
-    if (num >= 200) return Math.round(num / 20) * 20;
-    if (num >= 50) return Math.round(num / 10) * 10;
-    if (num >= 10) return Math.round(num / 5) * 5;
-    return Math.round(num * 10) / 10;
-}
-
-function formatAmountInput(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '';
-    if (num >= 100) return String(Math.round(num));
-    return num.toFixed(num >= 10 ? 1 : 2).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function formatRatioCompact(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '--';
-    if (num >= 100) return `${Math.round(num)}%`;
-    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
-    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
-function buildAddLiquidityPresetOptions(referenceAmount) {
-    const presets = [];
-    const seen = new Set();
-
-    const pushPreset = (value, hint) => {
-        const rounded = roundPresetAmount(value);
-        if (!(rounded > 0)) return;
-        const key = rounded.toFixed(2);
-        if (seen.has(key)) return;
-        seen.add(key);
-        presets.push({
-            value: rounded,
-            label: `${formatAmountInput(rounded)} USDT`,
-            hint,
-        });
-    };
-
-    if (referenceAmount > 0) {
-        pushPreset(referenceAmount * 0.25, '25% 参考仓位');
-        pushPreset(referenceAmount * 0.5, '50% 参考仓位');
-        pushPreset(referenceAmount, '1x 参考仓位');
-    }
-
-    pushPreset(50, '固定金额');
-    pushPreset(100, '固定金额');
-    pushPreset(200, '固定金额');
-
-    return presets.slice(0, 4);
-}
-
-const defaultHotPoolsFilter = {
-    enabled: true,
-    keyword: '',
-    riskFilter: 'all',
-    minFees: 60,
-    minFeeRate: 0.3,
-    minActiveFeeRate: null,
-    minTvl: 1000,
-    minVolume: 2000,
-    minTxCount: null,
-};
-const HOT_POOLS_RISK_FILTER_ALL = 'all';
-const HOT_POOLS_RISK_FILTER_OPTIONS = [
-    { value: HOT_POOLS_RISK_FILTER_ALL, label: '全部' },
-    { value: 'exclude_low_liquidity', label: '排除低流动性' },
-    { value: 'only_low_liquidity', label: '仅低流动性' },
-];
-
-function normalizeHotPoolsRiskFilter(value) {
-    const key = String(value || '').trim();
-    return HOT_POOLS_RISK_FILTER_OPTIONS.some((item) => item.value === key)
-        ? key
-        : HOT_POOLS_RISK_FILTER_ALL;
-}
-
-function parseNullableNumber(value) {
-    if (value === null || value === undefined || value === '') return null;
-    const n = Number(value);
-    if (!Number.isFinite(n)) return null;
-    return Math.max(0, n);
-}
-
-function parseMetricNumber(value) {
-    if (value === null || value === undefined || value === '') return NaN;
-    const raw = typeof value === 'string' ? value.replace(/,/g, '').trim() : value;
-    const direct = Number(raw);
-    if (Number.isFinite(direct)) return direct;
-    const match = String(value).match(/-?\d+(\.\d+)?/);
-    if (!match) return NaN;
-    const parsed = Number(match[0]);
-    return Number.isFinite(parsed) ? parsed : NaN;
-}
-
-function computeHotPoolActiveFeeRate(pool) {
-    const totalFees = Number(pool?.total_fees ?? 0);
-    const activeLiquidityUsd = Number(pool?.activeLiquidityUSD ?? pool?.active_liquidity_usd ?? 0);
-    if (!Number.isFinite(totalFees) || !Number.isFinite(activeLiquidityUsd) || activeLiquidityUsd <= 0) {
-        return null;
-    }
-    return (totalFees / activeLiquidityUsd) * 100;
-}
-
-function normalizeHotPoolsFilter(value) {
-    const base = { ...defaultHotPoolsFilter };
-    if (!value || typeof value !== 'object') return base;
-    if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
-        base.enabled = Boolean(value.enabled);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'keyword')) {
-        const raw = String(value.keyword ?? '').trim();
-        base.keyword = raw.length > 64 ? raw.slice(0, 64) : raw;
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'riskFilter')) {
-        base.riskFilter = normalizeHotPoolsRiskFilter(value.riskFilter);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'minFees')) {
-        base.minFees = parseNullableNumber(value.minFees);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'minFeeRate')) {
-        base.minFeeRate = parseNullableNumber(value.minFeeRate);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'minActiveFeeRate')) {
-        base.minActiveFeeRate = parseNullableNumber(value.minActiveFeeRate);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'minTvl')) {
-        base.minTvl = parseNullableNumber(value.minTvl);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
-        base.minVolume = parseNullableNumber(value.minVolume);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'minTxCount')) {
-        base.minTxCount = parseNullableNumber(value.minTxCount);
-    }
-    return base;
-}
-
-function parseDraftNumber(raw) {
-    const text = String(raw || '').trim();
-    if (!text) return null;
-    const match = text.match(/-?\d+(\.\d+)?/);
-    if (!match) return null;
-    const n = Number(match[0]);
-    if (!Number.isFinite(n)) return null;
-    return Math.max(0, n);
-}
-
-function formatDraftNumber(value) {
-    return Number.isFinite(value) ? String(value) : '';
-}
-
-function hotPoolMatchesRiskFilter(pool, filterKey) {
-    const key = normalizeHotPoolsRiskFilter(filterKey);
-    if (key === HOT_POOLS_RISK_FILTER_ALL) return true;
-
-    const risk = normalizeTokenRisk(pool?.token_risk);
-    const isLowLiquidity = Boolean(risk?.has_low_liquidity);
-
-    switch (key) {
-        case 'exclude_low_liquidity':
-            return !isLowLiquidity;
-        case 'only_low_liquidity':
-            return isLowLiquidity;
-        default:
-            return true;
-    }
-}
-
-function parseOptionalPercent(raw) {
-    const text = String(raw || '').trim();
-    if (!text) return { valid: true, value: undefined };
-    const num = Number(text);
-    if (!Number.isFinite(num) || num < 0 || num > 100) {
-        return { valid: false, value: undefined };
-    }
-    return { valid: true, value: num };
-}
-
-function formatDCAIntervalHint(seconds) {
-    const n = Number(seconds);
-    if (!Number.isFinite(n) || n <= 0) return '立即执行';
-    if (n < 1) return `${Math.round(n * 1000)}ms`;
-    if (Number.isInteger(n)) return `${n}s`;
-    return `${n.toFixed(1)}s`;
-}
-
-function formatPriceValue(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '--';
-    if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    if (num >= 1) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
-    return Number(num.toPrecision(6)).toString();
-}
-
-function formatPriceInputValue(value) {
-    const text = formatPriceValue(value);
-    return text === '--' ? '' : text;
-}
-
-function tickToPoolPrice(tick, token0Decimals, token1Decimals) {
-    const tickValue = Number(tick);
-    if (!Number.isFinite(tickValue)) return NaN;
-    const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
-    return Math.pow(1.0001, tickValue) * decAdj;
-}
-
-function poolPriceToTick(price, token0Decimals, token1Decimals) {
-    const priceValue = Number(price);
-    if (!Number.isFinite(priceValue) || priceValue <= 0) return NaN;
-    const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
-    const ratio = priceValue / decAdj;
-    if (!Number.isFinite(ratio) || ratio <= 0) return NaN;
-    return Math.log(ratio) / Math.log(1.0001);
-}
-
-function normalizeDisplayPriceTickRange(
-    lowerRaw,
-    upperRaw,
-    invertPrice,
-    token0Decimals,
-    token1Decimals,
-    tickSpacing,
-    minTick,
-    maxTick,
-) {
-    const lowerDisplay = Number(String(lowerRaw || '').trim());
-    const upperDisplay = Number(String(upperRaw || '').trim());
-    if (!Number.isFinite(lowerDisplay) || !Number.isFinite(upperDisplay) || lowerDisplay <= 0 || upperDisplay <= 0) {
-        return null;
-    }
-    const firstPoolPrice = invertPrice ? 1 / lowerDisplay : lowerDisplay;
-    const secondPoolPrice = invertPrice ? 1 / upperDisplay : upperDisplay;
-    const firstTick = poolPriceToTick(firstPoolPrice, token0Decimals, token1Decimals);
-    const secondTick = poolPriceToTick(secondPoolPrice, token0Decimals, token1Decimals);
-    if (!Number.isFinite(firstTick) || !Number.isFinite(secondTick)) return null;
-    const spacing = Number(tickSpacing);
-    const resolvedMinTick = Number(minTick);
-    const resolvedMaxTick = Number(maxTick);
-    let lowerTick = Number.isFinite(spacing) && spacing > 0
-        ? roundDownToTickSpacing(Math.min(firstTick, secondTick), spacing)
-        : Math.floor(Math.min(firstTick, secondTick));
-    let upperTick = Number.isFinite(spacing) && spacing > 0
-        ? roundUpToTickSpacing(Math.max(firstTick, secondTick), spacing)
-        : Math.ceil(Math.max(firstTick, secondTick));
-    if (Number.isFinite(resolvedMinTick)) lowerTick = Math.max(lowerTick, resolvedMinTick);
-    if (Number.isFinite(resolvedMaxTick)) upperTick = Math.min(upperTick, resolvedMaxTick);
-    if (Number.isFinite(spacing) && spacing > 0 && upperTick <= lowerTick) {
-        if (Number.isFinite(resolvedMaxTick) && lowerTick + spacing > resolvedMaxTick) {
-            lowerTick = upperTick - spacing;
-        } else {
-            upperTick = lowerTick + spacing;
-        }
-    }
-    if (!Number.isFinite(lowerTick) || !Number.isFinite(upperTick) || upperTick <= lowerTick) return null;
-    return { lowerTick: Math.trunc(lowerTick), upperTick: Math.trunc(upperTick) };
-}
-
-function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, token0Decimals, token1Decimals) {
-    if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return null;
-    const firstPrice = tickToPoolPrice(lowerTick, token0Decimals, token1Decimals);
-    const secondPrice = tickToPoolPrice(upperTick, token0Decimals, token1Decimals);
-    if (!Number.isFinite(firstPrice) || !Number.isFinite(secondPrice) || firstPrice <= 0 || secondPrice <= 0) return null;
-    const firstDisplay = invertPrice ? 1 / firstPrice : firstPrice;
-    const secondDisplay = invertPrice ? 1 / secondPrice : secondPrice;
-    if (!Number.isFinite(firstDisplay) || !Number.isFinite(secondDisplay) || firstDisplay <= 0 || secondDisplay <= 0) {
-        return null;
-    }
-    return {
-        lowerPrice: Math.min(firstDisplay, secondDisplay),
-        upperPrice: Math.max(firstDisplay, secondDisplay),
-    };
-}
-
-function estimateDisplayGridStepPercent(currentTick, tickSpacing, invertPrice, token0Decimals, token1Decimals) {
-    const baseTick = Number(currentTick);
-    const spacing = Number(tickSpacing);
-    if (!Number.isFinite(baseTick) || !Number.isFinite(spacing) || spacing <= 0) return null;
-    const currentPoolPrice = tickToPoolPrice(baseTick, token0Decimals, token1Decimals);
-    const nextPoolPrice = tickToPoolPrice(baseTick + spacing, token0Decimals, token1Decimals);
-    if (!Number.isFinite(currentPoolPrice) || currentPoolPrice <= 0 || !Number.isFinite(nextPoolPrice) || nextPoolPrice <= 0) {
-        return null;
-    }
-    const currentDisplay = invertPrice ? 1 / currentPoolPrice : currentPoolPrice;
-    const nextDisplay = invertPrice ? 1 / nextPoolPrice : nextPoolPrice;
-    if (!Number.isFinite(currentDisplay) || currentDisplay <= 0 || !Number.isFinite(nextDisplay) || nextDisplay <= 0) {
-        return null;
-    }
-    return Math.abs(((nextDisplay / currentDisplay) - 1) * 100);
-}
-
-function nudgeDisplayPriceBoundary(target, delta, invertPrice, tickSpacing, lowerTick, upperTick, minTick, maxTick) {
-    const spacing = Number(tickSpacing);
-    let nextLower = Number(lowerTick);
-    let nextUpper = Number(upperTick);
-    if (!Number.isFinite(spacing) || spacing <= 0) return null;
-    if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return null;
-
-    const changedRawBoundary = target === 'lower'
-        ? (invertPrice ? 'upper' : 'lower')
-        : (invertPrice ? 'lower' : 'upper');
-
-    if (target === 'lower') {
-        if (invertPrice) nextUpper += delta * spacing;
-        else nextLower -= delta * spacing;
-    } else if (invertPrice) {
-        nextLower -= delta * spacing;
-    } else {
-        nextUpper += delta * spacing;
-    }
-
-    const resolvedMinTick = Number(minTick);
-    const resolvedMaxTick = Number(maxTick);
-    if (Number.isFinite(resolvedMinTick)) nextLower = Math.max(nextLower, resolvedMinTick);
-    if (Number.isFinite(resolvedMaxTick)) nextUpper = Math.min(nextUpper, resolvedMaxTick);
-
-    if (changedRawBoundary === 'lower') {
-        if (Number.isFinite(resolvedMaxTick) && nextLower > resolvedMaxTick - spacing) {
-            nextLower = resolvedMaxTick - spacing;
-        }
-        if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
-        if (Number.isFinite(resolvedMaxTick) && nextUpper > resolvedMaxTick) {
-            nextUpper = resolvedMaxTick;
-            nextLower = nextUpper - spacing;
-        }
-    } else {
-        if (Number.isFinite(resolvedMinTick) && nextUpper < resolvedMinTick + spacing) {
-            nextUpper = resolvedMinTick + spacing;
-        }
-        if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
-        if (Number.isFinite(resolvedMinTick) && nextLower < resolvedMinTick) {
-            nextLower = resolvedMinTick;
-            nextUpper = nextLower + spacing;
-        }
-    }
-
-    if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return null;
-    return { lowerTick: nextLower, upperTick: nextUpper };
-}
-
-function roundDownToTickSpacing(tick, tickSpacing) {
-    const spacing = Number(tickSpacing);
-    const value = Number(tick);
-    if (!Number.isFinite(spacing) || spacing <= 0 || !Number.isFinite(value)) return 0;
-    const remainder = value % spacing;
-    if (remainder === 0) return value;
-    return value < 0 ? value - remainder - spacing : value - remainder;
-}
-
-function roundUpToTickSpacing(tick, tickSpacing) {
-    const spacing = Number(tickSpacing);
-    const value = Number(tick);
-    if (!Number.isFinite(spacing) || spacing <= 0 || !Number.isFinite(value)) return 0;
-    const down = roundDownToTickSpacing(value, spacing);
-    return down === value ? value : down + spacing;
-}
-
-function buildGridBins(editor, radius = OPEN_POSITION_GRID_RADIUS) {
-    const currentTick = Number(editor?.current_tick);
-    const tickSpacing = Number(editor?.tick_spacing);
-    if (!Number.isFinite(currentTick) || !Number.isFinite(tickSpacing) || tickSpacing <= 0) return [];
-    const anchorLower = Number.isFinite(Number(editor?.anchor_tick_lower))
-        ? Number(editor.anchor_tick_lower)
-        : roundDownToTickSpacing(currentTick, tickSpacing);
-    const anchorUpper = Number.isFinite(Number(editor?.anchor_tick_upper))
-        ? Number(editor.anchor_tick_upper)
-        : anchorLower + tickSpacing;
-    const bins = [];
-    for (let idx = -radius; idx <= radius; idx += 1) {
-        let lowerTick;
-        let upperTick;
-        if (idx === 0) {
-            lowerTick = anchorLower;
-            upperTick = anchorUpper;
-        } else if (idx > 0) {
-            lowerTick = anchorUpper + (idx - 1) * tickSpacing;
-            upperTick = lowerTick + tickSpacing;
-        } else {
-            upperTick = anchorLower + (idx + 1) * tickSpacing;
-            lowerTick = upperTick - tickSpacing;
-        }
-        bins.push({
-            key: `grid-${idx}`,
-            index: idx,
-            lowerTick,
-            upperTick,
-            isCurrent: idx === 0,
-        });
-    }
-    return bins;
-}
-
-function buildDefaultFocusedTickRange(editor, gridOffset = OPEN_POSITION_DEFAULT_GRID_OFFSET) {
-    const currentTick = Number(editor?.current_tick);
-    const tickSpacing = Number(editor?.tick_spacing);
-    if (!Number.isFinite(currentTick) || !Number.isFinite(tickSpacing) || tickSpacing <= 0) return null;
-    const offset = Math.max(1, Number(gridOffset) || OPEN_POSITION_DEFAULT_GRID_OFFSET);
-    const anchorLower = Number.isFinite(Number(editor?.anchor_tick_lower))
-        ? Number(editor.anchor_tick_lower)
-        : roundDownToTickSpacing(currentTick, tickSpacing);
-    const anchorUpper = Number.isFinite(Number(editor?.anchor_tick_upper))
-        ? Number(editor.anchor_tick_upper)
-        : anchorLower + tickSpacing;
-    if (!Number.isInteger(anchorLower) || !Number.isInteger(anchorUpper) || anchorUpper <= anchorLower) return null;
-    let lowerTick = anchorLower - offset * tickSpacing;
-    let upperTick = anchorUpper + offset * tickSpacing;
-    const minTick = Number(editor?.min_tick);
-    const maxTick = Number(editor?.max_tick);
-    if (Number.isFinite(minTick)) lowerTick = Math.max(lowerTick, minTick);
-    if (Number.isFinite(maxTick)) upperTick = Math.min(upperTick, maxTick);
-    if (upperTick <= lowerTick) {
-        upperTick = lowerTick + tickSpacing;
-        if (Number.isFinite(maxTick) && upperTick > maxTick) {
-            upperTick = maxTick;
-            lowerTick = upperTick - tickSpacing;
-        }
-    }
-    if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return null;
-    return { lowerTick, upperTick };
-}
-
-function buildDefaultFocusedPercentageRange(editor, gridOffset = OPEN_POSITION_DEFAULT_GRID_OFFSET) {
-    const focused = buildDefaultFocusedTickRange(editor, gridOffset);
-    const currentTick = Number(editor?.current_tick);
-    if (!focused || !Number.isFinite(currentTick)) return null;
-    const lowerPct = (1 - Math.pow(1.0001, focused.lowerTick - currentTick)) * 100;
-    const upperPct = (Math.pow(1.0001, focused.upperTick - currentTick) - 1) * 100;
-    if (!(lowerPct > 0) || !(upperPct > 0)) return null;
-    return {
-        lowerValue: formatPercentInputValue(lowerPct),
-        upperValue: formatPercentInputValue(upperPct),
-    };
-}
-
-function buildDCASummaryItems(amount, percentages) {
-    const totalAmount = Number(amount);
-    if (!Array.isArray(percentages) || percentages.length === 0) return [];
-    return percentages.map((pct, idx) => ({
-        key: `batch-${idx}`,
-        label: idx === 0 ? '首批' : `第${idx + 1}批`,
-        amount: Number.isFinite(totalAmount) && totalAmount > 0
-            ? formatUsdCompact(totalAmount * (Number(pct) || 0) / 100)
-            : '$--',
-    }));
-}
-
-function formatSharePercent(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num < 0) return '--';
-    const percent = num * 100;
-    if (percent >= 100) return `${Math.round(percent)}%`;
-    if (percent >= 10) return `${percent.toFixed(1).replace(/\.0$/, '')}%`;
-    return `${percent.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
-function formatPercentValue(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num < 0) return '--';
-    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
-    if (num >= 1) return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-    return `${num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
-function formatUSDTValue(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num < 0) return '--';
-    if (num === 0) return '0';
-    if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-    return num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function formatSizingModeLabel(mode) {
-    switch (String(mode || '').trim()) {
-        case 'conservative':
-            return '保守';
-        case 'neutral':
-            return '均衡';
-        case 'aggressive':
-            return '激进';
-        default:
-            return '--';
-    }
-}
-
-function getSizingEfficiencyMeta(efficiency) {
-    switch (String(efficiency || '').trim()) {
-        case 'high':
-            return {
-                label: '资金利用高',
-                chipClass: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
-            };
-        case 'medium':
-            return {
-                label: '资金利用适中',
-                chipClass: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
-            };
-        default:
-            return {
-                label: '资金利用低',
-                chipClass: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200',
-            };
-    }
-}
-
-const POSITION_SM_RANGE_STALE_MS = 60_000;
-const POSITION_SM_RANGE_BATCH_SIZE = 8;
-
-function normalizePoolKey(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    const body = raw.startsWith('0x') || raw.startsWith('0X') ? raw.slice(2) : raw;
-    if (!/^[a-fA-F0-9]{40}$/.test(body) && !/^[a-fA-F0-9]{64}$/.test(body)) {
-        return '';
-    }
-    return `0x${body.toLowerCase()}`;
-}
-
-function resolveOpenPositionPoolChain(pool, fallbackChain = 'bsc') {
-    const explicitChain = String(pool?.chain || '').trim().toLowerCase();
-    if (explicitChain) return explicitChain;
-    if (Number(pool?.chain_id) === 8453) return 'base';
-    return String(fallbackChain || 'bsc').trim().toLowerCase() || 'bsc';
-}
-
-function normalizeOpenPositionPoolVersion(pool) {
-    const directCandidates = [
-        pool?.protocol_version,
-        pool?.pool_version,
-        pool?.protocol,
-        pool?.factory_name,
-        pool?.dex,
-    ];
-    for (const candidate of directCandidates) {
-        const raw = String(candidate || '').trim().toLowerCase();
-        if (!raw) continue;
-        const matched = raw.match(/v?\d+/)?.[0] ?? '';
-        if (matched) return matched.startsWith('v') ? matched : `v${matched}`;
-    }
-    const aliasCandidates = [pool?.protocol, pool?.factory_name, pool?.dex];
-    for (const candidate of aliasCandidates) {
-        const raw = String(candidate || '').trim().toLowerCase();
-        if (!raw) continue;
-        if (raw.includes('v4')) return 'v4';
-        if (raw.includes('v3') || raw.includes('pancake') || raw.includes('aerodrome') || raw.includes('slipstream')) return 'v3';
-    }
-    return '';
-}
-
-function normalizePositionSmartMoneyGroups(groups) {
-    return Array.isArray(groups)
-        ? groups.filter((item) => Number(item?.range_percent) > 0)
-        : [];
-}
-
-
-function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
-    return [
-        preview?.required ? '1' : '0',
-        preview?.from_token_address || '',
-        preview?.to_token_address || '',
-        preview?.amount_in_raw || '',
-        preview?.expected_amount_out_raw || '',
-        String(entrySwapSlippage || '').trim(),
-    ].join('|');
-}
-
-function getOutOfRangeActionSummary(rebalanceEnabled) {
-    return {
-        above: rebalanceEnabled ? '自动再平衡' : '自动撤仓并结束',
-        below: rebalanceEnabled ? '自动再平衡' : '自动撤仓并结束',
-    };
-}
-
-function resolveOpenPositionErrorPayload(error) {
-    if (!error || typeof error !== 'object') return null;
-    if (error.payload && typeof error.payload === 'object') return error.payload;
-    return error;
-}
-
-function isOpenPositionSafetyError(error) {
-    const payload = resolveOpenPositionErrorPayload(error);
-    if (!payload) return false;
-    const code = String(payload?.code || '').trim();
-    return Boolean(
-        code === 'zap_safety_check_failed' ||
-        code === 'token_honeypot' ||
-        code.startsWith('pool_') ||
-        typeof payload?.liquidity_usd === 'number' ||
-        typeof payload?.max_open_amount === 'number' ||
-        typeof payload?.price_deviation_percent === 'number' ||
-        Boolean(payload?.token_risk) ||
-        Boolean(payload?.risk_ack_required)
-    );
-}
-
-function extractOpenPositionErrorChecks(error, fallbackKey = 'submit_safety') {
-    const payload = resolveOpenPositionErrorPayload(error);
-    if (Array.isArray(payload?.checks) && payload.checks.length > 0) {
-        return payload.checks;
-    }
-    if (!isOpenPositionSafetyError(payload)) {
-        return [];
-    }
-    const detail = String(error?.message || payload?.message || '').trim() || '校验失败，请稍后重试。';
-    return [{
-        key: fallbackKey,
-        status: 'fail',
-        label: '安全校验',
-        detail,
-    }];
-}
-
-function formatUserLabel(user) {
-    if (!user) return '未选择用户';
-    const username = String(user.username || '').trim();
-    if (username) return `@${username}`;
-    const first = String(user.first_name || '').trim();
-    const last = String(user.last_name || '').trim();
-    const full = `${first} ${last}`.trim();
-    if (full) return full;
-    const telegramId = String(user.telegram_id || '').trim();
-    if (telegramId) return `TG ${telegramId}`;
-    const userId = String(user.user_id || '').trim();
-    if (userId) return `用户 ${userId}`;
-    return '未选择用户';
-}
 
 function formatOnOff(value) {
     return value ? '开启' : '关闭';
@@ -1027,75 +174,6 @@ const Icon = ({ path: IconCmp, className = '' }) => {
     if (!IconCmp) return null;
     return <IconCmp className={className} strokeWidth={2} />;
 };
-
-const VIEW_MODULE_MAP = {
-    hot_pools: 'hot_pools',
-    positions: 'positions',
-    assets: 'assets',
-    smart_money: 'smart_money',
-    swap: 'swap',
-    admin_page: 'admin_panel',
-    admin: 'admin_panel',
-};
-
-function normalizeEnabledModules(value) {
-    if (!Array.isArray(value)) return [];
-    const seen = new Set();
-    const keys = [];
-    value.forEach((item) => {
-        const key = String(item || '').trim();
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        keys.push(key);
-    });
-    return keys;
-}
-
-function hasModuleAccess(me, moduleKey) {
-    const key = String(moduleKey || '').trim();
-    if (!key) return false;
-    if (Boolean(me?.is_admin)) return true;
-    if (!Boolean(me?.mini_app_enabled)) return false;
-    return normalizeEnabledModules(me?.enabled_modules).includes(key);
-}
-
-function canAccessView(me, viewMode) {
-    const moduleKey = VIEW_MODULE_MAP[String(viewMode || '').trim()];
-    return moduleKey ? hasModuleAccess(me, moduleKey) : false;
-}
-
-function buildTopNavItems({ me, isAdmin }) {
-    const baseItems = [
-        { key: 'hot_pools', label: '热门池' },
-        { key: 'positions', label: '仓位' },
-        { key: 'assets', label: '我的' },
-        { key: 'smart_money', label: '聪明钱' },
-        { key: 'swap', label: '兑换' },
-    ];
-    const items = me ? baseItems.filter((item) => canAccessView(me, item.key)) : [...baseItems];
-    if (isAdmin) {
-        items.push({ key: 'admin_page', label: '管理页' });
-    }
-    return items;
-}
-const HOT_POOL_SORT_TABS = [
-    { key: 'fees', label: '手续费' },
-    { key: 'fee_rate', label: '费率' },
-    { key: 'volume', label: '交易量' },
-];
-
-function tokenRiskPanelClass(tone) {
-    switch (tone) {
-        case 'high':
-        case 'critical':
-            return 'border-red-500/35 bg-red-500/10 text-red-800 dark:text-red-100';
-        case 'medium':
-        case 'unknown':
-            return 'border-amber-500/35 bg-amber-500/10 text-amber-800 dark:text-amber-100';
-        default:
-            return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-800 dark:text-emerald-100';
-    }
-}
 
 export default function App() {
     const initData = useInitData();
@@ -1146,61 +224,108 @@ export default function App() {
     const poolSearchControllerRef = useRef(null);
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
-    const [openPositionPool, setOpenPositionPool] = useState(null);
-    const [openPositionStep, setOpenPositionStep] = useState(0); // 开仓向导当前步：0 资金 / 1 区间 / 2 策略&确认
-    const [openPositionAmount, setOpenPositionAmount] = useState('');
-    const [openPositionRangeLower, setOpenPositionRangeLower] = useState('');
-    const [openPositionRangeUpper, setOpenPositionRangeUpper] = useState('');
-    const [openPositionRangeUpperAuto, setOpenPositionRangeUpperAuto] = useState(true);
-    const [openPositionRangeInputMode, setOpenPositionRangeInputMode] = useState('percentage');
-    const [openPositionTickLower, setOpenPositionTickLower] = useState('');
-    const [openPositionTickUpper, setOpenPositionTickUpper] = useState('');
-    const [openPositionPriceLower, setOpenPositionPriceLower] = useState('');
-    const [openPositionPriceUpper, setOpenPositionPriceUpper] = useState('');
-    const [openPositionInvertPrice, setOpenPositionInvertPrice] = useState(false);
-    const [openPositionGridBoundaryTarget, setOpenPositionGridBoundaryTarget] = useState('lower');
-    const [openPositionSlippage, setOpenPositionSlippage] = useState('');
-    const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
-    const [openPositionError, setOpenPositionError] = useState('');
-    const [openPositionPrepareChecks, setOpenPositionPrepareChecks] = useState([]);
-    const [openPositionChecks, setOpenPositionChecks] = useState([]);
-    const [openPositionRiskAck, setOpenPositionRiskAck] = useState(false);
-    const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
-    const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
-    const [openPositionPreviewPending, setOpenPositionPreviewPending] = useState(false);
-    const [openPositionPreviewSuspended, setOpenPositionPreviewSuspended] = useState(false);
-    const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
-    const openPositionDefaultRangeSeededRef = useRef(false);
-    const openPositionPreviewResumeTimerRef = useRef(null);
-    const openPositionAutoSingleSideRangeRef = useRef('');
-    const [openPositionPreparePrivateZapInfo, setOpenPositionPreparePrivateZapInfo] = useState(null);
-    const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
-    const [openPositionPrepareTokenRisk, setOpenPositionPrepareTokenRisk] = useState(null);
-    const [openPositionPreviewTokenRisk, setOpenPositionPreviewTokenRisk] = useState(null);
-    const [openPositionRangeEditor, setOpenPositionRangeEditor] = useState(null);
-    const [openPositionPreviewRangeEditor, setOpenPositionPreviewRangeEditor] = useState(null);
-    const [openPositionSizingAdvice, setOpenPositionSizingAdvice] = useState(null);
-    const [openPositionEntrySwapSlippage, setOpenPositionEntrySwapSlippage] = useState('');
-    const [openPositionEntrySwapSlippageDirty, setOpenPositionEntrySwapSlippageDirty] = useState(false);
-    const [openPositionEntrySwapConfirm, setOpenPositionEntrySwapConfirm] = useState(true);
-    const [openPositionLoading, setOpenPositionLoading] = useState(false);
-    const [openPositionSmartRanges, setOpenPositionSmartRanges] = useState([]);
-    const [openPositionSmartRangesLoading, setOpenPositionSmartRangesLoading] = useState(false);
-    const [openPositionDCAEnabled, setOpenPositionDCAEnabled] = useState(false);
-    const [openPositionDCAPercentages, setOpenPositionDCAPercentages] = useState([50, 50]);
-    const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
-    const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
-    const [openPositionTaskMode, setOpenPositionTaskMode] = useState('pause');
-    const [openPositionWalletBalancesHidden, setOpenPositionWalletBalancesHidden] = useState(() => storage.get(STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES) === '1');
-    const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
-    const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
-    const [openPositionLiqProfileError, setOpenPositionLiqProfileError] = useState('');
+    const {
+        openPositionPool,
+        setOpenPositionPool,
+        openPositionStep,
+        setOpenPositionStep,
+        openPositionAmount,
+        setOpenPositionAmount,
+        openPositionRangeLower,
+        setOpenPositionRangeLower,
+        openPositionRangeUpper,
+        setOpenPositionRangeUpper,
+        openPositionRangeUpperAuto,
+        setOpenPositionRangeUpperAuto,
+        openPositionRangeInputMode,
+        setOpenPositionRangeInputMode,
+        openPositionTickLower,
+        setOpenPositionTickLower,
+        openPositionTickUpper,
+        setOpenPositionTickUpper,
+        openPositionPriceLower,
+        setOpenPositionPriceLower,
+        openPositionPriceUpper,
+        setOpenPositionPriceUpper,
+        openPositionInvertPrice,
+        setOpenPositionInvertPrice,
+        openPositionGridBoundaryTarget,
+        setOpenPositionGridBoundaryTarget,
+        openPositionSlippage,
+        setOpenPositionSlippage,
+        openPositionError,
+        setOpenPositionError,
+        openPositionPrepareChecks,
+        setOpenPositionPrepareChecks,
+        openPositionChecks,
+        setOpenPositionChecks,
+        openPositionRiskAck,
+        setOpenPositionRiskAck,
+        openPositionEntrySwapPreview,
+        setOpenPositionEntrySwapPreview,
+        openPositionEntrySwapPreviewLoading,
+        setOpenPositionEntrySwapPreviewLoading,
+        openPositionPreviewPending,
+        setOpenPositionPreviewPending,
+        openPositionPreviewSuspended,
+        setOpenPositionPreviewSuspended,
+        openPositionEntrySwapPreviewError,
+        setOpenPositionEntrySwapPreviewError,
+        openPositionDefaultRangeSeededRef,
+        openPositionPreviewResumeTimerRef,
+        openPositionAutoSingleSideRangeRef,
+        openPositionPreparePrivateZapInfo,
+        setOpenPositionPreparePrivateZapInfo,
+        openPositionPrivateZapInfo,
+        setOpenPositionPrivateZapInfo,
+        openPositionPrepareTokenRisk,
+        setOpenPositionPrepareTokenRisk,
+        openPositionPreviewTokenRisk,
+        setOpenPositionPreviewTokenRisk,
+        openPositionRangeEditor,
+        setOpenPositionRangeEditor,
+        openPositionPreviewRangeEditor,
+        setOpenPositionPreviewRangeEditor,
+        openPositionSizingAdvice,
+        setOpenPositionSizingAdvice,
+        openPositionEntrySwapSlippage,
+        setOpenPositionEntrySwapSlippage,
+        openPositionEntrySwapSlippageDirty,
+        setOpenPositionEntrySwapSlippageDirty,
+        openPositionEntrySwapConfirm,
+        setOpenPositionEntrySwapConfirm,
+        openPositionLoading,
+        setOpenPositionLoading,
+        openPositionSmartRanges,
+        setOpenPositionSmartRanges,
+        openPositionSmartRangesLoading,
+        setOpenPositionSmartRangesLoading,
+        openPositionDCAEnabled,
+        setOpenPositionDCAEnabled,
+        openPositionDCAPercentages,
+        setOpenPositionDCAPercentages,
+        openPositionDCAInterval,
+        setOpenPositionDCAInterval,
+        openPositionDCAExpanded,
+        setOpenPositionDCAExpanded,
+        openPositionTaskMode,
+        setOpenPositionTaskMode,
+        openPositionWalletBalancesHidden,
+        setOpenPositionWalletBalancesHidden,
+        openPositionLiqProfile,
+        setOpenPositionLiqProfile,
+        openPositionLiqProfileLoading,
+        setOpenPositionLiqProfileLoading,
+        openPositionLiqProfileError,
+        setOpenPositionLiqProfileError,
+        openPositionWalletId,
+        setOpenPositionWalletId,
+        resetOpenPositionDraft,
+    } = useOpenPositionDraft();
     const [operationProgress, setOperationProgress] = useState(null);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
     const [walletsLoading, setWalletsLoading] = useState(false);
-    const [openPositionWalletId, setOpenPositionWalletId] = useState(() => storage.get(STORAGE_OPEN_POSITION_WALLET_ID) || '');
-
     const [taskRangeEdit, setTaskRangeEdit] = useState(null);
     const [taskRangeLower, setTaskRangeLower] = useState('');
     const [taskRangeUpper, setTaskRangeUpper] = useState('');
@@ -2739,49 +1864,6 @@ export default function App() {
         setTaskRangeUpper(value);
         setTaskRangeError('');
     }, []);
-
-    const resetOpenPositionDraft = () => {
-        openPositionDefaultRangeSeededRef.current = false;
-        openPositionAutoSingleSideRangeRef.current = '';
-        if (openPositionPreviewResumeTimerRef.current) {
-            window.clearTimeout(openPositionPreviewResumeTimerRef.current);
-            openPositionPreviewResumeTimerRef.current = null;
-        }
-        setOpenPositionAmount('');
-        setOpenPositionRangeLower('');
-        setOpenPositionRangeUpper('');
-        setOpenPositionRangeUpperAuto(true);
-        setOpenPositionRangeInputMode('percentage');
-        setOpenPositionTickLower('');
-        setOpenPositionTickUpper('');
-        setOpenPositionPriceLower('');
-        setOpenPositionPriceUpper('');
-        setOpenPositionGridBoundaryTarget('lower');
-        setOpenPositionSlippage('');
-        setOpenPositionPrepareChecks([]);
-        setOpenPositionEntrySwapPreview(null);
-        setOpenPositionEntrySwapPreviewLoading(false);
-        setOpenPositionPreviewPending(false);
-        setOpenPositionPreviewSuspended(false);
-        setOpenPositionEntrySwapPreviewError('');
-        setOpenPositionPreparePrivateZapInfo(null);
-        setOpenPositionPrivateZapInfo(null);
-        setOpenPositionPrepareTokenRisk(null);
-        setOpenPositionPreviewTokenRisk(null);
-        setOpenPositionRangeEditor(null);
-        setOpenPositionPreviewRangeEditor(null);
-        setOpenPositionSizingAdvice(null);
-        setOpenPositionEntrySwapSlippage('');
-        setOpenPositionEntrySwapSlippageDirty(false);
-        setOpenPositionEntrySwapConfirm(true);
-        setOpenPositionDCAExpanded(false);
-        setOpenPositionTaskMode('pause');
-        setOpenPositionStep(0);
-
-        setOpenPositionError('');
-        setOpenPositionChecks([]);
-        setOpenPositionRiskAck(false);
-    };
 
     const openPositionModal = (pool) => {
         let chain = resolveOpenPositionPoolChain(pool, hotPoolsData?.chain || 'bsc');
