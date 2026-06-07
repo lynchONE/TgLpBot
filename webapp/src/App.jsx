@@ -2829,13 +2829,14 @@ export default function App() {
               const badges = parseHotPoolBadges(pool?.badges);
               const tokenRisk = normalizeTokenRisk(pool?.token_risk);
               const tokenRiskTone = tokenRiskToneClass(tokenRisk);
+              const hasLowLiquidityRisk = Boolean(tokenRisk?.has_low_liquidity);
 
               const isHighFeeRate = feeRate >= 1;
 
               return (
                 <div
                   key={`${pool?.protocol_version || ''}:${addr || idx}`}
-                  className={`pool-row ${selected ? 'selected' : ''} ${isHighFeeRate ? 'high-fee' : ''}`}
+                  className={`pool-row ${selected ? 'selected' : ''} ${isHighFeeRate ? 'high-fee' : ''} ${hasLowLiquidityRisk ? 'low-liquidity' : ''}`}
                   onClick={() => selectPool({ ...pool, chain }, chain)}
                 >
                   {/* Avatar */}
@@ -2888,9 +2889,10 @@ export default function App() {
                       )}
                       {tokenRisk ? (
                         <span
-                          className={`tag pool-risk-chip is-${tokenRiskTone}`}
+                          className={`tag pool-risk-chip is-${tokenRiskTone} ${hasLowLiquidityRisk ? 'is-low-liquidity' : ''}`}
                           title={tokenRiskSummary(tokenRisk)}
                         >
+                          {hasLowLiquidityRisk ? <AlertTriangle size={11} strokeWidth={2.4} aria-hidden="true" /> : null}
                           {tokenRiskLabel(tokenRisk)}
                         </span>
                       ) : null}
@@ -2900,7 +2902,9 @@ export default function App() {
                         {badges.map((badge, badgeIdx) => (
                           <span
                             key={`${badge.text}:${badgeIdx}`}
-                            className="tag tag-badge pool-badge-chip"
+                            className={`tag tag-badge pool-badge-chip ${
+                              /(^|[\s·])(?:币安\s*alpha|binance\s*alpha|alpha)(?:$|[\s·])/i.test(String(badge.text || '')) ? 'pool-badge-chip-alpha' : ''
+                            }`}
                             data-tip={badge.tip}
                             aria-label={badge.tip}
                             tabIndex={0}
