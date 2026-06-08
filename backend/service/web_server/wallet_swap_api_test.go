@@ -100,3 +100,53 @@ func TestWalletSwapOKXValueUSDT_UsesOKXQuoteOutput(t *testing.T) {
 		t.Fatalf("value = %f, want 2.5", value)
 	}
 }
+
+func TestOKXBalanceHelpers_ParseDecimalsAndValue(t *testing.T) {
+	cc := config.ChainConfig{
+		StableAddress: "0x55d398326f99059ff775485246999027b3197955",
+		USDTAddress:   "0x55d398326f99059ff775485246999027b3197955",
+	}
+	token := exchange.BalanceTokenAsset{
+		TokenContractAddress: "0x1111111111111111111111111111111111111111",
+		TokenDecimal:         "18",
+		Balance:              "1.5",
+		RawBalance:           "1500000000000000000",
+		TokenPrice:           "2.5",
+	}
+	raw, ok := parseOKXRawBalance(token.RawBalance)
+	if !ok {
+		t.Fatalf("parseOKXRawBalance failed")
+	}
+	if decimals := okxBalanceTokenDecimals(token, raw); decimals != 18 {
+		t.Fatalf("decimals = %d, want 18", decimals)
+	}
+	value := okxBalanceValueUSDT(raw, 18, token.TokenPrice, token.TokenContractAddress, cc)
+	if value != 3.75 {
+		t.Fatalf("value = %f, want 3.75", value)
+	}
+}
+
+func TestOKXBalanceHelpers_StableValueUsesRawBalance(t *testing.T) {
+	cc := config.ChainConfig{
+		StableAddress: "0x55d398326f99059ff775485246999027b3197955",
+		USDTAddress:   "0x55d398326f99059ff775485246999027b3197955",
+	}
+	raw, ok := parseOKXRawBalance("123450000")
+	if !ok {
+		t.Fatalf("parseOKXRawBalance failed")
+	}
+	asset := exchange.BalanceTokenAsset{
+		TokenContractAddress: cc.StableAddress,
+		TokenDecimal:         "6",
+		Balance:              "123.45",
+		RawBalance:           "123450000",
+	}
+	decimals := okxBalanceTokenDecimals(asset, raw)
+	if decimals != 6 {
+		t.Fatalf("decimals = %d, want 6", decimals)
+	}
+	value := okxBalanceValueUSDT(raw, decimals, "", cc.StableAddress, cc)
+	if value != 123.45 {
+		t.Fatalf("value = %f, want 123.45", value)
+	}
+}

@@ -1,22 +1,19 @@
 package liquidity
 
 import (
-	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
-	"TgLpBot/base/database"
-	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"crypto/ecdsa"
 	"fmt"
-	"log"
 	"math/big"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // WalletSwapToUSDTReport is a best-effort report for swapping wallet tokens into USDT.
@@ -35,8 +32,16 @@ type SwapSingleTokenResult struct {
 	RouterAddress common.Address
 }
 
-// SwapWalletOtherTokensToUSDT swaps all known non-stable ERC20 tokens (excluding WBNB) in the default wallet to USDT.
-// Tokens are discovered from the user's task history (StrategyTask.token0/token1).
+type walletSwapOKXToken struct {
+	Address    common.Address
+	Symbol     string
+	Balance    string
+	RawBalance *big.Int
+	Decimals   int
+	ValueUSDT  float64
+}
+
+// SwapWalletOtherTokensToUSDT swaps non-stable ERC20 tokens discovered from OKX wallet balances.
 func (s *LiquidityService) SwapWalletOtherTokensToUSDT(userID uint, slippagePercent float64) (*WalletSwapToUSDTReport, error) {
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
@@ -47,9 +52,6 @@ func (s *LiquidityService) SwapWalletOtherTokensToUSDT(userID uint, slippagePerc
 func (s *LiquidityService) SwapWalletOtherTokensToUSDTForChain(userID uint, chain string, slippagePercent float64) (*WalletSwapToUSDTReport, error) {
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
-	}
-	if database.DB == nil {
-		return nil, fmt.Errorf("db not initialized")
 	}
 
 	chain = config.NormalizeChain(chain)
@@ -82,10 +84,7 @@ func (s *LiquidityService) SwapWalletOtherTokensToUSDTForChain(userID uint, chai
 	walletAddr := s.walletService.GetWalletAddress(wallet)
 	usdtAddr := common.HexToAddress(cc.StableAddress)
 
-	excluded := excludedSwapTokens(cc)
-	excluded[usdtAddr] = struct{}{}
-
-	candidates, err := s.collectUserTaskTokensForChain(userID, exec.Chain())
+	candidates, err := s.collectOKXWalletSwapTokens(exec.Chain(), cc, walletAddr, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -97,34 +96,22 @@ func (s *LiquidityService) SwapWalletOtherTokensToUSDTForChain(userID uint, chai
 		Failed:        make([]string, 0),
 	}
 
-	for tokenAddr, symGuess := range candidates {
-		if tokenAddr == (common.Address{}) {
-			continue
-		}
-		if _, ok := excluded[tokenAddr]; ok {
+	for _, candidate := range candidates {
+		if candidate.Address == (common.Address{}) || candidate.RawBalance == nil || candidate.RawBalance.Sign() <= 0 {
 			continue
 		}
 
-		bal, berr := blockchain.GetTokenBalanceWithClient(client, tokenAddr, walletAddr)
-		if berr != nil {
-			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|get balance failed: %v", tokenLabel(client, tokenAddr, symGuess), berr))
-			continue
-		}
-		if bal == nil || bal.Sign() <= 0 {
-			continue
-		}
-
-		txHash, serr := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, tokenAddr, usdtAddr, bal, slippagePercent)
+		txHash, serr := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, candidate.Address, usdtAddr, candidate.RawBalance, slippagePercent)
 		if serr != nil {
-			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|%v", tokenLabel(client, tokenAddr, symGuess), serr))
+			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|%v", candidate.Symbol, serr))
 			continue
 		}
 		if strings.TrimSpace(txHash) == "" {
-			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|empty tx hash", tokenLabel(client, tokenAddr, symGuess)))
+			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|empty tx hash", candidate.Symbol))
 			continue
 		}
 
-		report.Swapped = append(report.Swapped, fmt.Sprintf("%s->USDT|%s", tokenLabel(client, tokenAddr, symGuess), txHash))
+		report.Swapped = append(report.Swapped, fmt.Sprintf("%s->USDT|%s", candidate.Symbol, txHash))
 	}
 
 	return report, nil
@@ -151,82 +138,12 @@ func excludedSwapTokens(cc config.ChainConfig) map[common.Address]struct{} {
 	return excluded
 }
 
-func tokenLabel(client *ethclient.Client, tokenAddr common.Address, symGuess string) string {
-	sym := strings.TrimSpace(symGuess)
-	if sym == "" && client != nil {
-		if erc20, err := blockchain.NewERC20(tokenAddr, client); err == nil {
-			if s2, err := erc20.Symbol(nil); err == nil {
-				sym = strings.TrimSpace(s2)
-			}
-		}
-	}
-	if sym == "" {
-		sym = tokenAddr.Hex()
-	}
-	return sym
-}
-
-func (s *LiquidityService) collectUserTaskTokensForChain(userID uint, chain string) (map[common.Address]string, error) {
-	var tasks []models.StrategyTask
-	if err := database.DB.Select(
-		"id",
-		"chain",
-		"pool_version",
-		"exchange",
-		"pool_id",
-		"token0_address",
-		"token1_address",
-		"token0_symbol",
-		"token1_symbol",
-		"v3_position_manager_address",
-		"v3_token_id",
-		"v4_token_id",
-	).Where("user_id = ? AND chain = ?", userID, config.NormalizeChain(chain)).Find(&tasks).Error; err != nil {
-		return nil, fmt.Errorf("query tasks failed: %w", err)
-	}
-
-	out := make(map[common.Address]string)
-	for i := range tasks {
-		task := &tasks[i]
-
-		token0 := common.Address{}
-		token1 := common.Address{}
-		if common.IsHexAddress(task.Token0Address) {
-			token0 = common.HexToAddress(task.Token0Address)
-		}
-		if common.IsHexAddress(task.Token1Address) {
-			token1 = common.HexToAddress(task.Token1Address)
-		}
-		if token0 == (common.Address{}) || token1 == (common.Address{}) {
-			if c0, c1, err := s.resolveTaskTokenAddresses(task); err == nil {
-				if token0 == (common.Address{}) {
-					token0 = c0
-				}
-				if token1 == (common.Address{}) {
-					token1 = c1
-				}
-			} else {
-				log.Printf("[Liquidity] Warning: resolve task tokens failed (task=%d): %v", task.ID, err)
-			}
-		}
-
-		if token0 != (common.Address{}) {
-			out[token0] = strings.TrimSpace(task.Token0Symbol)
-		}
-		if token1 != (common.Address{}) {
-			out[token1] = strings.TrimSpace(task.Token1Symbol)
-		}
-	}
-
-	return out, nil
-}
-
 // WalletTokenInfo 代币信息结构
 type WalletTokenInfo struct {
 	Address   common.Address
 	Symbol    string
-	Balance   string  // 人类可读的余额
-	ValueUSDT float64 // USDT 价值
+	Balance   string
+	ValueUSDT float64
 }
 
 // ScanWalletTokensForSwap 扫描钱包中符合兑换条件的代币
@@ -239,12 +156,10 @@ func (s *LiquidityService) ScanWalletTokensForSwapForChain(userID uint, chain st
 	return s.ScanWalletTokensForSwapForChainWithWallet(userID, 0, chain, minValueUSDT)
 }
 
+// ScanWalletTokensForSwapForChainWithWallet scans OKX wallet balances for swappable tokens.
 func (s *LiquidityService) ScanWalletTokensForSwapForChainWithWallet(userID uint, walletID uint, chain string, minValueUSDT float64) ([]WalletTokenInfo, error) {
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
-	}
-	if database.DB == nil {
-		return nil, fmt.Errorf("db not initialized")
 	}
 
 	exec, err := chainexec.GetEVM(chain)
@@ -252,83 +167,238 @@ func (s *LiquidityService) ScanWalletTokensForSwapForChainWithWallet(userID uint
 		return nil, err
 	}
 	cc := exec.Config()
-	client := exec.Client()
-	if client == nil {
-		return nil, fmt.Errorf("blockchain client not initialized for chain=%s", exec.Chain())
-	}
 	if !common.IsHexAddress(cc.StableAddress) {
 		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
 	}
 
 	wallet, err := s.walletService.ResolveTaskWallet(userID, walletID, "")
 	if err != nil {
-		return nil, fmt.Errorf("获取钱包失败: %w", err)
+		return nil, fmt.Errorf("get wallet failed: %w", err)
 	}
 
-	walletAddr := s.walletService.GetWalletAddress(wallet)
-	usdtAddr := common.HexToAddress(cc.StableAddress)
-
-	excluded := excludedSwapTokens(cc)
-	excluded[usdtAddr] = struct{}{}
-
-	candidates, err := s.collectUserTaskTokensForChain(userID, exec.Chain())
+	tokens, err := s.collectOKXWalletSwapTokens(exec.Chain(), cc, s.walletService.GetWalletAddress(wallet), minValueUSDT)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []WalletTokenInfo
+	out := make([]WalletTokenInfo, 0, len(tokens))
+	for _, token := range tokens {
+		out = append(out, WalletTokenInfo{
+			Address:   token.Address,
+			Symbol:    token.Symbol,
+			Balance:   token.Balance,
+			ValueUSDT: token.ValueUSDT,
+		})
+	}
+	return out, nil
+}
 
-	for tokenAddr, symGuess := range candidates {
-		if tokenAddr == (common.Address{}) {
-			continue
-		}
-		if _, ok := excluded[tokenAddr]; ok {
-			continue
-		}
+func (s *LiquidityService) collectOKXWalletSwapTokens(chain string, cc config.ChainConfig, walletAddr common.Address, minValueUSDT float64) ([]walletSwapOKXToken, error) {
+	if s == nil || s.okxService == nil {
+		return nil, fmt.Errorf("OKX service unavailable")
+	}
+	if cc.ChainID <= 0 {
+		return nil, fmt.Errorf("invalid chain id")
+	}
 
-		bal, berr := blockchain.GetTokenBalanceWithClient(client, tokenAddr, walletAddr)
-		if berr != nil {
-			continue
-		}
-		if bal == nil || bal.Sign() <= 0 {
-			continue
-		}
+	resp, err := s.okxService.GetAllTokenBalancesByAddress(nil, exchange.BalanceAllTokenBalancesRequest{
+		Address: walletAddr.Hex(),
+		Chains:  []string{strconv.FormatInt(cc.ChainID, 10)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Data) == 0 {
+		return nil, fmt.Errorf("empty OKX balance response")
+	}
 
-		// 获取代币符号
-		symbol := tokenLabel(client, tokenAddr, symGuess)
-
-		// 获取代币小数位数
-		decimals := 18
-		if client != nil {
-			if erc20, err := blockchain.NewERC20(tokenAddr, client); err == nil {
-				if d, err := erc20.Decimals(nil); err == nil {
-					decimals = int(d)
-				}
+	excluded := excludedSwapTokens(cc)
+	out := make([]walletSwapOKXToken, 0)
+	seen := make(map[common.Address]struct{})
+	for _, data := range resp.Data {
+		for _, asset := range data.TokenAssets {
+			tokenAddr, ok := normalizeOKXWalletSwapTokenAddress(asset)
+			if !ok || tokenAddr == (common.Address{}) {
+				continue
 			}
-		}
+			if _, ok := excluded[tokenAddr]; ok {
+				continue
+			}
+			if _, ok := seen[tokenAddr]; ok {
+				continue
+			}
+			rawBalance, ok := parseOKXWalletSwapRawBalance(asset.RawBalance)
+			if !ok || rawBalance.Sign() <= 0 {
+				continue
+			}
 
-		// 计算人类可读余额
-		balFloat := toFloat64(bal, decimals)
-		balanceStr := fmt.Sprintf("%.4f", balFloat)
+			decimals := okxWalletSwapTokenDecimals(asset, rawBalance)
+			valueUSDT := okxWalletSwapTokenValueUSDT(rawBalance, decimals, asset.TokenPrice, tokenAddr, cc)
+			if valueUSDT < minValueUSDT {
+				continue
+			}
 
-		// 获取代币的 USDT 价值 (使用 OKX DEX 报价)
-		valueUSDT := s.getTokenValueInStable(exec, tokenAddr, bal, walletAddr)
+			symbol := firstOKXWalletSwapString(asset.Symbol, asset.TokenSymbol)
+			if symbol == "" {
+				symbol = shortOKXWalletSwapTokenLabel(tokenAddr)
+			}
+			balance := strings.TrimSpace(asset.Balance)
+			if balance == "" {
+				balance = formatOKXWalletSwapRawAmount(rawBalance, decimals)
+			}
 
-		// 只返回价值大于阈值的代币
-		if valueUSDT >= minValueUSDT {
-			result = append(result, WalletTokenInfo{
-				Address:   tokenAddr,
-				Symbol:    symbol,
-				Balance:   balanceStr,
-				ValueUSDT: valueUSDT,
+			seen[tokenAddr] = struct{}{}
+			out = append(out, walletSwapOKXToken{
+				Address:    tokenAddr,
+				Symbol:     symbol,
+				Balance:    balance,
+				RawBalance: rawBalance,
+				Decimals:   decimals,
+				ValueUSDT:  valueUSDT,
 			})
 		}
 	}
 
-	return result, nil
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].ValueUSDT == out[j].ValueUSDT {
+			return out[i].Symbol < out[j].Symbol
+		}
+		return out[i].ValueUSDT > out[j].ValueUSDT
+	})
+	return out, nil
 }
 
-// toFloat64 将 big.Int 转换为 float64
+func normalizeOKXWalletSwapTokenAddress(asset exchange.BalanceTokenAsset) (common.Address, bool) {
+	raw := firstOKXWalletSwapString(asset.TokenContractAddress, asset.TokenAddress)
+	if raw == "" || strings.EqualFold(raw, "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee") {
+		return common.Address{}, false
+	}
+	if !common.IsHexAddress(raw) {
+		return common.Address{}, false
+	}
+	return common.HexToAddress(raw), true
+}
+
+func parseOKXWalletSwapRawBalance(raw string) (*big.Int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	amount, ok := new(big.Int).SetString(raw, 10)
+	if !ok || amount == nil {
+		return nil, false
+	}
+	return amount, true
+}
+
+func okxWalletSwapTokenDecimals(asset exchange.BalanceTokenAsset, rawBalance *big.Int) int {
+	for _, raw := range []string{asset.TokenDecimal, asset.Decimals} {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		decimals, err := strconv.Atoi(raw)
+		if err != nil {
+			continue
+		}
+		if decimals >= 0 && decimals <= 36 {
+			return decimals
+		}
+	}
+	return inferOKXWalletSwapDecimals(rawBalance, asset.Balance)
+}
+
+func inferOKXWalletSwapDecimals(rawBalance *big.Int, balanceText string) int {
+	if rawBalance == nil || rawBalance.Sign() <= 0 {
+		return 18
+	}
+	balanceText = strings.TrimSpace(balanceText)
+	if balanceText == "" || strings.ContainsAny(balanceText, "eE") {
+		return 18
+	}
+	human, ok := new(big.Rat).SetString(balanceText)
+	if !ok || human == nil || human.Sign() <= 0 {
+		return 18
+	}
+	scale := new(big.Rat).Quo(new(big.Rat).SetInt(rawBalance), human)
+	for decimals := 0; decimals <= 36; decimals++ {
+		pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+		if scale.Cmp(new(big.Rat).SetInt(pow)) == 0 {
+			return decimals
+		}
+	}
+	return 18
+}
+
+func okxWalletSwapTokenValueUSDT(rawBalance *big.Int, decimals int, tokenPrice string, tokenAddr common.Address, cc config.ChainConfig) float64 {
+	if rawBalance == nil || rawBalance.Sign() <= 0 {
+		return 0
+	}
+	if walletSwapIsStableToken(tokenAddr, cc) {
+		return toFloat64(rawBalance, decimals)
+	}
+	tokenPrice = strings.TrimSpace(tokenPrice)
+	if tokenPrice == "" {
+		return 0
+	}
+	price, err := strconv.ParseFloat(tokenPrice, 64)
+	if err != nil || price <= 0 {
+		return 0
+	}
+	return toFloat64(rawBalance, decimals) * price
+}
+
+func walletSwapIsStableToken(tokenAddr common.Address, cc config.ChainConfig) bool {
+	for _, raw := range []string{cc.StableAddress, cc.USDTAddress, cc.USDCAddress, cc.BUSDAddress} {
+		if common.IsHexAddress(raw) && tokenAddr == common.HexToAddress(raw) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstOKXWalletSwapString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func shortOKXWalletSwapTokenLabel(tokenAddr common.Address) string {
+	addr := tokenAddr.Hex()
+	if len(addr) < 10 {
+		return "TOKEN"
+	}
+	return strings.ToUpper(addr[:6] + "..." + addr[len(addr)-4:])
+}
+
+func formatOKXWalletSwapRawAmount(amount *big.Int, decimals int) string {
+	if amount == nil || amount.Sign() == 0 {
+		return "0"
+	}
+	if decimals <= 0 {
+		return amount.String()
+	}
+	raw := amount.String()
+	if len(raw) <= decimals {
+		frac := strings.Repeat("0", decimals-len(raw)) + raw
+		frac = strings.TrimRight(frac, "0")
+		if frac == "" {
+			return "0"
+		}
+		return "0." + frac
+	}
+	intPart := raw[:len(raw)-decimals]
+	fracPart := strings.TrimRight(raw[len(raw)-decimals:], "0")
+	if fracPart == "" {
+		return intPart
+	}
+	return intPart + "." + fracPart
+}
+
 func toFloat64(val *big.Int, decimals int) float64 {
 	if val == nil {
 		return 0
@@ -338,57 +408,6 @@ func toFloat64(val *big.Int, decimals int) float64 {
 	f.Quo(f, divisor)
 	result, _ := f.Float64()
 	return result
-}
-
-// getTokenValueInUSDT 获取代币的 USDT 价值
-func (s *LiquidityService) getTokenValueInStable(exec chainexec.EVMExecutor, tokenAddr common.Address, amount *big.Int, walletAddr common.Address) float64 {
-	if amount == nil || amount.Sign() <= 0 {
-		return 0
-	}
-	if exec == nil {
-		return 0
-	}
-	if s.okxService == nil {
-		return 0
-	}
-
-	cc := exec.Config()
-	if !common.IsHexAddress(cc.StableAddress) {
-		return 0
-	}
-	stableAddr := common.HexToAddress(cc.StableAddress)
-	chainID := fmt.Sprintf("%d", cc.ChainID)
-
-	// 使用 OKX DEX 获取报价
-	resp, err := s.okxService.GetSwapData(exchange.SwapRequest{
-		ChainID:           chainID,
-		FromTokenAddress:  tokenAddr.Hex(),
-		ToTokenAddress:    stableAddr.Hex(),
-		Amount:            amount.String(),
-		Slippage:          "0.01", // 1% slippage for quote
-		UserWalletAddress: walletAddr.Hex(),
-	})
-	if err != nil {
-		log.Printf("[Liquidity] getTokenValueInUSDT quote failed for %s: %v", tokenAddr.Hex(), err)
-		return 0
-	}
-
-	if resp == nil || len(resp.Data) == 0 {
-		return 0
-	}
-
-	// 解析返回的 USDT 数量
-	toAmountStr := strings.TrimSpace(resp.Data[0].RouterResult.ToTokenAmount)
-	if toAmountStr == "" {
-		return 0
-	}
-	toAmount, ok := new(big.Int).SetString(toAmountStr, 10)
-	if !ok || toAmount.Sign() <= 0 {
-		return 0
-	}
-
-	// USDT 精度是 18
-	return toFloat64(toAmount, cc.StableDecimals)
 }
 
 // SwapSingleToken 执行单个代币兑换（任意代币对），返回交易哈希

@@ -289,6 +289,11 @@ type MarketTokenAdvancedInfoRequest struct {
 	TokenContractAddress string
 }
 
+type BalanceAllTokenBalancesRequest struct {
+	Address string
+	Chains  []string
+}
+
 type MarketCandle struct {
 	TimestampMS int64
 	Open        float64
@@ -356,6 +361,32 @@ type MarketTokenBasicInfoResponse struct {
 	Data []MarketTokenBasicInfo `json:"data"`
 }
 
+type BalanceTokenAsset struct {
+	ChainIndex           string `json:"chainIndex"`
+	TokenContractAddress string `json:"tokenContractAddress"`
+	TokenAddress         string `json:"tokenAddress"`
+	Symbol               string `json:"symbol"`
+	TokenSymbol          string `json:"tokenSymbol"`
+	TokenName            string `json:"tokenName"`
+	TokenLogoURL         string `json:"tokenLogoUrl"`
+	TokenDecimal         string `json:"tokenDecimal"`
+	Decimals             string `json:"decimals"`
+	Balance              string `json:"balance"`
+	RawBalance           string `json:"rawBalance"`
+	TokenPrice           string `json:"tokenPrice"`
+	IsRiskToken          bool   `json:"isRiskToken"`
+}
+
+type BalanceAllTokenBalancesData struct {
+	TokenAssets []BalanceTokenAsset `json:"tokenAssets"`
+}
+
+type BalanceAllTokenBalancesResponse struct {
+	Code string                        `json:"code"`
+	Msg  string                        `json:"msg"`
+	Data []BalanceAllTokenBalancesData `json:"data"`
+}
+
 func (r *MarketTokenAdvancedInfoResponse) UnmarshalJSON(body []byte) error {
 	var raw struct {
 		Code string          `json:"code"`
@@ -420,6 +451,29 @@ func (s *OKXDexService) marketAPIURLForBase(baseURL string) string {
 		return base
 	}
 	return "https://web3.okx.com/api/v6/dex/market"
+}
+
+func (s *OKXDexService) balanceAPIURLForBase(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	if base == "" {
+		return "https://web3.okx.com/api/v6/dex/balance"
+	}
+	base = strings.TrimRight(base, "/")
+	base = strings.Replace(base, "https://www.okx.com/", "https://web3.okx.com/", 1)
+	replacer := strings.NewReplacer(
+		"/api/v6/dex/aggregator", "/api/v6/dex/balance",
+		"/api/v6/dex/market", "/api/v6/dex/balance",
+		"/api/v5/dex/aggregator", "/api/v6/dex/balance",
+		"/api/v5/dex/market", "/api/v6/dex/balance",
+	)
+	next := replacer.Replace(base)
+	if next != base {
+		return next
+	}
+	if strings.Contains(base, "/api/v6/dex/balance") {
+		return base
+	}
+	return "https://web3.okx.com/api/v6/dex/balance"
 }
 
 func normalizeOKXSwapFeePercent(raw string, chainID string) string {
@@ -661,6 +715,14 @@ func cloneMarketTokenBasicInfoResponse(resp MarketTokenBasicInfoResponse) *Marke
 	return &MarketTokenBasicInfoResponse{Code: resp.Code, Msg: resp.Msg, Data: rows}
 }
 
+func cloneBalanceAllTokenBalancesResponse(resp BalanceAllTokenBalancesResponse) *BalanceAllTokenBalancesResponse {
+	rows := make([]BalanceAllTokenBalancesData, len(resp.Data))
+	for i := range resp.Data {
+		rows[i].TokenAssets = append([]BalanceTokenAsset(nil), resp.Data[i].TokenAssets...)
+	}
+	return &BalanceAllTokenBalancesResponse{Code: resp.Code, Msg: resp.Msg, Data: rows}
+}
+
 func okxAdvancedInfoCacheKey(baseURL string, req MarketTokenAdvancedInfoRequest) string {
 	chainIndex := strings.TrimSpace(req.ChainIndex)
 	tokenAddress := strings.ToLower(strings.TrimSpace(req.TokenContractAddress))
@@ -801,6 +863,132 @@ func normalizeMarketCandlesRequest(req MarketCandlesRequest) (MarketCandlesReque
 		normalized.Limit = 299
 	}
 	return normalized, nil
+}
+
+func normalizeBalanceAllTokenBalancesRequest(req BalanceAllTokenBalancesRequest) (BalanceAllTokenBalancesRequest, error) {
+	address := strings.TrimSpace(req.Address)
+	if address == "" {
+		return BalanceAllTokenBalancesRequest{}, fmt.Errorf("address is required")
+	}
+
+	chains := make([]string, 0, len(req.Chains))
+	seen := make(map[string]struct{}, len(req.Chains))
+	for _, raw := range req.Chains {
+		chain := strings.TrimSpace(raw)
+		if chain == "" {
+			continue
+		}
+		if _, ok := seen[chain]; ok {
+			continue
+		}
+		seen[chain] = struct{}{}
+		chains = append(chains, chain)
+	}
+	if len(chains) == 0 {
+		return BalanceAllTokenBalancesRequest{}, fmt.Errorf("chains is required")
+	}
+
+	return BalanceAllTokenBalancesRequest{
+		Address: address,
+		Chains:  chains,
+	}, nil
+}
+
+func (s *OKXDexService) GetAllTokenBalancesByAddress(ctx context.Context, req BalanceAllTokenBalancesRequest) (*BalanceAllTokenBalancesResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	normalized, err := normalizeBalanceAllTokenBalancesRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	eff, err := s.effectiveConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		nextEff := eff
+		if attempt > 1 {
+			var cfgErr error
+			nextEff, cfgErr = s.effectiveConfig(ctx)
+			if cfgErr != nil {
+				return nil, cfgErr
+			}
+		}
+		baseURL := s.balanceAPIURLForBase(nextEff.BaseURL)
+		resp, err := s.getAllTokenBalancesByAddressUncached(ctx, nextEff, baseURL, normalized)
+		if err == nil {
+			return cloneBalanceAllTokenBalancesResponse(*resp), nil
+		}
+		lastErr = err
+		if !s.shouldRetryWithNextOKXConfig(nextEff, err, attempt) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func (s *OKXDexService) getAllTokenBalancesByAddressUncached(ctx context.Context, eff okxpool.EffectiveConfig, baseURL string, req BalanceAllTokenBalancesRequest) (*BalanceAllTokenBalancesResponse, error) {
+	query := url.Values{}
+	query.Set("address", strings.TrimSpace(req.Address))
+	query.Set("chains", strings.Join(req.Chains, ","))
+
+	endpoint := fmt.Sprintf("%s/all-token-balances-by-address?%s", baseURL, query.Encode())
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Balance] all-token-balances request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeadersWithConfig(httpReq, "", timestamp, eff)
+
+	start := time.Now()
+	resp, err := s.httpClient().Do(httpReq)
+	latency := time.Since(start)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to send request: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		wrapped := fmt.Errorf("failed to read response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		wrapped := fmt.Errorf("OKX balance/all-token-balances-by-address http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Balance] all-token-balances raw response: %s", string(body))
+	}
+
+	var out BalanceAllTokenBalancesResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		wrapped := fmt.Errorf("failed to parse response: %w", err)
+		s.recordOKXFailure(ctx, eff, latency, wrapped)
+		return nil, wrapped
+	}
+	if out.Code != "0" {
+		err := &OKXAPIError{Endpoint: "balance/all-token-balances-by-address", Code: out.Code, Msg: out.Msg}
+		s.recordOKXFailure(ctx, eff, latency, err)
+		return nil, err
+	}
+
+	s.recordOKXSuccess(ctx, eff, latency)
+	return &out, nil
 }
 
 func (s *OKXDexService) GetMarketTokenBasicInfos(reqs []MarketTokenBasicInfoRequest) (*MarketTokenBasicInfoResponse, error) {

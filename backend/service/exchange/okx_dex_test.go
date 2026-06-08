@@ -169,6 +169,56 @@ func TestMarketAPIURL_RewritesAggregatorBase(t *testing.T) {
 	}
 }
 
+func TestGetAllTokenBalancesByAddress_UsesOfficialEndpoint(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET request, got %s", req.Method)
+			}
+			if req.URL.Scheme != "https" || req.URL.Host != "web3.okx.com" {
+				t.Fatalf("unexpected request host: %s", req.URL.String())
+			}
+			if req.URL.Path != "/api/v6/dex/balance/all-token-balances-by-address" {
+				t.Fatalf("unexpected request path: %s", req.URL.Path)
+			}
+			query := req.URL.Query()
+			if got := query.Get("address"); got != "0x0000000000000000000000000000000000000001" {
+				t.Fatalf("unexpected address: %q", got)
+			}
+			if got := query.Get("chains"); got != "56,8453" {
+				t.Fatalf("unexpected chains: %q", got)
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"tokenAssets":[{"chainIndex":"56","tokenContractAddress":"0x1111111111111111111111111111111111111111","symbol":"TEST","tokenName":"Test Token","tokenDecimal":"18","balance":"1.5","rawBalance":"1500000000000000000","tokenPrice":"2.5","isRiskToken":false}]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetAllTokenBalancesByAddress(context.Background(), BalanceAllTokenBalancesRequest{
+		Address: "0x0000000000000000000000000000000000000001",
+		Chains:  []string{"56", "8453"},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Data) != 1 || len(resp.Data[0].TokenAssets) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	asset := resp.Data[0].TokenAssets[0]
+	if asset.TokenContractAddress != "0x1111111111111111111111111111111111111111" || asset.Symbol != "TEST" || asset.RawBalance != "1500000000000000000" {
+		t.Fatalf("unexpected token asset: %+v", asset)
+	}
+}
+
 func TestNormalizeOKXSwapFeePercent_TruncatesToNineDecimals(t *testing.T) {
 	cases := []struct {
 		name    string
