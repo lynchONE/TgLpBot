@@ -7981,9 +7981,15 @@ body {
 }
 .smd-token-liquidity-form {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) 110px 90px 90px auto;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
+}
+.smd-token-liquidity-form label:first-child {
+  grid-column: span 4;
+}
+.smd-token-liquidity-form label:not(:first-child) {
+  grid-column: span 4;
 }
 .smd-token-liquidity-form label {
   display: flex;
@@ -8008,6 +8014,44 @@ body {
 .smd-token-liquidity-form input:focus {
   border-color: rgba(var(--accent-rgb), 0.6);
 }
+.smd-token-liquidity-window {
+  grid-column: span 8;
+  min-width: 0;
+  border: 1px solid rgba(139, 160, 196, 0.22);
+  border-radius: 12px;
+  background: rgba(18, 26, 40, 0.62);
+  padding: 8px;
+}
+.smd-token-liquidity-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.smd-token-liquidity-window-head strong {
+  color: var(--text);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smd-token-liquidity-datetime-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.smd-token-liquidity-datetime-grid label {
+  grid-column: auto;
+}
+.smd-token-liquidity-form .smd-add-btn {
+  grid-column: span 4;
+  justify-content: center;
+  min-height: 36px;
+}
 .smd-token-liquidity-toolbar {
   margin-top: 12px;
   display: flex;
@@ -8026,10 +8070,20 @@ body {
 }
 @media (max-width: 860px) {
   .smd-token-liquidity-form {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .smd-token-liquidity-form label:first-child,
+  .smd-token-liquidity-window,
   .smd-token-liquidity-form .smd-add-btn {
+    grid-column: 1 / -1;
+  }
+  .smd-token-liquidity-form label:not(:first-child) {
+    grid-column: span 1;
+  }
+  .smd-token-liquidity-datetime-grid {
+    grid-template-columns: 1fr;
+  }
+  .smd-token-liquidity-datetime-grid label {
     grid-column: 1 / -1;
   }
 }

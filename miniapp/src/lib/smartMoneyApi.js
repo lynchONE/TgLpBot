@@ -159,6 +159,8 @@ export async function fetchSMTokenLiquidityWalletCandidates({
     tokenAddress,
     minAmountUsd,
     windowHours,
+    startTime,
+    endTime,
     limit,
     provider,
     signal,
@@ -167,7 +169,9 @@ export async function fetchSMTokenLiquidityWalletCandidates({
     if (chain) params.set('chain', String(chain));
     params.set('token_address', String(tokenAddress || ''));
     params.set('min_amount_usd', String(minAmountUsd));
-    params.set('window_hours', String(windowHours));
+    if (startTime) params.set('start_time', String(startTime));
+    if (endTime) params.set('end_time', String(endTime));
+    if (!startTime && !endTime && windowHours !== undefined) params.set('window_hours', String(windowHours));
     params.set('limit', String(limit));
     if (provider) params.set('provider', String(provider));
     return smRequest(buildSMUrl(apiBaseUrl, 'token_liquidity_wallet_candidates', params.toString()), { signal });

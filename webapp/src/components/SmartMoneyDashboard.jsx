@@ -2,7 +2,7 @@
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
-    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Activity,
+    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Activity, Radar,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
@@ -38,6 +38,35 @@ const WALLET_AVATAR_ICONS = Object.entries(
 
 const SMART_MONEY_AVATAR_ACCEPT = 'image/png,image/jpeg,image/webp';
 const SMART_MONEY_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+function formatDateTimeLocalValue(date) {
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function createDefaultTokenLiquidityRange() {
+    const end = new Date();
+    end.setMilliseconds(0);
+    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    return {
+        start: formatDateTimeLocalValue(start),
+        end: formatDateTimeLocalValue(end),
+    };
+}
+
+function tokenLiquidityLocalToISO(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString();
+}
+
+function formatTokenLiquidityDateTimeRange(startValue, endValue) {
+    const start = String(startValue || '').replace('T', ' ');
+    const end = String(endValue || '').replace('T', ' ');
+    if (!start || !end) return '请选择开始和结束时间';
+    return `${start} → ${end}`;
+}
 
 function walletAvatarIdx(addr) {
     if (!WALLET_AVATAR_ICONS.length || !addr || addr.length < 6) return 0;
@@ -507,7 +536,7 @@ function walletSourceLabel(source) {
     const value = String(source || '').trim();
     if (value === 'manual') return '手动添加';
     if (value === 'contract_interaction') return '合约发现';
-    if (value === 'token_liquidity_indexer') return 'LP筛选';
+    if (value === 'token_liquidity_indexer') return '雷达发现';
     return value || '未标记来源';
 }
 
@@ -859,7 +888,7 @@ function ZombieWalletModal({ open, candidates, selectedMap, busy, onToggle, onTo
 function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
     const [tokenAddress, setTokenAddress] = useState('');
     const [minAmountUsd, setMinAmountUsd] = useState('500');
-    const [windowHours, setWindowHours] = useState('24');
+    const [timeRange, setTimeRange] = useState(() => createDefaultTokenLiquidityRange());
     const [limit, setLimit] = useState('50');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -872,6 +901,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         if (!open) return;
         setError('');
         setImportResult(null);
+        setTimeRange(createDefaultTokenLiquidityRange());
     }, [open]);
 
     if (!open) return null;
@@ -881,8 +911,19 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         .filter((item) => selected[item.wallet_address])
         .map((item) => item.wallet_address);
     const allSelected = candidates.length > 0 && selectedWallets.length === candidates.length;
+    const currentRangeLabel = formatTokenLiquidityDateTimeRange(timeRange.start, timeRange.end);
 
     const preview = async () => {
+        const startTime = tokenLiquidityLocalToISO(timeRange.start);
+        const endTime = tokenLiquidityLocalToISO(timeRange.end);
+        if (!startTime || !endTime) {
+            setError('请选择有效的开始和结束时间');
+            return;
+        }
+        if (new Date(endTime).getTime() <= new Date(startTime).getTime()) {
+            setError('结束时间必须晚于开始时间');
+            return;
+        }
         setLoading(true);
         setError('');
         setImportResult(null);
@@ -892,7 +933,8 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 chain: 'bsc',
                 tokenAddress,
                 minAmountUsd: Number(minAmountUsd),
-                windowHours: Number(windowHours),
+                startTime,
+                endTime,
                 limit: Number(limit),
             });
             const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
@@ -922,7 +964,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 chain: 'bsc',
                 tokenAddress,
                 wallets: selectedWallets,
-                labelPrefix: 'LP',
+                labelPrefix: '雷达',
             });
             setImportResult(resp);
             await onImported?.();
@@ -938,8 +980,8 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             <div className="smd-modal smd-token-liquidity-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="smd-modal-header">
                     <div>
-                        <h3 className="smd-modal-title">LP 大额加池钱包导入</h3>
-                        <div className="smd-modal-subtitle">Bitquery indexed liquidity events</div>
+                        <h3 className="smd-modal-title">聪明钱雷达</h3>
+                        <div className="smd-modal-subtitle">Bitquery 加池事件索引 · 精确时间范围</div>
                     </div>
                     <button type="button" onClick={onClose} disabled={loading || saving} className="smd-modal-close">
                         <X size={18} />
@@ -947,29 +989,51 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 </div>
                 <div className="smd-token-liquidity-form">
                     <label>
-                        <span>Token address</span>
+                        <span>代币地址</span>
                         <input placeholder="0x..." value={tokenAddress} onChange={(e) => setTokenAddress(e.target.value)} />
                     </label>
+                    <div className="smd-token-liquidity-window">
+                        <div className="smd-token-liquidity-window-head">
+                            <span>时间范围</span>
+                            <strong>{currentRangeLabel}</strong>
+                        </div>
+                        <div className="smd-token-liquidity-datetime-grid">
+                            <label>
+                                <span>开始时间</span>
+                                <input
+                                    type="datetime-local"
+                                    step="1"
+                                    value={timeRange.start}
+                                    onChange={(e) => setTimeRange((prev) => ({ ...prev, start: e.target.value }))}
+                                />
+                            </label>
+                            <label>
+                                <span>结束时间</span>
+                                <input
+                                    type="datetime-local"
+                                    step="1"
+                                    value={timeRange.end}
+                                    onChange={(e) => setTimeRange((prev) => ({ ...prev, end: e.target.value }))}
+                                />
+                            </label>
+                        </div>
+                    </div>
                     <label>
-                        <span>Min USD</span>
+                        <span>最低金额(USD)</span>
                         <input type="number" min="1" value={minAmountUsd} onChange={(e) => setMinAmountUsd(e.target.value)} />
                     </label>
                     <label>
-                        <span>Hours</span>
-                        <input type="number" min="1" value={windowHours} onChange={(e) => setWindowHours(e.target.value)} />
-                    </label>
-                    <label>
-                        <span>Limit</span>
+                        <span>数量上限</span>
                         <input type="number" min="1" max="100" value={limit} onChange={(e) => setLimit(e.target.value)} />
                     </label>
                     <button type="button" className="smd-add-btn" onClick={preview} disabled={loading || saving}>
-                        {loading ? '扫描中...' : '预览'}
+                        {loading ? '扫描中...' : '扫描候选钱包'}
                     </button>
                 </div>
                 {error ? <div className="smd-inline-error">{error}</div> : null}
                 {importResult ? (
                     <div className="smd-inline-success">
-                        created {importResult.created || 0}, reactivated {importResult.reactivated || 0}, skipped {importResult.skipped_existing || 0}
+                        已新增 {importResult.created || 0}，已恢复 {importResult.reactivated || 0}，已跳过 {importResult.skipped_existing || 0}
                     </div>
                 ) : null}
                 {candidates.length > 0 ? (
@@ -990,7 +1054,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                             >
                                 {allSelected ? '取消全选' : '全选'}
                             </button>
-                            <span>{selectedWallets.length} / {candidates.length} selected</span>
+                            <span>{selectedWallets.length} / {candidates.length} 已选择</span>
                         </div>
                         <div className="smd-table-wrap smd-token-liquidity-table-wrap">
                             <table className="smd-table">
@@ -998,10 +1062,10 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                                     <tr>
                                         <th></th>
                                         <th>钱包</th>
-                                        <th className="right">Max USD</th>
-                                        <th>Pair</th>
-                                        <th>Pool</th>
-                                        <th>Tx</th>
+                                        <th className="right">最大金额</th>
+                                        <th>交易对</th>
+                                        <th>池子</th>
+                                        <th>交易</th>
                                         <th>状态</th>
                                     </tr>
                                 </thead>
@@ -2523,9 +2587,9 @@ function WalletList({
                     type="button"
                     onClick={() => setTokenLiquidityOpen(true)}
                     className="smd-add-btn smd-token-liquidity-btn"
-                    title="按代币筛选大额加池钱包"
+                    title="按代币扫描大额加池钱包"
                 >
-                    <Zap size={14} /> LP 导入
+                    <Radar size={14} /> 聪明钱雷达
                 </button>
                 <button
                     type="button"

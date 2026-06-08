@@ -602,9 +602,9 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 		jsonError(w, "min_amount_usd must be greater than 0", http.StatusBadRequest)
 		return
 	}
-	windowHours, err := strconv.Atoi(strings.TrimSpace(q.Get("window_hours")))
-	if err != nil || windowHours <= 0 {
-		jsonError(w, "window_hours must be greater than 0", http.StatusBadRequest)
+	startTime, endTime, windowHours, err := parseSMTokenLiquidityTimeRange(q)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	limit, err := strconv.Atoi(strings.TrimSpace(q.Get("limit")))
@@ -620,7 +620,7 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 
 	provider, err := sm.NewTokenLiquidityProviderFromConfig(config.AppConfig)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, smartMoneyTokenLiquidityConfigErrorMessage(err), http.StatusBadRequest)
 		return
 	}
 	resp, err := provider.FindCandidates(ctx, sm.TokenLiquidityCandidateQuery{
@@ -629,6 +629,8 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 		TokenAddress: tokenAddress,
 		MinAmountUSD: minAmountUSD,
 		WindowHours:  windowHours,
+		StartTime:    startTime,
+		EndTime:      endTime,
 		Limit:        limit,
 		Provider:     providerName,
 	})
@@ -650,6 +652,58 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 		}
 	}
 	jsonOK(w, resp)
+}
+
+func parseSMTokenLiquidityTimeRange(q url.Values) (time.Time, time.Time, int, error) {
+	startText := strings.TrimSpace(q.Get("start_time"))
+	endText := strings.TrimSpace(q.Get("end_time"))
+	if startText != "" || endText != "" {
+		if startText == "" || endText == "" {
+			return time.Time{}, time.Time{}, 0, fmt.Errorf("start_time and end_time are both required")
+		}
+		startTime, err := time.Parse(time.RFC3339, startText)
+		if err != nil {
+			return time.Time{}, time.Time{}, 0, fmt.Errorf("invalid start_time")
+		}
+		endTime, err := time.Parse(time.RFC3339, endText)
+		if err != nil {
+			return time.Time{}, time.Time{}, 0, fmt.Errorf("invalid end_time")
+		}
+		startTime = startTime.UTC()
+		endTime = endTime.UTC()
+		if !endTime.After(startTime) {
+			return time.Time{}, time.Time{}, 0, fmt.Errorf("end_time must be after start_time")
+		}
+		if endTime.Sub(startTime) > 30*24*time.Hour {
+			return time.Time{}, time.Time{}, 0, fmt.Errorf("time range is too large")
+		}
+		return startTime, endTime, int(math.Ceil(endTime.Sub(startTime).Hours())), nil
+	}
+
+	windowHours, err := strconv.Atoi(strings.TrimSpace(q.Get("window_hours")))
+	if err != nil || windowHours <= 0 {
+		return time.Time{}, time.Time{}, 0, fmt.Errorf("window_hours must be greater than 0")
+	}
+	if windowHours > 24*30 {
+		return time.Time{}, time.Time{}, 0, fmt.Errorf("window_hours is too large")
+	}
+	return time.Time{}, time.Time{}, windowHours, nil
+}
+
+func smartMoneyTokenLiquidityConfigErrorMessage(err error) string {
+	msg := strings.TrimSpace(err.Error())
+	switch {
+	case strings.Contains(msg, "SMART_MONEY_LIQUIDITY_INDEX_PROVIDER is not configured"):
+		return "聪明钱雷达未配置数据源。请在后端环境变量中设置 SMART_MONEY_LIQUIDITY_INDEX_PROVIDER=bitquery，并配置 BITQUERY_API_KEY；BITQUERY_API_URL 可使用默认 https://streaming.bitquery.io/graphql。"
+	case strings.Contains(msg, "unsupported SMART_MONEY_LIQUIDITY_INDEX_PROVIDER"):
+		return "聪明钱雷达当前只支持 Bitquery 数据源。请将 SMART_MONEY_LIQUIDITY_INDEX_PROVIDER 设置为 bitquery。"
+	case strings.Contains(msg, "BITQUERY_API_KEY is not configured"):
+		return "聪明钱雷达缺少 Bitquery API Key。请在后端环境变量中配置 BITQUERY_API_KEY。"
+	case strings.Contains(msg, "BITQUERY_API_URL is not configured"):
+		return "聪明钱雷达缺少 Bitquery API URL。请在后端环境变量中配置 BITQUERY_API_URL=https://streaming.bitquery.io/graphql。"
+	default:
+		return msg
+	}
 }
 
 func (s *Server) handleSMTokenLiquidityWalletImport(w http.ResponseWriter, r *http.Request) {

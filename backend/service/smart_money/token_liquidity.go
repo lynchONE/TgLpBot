@@ -24,6 +24,8 @@ type TokenLiquidityCandidateQuery struct {
 	TokenAddress string
 	MinAmountUSD float64
 	WindowHours  int
+	StartTime    time.Time
+	EndTime      time.Time
 	Limit        int
 	Provider     string
 }
@@ -61,6 +63,8 @@ type TokenLiquidityTokenInfo struct {
 type TokenLiquidityFilterInfo struct {
 	MinAmountUSD float64 `json:"min_amount_usd"`
 	WindowHours  int     `json:"window_hours"`
+	StartTime    string  `json:"start_time,omitempty"`
+	EndTime      string  `json:"end_time,omitempty"`
 	Limit        int     `json:"limit"`
 }
 
@@ -113,11 +117,27 @@ func NormalizeTokenLiquidityCandidateQuery(query TokenLiquidityCandidateQuery) (
 	if query.MinAmountUSD <= 0 || math.IsNaN(query.MinAmountUSD) || math.IsInf(query.MinAmountUSD, 0) {
 		return query, fmt.Errorf("min_amount_usd must be greater than 0")
 	}
-	if query.WindowHours <= 0 {
+	if query.StartTime.IsZero() && !query.EndTime.IsZero() {
+		return query, fmt.Errorf("start_time is required")
+	}
+	if query.StartTime.IsZero() && query.WindowHours <= 0 {
 		return query, fmt.Errorf("window_hours must be greater than 0")
 	}
 	if query.WindowHours > 24*30 {
 		return query, fmt.Errorf("window_hours is too large")
+	}
+	if !query.StartTime.IsZero() {
+		query.StartTime = query.StartTime.UTC()
+		if query.EndTime.IsZero() {
+			return query, fmt.Errorf("end_time is required")
+		}
+		query.EndTime = query.EndTime.UTC()
+		if !query.EndTime.After(query.StartTime) {
+			return query, fmt.Errorf("end_time must be after start_time")
+		}
+		if query.EndTime.Sub(query.StartTime) > 30*24*time.Hour {
+			return query, fmt.Errorf("time range is too large")
+		}
 	}
 	if query.Limit <= 0 {
 		return query, fmt.Errorf("limit must be greater than 0")
@@ -198,9 +218,9 @@ func (p *BitqueryTokenLiquidityProvider) FindCandidates(ctx context.Context, que
 	if limit > 500 {
 		limit = 500
 	}
-	since := time.Now().UTC().Add(-time.Duration(query.WindowHours) * time.Hour)
+	since, till := resolveTokenLiquidityTimeRange(query)
 
-	events, err := p.queryLiquidityEvents(ctx, query, since, limit)
+	events, err := p.queryLiquidityEvents(ctx, query, since, till, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -220,14 +240,22 @@ func (p *BitqueryTokenLiquidityProvider) FindCandidates(ctx context.Context, que
 	return resp, nil
 }
 
+func resolveTokenLiquidityTimeRange(query TokenLiquidityCandidateQuery) (time.Time, time.Time) {
+	if !query.StartTime.IsZero() {
+		return query.StartTime.UTC(), query.EndTime.UTC()
+	}
+	till := time.Now().UTC()
+	return till.Add(-time.Duration(query.WindowHours) * time.Hour), till
+}
+
 const bitqueryLiquidityEventsQuery = `
-query TokenLiquidityEvents($token: String!, $since: DateTime!, $limit: Int!) {
+query TokenLiquidityEvents($token: String!, $since: DateTime!, $till: DateTime!, $limit: Int!) {
   EVM(network: bsc) {
     currencyA: DEXPoolEvents(
       limit: { count: $limit }
       orderBy: { descending: Block_Time }
       where: {
-        Block: { Time: { since: $since } }
+        Block: { Time: { since: $since, till: $till } }
         PoolEvent: { Pool: { CurrencyA: { SmartContract: { is: $token } } } }
       }
     ) {
@@ -248,7 +276,7 @@ query TokenLiquidityEvents($token: String!, $since: DateTime!, $limit: Int!) {
       limit: { count: $limit }
       orderBy: { descending: Block_Time }
       where: {
-        Block: { Time: { since: $since } }
+        Block: { Time: { since: $since, till: $till } }
         PoolEvent: { Pool: { CurrencyB: { SmartContract: { is: $token } } } }
       }
     ) {
@@ -442,11 +470,12 @@ type bitqueryArgValue struct {
 	Bool       bool   `json:"bool"`
 }
 
-func (p *BitqueryTokenLiquidityProvider) queryLiquidityEvents(ctx context.Context, query TokenLiquidityCandidateQuery, since time.Time, limit int) ([]bitqueryDEXPoolEvent, error) {
+func (p *BitqueryTokenLiquidityProvider) queryLiquidityEvents(ctx context.Context, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, limit int) ([]bitqueryDEXPoolEvent, error) {
 	var out bitqueryGraphQLResponse
 	err := p.postGraphQL(ctx, bitqueryLiquidityEventsQuery, map[string]any{
 		"token": strings.ToLower(query.TokenAddress),
 		"since": since.Format(time.RFC3339),
+		"till":  till.Format(time.RFC3339),
 		"limit": limit,
 	}, &out)
 	if err != nil {
@@ -605,6 +634,7 @@ type bitqueryTxBalanceCandidate struct {
 }
 
 func aggregateBitqueryCandidates(query TokenLiquidityCandidateQuery, events []bitqueryDEXPoolEvent, balances []bitqueryTransactionBalance) *TokenLiquidityCandidateResponse {
+	querySince, queryTill := resolveTokenLiquidityTimeRange(query)
 	balancesByTx := make(map[string][]bitqueryTxBalanceCandidate)
 	excluded := 0
 	for _, balance := range balances {
@@ -708,6 +738,8 @@ func aggregateBitqueryCandidates(query TokenLiquidityCandidateQuery, events []bi
 		Filters: TokenLiquidityFilterInfo{
 			MinAmountUSD: query.MinAmountUSD,
 			WindowHours:  query.WindowHours,
+			StartTime:    querySince.Format(time.RFC3339),
+			EndTime:      queryTill.Format(time.RFC3339),
 			Limit:        query.Limit,
 		},
 		Sources: []TokenLiquiditySourceInfo{

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, laz
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity,
-    Clock, DollarSign, Percent, Users, Zap,
+    Clock, DollarSign, Percent, Users, Zap, Radar,
 } from 'lucide-react';
 
 const LazySmartMoneyAssetsPage = lazy(() => import('./SmartMoneyAssetsPage.jsx'));
@@ -64,6 +64,35 @@ const WALLET_AVATAR_ICONS = Object.entries(
 ).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
 const SMART_MONEY_AVATAR_ACCEPT = 'image/png,image/jpeg,image/webp';
 const SMART_MONEY_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+function formatDateTimeLocalValue(date) {
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function createDefaultTokenLiquidityRange() {
+    const end = new Date();
+    end.setMilliseconds(0);
+    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    return {
+        start: formatDateTimeLocalValue(start),
+        end: formatDateTimeLocalValue(end),
+    };
+}
+
+function tokenLiquidityLocalToISO(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString();
+}
+
+function formatTokenLiquidityDateTimeRange(startValue, endValue) {
+    const start = String(startValue || '').replace('T', ' ');
+    const end = String(endValue || '').replace('T', ' ');
+    if (!start || !end) return '请选择开始和结束时间';
+    return `${start} → ${end}`;
+}
 
 function GoldenDogPageContent({
     apiBaseUrl,
@@ -886,7 +915,7 @@ function walletSourceLabel(source) {
     const value = String(source || '').trim();
     if (value === 'manual') return '手动添加';
     if (value === 'contract_interaction') return '合约发现';
-    if (value === 'token_liquidity_indexer') return 'LP筛选';
+    if (value === 'token_liquidity_indexer') return '雷达发现';
     return value || '未标记来源';
 }
 
@@ -1884,7 +1913,7 @@ function ZombieWalletSheet({ open, candidates, selectedMap, busy, onToggle, onTo
 function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImported }) {
     const [tokenAddress, setTokenAddress] = useState('');
     const [minAmountUsd, setMinAmountUsd] = useState('500');
-    const [windowHours, setWindowHours] = useState('24');
+    const [timeRange, setTimeRange] = useState(() => createDefaultTokenLiquidityRange());
     const [limit, setLimit] = useState('30');
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -1897,6 +1926,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         if (!open) return;
         setError('');
         setImportResult(null);
+        setTimeRange(createDefaultTokenLiquidityRange());
     }, [open]);
 
     if (!open) return null;
@@ -1905,8 +1935,20 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
     const selectedWallets = candidates
         .filter((item) => selected[item.wallet_address])
         .map((item) => item.wallet_address);
+    const allSelected = candidates.length > 0 && selectedWallets.length === candidates.length;
+    const currentRangeLabel = formatTokenLiquidityDateTimeRange(timeRange.start, timeRange.end);
 
     const preview = async () => {
+        const startTime = tokenLiquidityLocalToISO(timeRange.start);
+        const endTime = tokenLiquidityLocalToISO(timeRange.end);
+        if (!startTime || !endTime) {
+            setError('请选择有效的开始和结束时间。');
+            return;
+        }
+        if (new Date(endTime).getTime() <= new Date(startTime).getTime()) {
+            setError('结束时间必须晚于开始时间。');
+            return;
+        }
         setLoading(true);
         setError('');
         setImportResult(null);
@@ -1916,7 +1958,8 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                 chain: 'bsc',
                 tokenAddress,
                 minAmountUsd: Number(minAmountUsd),
-                windowHours: Number(windowHours),
+                startTime,
+                endTime,
                 limit: Number(limit),
             });
             const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
@@ -1927,7 +1970,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
             setData(resp);
             setSelected(nextSelected);
         } catch (err) {
-            setError(String(err?.message || err || 'Preview failed'));
+            setError(String(err?.message || err || '扫描失败'));
         } finally {
             setLoading(false);
         }
@@ -1935,7 +1978,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
 
     const importSelected = async () => {
         if (selectedWallets.length === 0) {
-            setError('Select at least one wallet.');
+            setError('请至少选择一个钱包。');
             return;
         }
         setSaving(true);
@@ -1946,12 +1989,12 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                 chain: 'bsc',
                 tokenAddress,
                 wallets: selectedWallets,
-                labelPrefix: 'LP',
+                labelPrefix: '雷达',
             });
             setImportResult(resp);
             await onImported?.();
         } catch (err) {
-            setError(String(err?.message || err || 'Import failed'));
+            setError(String(err?.message || err || '导入失败'));
         } finally {
             setSaving(false);
         }
@@ -1962,8 +2005,8 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
             <div className="max-h-[92vh] w-full overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950 shadow-2xl">
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                     <div>
-                        <div className="text-base font-semibold text-zinc-100">LP wallet import</div>
-                        <div className="text-xs text-zinc-500">Bitquery indexed liquidity events</div>
+                        <div className="text-base font-semibold text-zinc-100">聪明钱雷达</div>
+                        <div className="text-xs text-zinc-500">Bitquery 加池事件索引 · 精确时间范围</div>
                     </div>
                     <button type="button" className={getIconButtonClass(false)} onClick={onClose} disabled={loading || saving}>
                         <X size={16} />
@@ -1973,19 +2016,47 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                     <div className="space-y-2">
                         <input
                             className={getInputClass(brand)}
-                            placeholder="Token address (0x...)"
+                            placeholder="代币地址 (0x...)"
                             value={tokenAddress}
                             onChange={(e) => setTokenAddress(e.target.value)}
                         />
-                        <div className="grid grid-cols-3 gap-2">
-                            <input className={getInputClass(brand)} type="number" min="1" value={minAmountUsd} onChange={(e) => setMinAmountUsd(e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="1" value={windowHours} onChange={(e) => setWindowHours(e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="1" max="100" value={limit} onChange={(e) => setLimit(e.target.value)} />
+                        <div className="rounded-2xl border border-white/10 bg-zinc-900/55 p-2.5">
+                            <div className="mb-2 flex items-center justify-between text-[10px] text-zinc-500">
+                                <span className="font-semibold text-zinc-400">时间范围</span>
+                                <span className="max-w-[220px] truncate text-right">{currentRangeLabel}</span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <label className="min-w-0">
+                                    <span className="mb-1 block text-[10px] text-zinc-500">开始时间</span>
+                                    <input
+                                        className={getInputClass(brand)}
+                                        type="datetime-local"
+                                        step="1"
+                                        value={timeRange.start}
+                                        onChange={(e) => setTimeRange((prev) => ({ ...prev, start: e.target.value }))}
+                                    />
+                                </label>
+                                <label className="min-w-0">
+                                    <span className="mb-1 block text-[10px] text-zinc-500">结束时间</span>
+                                    <input
+                                        className={getInputClass(brand)}
+                                        type="datetime-local"
+                                        step="1"
+                                        value={timeRange.end}
+                                        onChange={(e) => setTimeRange((prev) => ({ ...prev, end: e.target.value }))}
+                                    />
+                                </label>
+                            </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
-                            <span>Min USD</span>
-                            <span>Hours</span>
-                            <span>Limit</span>
+                        <div className="grid grid-cols-2 gap-2">
+                            <label className="min-w-0">
+                                <span className="mb-1 block text-[10px] text-zinc-500">最低金额(USD)</span>
+                                <input className={getInputClass(brand)} type="number" min="1" value={minAmountUsd} onChange={(e) => setMinAmountUsd(e.target.value)} />
+                            </label>
+                            <label className="min-w-0">
+                                <span className="mb-1 block text-[10px] text-zinc-500">数量上限</span>
+                                <input className={getInputClass(brand)} type="number" min="1" max="100" value={limit} onChange={(e) => setLimit(e.target.value)} />
+                            </label>
                         </div>
                         <button
                             type="button"
@@ -1993,31 +2064,35 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                             onClick={preview}
                             disabled={loading || saving}
                         >
-                            {loading ? 'Scanning...' : 'Preview wallets'}
+                            {loading ? '扫描中...' : '扫描候选钱包'}
                         </button>
                     </div>
 
                     {error ? <div className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
                     {importResult ? (
                         <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                            created {importResult.created || 0}, reactivated {importResult.reactivated || 0}, skipped {importResult.skipped_existing || 0}
+                            已新增 {importResult.created || 0}，已恢复 {importResult.reactivated || 0}，已跳过 {importResult.skipped_existing || 0}
                         </div>
                     ) : null}
 
                     {candidates.length > 0 ? (
                         <div className="mt-4 space-y-2">
                             <div className="flex items-center justify-between text-xs text-zinc-500">
-                                <span>{candidates.length} candidates</span>
+                                <span>{candidates.length} 个候选钱包</span>
                                 <button
                                     type="button"
                                     className="text-zinc-300"
                                     onClick={() => {
+                                        if (allSelected) {
+                                            setSelected({});
+                                            return;
+                                        }
                                         const next = {};
                                         candidates.forEach((item) => { next[item.wallet_address] = true; });
                                         setSelected(next);
                                     }}
                                 >
-                                    Select all
+                                    {allSelected ? '取消全选' : '全选'}
                                 </button>
                             </div>
                             {candidates.map((item) => {
@@ -2033,12 +2108,12 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center justify-between gap-2">
                                                 <span className="font-mono text-xs text-zinc-100">{shortAddr(item.wallet_address)}</span>
-                                                <span className="text-xs font-semibold text-emerald-300">${formatUSDCompact(item.max_amount_usd)}</span>
+                                                <span className="text-xs font-semibold text-emerald-300">{formatUSDCompact(item.max_amount_usd)}</span>
                                             </div>
                                             <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
                                                 <span>{item.pair || 'pool'}</span>
                                                 <span>{shortAddr(item.pool_address)}</span>
-                                                {item.already_monitored ? <span>already monitored</span> : null}
+                                                {item.already_monitored ? <span>已监控</span> : null}
                                             </div>
                                         </div>
                                     </label>
@@ -2050,11 +2125,11 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                                 onClick={importSelected}
                                 disabled={saving || selectedWallets.length === 0}
                             >
-                                {saving ? 'Importing...' : `Import ${selectedWallets.length} wallets`}
+                                {saving ? '导入中...' : `导入 ${selectedWallets.length} 个钱包`}
                             </button>
                         </div>
                     ) : data ? (
-                        <div className="mt-4 rounded-2xl border border-white/10 bg-zinc-900/60 px-3 py-5 text-center text-sm text-zinc-500">No candidates.</div>
+                        <div className="mt-4 rounded-2xl border border-white/10 bg-zinc-900/60 px-3 py-5 text-center text-sm text-zinc-500">没有找到符合条件的钱包</div>
                     ) : null}
                 </div>
             </div>
@@ -3305,7 +3380,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                     onClick={() => setTokenLiquidityOpen(true)}
                     className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-300/15"
                 >
-                    <Zap size={14} /> LP
+                    <Radar size={14} /> 聪明钱雷达
                 </button>
                 <button
                     type="button"

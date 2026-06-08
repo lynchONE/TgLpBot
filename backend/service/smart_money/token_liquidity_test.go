@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeTokenLiquidityCandidateQuery(t *testing.T) {
@@ -41,6 +42,36 @@ func TestNormalizeTokenLiquidityCandidateQuery(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestNormalizeTokenLiquidityCandidateQueryAcceptsAbsoluteRange(t *testing.T) {
+	start := time.Date(2026, 6, 7, 12, 30, 15, 0, time.FixedZone("CST", 8*3600))
+	end := start.Add(3*time.Hour + 20*time.Minute)
+	query, err := NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
+		Chain:        "bsc",
+		TokenAddress: "0x55d398326f99059ff775485246999027b3197955",
+		MinAmountUSD: 500,
+		StartTime:    start,
+		EndTime:      end,
+		Limit:        20,
+	})
+	if err != nil {
+		t.Fatalf("expected absolute range query: %v", err)
+	}
+	if query.StartTime.Location() != time.UTC || query.EndTime.Location() != time.UTC {
+		t.Fatal("expected absolute range to be normalized to UTC")
+	}
+
+	_, err = NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
+		TokenAddress: "0x55d398326f99059ff775485246999027b3197955",
+		MinAmountUSD: 500,
+		StartTime:    end,
+		EndTime:      start,
+		Limit:        20,
+	})
+	if err == nil || !strings.Contains(err.Error(), "end_time must be after start_time") {
+		t.Fatalf("expected invalid absolute range error, got %v", err)
 	}
 }
 
