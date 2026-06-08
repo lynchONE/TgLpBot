@@ -7469,6 +7469,11 @@ body {
 .smd-badge.fee { background: rgba(18, 26, 40, 0.6); color: var(--text-muted); }
 .smd-badge.source-manual { background: var(--accent-soft); color: var(--accent-text); }
 .smd-badge.source-contract { background: rgba(18, 26, 40, 0.85); color: var(--text-muted); }
+.smd-badge.source-token-liquidity {
+  background: rgba(56, 189, 248, 0.12);
+  color: #bae6fd;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+}
 .smd-badge.status-open {
   background: rgba(74, 222, 128, 0.12);
   color: #86efac;
@@ -7775,6 +7780,15 @@ body {
   color: #ffb4b4;
   font-size: 13px;
 }
+.smd-inline-success {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(74, 222, 128, 0.24);
+  background: rgba(74, 222, 128, 0.08);
+  color: #bbf7d0;
+  font-size: 13px;
+}
 .smd-monitor-banner {
   display: flex;
   align-items: center;
@@ -7956,6 +7970,68 @@ body {
   padding: 20px;
   width: 100%;
   max-width: 420px;
+}
+.smd-token-liquidity-modal {
+  max-width: 980px;
+}
+.smd-modal-subtitle {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.smd-token-liquidity-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 110px 90px 90px auto;
+  gap: 10px;
+  align-items: end;
+}
+.smd-token-liquidity-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.smd-token-liquidity-form input {
+  width: 100%;
+  height: 36px;
+  background: rgba(18, 26, 40, 0.85);
+  border: 1px solid rgba(139, 160, 196, 0.28);
+  border-radius: 10px;
+  padding: 0 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.smd-token-liquidity-form input:focus {
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+.smd-token-liquidity-toolbar {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.smd-token-liquidity-table-wrap {
+  margin-top: 10px;
+  max-height: 380px;
+  overflow: auto;
+}
+.smd-token-liquidity-table-wrap .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (max-width: 860px) {
+  .smd-token-liquidity-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .smd-token-liquidity-form label:first-child,
+  .smd-token-liquidity-form .smd-add-btn {
+    grid-column: 1 / -1;
+  }
 }
 .smd-modal-header {
   display: flex;

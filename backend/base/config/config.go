@@ -244,6 +244,10 @@ type Config struct {
 	// Smart Money monitoring
 	SmartMoneyEnabled      bool
 	SmartMoneyPollInterval int
+	// Smart Money token-liquidity wallet discovery.
+	SmartMoneyLiquidityIndexProvider string
+	BitqueryAPIKey                   string
+	BitqueryAPIURL                   string
 
 	// Multi-chain (single instance). Chains are keyed by lower-case chain slug (e.g. "bsc", "base").
 	EnabledChains []string
@@ -492,8 +496,11 @@ func LoadConfig() error {
 		SmartLPScanTimeoutSeconds:  smartLPScanTimeoutSeconds,
 
 		// Smart Money monitoring
-		SmartMoneyEnabled:      getEnvBool("SMART_MONEY_ENABLED", false),
-		SmartMoneyPollInterval: smartMoneyPollInterval,
+		SmartMoneyEnabled:                getEnvBool("SMART_MONEY_ENABLED", false),
+		SmartMoneyPollInterval:           smartMoneyPollInterval,
+		SmartMoneyLiquidityIndexProvider: strings.ToLower(strings.TrimSpace(getEnv("SMART_MONEY_LIQUIDITY_INDEX_PROVIDER", ""))),
+		BitqueryAPIKey:                   strings.TrimSpace(getEnv("BITQUERY_API_KEY", "")),
+		BitqueryAPIURL:                   strings.TrimRight(strings.TrimSpace(getEnv("BITQUERY_API_URL", "https://streaming.bitquery.io/graphql")), "/"),
 	}
 
 	// Build per-chain configs (single-instance multi-chain).
@@ -597,6 +604,9 @@ func LoadConfig() error {
 	log.Printf("   - SmartMoney Enabled: %v", AppConfig.SmartMoneyEnabled)
 	log.Printf("   - SmartMoney BSC HTTP RPC: %s", maskURL(AppConfig.BSCRpcURL))
 	log.Printf("   - SmartMoney Poll Interval: %d seconds", AppConfig.SmartMoneyPollInterval)
+	log.Printf("   - SmartMoney Liquidity Index Provider: %s", AppConfig.SmartMoneyLiquidityIndexProvider)
+	log.Printf("   - Bitquery API URL: %s", maskURL(AppConfig.BitqueryAPIURL))
+	log.Printf("   - Bitquery API Key: %s", maskString(AppConfig.BitqueryAPIKey))
 	log.Println("[Config] Configuration loaded")
 	log.Println("========================================")
 

@@ -153,6 +153,47 @@ export async function deleteSMZombieWallets({ apiBaseUrl, wallets, signal }) {
     });
 }
 
+export async function fetchSMTokenLiquidityWalletCandidates({
+    apiBaseUrl,
+    chain = 'bsc',
+    tokenAddress,
+    minAmountUsd,
+    windowHours,
+    limit,
+    provider,
+    signal,
+}) {
+    const params = new URLSearchParams();
+    if (chain) params.set('chain', String(chain));
+    params.set('token_address', String(tokenAddress || ''));
+    params.set('min_amount_usd', String(minAmountUsd));
+    params.set('window_hours', String(windowHours));
+    params.set('limit', String(limit));
+    if (provider) params.set('provider', String(provider));
+    return smRequest(buildSMUrl(apiBaseUrl, 'token_liquidity_wallet_candidates', params.toString()), { signal });
+}
+
+export async function importSMTokenLiquidityWallets({
+    apiBaseUrl,
+    chain = 'bsc',
+    tokenAddress,
+    wallets,
+    labelPrefix,
+    signal,
+}) {
+    return smRequest(buildSMUrl(apiBaseUrl, 'token_liquidity_wallet_import', ''), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chain,
+            token_address: tokenAddress,
+            wallets,
+            label_prefix: labelPrefix,
+        }),
+        signal,
+    });
+}
+
 export async function uploadSMWalletAvatar({ apiBaseUrl, address, file, signal }) {
     const params = new URLSearchParams();
     params.set('address', String(address));

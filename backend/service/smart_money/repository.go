@@ -54,6 +54,13 @@ type WatchActivityQuery struct {
 	Size          int
 }
 
+type MonitoredWalletImportResult struct {
+	Created         int      `json:"created"`
+	Reactivated     int      `json:"reactivated"`
+	SkippedExisting int      `json:"skipped_existing"`
+	Invalid         []string `json:"invalid"`
+}
+
 const smartMoneyNetAmountOrderJoin = `
 LEFT JOIN sm_lp_active_positions ap
 	ON ap.chain_id = sm_lp_positions.chain_id
@@ -200,6 +207,89 @@ func (r *Repository) UpdateMonitoredWallet(ctx context.Context, address string, 
 	return database.DB.WithContext(ctx).Model(&models.MonitoredWallet{}).
 		Where("address = ? AND chain_id = ?", strings.ToLower(address), chainID).
 		Updates(updates).Error
+}
+
+func (r *Repository) ImportTokenLiquidityWallets(ctx context.Context, chainID int, tokenAddress string, wallets []string, labelPrefix string) (MonitoredWalletImportResult, error) {
+	result := MonitoredWalletImportResult{Invalid: []string{}}
+	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
+	labelPrefix = strings.TrimSpace(labelPrefix)
+	if chainID <= 0 {
+		chainID = 56
+	}
+
+	seen := make(map[string]struct{}, len(wallets))
+	normalized := make([]string, 0, len(wallets))
+	for _, raw := range wallets {
+		addr := strings.ToLower(strings.TrimSpace(raw))
+		if !isRepositoryEVMAddress(addr) {
+			result.Invalid = append(result.Invalid, strings.TrimSpace(raw))
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		normalized = append(normalized, addr)
+	}
+	if len(result.Invalid) > 0 {
+		return result, nil
+	}
+	if len(normalized) == 0 {
+		return result, nil
+	}
+
+	err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, addr := range normalized {
+			var existing models.MonitoredWallet
+			err := tx.Where("address = ? AND chain_id = ?", addr, chainID).First(&existing).Error
+			if err != nil && err != gorm.ErrRecordNotFound {
+				return err
+			}
+			if err == nil {
+				if existing.IsActive {
+					result.SkippedExisting++
+					continue
+				}
+				updates := map[string]any{
+					"is_active":       true,
+					"source":          MonitoredWalletSourceTokenLiquidityIndexer,
+					"source_contract": tokenAddress,
+				}
+				if labelPrefix != "" {
+					label := labelPrefix + " " + addr[len(addr)-4:]
+					updates["label"] = label
+				}
+				if err := tx.Model(&models.MonitoredWallet{}).
+					Where("address = ? AND chain_id = ?", addr, chainID).
+					Updates(updates).Error; err != nil {
+					return err
+				}
+				result.Reactivated++
+				continue
+			}
+
+			var labelPtr *string
+			if labelPrefix != "" {
+				label := labelPrefix + " " + addr[len(addr)-4:]
+				labelPtr = &label
+			}
+			sourceContract := tokenAddress
+			wallet := &models.MonitoredWallet{
+				Address:        addr,
+				ChainID:        chainID,
+				Source:         MonitoredWalletSourceTokenLiquidityIndexer,
+				SourceContract: &sourceContract,
+				Label:          labelPtr,
+				IsActive:       true,
+			}
+			if err := tx.Create(wallet).Error; err != nil {
+				return err
+			}
+			result.Created++
+		}
+		return nil
+	})
+	return result, err
 }
 
 func (r *Repository) DeleteMonitoredWallet(ctx context.Context, address string, chainID int) error {
@@ -2506,6 +2596,22 @@ func normalizeWalletRefs(wallets []WalletRef) []WalletRef {
 		out = append(out, WalletRef{Address: address, ChainID: chainID})
 	}
 	return out
+}
+
+func isRepositoryEVMAddress(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if len(addr) != 42 {
+		return false
+	}
+	if !strings.HasPrefix(addr, "0x") && !strings.HasPrefix(addr, "0X") {
+		return false
+	}
+	for _, c := range addr[2:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func deleteMonitoredWalletHistory(tx *gorm.DB, wallet WalletRef) (int64, error) {

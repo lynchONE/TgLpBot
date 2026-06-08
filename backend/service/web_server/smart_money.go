@@ -88,6 +88,8 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm_upload", s.handleSMUploadCompat)
 	mux.HandleFunc("/api/sm/wallets", s.handleSMWallets)
 	mux.HandleFunc("/api/sm/wallet_zombies", s.handleSMWalletZombies)
+	mux.HandleFunc("/api/sm/token_liquidity_wallet_candidates", s.handleSMTokenLiquidityWalletCandidates)
+	mux.HandleFunc("/api/sm/token_liquidity_wallet_import", s.handleSMTokenLiquidityWalletImport)
 	mux.HandleFunc("/api/sm/wallet_avatar", s.handleSMWalletAvatar)
 	mux.HandleFunc("/api/sm/contracts", s.handleSMContracts)
 	mux.HandleFunc("/api/sm/pools", s.handleSMPools)
@@ -124,6 +126,10 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMWallets(w, r)
 		case "wallet_zombies":
 			s.handleSMWalletZombies(w, r)
+		case "token_liquidity_wallet_candidates":
+			s.handleSMTokenLiquidityWalletCandidates(w, r)
+		case "token_liquidity_wallet_import":
+			s.handleSMTokenLiquidityWalletImport(w, r)
 		case "contracts":
 			s.handleSMContracts(w, r)
 		case "pools":
@@ -159,7 +165,7 @@ func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
 
 func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
-	case "wallets", "wallet_zombies", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
+	case "wallets", "wallet_zombies", "token_liquidity_wallet_candidates", "token_liquidity_wallet_import", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
 	case "watch_activity":
 		return "/api/smart_money_watch_activity", true
@@ -566,6 +572,144 @@ func (s *Server) handleSMWalletZombies(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if smService == nil {
+		jsonError(w, "smart money service not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	q := r.URL.Query()
+	chainID := resolveSmartMoneyRequestChainID(r)
+	chain := smartMoneyChainSlug(chainID)
+	if chain != "bsc" {
+		jsonError(w, "token liquidity wallet discovery currently supports bsc only", http.StatusBadRequest)
+		return
+	}
+	tokenAddress := smartMoneyNormalizeTokenAddress(q.Get("token_address"))
+	if tokenAddress == "" {
+		jsonError(w, "invalid token_address", http.StatusBadRequest)
+		return
+	}
+	minAmountUSD, err := strconv.ParseFloat(strings.TrimSpace(q.Get("min_amount_usd")), 64)
+	if err != nil || minAmountUSD <= 0 {
+		jsonError(w, "min_amount_usd must be greater than 0", http.StatusBadRequest)
+		return
+	}
+	windowHours, err := strconv.Atoi(strings.TrimSpace(q.Get("window_hours")))
+	if err != nil || windowHours <= 0 {
+		jsonError(w, "window_hours must be greater than 0", http.StatusBadRequest)
+		return
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(q.Get("limit")))
+	if err != nil || limit <= 0 {
+		jsonError(w, "limit must be greater than 0", http.StatusBadRequest)
+		return
+	}
+	providerName := strings.TrimSpace(q.Get("provider"))
+	if providerName != "" && strings.ToLower(providerName) != "bitquery" {
+		jsonError(w, "unsupported provider: "+providerName, http.StatusBadRequest)
+		return
+	}
+
+	provider, err := sm.NewTokenLiquidityProviderFromConfig(config.AppConfig)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp, err := provider.FindCandidates(ctx, sm.TokenLiquidityCandidateQuery{
+		Chain:        chain,
+		ChainID:      chainID,
+		TokenAddress: tokenAddress,
+		MinAmountUSD: minAmountUSD,
+		WindowHours:  windowHours,
+		Limit:        limit,
+		Provider:     providerName,
+	})
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	repo := smService.Repo()
+	if repo != nil && resp != nil {
+		activeWallets, err := repo.GetAllActiveWalletAddresses(ctx, chainID)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for i := range resp.Candidates {
+			addr := strings.ToLower(strings.TrimSpace(resp.Candidates[i].WalletAddress))
+			_, resp.Candidates[i].AlreadyMonitored = activeWallets[addr]
+		}
+	}
+	jsonOK(w, resp)
+}
+
+func (s *Server) handleSMTokenLiquidityWalletImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if smService == nil {
+		jsonError(w, "smart money service not initialized", http.StatusInternalServerError)
+		return
+	}
+	var req struct {
+		Chain        string   `json:"chain"`
+		TokenAddress string   `json:"token_address"`
+		Wallets      []string `json:"wallets"`
+		LabelPrefix  string   `json:"label_prefix"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	chainID := resolveSmartMoneyRequestChainID(r)
+	if strings.TrimSpace(req.Chain) != "" {
+		switch config.NormalizeChain(req.Chain) {
+		case "base":
+			chainID = 8453
+		default:
+			chainID = 56
+		}
+	}
+	tokenAddress := smartMoneyNormalizeTokenAddress(req.TokenAddress)
+	if tokenAddress == "" {
+		jsonError(w, "invalid token_address", http.StatusBadRequest)
+		return
+	}
+	if len(req.Wallets) == 0 {
+		jsonError(w, "wallets is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Wallets) > 100 {
+		jsonError(w, "wallets cannot exceed 100", http.StatusBadRequest)
+		return
+	}
+
+	repo := smService.Repo()
+	result, err := repo.ImportTokenLiquidityWallets(r.Context(), chainID, tokenAddress, req.Wallets, req.LabelPrefix)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(result.Invalid) > 0 {
+		jsonOK(w, map[string]any{
+			"created":          result.Created,
+			"reactivated":      result.Reactivated,
+			"skipped_existing": result.SkippedExisting,
+			"invalid":          result.Invalid,
+		})
+		return
+	}
+	jsonOK(w, result)
 }
 
 // --- Contracts ---
@@ -1572,6 +1716,8 @@ func normalizeSmartMoneyWalletSourceScope(raw string) (string, bool) {
 		return "manual", true
 	case "contract", "contract_interaction":
 		return "contract_interaction", true
+	case "token_liquidity", "token_liquidity_indexer":
+		return sm.MonitoredWalletSourceTokenLiquidityIndexer, true
 	default:
 		return "", false
 	}

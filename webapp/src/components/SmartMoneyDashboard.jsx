@@ -7,6 +7,7 @@ import {
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet, fetchSMZombieWallets, deleteSMZombieWallets,
+    fetchSMTokenLiquidityWalletCandidates, importSMTokenLiquidityWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     buildSMEventsWsUrl,
@@ -506,11 +507,15 @@ function walletSourceLabel(source) {
     const value = String(source || '').trim();
     if (value === 'manual') return '手动添加';
     if (value === 'contract_interaction') return '合约发现';
+    if (value === 'token_liquidity_indexer') return 'LP筛选';
     return value || '未标记来源';
 }
 
 function walletSourceBadgeClass(source) {
-    return String(source || '').trim() === 'manual' ? 'source-manual' : 'source-contract';
+    const value = String(source || '').trim();
+    if (value === 'manual') return 'source-manual';
+    if (value === 'token_liquidity_indexer') return 'source-token-liquidity';
+    return 'source-contract';
 }
 
 function walletSourceContractLabel(value) {
@@ -844,6 +849,191 @@ function ZombieWalletModal({ open, candidates, selectedMap, busy, onToggle, onTo
                     <button type="button" onClick={onClose} disabled={busy} className="smd-modal-cancel">关闭</button>
                     <button type="button" onClick={onDelete} disabled={busy || selectedCount === 0} className="smd-modal-submit danger">
                         {busy ? '删除中...' : `删除 ${selectedCount} 个`}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
+    const [tokenAddress, setTokenAddress] = useState('');
+    const [minAmountUsd, setMinAmountUsd] = useState('500');
+    const [windowHours, setWindowHours] = useState('24');
+    const [limit, setLimit] = useState('50');
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [data, setData] = useState(null);
+    const [selected, setSelected] = useState({});
+    const [importResult, setImportResult] = useState(null);
+
+    useEffect(() => {
+        if (!open) return;
+        setError('');
+        setImportResult(null);
+    }, [open]);
+
+    if (!open) return null;
+
+    const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+    const selectedWallets = candidates
+        .filter((item) => selected[item.wallet_address])
+        .map((item) => item.wallet_address);
+    const allSelected = candidates.length > 0 && selectedWallets.length === candidates.length;
+
+    const preview = async () => {
+        setLoading(true);
+        setError('');
+        setImportResult(null);
+        try {
+            const resp = await fetchSMTokenLiquidityWalletCandidates({
+                apiBaseUrl,
+                chain: 'bsc',
+                tokenAddress,
+                minAmountUsd: Number(minAmountUsd),
+                windowHours: Number(windowHours),
+                limit: Number(limit),
+            });
+            const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
+            const nextSelected = {};
+            list.forEach((item) => {
+                if (!item.already_monitored) nextSelected[item.wallet_address] = true;
+            });
+            setData(resp);
+            setSelected(nextSelected);
+        } catch (err) {
+            setError(String(err?.message || err || '预览失败'));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const importSelected = async () => {
+        if (selectedWallets.length === 0) {
+            setError('请选择至少一个钱包');
+            return;
+        }
+        setSaving(true);
+        setError('');
+        try {
+            const resp = await importSMTokenLiquidityWallets({
+                apiBaseUrl,
+                chain: 'bsc',
+                tokenAddress,
+                wallets: selectedWallets,
+                labelPrefix: 'LP',
+            });
+            setImportResult(resp);
+            await onImported?.();
+        } catch (err) {
+            setError(String(err?.message || err || '导入失败'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="smd-modal-overlay" onClick={(loading || saving) ? undefined : onClose}>
+            <div className="smd-modal smd-token-liquidity-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="smd-modal-header">
+                    <div>
+                        <h3 className="smd-modal-title">LP 大额加池钱包导入</h3>
+                        <div className="smd-modal-subtitle">Bitquery indexed liquidity events</div>
+                    </div>
+                    <button type="button" onClick={onClose} disabled={loading || saving} className="smd-modal-close">
+                        <X size={18} />
+                    </button>
+                </div>
+                <div className="smd-token-liquidity-form">
+                    <label>
+                        <span>Token address</span>
+                        <input placeholder="0x..." value={tokenAddress} onChange={(e) => setTokenAddress(e.target.value)} />
+                    </label>
+                    <label>
+                        <span>Min USD</span>
+                        <input type="number" min="1" value={minAmountUsd} onChange={(e) => setMinAmountUsd(e.target.value)} />
+                    </label>
+                    <label>
+                        <span>Hours</span>
+                        <input type="number" min="1" value={windowHours} onChange={(e) => setWindowHours(e.target.value)} />
+                    </label>
+                    <label>
+                        <span>Limit</span>
+                        <input type="number" min="1" max="100" value={limit} onChange={(e) => setLimit(e.target.value)} />
+                    </label>
+                    <button type="button" className="smd-add-btn" onClick={preview} disabled={loading || saving}>
+                        {loading ? '扫描中...' : '预览'}
+                    </button>
+                </div>
+                {error ? <div className="smd-inline-error">{error}</div> : null}
+                {importResult ? (
+                    <div className="smd-inline-success">
+                        created {importResult.created || 0}, reactivated {importResult.reactivated || 0}, skipped {importResult.skipped_existing || 0}
+                    </div>
+                ) : null}
+                {candidates.length > 0 ? (
+                    <>
+                        <div className="smd-token-liquidity-toolbar">
+                            <button
+                                type="button"
+                                className="smd-modal-cancel"
+                                onClick={() => {
+                                    if (allSelected) {
+                                        setSelected({});
+                                        return;
+                                    }
+                                    const next = {};
+                                    candidates.forEach((item) => { next[item.wallet_address] = true; });
+                                    setSelected(next);
+                                }}
+                            >
+                                {allSelected ? '取消全选' : '全选'}
+                            </button>
+                            <span>{selectedWallets.length} / {candidates.length} selected</span>
+                        </div>
+                        <div className="smd-table-wrap smd-token-liquidity-table-wrap">
+                            <table className="smd-table">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th>钱包</th>
+                                        <th className="right">Max USD</th>
+                                        <th>Pair</th>
+                                        <th>Pool</th>
+                                        <th>Tx</th>
+                                        <th>状态</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {candidates.map((item) => (
+                                        <tr key={`${item.wallet_address}:${item.tx_hash}`}>
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(selected[item.wallet_address])}
+                                                    onChange={(e) => setSelected((prev) => ({ ...prev, [item.wallet_address]: e.target.checked }))}
+                                                />
+                                            </td>
+                                            <td className="mono">{shortAddr(item.wallet_address)}</td>
+                                            <td className="right">{formatUsd(item.max_amount_usd)}</td>
+                                            <td>{item.pair || '--'}</td>
+                                            <td className="mono">{shortAddr(item.pool_address)}</td>
+                                            <td className="mono">{shortAddr(item.tx_hash)}</td>
+                                            <td>{item.already_monitored ? '已存在' : '可导入'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                ) : data ? (
+                    <div className="smd-empty" style={{ marginTop: 12 }}>没有找到符合条件的钱包</div>
+                ) : null}
+                <div className="smd-modal-actions">
+                    <button type="button" onClick={onClose} disabled={loading || saving} className="smd-modal-cancel">关闭</button>
+                    <button type="button" onClick={importSelected} disabled={saving || selectedWallets.length === 0} className="smd-modal-submit">
+                        {saving ? '导入中...' : `导入 ${selectedWallets.length} 个`}
                     </button>
                 </div>
             </div>
@@ -2189,6 +2379,7 @@ function WalletList({
     const [confirmState, setConfirmState] = useState(null);
     const [editingWallet, setEditingWallet] = useState(null);
     const [zombieOpen, setZombieOpen] = useState(false);
+    const [tokenLiquidityOpen, setTokenLiquidityOpen] = useState(false);
     const [zombieCandidates, setZombieCandidates] = useState([]);
     const [zombieSelected, setZombieSelected] = useState({});
     const loadSeqRef = useRef(0);
@@ -2330,6 +2521,14 @@ function WalletList({
                 </div>
                 <button
                     type="button"
+                    onClick={() => setTokenLiquidityOpen(true)}
+                    className="smd-add-btn smd-token-liquidity-btn"
+                    title="按代币筛选大额加池钱包"
+                >
+                    <Zap size={14} /> LP 导入
+                </button>
+                <button
+                    type="button"
                     onClick={findZombieWallets}
                     disabled={busyKey === 'wallet-zombies:find' || busyKey === 'wallet-zombies:delete'}
                     className="smd-add-btn smd-zombie-btn"
@@ -2448,6 +2647,14 @@ function WalletList({
                     if (busyKey !== 'wallet-zombies:delete') setZombieOpen(false);
                 }}
                 onDelete={deleteSelectedZombieWallets}
+            />
+            <TokenLiquidityImportModal
+                open={tokenLiquidityOpen}
+                apiBaseUrl={apiBaseUrl}
+                onClose={() => setTokenLiquidityOpen(false)}
+                onImported={async () => {
+                    await load();
+                }}
             />
             <EditWalletModal
                 open={Boolean(editingWallet)}

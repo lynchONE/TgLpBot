@@ -13,6 +13,7 @@ import {
     fetchSMZombieWallets, deleteSMZombieWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
+    fetchSMTokenLiquidityWalletCandidates, importSMTokenLiquidityWallets,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchWallets, fetchSMWatchActivity, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
@@ -885,13 +886,15 @@ function walletSourceLabel(source) {
     const value = String(source || '').trim();
     if (value === 'manual') return '手动添加';
     if (value === 'contract_interaction') return '合约发现';
+    if (value === 'token_liquidity_indexer') return 'LP筛选';
     return value || '未标记来源';
 }
 
 function walletSourceBadgeClass(source) {
-    return String(source || '').trim() === 'manual'
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-        : 'border-white/10 bg-zinc-800/80 text-zinc-300';
+    const value = String(source || '').trim();
+    if (value === 'manual') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+    if (value === 'token_liquidity_indexer') return 'border-sky-400/20 bg-sky-400/10 text-sky-200';
+    return 'border-white/10 bg-zinc-800/80 text-zinc-300';
 }
 
 function walletSourceContractLabel(value) {
@@ -1872,6 +1875,187 @@ function ZombieWalletSheet({ open, candidates, selectedMap, busy, onToggle, onTo
                     >
                         {busy ? '删除中...' : `删除 ${selectedCount} 个`}
                     </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImported }) {
+    const [tokenAddress, setTokenAddress] = useState('');
+    const [minAmountUsd, setMinAmountUsd] = useState('500');
+    const [windowHours, setWindowHours] = useState('24');
+    const [limit, setLimit] = useState('30');
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [data, setData] = useState(null);
+    const [selected, setSelected] = useState({});
+    const [importResult, setImportResult] = useState(null);
+
+    useEffect(() => {
+        if (!open) return;
+        setError('');
+        setImportResult(null);
+    }, [open]);
+
+    if (!open) return null;
+
+    const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+    const selectedWallets = candidates
+        .filter((item) => selected[item.wallet_address])
+        .map((item) => item.wallet_address);
+
+    const preview = async () => {
+        setLoading(true);
+        setError('');
+        setImportResult(null);
+        try {
+            const resp = await fetchSMTokenLiquidityWalletCandidates({
+                apiBaseUrl,
+                chain: 'bsc',
+                tokenAddress,
+                minAmountUsd: Number(minAmountUsd),
+                windowHours: Number(windowHours),
+                limit: Number(limit),
+            });
+            const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
+            const nextSelected = {};
+            list.forEach((item) => {
+                if (!item.already_monitored) nextSelected[item.wallet_address] = true;
+            });
+            setData(resp);
+            setSelected(nextSelected);
+        } catch (err) {
+            setError(String(err?.message || err || 'Preview failed'));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const importSelected = async () => {
+        if (selectedWallets.length === 0) {
+            setError('Select at least one wallet.');
+            return;
+        }
+        setSaving(true);
+        setError('');
+        try {
+            const resp = await importSMTokenLiquidityWallets({
+                apiBaseUrl,
+                chain: 'bsc',
+                tokenAddress,
+                wallets: selectedWallets,
+                labelPrefix: 'LP',
+            });
+            setImportResult(resp);
+            await onImported?.();
+        } catch (err) {
+            setError(String(err?.message || err || 'Import failed'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-end bg-black/60 px-2 pb-2">
+            <div className="max-h-[92vh] w-full overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                    <div>
+                        <div className="text-base font-semibold text-zinc-100">LP wallet import</div>
+                        <div className="text-xs text-zinc-500">Bitquery indexed liquidity events</div>
+                    </div>
+                    <button type="button" className={getIconButtonClass(false)} onClick={onClose} disabled={loading || saving}>
+                        <X size={16} />
+                    </button>
+                </div>
+                <div className="max-h-[calc(92vh-60px)] overflow-y-auto p-4">
+                    <div className="space-y-2">
+                        <input
+                            className={getInputClass(brand)}
+                            placeholder="Token address (0x...)"
+                            value={tokenAddress}
+                            onChange={(e) => setTokenAddress(e.target.value)}
+                        />
+                        <div className="grid grid-cols-3 gap-2">
+                            <input className={getInputClass(brand)} type="number" min="1" value={minAmountUsd} onChange={(e) => setMinAmountUsd(e.target.value)} />
+                            <input className={getInputClass(brand)} type="number" min="1" value={windowHours} onChange={(e) => setWindowHours(e.target.value)} />
+                            <input className={getInputClass(brand)} type="number" min="1" max="100" value={limit} onChange={(e) => setLimit(e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[10px] text-zinc-500">
+                            <span>Min USD</span>
+                            <span>Hours</span>
+                            <span>Limit</span>
+                        </div>
+                        <button
+                            type="button"
+                            className={`${brand.solidButtonClass} ${brand.solidRingClass} w-full rounded-2xl px-3 py-2 text-sm font-semibold disabled:opacity-50`}
+                            onClick={preview}
+                            disabled={loading || saving}
+                        >
+                            {loading ? 'Scanning...' : 'Preview wallets'}
+                        </button>
+                    </div>
+
+                    {error ? <div className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
+                    {importResult ? (
+                        <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                            created {importResult.created || 0}, reactivated {importResult.reactivated || 0}, skipped {importResult.skipped_existing || 0}
+                        </div>
+                    ) : null}
+
+                    {candidates.length > 0 ? (
+                        <div className="mt-4 space-y-2">
+                            <div className="flex items-center justify-between text-xs text-zinc-500">
+                                <span>{candidates.length} candidates</span>
+                                <button
+                                    type="button"
+                                    className="text-zinc-300"
+                                    onClick={() => {
+                                        const next = {};
+                                        candidates.forEach((item) => { next[item.wallet_address] = true; });
+                                        setSelected(next);
+                                    }}
+                                >
+                                    Select all
+                                </button>
+                            </div>
+                            {candidates.map((item) => {
+                                const checked = Boolean(selected[item.wallet_address]);
+                                return (
+                                    <label key={`${item.wallet_address}:${item.tx_hash}`} className="flex gap-3 rounded-2xl border border-white/10 bg-zinc-900/70 p-3">
+                                        <input
+                                            type="checkbox"
+                                            className="mt-1 h-4 w-4"
+                                            checked={checked}
+                                            onChange={(e) => setSelected((prev) => ({ ...prev, [item.wallet_address]: e.target.checked }))}
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="font-mono text-xs text-zinc-100">{shortAddr(item.wallet_address)}</span>
+                                                <span className="text-xs font-semibold text-emerald-300">${formatUSDCompact(item.max_amount_usd)}</span>
+                                            </div>
+                                            <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+                                                <span>{item.pair || 'pool'}</span>
+                                                <span>{shortAddr(item.pool_address)}</span>
+                                                {item.already_monitored ? <span>already monitored</span> : null}
+                                            </div>
+                                        </div>
+                                    </label>
+                                );
+                            })}
+                            <button
+                                type="button"
+                                className={`${brand.solidButtonClass} ${brand.solidRingClass} mt-2 w-full rounded-2xl px-3 py-2 text-sm font-semibold disabled:opacity-50`}
+                                onClick={importSelected}
+                                disabled={saving || selectedWallets.length === 0}
+                            >
+                                {saving ? 'Importing...' : `Import ${selectedWallets.length} wallets`}
+                            </button>
+                        </div>
+                    ) : data ? (
+                        <div className="mt-4 rounded-2xl border border-white/10 bg-zinc-900/60 px-3 py-5 text-center text-sm text-zinc-500">No candidates.</div>
+                    ) : null}
                 </div>
             </div>
         </div>
@@ -2974,6 +3158,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
     const [confirmState, setConfirmState] = useState(null);
     const [editingWallet, setEditingWallet] = useState(null);
     const [zombieOpen, setZombieOpen] = useState(false);
+    const [tokenLiquidityOpen, setTokenLiquidityOpen] = useState(false);
     const [zombieCandidates, setZombieCandidates] = useState([]);
     const [zombieSelected, setZombieSelected] = useState({});
     const loadSeqRef = useRef(0);
@@ -3115,6 +3300,13 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                         }}
                     />
                 </div>
+                <button
+                    type="button"
+                    onClick={() => setTokenLiquidityOpen(true)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-300/15"
+                >
+                    <Zap size={14} /> LP
+                </button>
                 <button
                     type="button"
                     onClick={findZombieWallets}
@@ -3271,6 +3463,17 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                     if (busyKey !== 'wallet-zombies:delete') setZombieOpen(false);
                 }}
                 onDelete={deleteSelectedZombieWallets}
+            />
+            <TokenLiquidityImportSheet
+                open={tokenLiquidityOpen}
+                apiBaseUrl={apiBaseUrl}
+                brand={brand}
+                onClose={() => {
+                    if (!busyKey) setTokenLiquidityOpen(false);
+                }}
+                onImported={async () => {
+                    await load();
+                }}
             />
             <EditWalletModal
                 open={Boolean(editingWallet)}
