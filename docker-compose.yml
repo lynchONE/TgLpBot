@@ -10,7 +10,7 @@ services:
       MYSQL_ROOT_HOST: "%"
       MYSQL_DATABASE: ${COMPOSE_MYSQL_DATABASE:-tglpbot}
     ports:
-      - "${MYSQL_BIND_ADDR:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -37,7 +37,7 @@ services:
     environment:
       REDIS_PASSWORD: ${COMPOSE_REDIS_PASSWORD:-}
     ports:
-      - "${REDIS_BIND_ADDR:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - ./data/redis:/data
     healthcheck:
