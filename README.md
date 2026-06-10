@@ -186,43 +186,21 @@ Add this to your `.env` file as `ENCRYPTION_KEY`.
 
 ### Docker Compose
 
-This starts the backend, webapp, miniapp, MySQL, Redis, and MinIO from the repo root:
+This starts only the middleware services from the repo root: MySQL, Redis, and MinIO.
 
 ```bash
-# First-time only: create backend/.env and fill TELEGRAM_BOT_TOKEN + ENCRYPTION_KEY.
-cp backend/.env.example backend/.env
-
-docker compose up -d --build
+docker compose up -d
 ```
 
-On Windows PowerShell, use `Copy-Item backend\.env.example backend\.env` for the copy step.
+To change middleware ports or passwords, copy `docker-compose.env.example` to `.env` in the repo root and edit it.
 
 URLs:
 
-- Backend API: `http://localhost:8080`
-- WebApp: `http://localhost:3000`
-- MiniApp: `http://localhost:3001`
 - MinIO console: `http://localhost:9001`
-
-Compose reads `backend/.env` for bot/RPC/API settings, then overrides MySQL, Redis, and MinIO hosts to the Docker services. To change local ports or middleware passwords, copy `docker-compose.env.example` to `.env` in the repo root and edit it.
 
 Persistent middleware data is stored under `data/mysql`, `data/redis`, and `data/minio` in the repo root.
 
-To update an existing deployment after code changes:
-
-```bash
-bash update-services.sh
-```
-
-The script runs `git pull --ff-only`, checks which paths changed, and rebuilds only the affected app services: `backend`, `webapp`, and/or `miniapp`. It does not update middleware services.
-
-Useful variants:
-
-```bash
-bash update-services.sh --logs
-bash update-services.sh --force
-bash update-services.sh --no-pull
-```
+If the backend runs on the host machine, point `backend/.env` at the published middleware ports, for example `MYSQL_HOST=127.0.0.1`, `REDIS_HOST=127.0.0.1`, and `MINIO_ENDPOINT=127.0.0.1:9000`.
 
 ### Development
 
