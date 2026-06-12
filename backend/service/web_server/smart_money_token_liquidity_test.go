@@ -35,3 +35,14 @@ func TestParseSMTokenLiquidityTimeRangeRejectsInvalidAbsoluteRange(t *testing.T)
 		t.Fatal("expected invalid range error")
 	}
 }
+
+func TestParseSMTokenLiquidityTimeRangeRejectsTooLargeRange(t *testing.T) {
+	values := url.Values{}
+	values.Set("start_time", "2026-06-01T00:00:00Z")
+	values.Set("end_time", "2026-06-09T00:00:00Z")
+
+	_, _, _, err := parseSMTokenLiquidityTimeRange(values)
+	if err == nil {
+		t.Fatal("expected too large range error")
+	}
+}

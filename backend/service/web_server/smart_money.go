@@ -88,6 +88,8 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm_upload", s.handleSMUploadCompat)
 	mux.HandleFunc("/api/sm/wallets", s.handleSMWallets)
 	mux.HandleFunc("/api/sm/wallet_zombies", s.handleSMWalletZombies)
+	mux.HandleFunc("/api/sm/pool_liquidity_wallet_candidates", s.handleSMPoolLiquidityWalletCandidates)
+	mux.HandleFunc("/api/sm/pool_liquidity_wallet_import", s.handleSMPoolLiquidityWalletImport)
 	mux.HandleFunc("/api/sm/token_liquidity_wallet_candidates", s.handleSMTokenLiquidityWalletCandidates)
 	mux.HandleFunc("/api/sm/token_liquidity_wallet_import", s.handleSMTokenLiquidityWalletImport)
 	mux.HandleFunc("/api/sm/wallet_avatar", s.handleSMWalletAvatar)
@@ -126,6 +128,10 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMWallets(w, r)
 		case "wallet_zombies":
 			s.handleSMWalletZombies(w, r)
+		case "pool_liquidity_wallet_candidates":
+			s.handleSMPoolLiquidityWalletCandidates(w, r)
+		case "pool_liquidity_wallet_import":
+			s.handleSMPoolLiquidityWalletImport(w, r)
 		case "token_liquidity_wallet_candidates":
 			s.handleSMTokenLiquidityWalletCandidates(w, r)
 		case "token_liquidity_wallet_import":
@@ -165,7 +171,7 @@ func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
 
 func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
-	case "wallets", "wallet_zombies", "token_liquidity_wallet_candidates", "token_liquidity_wallet_import", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
+	case "wallets", "wallet_zombies", "pool_liquidity_wallet_candidates", "pool_liquidity_wallet_import", "token_liquidity_wallet_candidates", "token_liquidity_wallet_import", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
 	case "watch_activity":
 		return "/api/smart_money_watch_activity", true
@@ -575,6 +581,10 @@ func (s *Server) handleSMWalletZombies(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r *http.Request) {
+	s.handleSMPoolLiquidityWalletCandidates(w, r)
+}
+
+func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -588,13 +598,18 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 	q := r.URL.Query()
 	chainID := resolveSmartMoneyRequestChainID(r)
 	chain := smartMoneyChainSlug(chainID)
-	if chain != "bsc" {
-		jsonError(w, "token liquidity wallet discovery currently supports bsc only", http.StatusBadRequest)
+	poolAddress := smartMoneyNormalizePoolIdentifier(q.Get("pool_address"))
+	poolID := smartMoneyNormalizePoolID(q.Get("pool_id"))
+	if poolAddress == "" && poolID == "" && strings.TrimSpace(q.Get("token_address")) != "" {
+		jsonError(w, "token_address is no longer supported; use pool_address or pool_id", http.StatusBadRequest)
 		return
 	}
-	tokenAddress := smartMoneyNormalizeTokenAddress(q.Get("token_address"))
-	if tokenAddress == "" {
-		jsonError(w, "invalid token_address", http.StatusBadRequest)
+	if poolAddress == "" && poolID == "" {
+		jsonError(w, "pool_address or pool_id is required", http.StatusBadRequest)
+		return
+	}
+	if poolAddress != "" && poolID != "" {
+		jsonError(w, "pool_address and pool_id cannot both be set", http.StatusBadRequest)
 		return
 	}
 	minAmountUSD, err := strconv.ParseFloat(strings.TrimSpace(q.Get("min_amount_usd")), 64)
@@ -613,20 +628,21 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 		return
 	}
 	providerName := strings.TrimSpace(q.Get("provider"))
-	if providerName != "" && strings.ToLower(providerName) != "bitquery" {
-		jsonError(w, "unsupported provider: "+providerName, http.StatusBadRequest)
+	if providerName != "" {
+		jsonError(w, "provider is no longer supported", http.StatusBadRequest)
 		return
 	}
 
 	provider, err := sm.NewTokenLiquidityProviderFromConfig(config.AppConfig)
 	if err != nil {
-		jsonError(w, smartMoneyTokenLiquidityConfigErrorMessage(err), http.StatusBadRequest)
+		jsonError(w, smartMoneyPoolLiquidityConfigErrorMessage(err), http.StatusBadRequest)
 		return
 	}
 	resp, err := provider.FindCandidates(ctx, sm.TokenLiquidityCandidateQuery{
 		Chain:        chain,
 		ChainID:      chainID,
-		TokenAddress: tokenAddress,
+		PoolAddress:  poolAddress,
+		PoolID:       poolID,
 		MinAmountUSD: minAmountUSD,
 		WindowHours:  windowHours,
 		StartTime:    startTime,
@@ -674,7 +690,7 @@ func parseSMTokenLiquidityTimeRange(q url.Values) (time.Time, time.Time, int, er
 		if !endTime.After(startTime) {
 			return time.Time{}, time.Time{}, 0, fmt.Errorf("end_time must be after start_time")
 		}
-		if endTime.Sub(startTime) > 30*24*time.Hour {
+		if endTime.Sub(startTime) > 7*24*time.Hour {
 			return time.Time{}, time.Time{}, 0, fmt.Errorf("time range is too large")
 		}
 		return startTime, endTime, int(math.Ceil(endTime.Sub(startTime).Hours())), nil
@@ -684,29 +700,25 @@ func parseSMTokenLiquidityTimeRange(q url.Values) (time.Time, time.Time, int, er
 	if err != nil || windowHours <= 0 {
 		return time.Time{}, time.Time{}, 0, fmt.Errorf("window_hours must be greater than 0")
 	}
-	if windowHours > 24*30 {
+	if windowHours > 7*24 {
 		return time.Time{}, time.Time{}, 0, fmt.Errorf("window_hours is too large")
 	}
 	return time.Time{}, time.Time{}, windowHours, nil
 }
 
-func smartMoneyTokenLiquidityConfigErrorMessage(err error) string {
+func smartMoneyPoolLiquidityConfigErrorMessage(err error) string {
 	msg := strings.TrimSpace(err.Error())
-	switch {
-	case strings.Contains(msg, "SMART_MONEY_LIQUIDITY_INDEX_PROVIDER is not configured"):
-		return "聪明钱雷达未配置数据源。请在后端环境变量中设置 SMART_MONEY_LIQUIDITY_INDEX_PROVIDER=bitquery，并配置 BITQUERY_API_KEY；BITQUERY_API_URL 可使用默认 https://streaming.bitquery.io/graphql。"
-	case strings.Contains(msg, "unsupported SMART_MONEY_LIQUIDITY_INDEX_PROVIDER"):
-		return "聪明钱雷达当前只支持 Bitquery 数据源。请将 SMART_MONEY_LIQUIDITY_INDEX_PROVIDER 设置为 bitquery。"
-	case strings.Contains(msg, "BITQUERY_API_KEY is not configured"):
-		return "聪明钱雷达缺少 Bitquery API Key。请在后端环境变量中配置 BITQUERY_API_KEY。"
-	case strings.Contains(msg, "BITQUERY_API_URL is not configured"):
-		return "聪明钱雷达缺少 Bitquery API URL。请在后端环境变量中配置 BITQUERY_API_URL=https://streaming.bitquery.io/graphql。"
-	default:
-		return msg
+	if msg == "" {
+		return "smart money radar scan failed"
 	}
+	return msg
 }
 
 func (s *Server) handleSMTokenLiquidityWalletImport(w http.ResponseWriter, r *http.Request) {
+	s.handleSMPoolLiquidityWalletImport(w, r)
+}
+
+func (s *Server) handleSMPoolLiquidityWalletImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -716,10 +728,11 @@ func (s *Server) handleSMTokenLiquidityWalletImport(w http.ResponseWriter, r *ht
 		return
 	}
 	var req struct {
-		Chain        string   `json:"chain"`
-		TokenAddress string   `json:"token_address"`
-		Wallets      []string `json:"wallets"`
-		LabelPrefix  string   `json:"label_prefix"`
+		Chain       string   `json:"chain"`
+		PoolAddress string   `json:"pool_address"`
+		PoolID      string   `json:"pool_id"`
+		Wallets     []string `json:"wallets"`
+		LabelPrefix string   `json:"label_prefix"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -734,10 +747,19 @@ func (s *Server) handleSMTokenLiquidityWalletImport(w http.ResponseWriter, r *ht
 			chainID = 56
 		}
 	}
-	tokenAddress := smartMoneyNormalizeTokenAddress(req.TokenAddress)
-	if tokenAddress == "" {
-		jsonError(w, "invalid token_address", http.StatusBadRequest)
+	poolAddress := smartMoneyNormalizePoolIdentifier(req.PoolAddress)
+	poolID := smartMoneyNormalizePoolID(req.PoolID)
+	if poolAddress == "" && poolID == "" {
+		jsonError(w, "pool_address or pool_id is required", http.StatusBadRequest)
 		return
+	}
+	if poolAddress != "" && poolID != "" {
+		jsonError(w, "pool_address and pool_id cannot both be set", http.StatusBadRequest)
+		return
+	}
+	sourceContract := poolAddress
+	if poolID != "" {
+		sourceContract = poolID
 	}
 	if len(req.Wallets) == 0 {
 		jsonError(w, "wallets is required", http.StatusBadRequest)
@@ -749,7 +771,7 @@ func (s *Server) handleSMTokenLiquidityWalletImport(w http.ResponseWriter, r *ht
 	}
 
 	repo := smService.Repo()
-	result, err := repo.ImportTokenLiquidityWallets(r.Context(), chainID, tokenAddress, req.Wallets, req.LabelPrefix)
+	result, err := repo.ImportPoolLiquidityWallets(r.Context(), chainID, sourceContract, req.Wallets, req.LabelPrefix)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1772,6 +1794,8 @@ func normalizeSmartMoneyWalletSourceScope(raw string) (string, bool) {
 		return "contract_interaction", true
 	case "token_liquidity", "token_liquidity_indexer":
 		return sm.MonitoredWalletSourceTokenLiquidityIndexer, true
+	case "pool_liquidity", "pool_liquidity_radar":
+		return sm.MonitoredWalletSourcePoolLiquidityRadar, true
 	default:
 		return "", false
 	}
@@ -1896,6 +1920,30 @@ func smartMoneyNormalizeTokenAddress(value string) string {
 	value = strings.TrimSpace(value)
 	if !isValidAddress(value) {
 		return ""
+	}
+	return strings.ToLower(value)
+}
+
+func smartMoneyNormalizePoolIdentifier(value string) string {
+	value = strings.TrimSpace(value)
+	if !isValidAddress(value) {
+		return ""
+	}
+	return strings.ToLower(value)
+}
+
+func smartMoneyNormalizePoolID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) != 66 {
+		return ""
+	}
+	if !strings.HasPrefix(value, "0x") && !strings.HasPrefix(value, "0X") {
+		return ""
+	}
+	for _, c := range value[2:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return ""
+		}
 	}
 	return strings.ToLower(value)
 }

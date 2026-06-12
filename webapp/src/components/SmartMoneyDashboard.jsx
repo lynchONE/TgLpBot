@@ -7,7 +7,7 @@ import {
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet, fetchSMZombieWallets, deleteSMZombieWallets,
-    fetchSMTokenLiquidityWalletCandidates, importSMTokenLiquidityWallets,
+    fetchSMPoolLiquidityWalletCandidates, importSMPoolLiquidityWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     buildSMEventsWsUrl,
@@ -66,6 +66,17 @@ function formatTokenLiquidityDateTimeRange(startValue, endValue) {
     const end = String(endValue || '').replace('T', ' ');
     if (!start || !end) return '请选择开始和结束时间';
     return `${start} → ${end}`;
+}
+
+function parsePoolLiquidityInput(value) {
+    const text = String(value || '').trim();
+    if (/^0x[a-fA-F0-9]{40}$/.test(text)) {
+        return { poolAddress: text.toLowerCase(), poolId: '' };
+    }
+    if (/^0x[a-fA-F0-9]{64}$/.test(text)) {
+        return { poolAddress: '', poolId: text.toLowerCase() };
+    }
+    return null;
 }
 
 function walletAvatarIdx(addr) {
@@ -537,19 +548,23 @@ function walletSourceLabel(source) {
     if (value === 'manual') return '手动添加';
     if (value === 'contract_interaction') return '合约发现';
     if (value === 'token_liquidity_indexer') return '雷达发现';
+    if (value === 'pool_liquidity_radar') return '池子雷达';
     return value || '未标记来源';
 }
 
 function walletSourceBadgeClass(source) {
     const value = String(source || '').trim();
     if (value === 'manual') return 'source-manual';
-    if (value === 'token_liquidity_indexer') return 'source-token-liquidity';
+    if (value === 'token_liquidity_indexer' || value === 'pool_liquidity_radar') return 'source-token-liquidity';
     return 'source-contract';
 }
 
 function walletSourceContractLabel(value) {
     const address = normalizeWalletAddress(value);
-    return address ? `来源合约 ${shortAddr(address)}` : '';
+    if (address) return `来源合约 ${shortAddr(address)}`;
+    const poolId = String(value || '').trim();
+    if (/^0x[a-fA-F0-9]{64}$/.test(poolId)) return `来源 poolId ${shortAddr(poolId)}`;
+    return '';
 }
 
 function CopyBtn({ text }) {
@@ -886,7 +901,7 @@ function ZombieWalletModal({ open, candidates, selectedMap, busy, onToggle, onTo
 }
 
 function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
-    const [tokenAddress, setTokenAddress] = useState('');
+    const [poolInput, setPoolInput] = useState('');
     const [minAmountUsd, setMinAmountUsd] = useState('500');
     const [timeRange, setTimeRange] = useState(() => createDefaultTokenLiquidityRange());
     const [limit, setLimit] = useState('50');
@@ -914,6 +929,11 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
     const currentRangeLabel = formatTokenLiquidityDateTimeRange(timeRange.start, timeRange.end);
 
     const preview = async () => {
+        const poolTarget = parsePoolLiquidityInput(poolInput);
+        if (!poolTarget) {
+            setError('请输入有效的 V3 池子合约地址或 V4 poolId');
+            return;
+        }
         const startTime = tokenLiquidityLocalToISO(timeRange.start);
         const endTime = tokenLiquidityLocalToISO(timeRange.end);
         if (!startTime || !endTime) {
@@ -928,10 +948,10 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         setError('');
         setImportResult(null);
         try {
-            const resp = await fetchSMTokenLiquidityWalletCandidates({
+            const resp = await fetchSMPoolLiquidityWalletCandidates({
                 apiBaseUrl,
                 chain: 'bsc',
-                tokenAddress,
+                ...poolTarget,
                 minAmountUsd: Number(minAmountUsd),
                 startTime,
                 endTime,
@@ -956,13 +976,18 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             setError('请选择至少一个钱包');
             return;
         }
+        const poolTarget = parsePoolLiquidityInput(poolInput);
+        if (!poolTarget) {
+            setError('请输入有效的 V3 池子合约地址或 V4 poolId');
+            return;
+        }
         setSaving(true);
         setError('');
         try {
-            const resp = await importSMTokenLiquidityWallets({
+            const resp = await importSMPoolLiquidityWallets({
                 apiBaseUrl,
                 chain: 'bsc',
-                tokenAddress,
+                ...poolTarget,
                 wallets: selectedWallets,
                 labelPrefix: '雷达',
             });
@@ -981,7 +1006,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 <div className="smd-modal-header">
                     <div>
                         <h3 className="smd-modal-title">聪明钱雷达</h3>
-                        <div className="smd-modal-subtitle">Bitquery 加池事件索引 · 精确时间范围</div>
+                        <div className="smd-modal-subtitle">RPC 池子加池事件扫描 · 支持 V3/V4</div>
                     </div>
                     <button type="button" onClick={onClose} disabled={loading || saving} className="smd-modal-close">
                         <X size={18} />
@@ -989,8 +1014,8 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 </div>
                 <div className="smd-token-liquidity-form">
                     <label>
-                        <span>代币地址</span>
-                        <input placeholder="0x..." value={tokenAddress} onChange={(e) => setTokenAddress(e.target.value)} />
+                        <span>池子地址 / V4 poolId</span>
+                        <input placeholder="V3 0x... 或 V4 poolId" value={poolInput} onChange={(e) => setPoolInput(e.target.value)} />
                     </label>
                     <div className="smd-token-liquidity-window">
                         <div className="smd-token-liquidity-window-head">
@@ -1036,6 +1061,14 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                         已新增 {importResult.created || 0}，已恢复 {importResult.reactivated || 0}，已跳过 {importResult.skipped_existing || 0}
                     </div>
                 ) : null}
+                {data ? (
+                    <div className="smd-token-liquidity-toolbar">
+                        <span>已排除 {Number(data?.excluded_count || 0)} 条事件</span>
+                        {Array.isArray(data?.warnings) && data.warnings.length > 0 ? (
+                            <span title={data.warnings.join('\n')}>{data.warnings.length} 条提示</span>
+                        ) : null}
+                    </div>
+                ) : null}
                 {candidates.length > 0 ? (
                     <>
                         <div className="smd-token-liquidity-toolbar">
@@ -1064,6 +1097,8 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                                         <th>钱包</th>
                                         <th className="right">最大金额</th>
                                         <th>交易对</th>
+                                        <th>协议</th>
+                                        <th>金额来源</th>
                                         <th>池子</th>
                                         <th>交易</th>
                                         <th>状态</th>
@@ -1082,6 +1117,8 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                                             <td className="mono">{shortAddr(item.wallet_address)}</td>
                                             <td className="right">{formatUsd(item.max_amount_usd)}</td>
                                             <td>{item.pair || '--'}</td>
+                                            <td>{item.protocol || '--'}</td>
+                                            <td>{item.amount_source || '--'}</td>
                                             <td className="mono">{shortAddr(item.pool_address)}</td>
                                             <td className="mono">{shortAddr(item.tx_hash)}</td>
                                             <td>{item.already_monitored ? '已存在' : '可导入'}</td>

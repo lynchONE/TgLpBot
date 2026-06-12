@@ -7,21 +7,44 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/models"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const MonitoredWalletSourceTokenLiquidityIndexer = "token_liquidity_indexer"
+const MonitoredWalletSourcePoolLiquidityRadar = "pool_liquidity_radar"
+
+const (
+	rpcPoolLiquidityProviderName    = "rpc"
+	rpcPoolLiquidityMaxWindow       = 7 * 24 * time.Hour
+	rpcPoolLiquidityMaxWindowHours  = int(rpcPoolLiquidityMaxWindow / time.Hour)
+	rpcPoolLiquidityMaxLogs         = 5000
+	rpcPoolLiquidityBlockChunk      = uint64(2000)
+	rpcPoolLiquidityHeaderCacheSize = 512
+)
 
 type TokenLiquidityCandidateQuery struct {
 	Chain        string
 	ChainID      int
 	TokenAddress string
+	PoolAddress  string
+	PoolID       string
 	MinAmountUSD float64
 	WindowHours  int
 	StartTime    time.Time
@@ -38,6 +61,8 @@ type TokenLiquidityCandidate struct {
 	TxTime           string   `json:"tx_time"`
 	TokenAddress     string   `json:"token_address"`
 	PoolAddress      string   `json:"pool_address"`
+	PoolID           string   `json:"pool_id,omitempty"`
+	Protocol         string   `json:"protocol,omitempty"`
 	Pair             string   `json:"pair"`
 	PoolCount        int      `json:"pool_count"`
 	AmountSource     string   `json:"amount_source"`
@@ -48,6 +73,7 @@ type TokenLiquidityCandidate struct {
 
 type TokenLiquidityCandidateResponse struct {
 	Token         TokenLiquidityTokenInfo    `json:"token"`
+	Pool          TokenLiquidityPoolInfo     `json:"pool"`
 	Filters       TokenLiquidityFilterInfo   `json:"filters"`
 	Sources       []TokenLiquiditySourceInfo `json:"sources"`
 	Candidates    []TokenLiquidityCandidate  `json:"candidates"`
@@ -60,7 +86,15 @@ type TokenLiquidityTokenInfo struct {
 	Chain   string `json:"chain"`
 }
 
+type TokenLiquidityPoolInfo struct {
+	Address string `json:"address,omitempty"`
+	PoolID  string `json:"pool_id,omitempty"`
+	Chain   string `json:"chain"`
+}
+
 type TokenLiquidityFilterInfo struct {
+	PoolAddress  string  `json:"pool_address,omitempty"`
+	PoolID       string  `json:"pool_id,omitempty"`
 	MinAmountUSD float64 `json:"min_amount_usd"`
 	WindowHours  int     `json:"window_hours"`
 	StartTime    string  `json:"start_time,omitempty"`
@@ -81,23 +115,79 @@ func NewTokenLiquidityProviderFromConfig(cfg *config.Config) (TokenLiquidityProv
 	if cfg == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	provider := strings.ToLower(strings.TrimSpace(cfg.SmartMoneyLiquidityIndexProvider))
-	if provider == "" {
-		return nil, fmt.Errorf("SMART_MONEY_LIQUIDITY_INDEX_PROVIDER is not configured")
-	}
-	if provider != "bitquery" {
-		return nil, fmt.Errorf("unsupported SMART_MONEY_LIQUIDITY_INDEX_PROVIDER: %s", provider)
-	}
-	if strings.TrimSpace(cfg.BitqueryAPIKey) == "" {
-		return nil, fmt.Errorf("BITQUERY_API_KEY is not configured")
-	}
-	if strings.TrimSpace(cfg.BitqueryAPIURL) == "" {
-		return nil, fmt.Errorf("BITQUERY_API_URL is not configured")
-	}
-	return NewBitqueryTokenLiquidityProvider(cfg.BitqueryAPIURL, cfg.BitqueryAPIKey), nil
+	return NewRPCTokenLiquidityProvider(), nil
 }
 
 func NormalizeTokenLiquidityCandidateQuery(query TokenLiquidityCandidateQuery) (TokenLiquidityCandidateQuery, error) {
+	query.Chain = config.NormalizeChain(query.Chain)
+	if query.ChainID <= 0 {
+		switch query.Chain {
+		case "base":
+			query.ChainID = 8453
+		default:
+			query.ChainID = 56
+		}
+	}
+	if query.Chain == "" {
+		query.Chain = ChainSlugForID(query.ChainID)
+	}
+	query.TokenAddress = strings.ToLower(strings.TrimSpace(query.TokenAddress))
+	query.PoolAddress = strings.ToLower(strings.TrimSpace(query.PoolAddress))
+	query.PoolID = strings.ToLower(strings.TrimSpace(query.PoolID))
+	if query.PoolAddress == "" && query.TokenAddress != "" {
+		return query, fmt.Errorf("token_address is no longer supported; use pool_address or pool_id")
+	}
+	if query.PoolAddress == "" && query.PoolID == "" {
+		return query, fmt.Errorf("pool_address or pool_id is required")
+	}
+	if query.PoolAddress != "" && query.PoolID != "" {
+		return query, fmt.Errorf("pool_address and pool_id cannot both be set")
+	}
+	if query.PoolAddress != "" && !isEVMAddress(query.PoolAddress) {
+		return query, fmt.Errorf("invalid pool_address")
+	}
+	if query.PoolID != "" && !isEVMHash(query.PoolID) {
+		return query, fmt.Errorf("invalid pool_id")
+	}
+	if query.MinAmountUSD <= 0 || math.IsNaN(query.MinAmountUSD) || math.IsInf(query.MinAmountUSD, 0) {
+		return query, fmt.Errorf("min_amount_usd must be greater than 0")
+	}
+	if query.StartTime.IsZero() && !query.EndTime.IsZero() {
+		return query, fmt.Errorf("start_time is required")
+	}
+	if query.StartTime.IsZero() && query.WindowHours <= 0 {
+		return query, fmt.Errorf("window_hours must be greater than 0")
+	}
+	if query.WindowHours > rpcPoolLiquidityMaxWindowHours {
+		return query, fmt.Errorf("window_hours is too large")
+	}
+	if !query.StartTime.IsZero() {
+		query.StartTime = query.StartTime.UTC()
+		if query.EndTime.IsZero() {
+			return query, fmt.Errorf("end_time is required")
+		}
+		query.EndTime = query.EndTime.UTC()
+		if !query.EndTime.After(query.StartTime) {
+			return query, fmt.Errorf("end_time must be after start_time")
+		}
+		if query.EndTime.Sub(query.StartTime) > rpcPoolLiquidityMaxWindow {
+			return query, fmt.Errorf("time range is too large")
+		}
+	}
+	if query.Limit <= 0 {
+		return query, fmt.Errorf("limit must be greater than 0")
+	}
+	if query.Limit > 100 {
+		return query, fmt.Errorf("limit cannot exceed 100")
+	}
+	query.Provider = strings.ToLower(strings.TrimSpace(query.Provider))
+	if query.Provider != "" {
+		return query, fmt.Errorf("provider is no longer supported")
+	}
+	return query, nil
+}
+
+func normalizeLegacyTokenLiquidityCandidateQuery(query TokenLiquidityCandidateQuery) (TokenLiquidityCandidateQuery, error) {
 	query.Chain = config.NormalizeChain(query.Chain)
 	if query.ChainID <= 0 {
 		switch query.Chain {
@@ -177,6 +267,801 @@ func isEVMAddress(addr string) bool {
 	return true
 }
 
+func isEVMHash(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 66 {
+		return false
+	}
+	if !strings.HasPrefix(value, "0x") && !strings.HasPrefix(value, "0X") {
+		return false
+	}
+	for _, c := range value[2:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+type RPCTokenLiquidityProvider struct{}
+
+func NewRPCTokenLiquidityProvider() *RPCTokenLiquidityProvider {
+	return &RPCTokenLiquidityProvider{}
+}
+
+func (p *RPCTokenLiquidityProvider) FindCandidates(ctx context.Context, query TokenLiquidityCandidateQuery) (*TokenLiquidityCandidateResponse, error) {
+	query, err := NormalizeTokenLiquidityCandidateQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, fmt.Errorf("rpc liquidity provider is nil")
+	}
+
+	client, _, err := blockchain.GetEVMClient(query.Chain)
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, fmt.Errorf("rpc client not initialized")
+	}
+	since, till := resolveTokenLiquidityTimeRange(query)
+	fromBlock, toBlock, err := resolveRPCBlockRangeByTime(ctx, client, since, till)
+	if err != nil {
+		return nil, err
+	}
+	if toBlock < fromBlock {
+		return poolLiquidityEmptyResponse(query, since, till, "rpc returned an empty block range"), nil
+	}
+
+	watcher := newPoolLiquidityRadarWatcher(query.ChainID)
+	if query.PoolID != "" {
+		return p.findV4Candidates(ctx, client, watcher, query, since, till, fromBlock, toBlock)
+	}
+	return p.findV3Candidates(ctx, client, watcher, query, since, till, fromBlock, toBlock)
+}
+
+func (p *RPCTokenLiquidityProvider) findV3Candidates(ctx context.Context, client *ethclient.Client, watcher *Watcher, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, fromBlock uint64, toBlock uint64) (*TokenLiquidityCandidateResponse, error) {
+	poolAddress := common.HexToAddress(query.PoolAddress)
+	deployment, err := resolveV3DeploymentForPool(ctx, client, query.Chain, poolAddress)
+	if err != nil {
+		return nil, err
+	}
+	logs, truncated, err := filterPoolLiquidityLogs(ctx, client, ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(fromBlock),
+		ToBlock:   new(big.Int).SetUint64(toBlock),
+		Addresses: []common.Address{deployment.PositionManager},
+		Topics: [][]common.Hash{{
+			TopicIncreaseLiquidity,
+		}},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headerCache := newRPCHeaderCache(client)
+	items := make([]*models.SmartMoneyLPEvent, 0, len(logs))
+	excluded := 0
+	warnings := []string{}
+	for _, vlog := range logs {
+		event, err := parsePoolLiquidityCandidateLog(ctx, client, watcher, headerCache, vlog)
+		if err != nil {
+			excluded++
+			continue
+		}
+		if event.EventType != "add" {
+			excluded++
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(event.PoolAddress), query.PoolAddress) {
+			excluded++
+			continue
+		}
+		owner, ownerSource, err := resolveV3LiquidityOwner(ctx, client, deployment.PositionManager, event, vlog.BlockNumber)
+		if err != nil {
+			excluded++
+			warnings = appendLimitedWarning(warnings, fmt.Sprintf("excluded tx %s: %v", shortAddr(event.TxHash), err))
+			continue
+		}
+		event.WalletAddress = strings.ToLower(owner.Hex())
+		if event.Token0Amount == "0" && event.Token1Amount == "0" && event.Token0Address != "" && event.Token1Address != "" {
+			watcher.resolveAmountsFromReceipt(ctx, event)
+		}
+		ComputeEventAmountUSD(ctx, event)
+		if eventTotalUSD(event) < query.MinAmountUSD {
+			excluded++
+			continue
+		}
+		if ownerSource == "current_ownerOf" {
+			warnings = appendLimitedWarning(warnings, fmt.Sprintf("tx %s owner resolved from current ownerOf because historical ownerOf was unavailable", shortAddr(event.TxHash)))
+		}
+		items = append(items, event)
+	}
+	if truncated {
+		warnings = append(warnings, fmt.Sprintf("rpc log result reached %d logs; narrow the time range for complete results", rpcPoolLiquidityMaxLogs))
+	}
+	return aggregateRPCLiquidityCandidates(query, since, till, items, excluded, warnings), nil
+}
+
+func (p *RPCTokenLiquidityProvider) findV4Candidates(ctx context.Context, client *ethclient.Client, watcher *Watcher, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, fromBlock uint64, toBlock uint64) (*TokenLiquidityCandidateResponse, error) {
+	poolManager, err := resolveV4PoolManagerAddress(query.Chain)
+	if err != nil {
+		return nil, err
+	}
+	positionManager, err := resolveV4PositionManagerAddress(query.Chain)
+	if err != nil {
+		return nil, err
+	}
+	poolID := common.HexToHash(query.PoolID)
+	logs, truncated, err := filterPoolLiquidityLogs(ctx, client, ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(fromBlock),
+		ToBlock:   new(big.Int).SetUint64(toBlock),
+		Addresses: []common.Address{poolManager},
+		Topics: [][]common.Hash{
+			{TopicModifyLiquidity},
+			{poolID},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headerCache := newRPCHeaderCache(client)
+	items := make([]*models.SmartMoneyLPEvent, 0, len(logs))
+	excluded := 0
+	warnings := []string{}
+	for _, vlog := range logs {
+		event, err := parsePoolLiquidityCandidateLog(ctx, client, watcher, headerCache, vlog)
+		if err != nil {
+			excluded++
+			continue
+		}
+		if event.EventType != "add" {
+			excluded++
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(event.PoolAddress), query.PoolID) {
+			excluded++
+			continue
+		}
+		if event.NftTokenID == nil || *event.NftTokenID == 0 {
+			excluded++
+			warnings = appendLimitedWarning(warnings, fmt.Sprintf("excluded tx %s: v4 event has no position token id", shortAddr(event.TxHash)))
+			continue
+		}
+		owner, ownerSource, err := resolveV4LiquidityOwner(ctx, client, positionManager, event, vlog.BlockNumber)
+		if err != nil {
+			excluded++
+			warnings = appendLimitedWarning(warnings, fmt.Sprintf("excluded tx %s: %v", shortAddr(event.TxHash), err))
+			continue
+		}
+		event.WalletAddress = strings.ToLower(owner.Hex())
+		if event.Token0Amount == "0" && event.Token1Amount == "0" && event.Token0Address != "" && event.Token1Address != "" {
+			watcher.resolveAmountsFromReceipt(ctx, event)
+		}
+		ComputeEventAmountUSD(ctx, event)
+		if eventTotalUSD(event) < query.MinAmountUSD {
+			excluded++
+			continue
+		}
+		if ownerSource == "current_ownerOf" {
+			warnings = appendLimitedWarning(warnings, fmt.Sprintf("tx %s owner resolved from current ownerOf because historical ownerOf was unavailable", shortAddr(event.TxHash)))
+		}
+		items = append(items, event)
+	}
+	if truncated {
+		warnings = append(warnings, fmt.Sprintf("rpc log result reached %d logs; narrow the time range for complete results", rpcPoolLiquidityMaxLogs))
+	}
+	return aggregateRPCLiquidityCandidates(query, since, till, items, excluded, warnings), nil
+}
+
+type v3PoolDeployment struct {
+	Protocol        string
+	Factory         common.Address
+	PositionManager common.Address
+}
+
+func resolveV3DeploymentForPool(ctx context.Context, client *ethclient.Client, chain string, poolAddress common.Address) (*v3PoolDeployment, error) {
+	if poolAddress == (common.Address{}) {
+		return nil, fmt.Errorf("pool_address is empty")
+	}
+	token0, token1, err := blockchain.GetV3PoolTokensWithClient(client, poolAddress)
+	if err != nil {
+		return nil, err
+	}
+	fee, err := blockchain.GetV3PoolFeeWithClient(client, poolAddress)
+	if err != nil {
+		return nil, err
+	}
+	deployments := configuredV3Deployments(chain)
+	if len(deployments) == 0 {
+		return nil, fmt.Errorf("v3 deployments are not configured")
+	}
+	for _, dep := range deployments {
+		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		resolvedPool, err := blockchain.GetV3PoolFromFactoryCtxWithClient(client, callCtx, dep.Factory, token0, token1, uint64(fee))
+		cancel()
+		if err != nil {
+			continue
+		}
+		if resolvedPool == poolAddress {
+			matched := dep
+			return &matched, nil
+		}
+	}
+	return nil, fmt.Errorf("pool_address does not match configured v3 deployments")
+}
+
+func configuredV3Deployments(chain string) []v3PoolDeployment {
+	chain = config.NormalizeChain(chain)
+	out := []v3PoolDeployment{}
+	seen := map[string]struct{}{}
+	add := func(name string, factoryAddr string, managerAddr string) {
+		if !common.IsHexAddress(strings.TrimSpace(factoryAddr)) || !common.IsHexAddress(strings.TrimSpace(managerAddr)) {
+			return
+		}
+		protocol := protocolFromDeploymentName(name)
+		if protocol == "" {
+			return
+		}
+		key := strings.ToLower(strings.TrimSpace(factoryAddr)) + "|" + strings.ToLower(strings.TrimSpace(managerAddr))
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, v3PoolDeployment{
+			Protocol:        protocol,
+			Factory:         common.HexToAddress(factoryAddr),
+			PositionManager: common.HexToAddress(managerAddr),
+		})
+	}
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			for _, dep := range cc.V3Deployments {
+				add(dep.Name, dep.FactoryAddress, dep.PositionManagerAddress)
+			}
+		}
+		add("PancakeSwap V3", "0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865", config.AppConfig.PancakeV3PositionManagerAddress)
+		add("Uniswap V3", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7", config.AppConfig.UniswapV3PositionManagerAddress)
+	}
+	return out
+}
+
+func protocolFromDeploymentName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(name, "pancake"):
+		return "pancake_v3"
+	case strings.Contains(name, "uniswap"):
+		return "uniswap_v3"
+	default:
+		return ""
+	}
+}
+
+func resolveV4PoolManagerAddress(chain string) (common.Address, error) {
+	chain = config.NormalizeChain(chain)
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok && common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+			return common.HexToAddress(cc.UniswapV4PoolManagerAddress), nil
+		}
+		if common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
+			return common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress), nil
+		}
+	}
+	return common.Address{}, fmt.Errorf("uniswap v4 pool manager not configured")
+}
+
+func newPoolLiquidityRadarWatcher(chainID int) *Watcher {
+	if chainID <= 0 {
+		chainID = 56
+	}
+	var pancakeNPM, uniswapNPM, v4PoolManager string
+	chain := smartMoneyChainName(chainID)
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			for _, dep := range cc.V3Deployments {
+				name := strings.ToLower(strings.TrimSpace(dep.Name))
+				if strings.Contains(name, "pancake") && strings.TrimSpace(pancakeNPM) == "" {
+					pancakeNPM = strings.TrimSpace(dep.PositionManagerAddress)
+				}
+				if strings.Contains(name, "uniswap") && strings.TrimSpace(uniswapNPM) == "" {
+					uniswapNPM = strings.TrimSpace(dep.PositionManagerAddress)
+				}
+			}
+			v4PoolManager = strings.TrimSpace(cc.UniswapV4PoolManagerAddress)
+		}
+		if strings.TrimSpace(pancakeNPM) == "" {
+			pancakeNPM = strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress)
+		}
+		if strings.TrimSpace(uniswapNPM) == "" {
+			uniswapNPM = strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)
+		}
+		if strings.TrimSpace(v4PoolManager) == "" {
+			v4PoolManager = strings.TrimSpace(config.AppConfig.UniswapV4PoolManagerAddress)
+		}
+	}
+	return NewWatcher(nil, int64(chainID), pancakeNPM, uniswapNPM, v4PoolManager, 2)
+}
+
+func filterPoolLiquidityLogs(ctx context.Context, client *ethclient.Client, base ethereum.FilterQuery) ([]types.Log, bool, error) {
+	if client == nil {
+		return nil, false, fmt.Errorf("rpc client not initialized")
+	}
+	if base.FromBlock == nil || base.ToBlock == nil {
+		return nil, false, fmt.Errorf("block range is required")
+	}
+	from := base.FromBlock.Uint64()
+	to := base.ToBlock.Uint64()
+	if to < from {
+		return []types.Log{}, false, nil
+	}
+
+	out := []types.Log{}
+	truncated := false
+	chunk := rpcPoolLiquidityBlockChunk
+	for start := from; start <= to; {
+		if chunk == 0 {
+			return nil, false, fmt.Errorf("rpc log block chunk is zero")
+		}
+		end := start + chunk - 1
+		if end > to {
+			end = to
+		}
+		query := base
+		query.FromBlock = new(big.Int).SetUint64(start)
+		query.ToBlock = new(big.Int).SetUint64(end)
+		logs, err := client.FilterLogs(ctx, query)
+		if err != nil {
+			if isRPCLogRangeLimitError(err) && chunk > 1 {
+				chunk = chunk / 2
+				if chunk == 0 {
+					chunk = 1
+				}
+				continue
+			}
+			return nil, false, fmt.Errorf("filter logs %d-%d: %w", start, end, err)
+		}
+		out = append(out, logs...)
+		if len(out) >= rpcPoolLiquidityMaxLogs {
+			out = out[:rpcPoolLiquidityMaxLogs]
+			truncated = true
+			break
+		}
+		if end == to {
+			break
+		}
+		start = end + 1
+		if chunk < rpcPoolLiquidityBlockChunk {
+			chunk = rpcPoolLiquidityBlockChunk
+		}
+	}
+	return out, truncated, nil
+}
+
+func isRPCLogRangeLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"block range",
+		"range too large",
+		"more than",
+		"too many",
+		"limit exceeded",
+		"query returned more than",
+		"exceed maximum block range",
+		"response size exceeded",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func parsePoolLiquidityCandidateLog(ctx context.Context, client *ethclient.Client, watcher *Watcher, headerCache *rpcHeaderCache, vlog types.Log) (*models.SmartMoneyLPEvent, error) {
+	if watcher == nil {
+		return nil, fmt.Errorf("watcher not initialized")
+	}
+	event, err := watcher.parseLog(vlog)
+	if err != nil {
+		return nil, err
+	}
+	event.ChainID = int(watcher.chainID)
+	event.TxHash = strings.ToLower(vlog.TxHash.Hex())
+	event.BlockNumber = vlog.BlockNumber
+	event.LogIndex = int(vlog.Index)
+	if event.Token0Amount == "" {
+		event.Token0Amount = "0"
+	}
+	if event.Token1Amount == "" {
+		event.Token1Amount = "0"
+	}
+	if err := EnrichLPEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	header, err := headerCache.HeaderByNumber(ctx, client, vlog.BlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	event.TxTimestamp = time.Unix(int64(header.Time), 0).UTC()
+	return event, nil
+}
+
+func resolveV3LiquidityOwner(ctx context.Context, client *ethclient.Client, positionManager common.Address, event *models.SmartMoneyLPEvent, blockNumber uint64) (common.Address, string, error) {
+	if event == nil || event.NftTokenID == nil || *event.NftTokenID == 0 {
+		return common.Address{}, "", fmt.Errorf("v3 event has no position token id")
+	}
+	owner, ok, err := resolveERC721TransferOwnerFromReceipt(ctx, client, positionManager, event.TxHash, *event.NftTokenID)
+	if err != nil {
+		return common.Address{}, "", err
+	}
+	if ok {
+		return owner, "transfer_event", nil
+	}
+	pm, err := blockchain.NewV3PositionManager(positionManager, client)
+	if err != nil {
+		return common.Address{}, "", err
+	}
+	tokenID := new(big.Int).SetUint64(*event.NftTokenID)
+	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	owner, err = pm.OwnerOf(&bind.CallOpts{Context: callCtx, BlockNumber: new(big.Int).SetUint64(blockNumber)}, tokenID)
+	cancel()
+	if err == nil && owner != (common.Address{}) {
+		return owner, "historical_ownerOf", nil
+	}
+	callCtx, cancel = context.WithTimeout(ctx, 8*time.Second)
+	owner, liveErr := pm.OwnerOf(&bind.CallOpts{Context: callCtx}, tokenID)
+	cancel()
+	if liveErr != nil {
+		return common.Address{}, "", fmt.Errorf("resolve v3 ownerOf failed: historical=%v current=%w", err, liveErr)
+	}
+	if owner == (common.Address{}) {
+		return common.Address{}, "", fmt.Errorf("resolve v3 ownerOf returned zero address")
+	}
+	return owner, "current_ownerOf", nil
+}
+
+func resolveV4LiquidityOwner(ctx context.Context, client *ethclient.Client, positionManager common.Address, event *models.SmartMoneyLPEvent, blockNumber uint64) (common.Address, string, error) {
+	if event == nil || event.NftTokenID == nil || *event.NftTokenID == 0 {
+		return common.Address{}, "", fmt.Errorf("v4 event has no position token id")
+	}
+	owner, ok, err := resolveERC721TransferOwnerFromReceipt(ctx, client, positionManager, event.TxHash, *event.NftTokenID)
+	if err != nil {
+		return common.Address{}, "", err
+	}
+	if ok {
+		return owner, "transfer_event", nil
+	}
+	pm, err := blockchain.NewV4PositionManager(positionManager, client)
+	if err != nil {
+		return common.Address{}, "", err
+	}
+	tokenID := new(big.Int).SetUint64(*event.NftTokenID)
+	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	owner, err = pm.OwnerOf(&bind.CallOpts{Context: callCtx, BlockNumber: new(big.Int).SetUint64(blockNumber)}, tokenID)
+	cancel()
+	if err == nil && owner != (common.Address{}) {
+		return owner, "historical_ownerOf", nil
+	}
+	callCtx, cancel = context.WithTimeout(ctx, 8*time.Second)
+	owner, liveErr := pm.OwnerOf(&bind.CallOpts{Context: callCtx}, tokenID)
+	cancel()
+	if liveErr != nil {
+		return common.Address{}, "", fmt.Errorf("resolve v4 ownerOf failed: historical=%v current=%w", err, liveErr)
+	}
+	if owner == (common.Address{}) {
+		return common.Address{}, "", fmt.Errorf("resolve v4 ownerOf returned zero address")
+	}
+	return owner, "current_ownerOf", nil
+}
+
+func resolveERC721TransferOwnerFromReceipt(ctx context.Context, client *ethclient.Client, nftContract common.Address, txHash string, tokenID uint64) (common.Address, bool, error) {
+	if client == nil {
+		return common.Address{}, false, fmt.Errorf("rpc client not initialized")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	receipt, err := client.TransactionReceipt(callCtx, common.HexToHash(txHash))
+	if err != nil {
+		return common.Address{}, false, fmt.Errorf("fetch receipt for owner attribution failed: %w", err)
+	}
+	if receipt == nil {
+		return common.Address{}, false, fmt.Errorf("receipt not found")
+	}
+	transferTopic := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+	tokenTopic := common.BigToHash(new(big.Int).SetUint64(tokenID))
+	for _, vlog := range receipt.Logs {
+		if vlog == nil || vlog.Address != nftContract || len(vlog.Topics) < 4 {
+			continue
+		}
+		if vlog.Topics[0] != transferTopic || vlog.Topics[3] != tokenTopic {
+			continue
+		}
+		owner := common.BytesToAddress(vlog.Topics[2].Bytes())
+		if owner == (common.Address{}) {
+			continue
+		}
+		return owner, true, nil
+	}
+	return common.Address{}, false, nil
+}
+
+type rpcHeaderCache struct {
+	mu      sync.Mutex
+	client  *ethclient.Client
+	headers map[uint64]*types.Header
+	order   []uint64
+}
+
+func newRPCHeaderCache(client *ethclient.Client) *rpcHeaderCache {
+	return &rpcHeaderCache{
+		client:  client,
+		headers: make(map[uint64]*types.Header),
+		order:   make([]uint64, 0, rpcPoolLiquidityHeaderCacheSize),
+	}
+}
+
+func (c *rpcHeaderCache) HeaderByNumber(ctx context.Context, client *ethclient.Client, blockNumber uint64) (*types.Header, error) {
+	if c == nil {
+		return nil, fmt.Errorf("header cache not initialized")
+	}
+	c.mu.Lock()
+	if header, ok := c.headers[blockNumber]; ok {
+		c.mu.Unlock()
+		return header, nil
+	}
+	c.mu.Unlock()
+
+	if client == nil {
+		client = c.client
+	}
+	if client == nil {
+		return nil, fmt.Errorf("rpc client not initialized")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	header, err := client.HeaderByNumber(callCtx, new(big.Int).SetUint64(blockNumber))
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	if _, exists := c.headers[blockNumber]; !exists {
+		if len(c.order) >= rpcPoolLiquidityHeaderCacheSize {
+			delete(c.headers, c.order[0])
+			c.order = c.order[1:]
+		}
+		c.headers[blockNumber] = header
+		c.order = append(c.order, blockNumber)
+	}
+	c.mu.Unlock()
+	return header, nil
+}
+
+func resolveRPCBlockRangeByTime(ctx context.Context, client *ethclient.Client, start time.Time, end time.Time) (uint64, uint64, error) {
+	if client == nil {
+		return 0, 0, fmt.Errorf("rpc client not initialized")
+	}
+	latest, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("load latest block: %w", err)
+	}
+	if latest == nil || latest.Number == nil {
+		return 0, 0, fmt.Errorf("latest block header is missing")
+	}
+	latestNumber := latest.Number.Uint64()
+	latestTime := time.Unix(int64(latest.Time), 0).UTC()
+	if latestTime.Before(start) {
+		return latestNumber + 1, latestNumber, nil
+	}
+	startBlock, err := firstBlockAtOrAfter(ctx, client, latestNumber, start)
+	if err != nil {
+		return 0, 0, err
+	}
+	endBlock, err := lastBlockAtOrBefore(ctx, client, latestNumber, end)
+	if err != nil {
+		return 0, 0, err
+	}
+	return startBlock, endBlock, nil
+}
+
+func firstBlockAtOrAfter(ctx context.Context, client *ethclient.Client, latest uint64, target time.Time) (uint64, error) {
+	var lo uint64
+	hi := latest
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		header, err := client.HeaderByNumber(ctx, new(big.Int).SetUint64(mid))
+		if err != nil {
+			return 0, fmt.Errorf("load block %d: %w", mid, err)
+		}
+		if time.Unix(int64(header.Time), 0).Before(target) {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo, nil
+}
+
+func lastBlockAtOrBefore(ctx context.Context, client *ethclient.Client, latest uint64, target time.Time) (uint64, error) {
+	var lo uint64
+	hi := latest
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		header, err := client.HeaderByNumber(ctx, new(big.Int).SetUint64(mid))
+		if err != nil {
+			return 0, fmt.Errorf("load block %d: %w", mid, err)
+		}
+		if time.Unix(int64(header.Time), 0).After(target) {
+			hi = mid - 1
+		} else {
+			lo = mid
+		}
+	}
+	return lo, nil
+}
+
+func aggregateRPCLiquidityCandidates(query TokenLiquidityCandidateQuery, since time.Time, till time.Time, events []*models.SmartMoneyLPEvent, excluded int, warnings []string) *TokenLiquidityCandidateResponse {
+	type agg struct {
+		candidate TokenLiquidityCandidate
+		pools     map[string]struct{}
+		lastTime  time.Time
+	}
+	byWallet := make(map[string]*agg)
+	for _, event := range events {
+		if event == nil {
+			excluded++
+			continue
+		}
+		wallet := strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		if !isEVMAddress(wallet) {
+			excluded++
+			continue
+		}
+		amountUSD := eventTotalUSD(event)
+		if amountUSD < query.MinAmountUSD {
+			excluded++
+			continue
+		}
+		walletAgg := byWallet[wallet]
+		if walletAgg == nil {
+			walletAgg = &agg{
+				candidate: TokenLiquidityCandidate{
+					WalletAddress: wallet,
+					TokenAddress:  firstNonEmptyString(event.Token0Address, event.Token1Address),
+					PoolAddress:   strings.ToLower(strings.TrimSpace(event.PoolAddress)),
+					PoolID:        poolIDForCandidate(event),
+					Pair:          buildBitqueryPair(event.Token0Symbol, event.Token1Symbol),
+					Protocol:      strings.TrimSpace(event.Protocol),
+					Provider:      rpcPoolLiquidityProviderName,
+					AmountSource:  "rpc_lp_event_amount_usd",
+				},
+				pools: make(map[string]struct{}),
+			}
+			byWallet[wallet] = walletAgg
+		}
+		if amountUSD > walletAgg.candidate.MaxAmountUSD {
+			walletAgg.candidate.MaxAmountUSD = amountUSD
+		}
+		if event.TxTimestamp.IsZero() || !event.TxTimestamp.Before(walletAgg.lastTime) {
+			walletAgg.lastTime = event.TxTimestamp
+			walletAgg.candidate.LastAmountUSD = amountUSD
+			walletAgg.candidate.TxHash = strings.ToLower(strings.TrimSpace(event.TxHash))
+			walletAgg.candidate.TxTime = event.TxTimestamp.UTC().Format(time.RFC3339)
+			walletAgg.candidate.PoolAddress = strings.ToLower(strings.TrimSpace(event.PoolAddress))
+			walletAgg.candidate.PoolID = poolIDForCandidate(event)
+			walletAgg.candidate.Pair = buildBitqueryPair(event.Token0Symbol, event.Token1Symbol)
+			walletAgg.candidate.Protocol = strings.TrimSpace(event.Protocol)
+		}
+		poolKey := strings.ToLower(strings.TrimSpace(event.PoolAddress))
+		if poolKey != "" {
+			walletAgg.pools[poolKey] = struct{}{}
+		}
+	}
+
+	candidates := make([]TokenLiquidityCandidate, 0, len(byWallet))
+	for _, item := range byWallet {
+		item.candidate.PoolCount = len(item.pools)
+		candidates = append(candidates, item.candidate)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].MaxAmountUSD != candidates[j].MaxAmountUSD {
+			return candidates[i].MaxAmountUSD > candidates[j].MaxAmountUSD
+		}
+		return strings.Compare(candidates[i].TxTime, candidates[j].TxTime) > 0
+	})
+	if len(candidates) > query.Limit {
+		candidates = candidates[:query.Limit]
+	}
+	if len(events) == 0 {
+		warnings = append(warnings, "rpc returned no add-liquidity events for this pool and window")
+	}
+
+	return &TokenLiquidityCandidateResponse{
+		Token: TokenLiquidityTokenInfo{
+			Address: "",
+			Chain:   query.Chain,
+		},
+		Pool: TokenLiquidityPoolInfo{
+			Address: query.PoolAddress,
+			PoolID:  query.PoolID,
+			Chain:   query.Chain,
+		},
+		Filters: TokenLiquidityFilterInfo{
+			PoolAddress:  query.PoolAddress,
+			PoolID:       query.PoolID,
+			MinAmountUSD: query.MinAmountUSD,
+			WindowHours:  query.WindowHours,
+			StartTime:    since.Format(time.RFC3339),
+			EndTime:      till.Format(time.RFC3339),
+			Limit:        query.Limit,
+		},
+		Sources: []TokenLiquiditySourceInfo{
+			{Name: "rpc", Role: "pool_liquidity_event_reader"},
+		},
+		Candidates:    candidates,
+		ExcludedCount: excluded,
+		Warnings:      warnings,
+	}
+}
+
+func poolLiquidityEmptyResponse(query TokenLiquidityCandidateQuery, since time.Time, till time.Time, warning string) *TokenLiquidityCandidateResponse {
+	warnings := []string{}
+	if strings.TrimSpace(warning) != "" {
+		warnings = append(warnings, strings.TrimSpace(warning))
+	}
+	return aggregateRPCLiquidityCandidates(query, since, till, []*models.SmartMoneyLPEvent{}, 0, warnings)
+}
+
+func eventTotalUSD(event *models.SmartMoneyLPEvent) float64 {
+	if event == nil || event.TotalUSD == nil {
+		return 0
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(*event.TotalUSD), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func poolIDForCandidate(event *models.SmartMoneyLPEvent) string {
+	if event == nil {
+		return ""
+	}
+	pool := strings.ToLower(strings.TrimSpace(event.PoolAddress))
+	if isEVMHash(pool) {
+		return pool
+	}
+	return ""
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func appendLimitedWarning(warnings []string, warning string) []string {
+	warning = strings.TrimSpace(warning)
+	if warning == "" {
+		return warnings
+	}
+	if len(warnings) >= 5 {
+		return warnings
+	}
+	return append(warnings, warning)
+}
+
 type BitqueryTokenLiquidityProvider struct {
 	apiURL     string
 	apiKey     string
@@ -194,7 +1079,7 @@ func NewBitqueryTokenLiquidityProvider(apiURL string, apiKey string) *BitqueryTo
 }
 
 func (p *BitqueryTokenLiquidityProvider) FindCandidates(ctx context.Context, query TokenLiquidityCandidateQuery) (*TokenLiquidityCandidateResponse, error) {
-	query, err := NormalizeTokenLiquidityCandidateQuery(query)
+	query, err := normalizeLegacyTokenLiquidityCandidateQuery(query)
 	if err != nil {
 		return nil, err
 	}

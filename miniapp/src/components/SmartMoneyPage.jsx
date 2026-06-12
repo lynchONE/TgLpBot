@@ -13,7 +13,7 @@ import {
     fetchSMZombieWallets, deleteSMZombieWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
-    fetchSMTokenLiquidityWalletCandidates, importSMTokenLiquidityWallets,
+    fetchSMPoolLiquidityWalletCandidates, importSMPoolLiquidityWallets,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchWallets, fetchSMWatchActivity, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
@@ -92,6 +92,17 @@ function formatTokenLiquidityDateTimeRange(startValue, endValue) {
     const end = String(endValue || '').replace('T', ' ');
     if (!start || !end) return '请选择开始和结束时间';
     return `${start} → ${end}`;
+}
+
+function parsePoolLiquidityInput(value) {
+    const text = String(value || '').trim();
+    if (/^0x[a-fA-F0-9]{40}$/.test(text)) {
+        return { poolAddress: text.toLowerCase(), poolId: '' };
+    }
+    if (/^0x[a-fA-F0-9]{64}$/.test(text)) {
+        return { poolAddress: '', poolId: text.toLowerCase() };
+    }
+    return null;
 }
 
 function GoldenDogPageContent({
@@ -916,19 +927,23 @@ function walletSourceLabel(source) {
     if (value === 'manual') return '手动添加';
     if (value === 'contract_interaction') return '合约发现';
     if (value === 'token_liquidity_indexer') return '雷达发现';
+    if (value === 'pool_liquidity_radar') return '池子雷达';
     return value || '未标记来源';
 }
 
 function walletSourceBadgeClass(source) {
     const value = String(source || '').trim();
     if (value === 'manual') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
-    if (value === 'token_liquidity_indexer') return 'border-sky-400/20 bg-sky-400/10 text-sky-200';
+    if (value === 'token_liquidity_indexer' || value === 'pool_liquidity_radar') return 'border-sky-400/20 bg-sky-400/10 text-sky-200';
     return 'border-white/10 bg-zinc-800/80 text-zinc-300';
 }
 
 function walletSourceContractLabel(value) {
     const address = normalizeWalletAddress(value);
-    return address ? `来源合约 ${shortAddr(address)}` : '';
+    if (address) return `来源合约 ${shortAddr(address)}`;
+    const poolId = String(value || '').trim();
+    if (/^0x[a-fA-F0-9]{64}$/.test(poolId)) return `来源 poolId ${shortAddr(poolId)}`;
+    return '';
 }
 
 function getPairLabel(value) {
@@ -1911,7 +1926,7 @@ function ZombieWalletSheet({ open, candidates, selectedMap, busy, onToggle, onTo
 }
 
 function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImported }) {
-    const [tokenAddress, setTokenAddress] = useState('');
+    const [poolInput, setPoolInput] = useState('');
     const [minAmountUsd, setMinAmountUsd] = useState('500');
     const [timeRange, setTimeRange] = useState(() => createDefaultTokenLiquidityRange());
     const [limit, setLimit] = useState('30');
@@ -1939,6 +1954,11 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
     const currentRangeLabel = formatTokenLiquidityDateTimeRange(timeRange.start, timeRange.end);
 
     const preview = async () => {
+        const poolTarget = parsePoolLiquidityInput(poolInput);
+        if (!poolTarget) {
+            setError('请输入有效的 V3 池子合约地址或 V4 poolId');
+            return;
+        }
         const startTime = tokenLiquidityLocalToISO(timeRange.start);
         const endTime = tokenLiquidityLocalToISO(timeRange.end);
         if (!startTime || !endTime) {
@@ -1953,10 +1973,10 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         setError('');
         setImportResult(null);
         try {
-            const resp = await fetchSMTokenLiquidityWalletCandidates({
+            const resp = await fetchSMPoolLiquidityWalletCandidates({
                 apiBaseUrl,
                 chain: 'bsc',
-                tokenAddress,
+                ...poolTarget,
                 minAmountUsd: Number(minAmountUsd),
                 startTime,
                 endTime,
@@ -1981,13 +2001,18 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
             setError('请至少选择一个钱包。');
             return;
         }
+        const poolTarget = parsePoolLiquidityInput(poolInput);
+        if (!poolTarget) {
+            setError('请输入有效的 V3 池子合约地址或 V4 poolId');
+            return;
+        }
         setSaving(true);
         setError('');
         try {
-            const resp = await importSMTokenLiquidityWallets({
+            const resp = await importSMPoolLiquidityWallets({
                 apiBaseUrl,
                 chain: 'bsc',
-                tokenAddress,
+                ...poolTarget,
                 wallets: selectedWallets,
                 labelPrefix: '雷达',
             });
@@ -2006,7 +2031,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                     <div>
                         <div className="text-base font-semibold text-zinc-100">聪明钱雷达</div>
-                        <div className="text-xs text-zinc-500">Bitquery 加池事件索引 · 精确时间范围</div>
+                        <div className="text-xs text-zinc-500">RPC 池子加池事件扫描 · 支持 V3/V4</div>
                     </div>
                     <button type="button" className={getIconButtonClass(false)} onClick={onClose} disabled={loading || saving}>
                         <X size={16} />
@@ -2016,9 +2041,9 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                     <div className="space-y-2">
                         <input
                             className={getInputClass(brand)}
-                            placeholder="代币地址 (0x...)"
-                            value={tokenAddress}
-                            onChange={(e) => setTokenAddress(e.target.value)}
+                            placeholder="V3 池子地址 / V4 poolId"
+                            value={poolInput}
+                            onChange={(e) => setPoolInput(e.target.value)}
                         />
                         <div className="rounded-2xl border border-white/10 bg-zinc-900/55 p-2.5">
                             <div className="mb-2 flex items-center justify-between text-[10px] text-zinc-500">
@@ -2074,6 +2099,14 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                             已新增 {importResult.created || 0}，已恢复 {importResult.reactivated || 0}，已跳过 {importResult.skipped_existing || 0}
                         </div>
                     ) : null}
+                    {data ? (
+                        <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+                            <span>已排除 {Number(data?.excluded_count || 0)} 条事件</span>
+                            {Array.isArray(data?.warnings) && data.warnings.length > 0 ? (
+                                <span title={data.warnings.join('\n')}>{data.warnings.length} 条提示</span>
+                            ) : null}
+                        </div>
+                    ) : null}
 
                     {candidates.length > 0 ? (
                         <div className="mt-4 space-y-2">
@@ -2112,6 +2145,8 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                                             </div>
                                             <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
                                                 <span>{item.pair || 'pool'}</span>
+                                                <span>{item.protocol || 'protocol'}</span>
+                                                <span>{item.amount_source || 'amount'}</span>
                                                 <span>{shortAddr(item.pool_address)}</span>
                                                 {item.already_monitored ? <span>已监控</span> : null}
                                             </div>

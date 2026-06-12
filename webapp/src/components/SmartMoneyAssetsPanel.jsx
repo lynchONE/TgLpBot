@@ -115,13 +115,16 @@ function walletSourceLabel(wallet) {
   const source = String(wallet?.source ?? wallet?.wallet_source ?? '').trim();
   if (source === 'manual') return '手动添加';
   if (source === 'contract_interaction') return '合约发现';
+  if (source === 'token_liquidity_indexer') return '雷达发现';
+  if (source === 'pool_liquidity_radar') return '池子雷达';
   return source || '未标记来源';
 }
 
 function walletSourceContractLabel(wallet) {
   const raw = String(wallet?.source_contract ?? wallet?.wallet_source_contract ?? '').trim();
-  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
-  return `来源合约 ${raw.slice(0, 6)}...${raw.slice(-4)}`;
+  if (/^0x[0-9a-fA-F]{40}$/.test(raw)) return `来源合约 ${raw.slice(0, 6)}...${raw.slice(-4)}`;
+  if (/^0x[0-9a-fA-F]{64}$/.test(raw)) return `来源 poolId ${raw.slice(0, 6)}...${raw.slice(-4)}`;
+  return '';
 }
 
 function walletAvatarIdx(address) {

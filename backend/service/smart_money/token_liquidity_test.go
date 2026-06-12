@@ -11,7 +11,7 @@ import (
 func TestNormalizeTokenLiquidityCandidateQuery(t *testing.T) {
 	query, err := NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
 		Chain:        "bsc",
-		TokenAddress: "0x55d398326f99059ff775485246999027b3197955",
+		PoolAddress:  "0x00000000000000000000000000000000000000aa",
 		MinAmountUSD: 500,
 		WindowHours:  24,
 		Limit:        20,
@@ -24,24 +24,24 @@ func TestNormalizeTokenLiquidityCandidateQuery(t *testing.T) {
 	}
 
 	_, err = NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
-		TokenAddress: "bad",
+		PoolAddress:  "bad",
 		MinAmountUSD: 500,
 		WindowHours:  24,
 		Limit:        20,
 	})
 	if err == nil {
-		t.Fatal("expected invalid token address error")
+		t.Fatal("expected invalid pool address error")
 	}
 
 	_, err = NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
 		Provider:     "dexscreener",
-		TokenAddress: "0x55d398326f99059ff775485246999027b3197955",
+		PoolAddress:  "0x00000000000000000000000000000000000000aa",
 		MinAmountUSD: 500,
 		WindowHours:  24,
 		Limit:        20,
 	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
-		t.Fatalf("expected unsupported provider error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "provider is no longer supported") {
+		t.Fatalf("expected provider removal error, got %v", err)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestNormalizeTokenLiquidityCandidateQueryAcceptsAbsoluteRange(t *testing.T)
 	end := start.Add(3*time.Hour + 20*time.Minute)
 	query, err := NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
 		Chain:        "bsc",
-		TokenAddress: "0x55d398326f99059ff775485246999027b3197955",
+		PoolAddress:  "0x00000000000000000000000000000000000000aa",
 		MinAmountUSD: 500,
 		StartTime:    start,
 		EndTime:      end,
@@ -64,7 +64,7 @@ func TestNormalizeTokenLiquidityCandidateQueryAcceptsAbsoluteRange(t *testing.T)
 	}
 
 	_, err = NormalizeTokenLiquidityCandidateQuery(TokenLiquidityCandidateQuery{
-		TokenAddress: "0x55d398326f99059ff775485246999027b3197955",
+		PoolAddress:  "0x00000000000000000000000000000000000000aa",
 		MinAmountUSD: 500,
 		StartTime:    end,
 		EndTime:      start,
@@ -75,27 +75,13 @@ func TestNormalizeTokenLiquidityCandidateQueryAcceptsAbsoluteRange(t *testing.T)
 	}
 }
 
-func TestNewTokenLiquidityProviderFromConfigRequiresBitqueryConfig(t *testing.T) {
-	_, err := NewTokenLiquidityProviderFromConfig(&config.Config{})
-	if err == nil || !strings.Contains(err.Error(), "SMART_MONEY_LIQUIDITY_INDEX_PROVIDER") {
-		t.Fatalf("expected provider config error, got %v", err)
+func TestNewTokenLiquidityProviderFromConfigUsesRPCWithoutProviderConfig(t *testing.T) {
+	provider, err := NewTokenLiquidityProviderFromConfig(&config.Config{})
+	if err != nil {
+		t.Fatalf("expected rpc provider without extra config: %v", err)
 	}
-
-	_, err = NewTokenLiquidityProviderFromConfig(&config.Config{
-		SmartMoneyLiquidityIndexProvider: "dexscreener",
-		BitqueryAPIURL:                   "https://streaming.bitquery.io/graphql",
-		BitqueryAPIKey:                   "key",
-	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported SMART_MONEY_LIQUIDITY_INDEX_PROVIDER") {
-		t.Fatalf("expected unsupported provider config error, got %v", err)
-	}
-
-	_, err = NewTokenLiquidityProviderFromConfig(&config.Config{
-		SmartMoneyLiquidityIndexProvider: "bitquery",
-		BitqueryAPIURL:                   "https://streaming.bitquery.io/graphql",
-	})
-	if err == nil || !strings.Contains(err.Error(), "BITQUERY_API_KEY") {
-		t.Fatalf("expected api key config error, got %v", err)
+	if _, ok := provider.(*RPCTokenLiquidityProvider); !ok {
+		t.Fatalf("expected rpc provider, got %T", provider)
 	}
 }
 

@@ -154,50 +154,55 @@ export async function deleteSMZombieWallets({ apiBaseUrl, wallets, signal }) {
     });
 }
 
-export async function fetchSMTokenLiquidityWalletCandidates({
+export async function fetchSMPoolLiquidityWalletCandidates({
     apiBaseUrl,
     chain = 'bsc',
-    tokenAddress,
+    poolAddress,
+    poolId,
     minAmountUsd,
     windowHours,
     startTime,
     endTime,
     limit,
-    provider,
     signal,
 }) {
     const params = new URLSearchParams();
     if (chain) params.set('chain', String(chain));
-    params.set('token_address', String(tokenAddress || ''));
+    if (poolAddress) params.set('pool_address', String(poolAddress));
+    if (poolId) params.set('pool_id', String(poolId));
     params.set('min_amount_usd', String(minAmountUsd));
     if (startTime) params.set('start_time', String(startTime));
     if (endTime) params.set('end_time', String(endTime));
     if (!startTime && !endTime && windowHours !== undefined) params.set('window_hours', String(windowHours));
     params.set('limit', String(limit));
-    if (provider) params.set('provider', String(provider));
-    return smRequest(buildSMUrl(apiBaseUrl, 'token_liquidity_wallet_candidates', params.toString()), { signal });
+    return smRequest(buildSMUrl(apiBaseUrl, 'pool_liquidity_wallet_candidates', params.toString()), { signal });
 }
 
-export async function importSMTokenLiquidityWallets({
+export async function importSMPoolLiquidityWallets({
     apiBaseUrl,
     chain = 'bsc',
-    tokenAddress,
+    poolAddress,
+    poolId,
     wallets,
     labelPrefix,
     signal,
 }) {
-    return smRequest(buildSMUrl(apiBaseUrl, 'token_liquidity_wallet_import', ''), {
+    return smRequest(buildSMUrl(apiBaseUrl, 'pool_liquidity_wallet_import', ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             chain,
-            token_address: tokenAddress,
+            pool_address: poolAddress,
+            pool_id: poolId,
             wallets,
             label_prefix: labelPrefix,
         }),
         signal,
     });
 }
+
+export const fetchSMTokenLiquidityWalletCandidates = fetchSMPoolLiquidityWalletCandidates;
+export const importSMTokenLiquidityWallets = importSMPoolLiquidityWallets;
 
 export async function uploadSMWalletAvatar({ apiBaseUrl, address, file, chain, signal }) {
     const params = new URLSearchParams();

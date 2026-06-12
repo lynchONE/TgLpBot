@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"context"
+	"fmt"
 	"math/big"
 	"sort"
 	"strconv"
@@ -210,11 +211,28 @@ func (r *Repository) UpdateMonitoredWallet(ctx context.Context, address string, 
 }
 
 func (r *Repository) ImportTokenLiquidityWallets(ctx context.Context, chainID int, tokenAddress string, wallets []string, labelPrefix string) (MonitoredWalletImportResult, error) {
-	result := MonitoredWalletImportResult{Invalid: []string{}}
 	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
+	return r.importMonitoredWalletsFromLiquiditySource(ctx, chainID, tokenAddress, wallets, labelPrefix, MonitoredWalletSourceTokenLiquidityIndexer)
+}
+
+func (r *Repository) ImportPoolLiquidityWallets(ctx context.Context, chainID int, poolIdentifier string, wallets []string, labelPrefix string) (MonitoredWalletImportResult, error) {
+	poolIdentifier = strings.ToLower(strings.TrimSpace(poolIdentifier))
+	return r.importMonitoredWalletsFromLiquiditySource(ctx, chainID, poolIdentifier, wallets, labelPrefix, MonitoredWalletSourcePoolLiquidityRadar)
+}
+
+func (r *Repository) importMonitoredWalletsFromLiquiditySource(ctx context.Context, chainID int, sourceContract string, wallets []string, labelPrefix string, source string) (MonitoredWalletImportResult, error) {
+	result := MonitoredWalletImportResult{Invalid: []string{}}
+	sourceContract = strings.ToLower(strings.TrimSpace(sourceContract))
+	source = strings.TrimSpace(source)
 	labelPrefix = strings.TrimSpace(labelPrefix)
 	if chainID <= 0 {
 		chainID = 56
+	}
+	if source == "" {
+		return result, fmt.Errorf("source is required")
+	}
+	if sourceContract == "" {
+		return result, fmt.Errorf("source_contract is required")
 	}
 
 	seen := make(map[string]struct{}, len(wallets))
@@ -252,8 +270,8 @@ func (r *Repository) ImportTokenLiquidityWallets(ctx context.Context, chainID in
 				}
 				updates := map[string]any{
 					"is_active":       true,
-					"source":          MonitoredWalletSourceTokenLiquidityIndexer,
-					"source_contract": tokenAddress,
+					"source":          source,
+					"source_contract": sourceContract,
 				}
 				if labelPrefix != "" {
 					label := labelPrefix + " " + addr[len(addr)-4:]
@@ -273,12 +291,12 @@ func (r *Repository) ImportTokenLiquidityWallets(ctx context.Context, chainID in
 				label := labelPrefix + " " + addr[len(addr)-4:]
 				labelPtr = &label
 			}
-			sourceContract := tokenAddress
+			walletSourceContract := sourceContract
 			wallet := &models.MonitoredWallet{
 				Address:        addr,
 				ChainID:        chainID,
-				Source:         MonitoredWalletSourceTokenLiquidityIndexer,
-				SourceContract: &sourceContract,
+				Source:         source,
+				SourceContract: &walletSourceContract,
 				Label:          labelPtr,
 				IsActive:       true,
 			}

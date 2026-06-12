@@ -7,7 +7,7 @@ type MonitoredWallet struct {
 	Address        string    `gorm:"size:42;not null;uniqueIndex:uq_sm_address_chain" json:"address"`
 	ChainID        int       `gorm:"not null;default:56;uniqueIndex:uq_sm_address_chain" json:"chain_id"`
 	Source         string    `gorm:"size:30;not null;index:idx_sm_wallet_source_active_created,priority:1" json:"source"`
-	SourceContract *string   `gorm:"size:42" json:"source_contract"`
+	SourceContract *string   `gorm:"size:66" json:"source_contract"`
 	Label          *string   `gorm:"size:100" json:"label"`
 	AvatarURL      *string   `gorm:"size:512" json:"avatar_url"`
 	IsActive       bool      `gorm:"not null;default:true;index:idx_sm_wallet_active_created,priority:1;index:idx_sm_wallet_source_active_created,priority:2" json:"is_active"`

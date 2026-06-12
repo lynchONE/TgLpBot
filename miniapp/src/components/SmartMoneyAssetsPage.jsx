@@ -47,12 +47,15 @@ function walletSourceLabel(w) {
     const s=String(w?.source??w?.wallet_source??'').trim();
     if(s==='manual') return '手动添加';
     if(s==='contract_interaction') return '合约发现';
+    if(s==='token_liquidity_indexer') return '雷达发现';
+    if(s==='pool_liquidity_radar') return '池子雷达';
     return s||'未标记来源';
 }
 function walletSourceContractLabel(w) {
     const a=String(w?.source_contract??w?.wallet_source_contract??'').trim();
-    if(!/^0x[0-9a-fA-F]{40}$/.test(a)) return '';
-    return `来源合约 ${a.slice(0,6)}...${a.slice(-4)}`;
+    if(/^0x[0-9a-fA-F]{40}$/.test(a)) return `来源合约 ${a.slice(0,6)}...${a.slice(-4)}`;
+    if(/^0x[0-9a-fA-F]{64}$/.test(a)) return `来源 poolId ${a.slice(0,6)}...${a.slice(-4)}`;
+    return '';
 }
 function errorText(e) { return String(e?.message||e||'').trim(); }
 function isIgnorableSmartMoneyDataError(err) { const m=errorText(err).toLowerCase(); return m.includes("unknown column 'open_lp_usd'")||m.includes("unknown column `open_lp_usd`"); }
