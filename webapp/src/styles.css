@@ -8102,14 +8102,23 @@ body {
 }
 .smd-token-liquidity-progress span {
   display: block;
-  width: 100%;
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(56, 189, 248, 0.1), rgba(132, 204, 22, 0.74), rgba(56, 189, 248, 0.1));
   transform-origin: left center;
+  transition: width 0.25s ease;
 }
 .smd-token-liquidity-progress span.active {
-  width: 42%;
+  position: relative;
+  min-width: 42px;
+  overflow: hidden;
+}
+.smd-token-liquidity-progress span.active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent);
   animation: smdScanProgress 1.15s ease-in-out infinite;
 }
 .smd-token-liquidity-scan-meta {
@@ -8118,9 +8127,71 @@ body {
   color: var(--text-muted);
   font-size: 11px;
 }
+.smd-token-liquidity-scan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.smd-token-liquidity-scan-grid span {
+  min-width: 0;
+  border: 1px solid rgba(139, 160, 196, 0.14);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.18);
+  padding: 7px 8px;
+}
+.smd-token-liquidity-scan-grid strong {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.smd-token-liquidity-scan-grid em {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smd-token-liquidity-log {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.smd-token-liquidity-log-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.smd-token-liquidity-log-row span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(148, 163, 184, 0.72);
+}
+.smd-token-liquidity-log-row p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.smd-token-liquidity-log-row.success p {
+  color: rgba(134, 239, 172, 0.92);
+}
+.smd-token-liquidity-log-row.warn p {
+  color: rgba(253, 224, 71, 0.9);
+}
+.smd-token-liquidity-log-row.error p {
+  color: rgba(252, 165, 165, 0.94);
+}
 @keyframes smdScanProgress {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(250%); }
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 .smd-token-liquidity-toolbar {
   margin-top: 12px;
@@ -8155,6 +8226,12 @@ body {
   }
   .smd-token-liquidity-datetime-grid label {
     grid-column: 1 / -1;
+  }
+  .smd-token-liquidity-scan-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .smd-token-liquidity-log-row {
+    grid-template-columns: 58px minmax(0, 1fr);
   }
 }
 .smd-modal-header {

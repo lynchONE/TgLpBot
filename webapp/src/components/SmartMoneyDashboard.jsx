@@ -68,6 +68,26 @@ function formatTokenLiquidityDateTimeRange(startValue, endValue) {
     return `${start} → ${end}`;
 }
 
+const SMART_MONEY_RADAR_SCAN_TIMEOUT_MS = 50 * 1000;
+
+function formatRadarElapsed(ms) {
+    const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes <= 0) return `${seconds}s`;
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function createRadarLogEntry(text, tone = 'info') {
+    const date = new Date();
+    return {
+        id: `${date.getTime()}-${Math.random().toString(16).slice(2)}`,
+        time: date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        text,
+        tone,
+    };
+}
+
 function parsePoolLiquidityInput(value) {
     const text = String(value || '').trim();
     if (/^0x[a-fA-F0-9]{40}$/.test(text)) {
@@ -947,14 +967,34 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
     const [selected, setSelected] = useState({});
     const [importResult, setImportResult] = useState(null);
     const [scanStep, setScanStep] = useState('');
+    const [scanStartedAt, setScanStartedAt] = useState(null);
+    const [scanElapsedMs, setScanElapsedMs] = useState(0);
+    const [scanTarget, setScanTarget] = useState(null);
+    const [scanLogs, setScanLogs] = useState([]);
+
+    const appendScanLog = useCallback((text, tone = 'info') => {
+        setScanLogs((prev) => [...prev.slice(-7), createRadarLogEntry(text, tone)]);
+    }, []);
 
     useEffect(() => {
         if (!open) return;
         setError('');
         setImportResult(null);
         setScanStep('');
+        setScanStartedAt(null);
+        setScanElapsedMs(0);
+        setScanTarget(null);
+        setScanLogs([]);
         setTimeRange(createDefaultTokenLiquidityRange());
     }, [open]);
+
+    useEffect(() => {
+        if (!open || (!loading && !saving) || !scanStartedAt) return undefined;
+        const tick = () => setScanElapsedMs(Date.now() - scanStartedAt);
+        tick();
+        const timer = window.setInterval(tick, 1000);
+        return () => window.clearInterval(timer);
+    }, [open, loading, saving, scanStartedAt]);
 
     if (!open) return null;
 
@@ -964,12 +1004,21 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         .map((item) => item.wallet_address);
     const allSelected = candidates.length > 0 && selectedWallets.length === candidates.length;
     const currentRangeLabel = formatTokenLiquidityDateTimeRange(timeRange.start, timeRange.end);
+    const scanProgressPct = (loading || saving)
+        ? Math.min(96, Math.max(8, (scanElapsedMs / SMART_MONEY_RADAR_SCAN_TIMEOUT_MS) * 96))
+        : (scanStep ? 100 : 0);
+    const scanTargetText = scanTarget ? `${scanTarget.kind} ${shortAddr(scanTarget.value)}` : '';
+    const scanStatusText = loading ? '运行中' : saving ? '导入中' : error ? '失败' : data ? '完成' : '就绪';
 
     const preview = async () => {
         const poolTarget = parsePoolLiquidityInput(poolInput);
         if (!poolTarget) {
             setError('请输入有效的 V3 池子合约地址或 V4 poolId');
             setScanStep('扫描失败');
+            setScanStartedAt(null);
+            setScanElapsedMs(0);
+            setScanTarget(null);
+            setScanLogs([createRadarLogEntry('参数校验失败：池子地址或 poolId 格式不正确。', 'error')]);
             return;
         }
         setScanStep('校验扫描参数');
@@ -978,18 +1027,44 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         if (!startTime || !endTime) {
             setError('请选择有效的开始和结束时间');
             setScanStep('扫描失败');
+            setScanStartedAt(null);
+            setScanElapsedMs(0);
+            setScanTarget(null);
+            setScanLogs([createRadarLogEntry('参数校验失败：开始时间和结束时间必须完整。', 'error')]);
             return;
         }
         if (new Date(endTime).getTime() <= new Date(startTime).getTime()) {
             setError('结束时间必须晚于开始时间');
             setScanStep('扫描失败');
+            setScanStartedAt(null);
+            setScanElapsedMs(0);
+            setScanTarget(null);
+            setScanLogs([createRadarLogEntry('参数校验失败：结束时间必须晚于开始时间。', 'error')]);
             return;
         }
+        const startedAt = Date.now();
+        const rangeHours = Math.max(1, Math.ceil((new Date(endTime).getTime() - new Date(startTime).getTime()) / (60 * 60 * 1000)));
+        const targetValue = poolTarget.poolAddress || poolTarget.poolId;
+        const targetKind = poolTarget.poolAddress ? 'V3 Pool' : 'V4 PoolId';
         setLoading(true);
         setError('');
         setImportResult(null);
         setData(null);
         setSelected({});
+        setScanStartedAt(startedAt);
+        setScanElapsedMs(0);
+        setScanTarget({
+            kind: targetKind,
+            value: targetValue,
+            range: currentRangeLabel,
+            rangeHours,
+            minAmountUsd: Number(minAmountUsd),
+            limit: Number(limit),
+        });
+        setScanLogs([
+            createRadarLogEntry(`参数已校验：${targetKind} ${shortAddr(targetValue)}，约 ${rangeHours} 小时时间窗。`),
+            createRadarLogEntry(`提交后端 RPC 扫描请求，最低金额 ${formatUSDCompact(Number(minAmountUsd))}，最多返回 ${Number(limit)} 个候选。`),
+        ]);
         try {
             setScanStep('请求节点扫描池子加池事件');
             const resp = await fetchSMPoolLiquidityWalletCandidates({
@@ -1003,6 +1078,11 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             });
             setScanStep('整理候选钱包');
             const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
+            const excludedCount = Number(resp?.excluded_count || 0);
+            appendScanLog(`后端返回：候选 ${list.length} 个，排除 ${excludedCount} 条事件。`, list.length > 0 ? 'success' : 'info');
+            if (Array.isArray(resp?.warnings) && resp.warnings.length > 0) {
+                appendScanLog(`扫描提示：${resp.warnings.slice(0, 2).join('；')}`, 'warn');
+            }
             const nextSelected = {};
             list.forEach((item) => {
                 if (!item.already_monitored) nextSelected[item.wallet_address] = true;
@@ -1011,9 +1091,12 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             setSelected(nextSelected);
             setScanStep(list.length > 0 ? `扫描完成，找到 ${list.length} 个候选钱包` : '扫描完成，未找到符合条件的钱包');
         } catch (err) {
-            setError(String(err?.message || err || '预览失败'));
+            const message = String(err?.message || err || '预览失败');
+            setError(message);
             setScanStep('扫描失败');
+            appendScanLog(`扫描失败：${message}`, 'error');
         } finally {
+            setScanElapsedMs(Date.now() - startedAt);
             setLoading(false);
         }
     };
@@ -1031,6 +1114,10 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         setSaving(true);
         setError('');
         setScanStep('导入选中的候选钱包');
+        const startedAt = Date.now();
+        setScanStartedAt(startedAt);
+        setScanElapsedMs(0);
+        appendScanLog(`开始导入 ${selectedWallets.length} 个候选钱包。`);
         try {
             const resp = await importSMPoolLiquidityWallets({
                 apiBaseUrl,
@@ -1041,11 +1128,15 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             });
             setImportResult(resp);
             setScanStep('导入完成');
+            appendScanLog(`导入完成：新增 ${resp.created || 0}，恢复 ${resp.reactivated || 0}，跳过 ${resp.skipped_existing || 0}。`, 'success');
             await onImported?.();
         } catch (err) {
-            setError(String(err?.message || err || '导入失败'));
+            const message = String(err?.message || err || '导入失败');
+            setError(message);
             setScanStep('导入失败');
+            appendScanLog(`导入失败：${message}`, 'error');
         } finally {
+            setScanElapsedMs(Date.now() - startedAt);
             setSaving(false);
         }
     };
@@ -1109,17 +1200,47 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                     <div className={`smd-token-liquidity-scan-state${error ? ' error' : ''}`}>
                         <div className="smd-token-liquidity-scan-head">
                             <span>{scanStep || (loading ? '准备扫描' : '等待操作')}</span>
-                            <strong>{loading ? '运行中' : saving ? '导入中' : error ? '失败' : data ? '完成' : '就绪'}</strong>
+                            <strong>{scanStatusText} · {formatRadarElapsed(scanElapsedMs)}</strong>
                         </div>
                         <div className="smd-token-liquidity-progress" aria-hidden="true">
-                            <span className={loading || saving ? 'active' : ''} />
+                            <span className={loading || saving ? 'active' : ''} style={{ width: `${scanProgressPct}%` }} />
                         </div>
                         <div className="smd-token-liquidity-scan-meta">
-                            {loading ? '正在通过后端 RPC 扫描链上加池事件，时间范围越大耗时越久。' : null}
+                            {loading ? `后端正在通过 RPC 扫描链上加池事件，约 ${Math.round(SMART_MONEY_RADAR_SCAN_TIMEOUT_MS / 1000)}s 未完成会自动超时。` : null}
                             {saving ? '正在写入监控钱包，请保持弹窗打开。' : null}
                             {!loading && !saving && data ? `候选 ${candidates.length} 个，已排除 ${Number(data?.excluded_count || 0)} 条事件。` : null}
                             {!loading && !saving && error ? '请求未完成，参数保留，可直接重试。' : null}
                         </div>
+                        {scanTarget ? (
+                            <div className="smd-token-liquidity-scan-grid">
+                                <span>
+                                    <strong>目标</strong>
+                                    <em>{scanTargetText}</em>
+                                </span>
+                                <span>
+                                    <strong>时间窗</strong>
+                                    <em>{scanTarget.rangeHours}h</em>
+                                </span>
+                                <span>
+                                    <strong>阈值</strong>
+                                    <em>{formatUSDCompact(scanTarget.minAmountUsd)}</em>
+                                </span>
+                                <span>
+                                    <strong>上限</strong>
+                                    <em>{scanTarget.limit}</em>
+                                </span>
+                            </div>
+                        ) : null}
+                        {scanLogs.length > 0 ? (
+                            <div className="smd-token-liquidity-log">
+                                {scanLogs.map((item) => (
+                                    <div key={item.id} className={`smd-token-liquidity-log-row ${item.tone}`}>
+                                        <span>{item.time}</span>
+                                        <p>{item.text}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
                 ) : null}
                 {error ? <div className="smd-inline-error">{error}</div> : null}
