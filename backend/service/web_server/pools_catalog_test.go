@@ -65,3 +65,17 @@ func TestPoolCatalogPickMarketCapTokenExcludesQuoteToken(t *testing.T) {
 		t.Fatalf("market cap token = %s/%s, want AAA token", addr, symbol)
 	}
 }
+
+func TestPoolCatalogFDVUSDUsesFDVBeforeCurrentTokenFDV(t *testing.T) {
+	t.Parallel()
+
+	got := poolCatalogFDVUSD(HotPoolResponse{
+		MarketCapUSD:       1_000,
+		FDVUSD:             4_000,
+		CurrentTokenFDVUSD: 3_000,
+	})
+
+	if got != 4_000 {
+		t.Fatalf("fdv metric = %.0f, want 4000", got)
+	}
+}

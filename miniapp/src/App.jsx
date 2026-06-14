@@ -3308,7 +3308,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">市值 &gt;= (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">FDV &gt;= (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minMarketCap}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minMarketCap: e.target.value }))}

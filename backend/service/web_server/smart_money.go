@@ -990,16 +990,22 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		maxFeeRate = value
 		hasMaxFeeRate = true
 	}
-	var minMarketCapUSD float64
-	hasMinMarketCapUSD := false
-	if raw := strings.TrimSpace(r.URL.Query().Get("min_market_cap_usd")); raw != "" {
-		value, err := strconv.ParseFloat(raw, 64)
+	var minFDVUSD float64
+	hasMinFDVUSD := false
+	minFDVParam := "min_fdv_usd"
+	rawMinFDV := strings.TrimSpace(r.URL.Query().Get(minFDVParam))
+	if rawMinFDV == "" {
+		minFDVParam = "min_market_cap_usd"
+		rawMinFDV = strings.TrimSpace(r.URL.Query().Get(minFDVParam))
+	}
+	if rawMinFDV != "" {
+		value, err := strconv.ParseFloat(rawMinFDV, 64)
 		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			jsonError(w, "invalid min_market_cap_usd", http.StatusBadRequest)
+			jsonError(w, "invalid "+minFDVParam, http.StatusBadRequest)
 			return
 		}
-		minMarketCapUSD = value
-		hasMinMarketCapUSD = true
+		minFDVUSD = value
+		hasMinFDVUSD = true
 	}
 
 	sqlStarted := time.Now()
@@ -1044,7 +1050,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		if hasMinMarketCapUSD && sanitizeFloat(pool.MarketCapUSD) < minMarketCapUSD {
+		if hasMinFDVUSD && smartMoneyFDVUSD(pool.FDVUSD, pool.CurrentTokenFDVUSD) < minFDVUSD {
 			continue
 		}
 		filtered = append(filtered, pool)
@@ -2300,6 +2306,13 @@ func applySmartMoneyMarketDataToFields(
 	*fdvUSD = sanitizeFloat(data.FDVUSD)
 	*currentTokenFDVUSD = sanitizeFloat(data.FDVUSD)
 	*provider = strings.TrimSpace(data.Provider)
+}
+
+func smartMoneyFDVUSD(fdvUSD float64, currentTokenFDVUSD float64) float64 {
+	if value := sanitizeFloat(fdvUSD); value > 0 {
+		return value
+	}
+	return sanitizeFloat(currentTokenFDVUSD)
 }
 
 func (s *Server) loadSmartMoneyTokenMetadataByChain(ctx context.Context, addressesByChain map[string][]string) map[string]map[string]models.TokenMetadata {

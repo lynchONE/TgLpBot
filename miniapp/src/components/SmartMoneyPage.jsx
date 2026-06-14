@@ -959,9 +959,9 @@ function parsePoolMetricNumber(value) {
 
 function resolveSmartMoneyPoolMarketCapDisplay(pool) {
     const candidates = [
-        pool?.market_cap_usd,
-        pool?.current_token_fdv_usd,
         pool?.fdv_usd,
+        pool?.current_token_fdv_usd,
+        pool?.market_cap_usd,
     ];
     for (const candidate of candidates) {
         const value = parsePoolMetricNumber(candidate);
@@ -971,11 +971,9 @@ function resolveSmartMoneyPoolMarketCapDisplay(pool) {
 }
 
 function resolveSmartMoneyPoolMarketCapLabel(pool) {
-    const marketCap = parsePoolMetricNumber(pool?.market_cap_usd);
-    if (Number.isFinite(marketCap) && marketCap > 0) return '市值';
-    const fdv = parsePoolMetricNumber(pool?.current_token_fdv_usd);
+    const fdv = parsePoolMetricNumber(pool?.fdv_usd);
     if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
-    const legacyFDV = parsePoolMetricNumber(pool?.fdv_usd);
+    const legacyFDV = parsePoolMetricNumber(pool?.current_token_fdv_usd);
     if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
     return '市值';
 }
@@ -2709,7 +2707,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                             />
                         </label>
                         <label className="text-[11px] text-zinc-500">
-                            <span className="mb-1 block">市值 ≥ (USD)</span>
+                            <span className="mb-1 block">FDV ≥ (USD)</span>
                             <input
                                 className={getInputClass(brand)}
                                 value={poolFilterDraft.minMarketCapUsd}

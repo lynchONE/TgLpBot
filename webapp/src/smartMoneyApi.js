@@ -259,7 +259,7 @@ export async function fetchSMPools({ apiBaseUrl, page = 1, size = 10, keyword, p
     if (source) params.set('source', source);
     if (Number.isFinite(minSmartMoneyUsd)) params.set('min_smart_money_usd', String(minSmartMoneyUsd));
     if (Number.isFinite(maxFeeRate)) params.set('max_fee_rate', String(maxFeeRate));
-    if (Number.isFinite(minMarketCapUsd)) params.set('min_market_cap_usd', String(minMarketCapUsd));
+    if (Number.isFinite(minMarketCapUsd)) params.set('min_fdv_usd', String(minMarketCapUsd));
     return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
 }
 

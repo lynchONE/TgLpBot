@@ -513,7 +513,7 @@ export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timefra
     if (Number.isFinite(limit)) params.set('limit', String(limit));
     if (dex) params.set('dex', String(dex));
     if (Number.isFinite(maxFeeRate)) params.set('max_fee_rate', String(maxFeeRate));
-    if (Number.isFinite(minMarketCapUsd)) params.set('min_market_cap_usd', String(minMarketCapUsd));
+    if (Number.isFinite(minMarketCapUsd)) params.set('min_fdv_usd', String(minMarketCapUsd));
     // 添加 include_pools 参数（逗号分隔的池子地址列表）
     if (Array.isArray(includePools) && includePools.length > 0) {
         params.set('include_pools', includePools.join(','));

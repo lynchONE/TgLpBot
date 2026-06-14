@@ -781,14 +781,16 @@ function parseMetricNumber(value) {
 }
 
 function resolveHotPoolMarketCap(pool) {
-  return parseMetricNumber(pool?.market_cap_usd);
+  const fdv = parseMetricNumber(pool?.fdv_usd);
+  if (Number.isFinite(fdv) && fdv > 0) return fdv;
+  return parseMetricNumber(pool?.current_token_fdv_usd);
 }
 
 function resolveHotPoolMarketCapDisplay(pool) {
   const candidates = [
-    pool?.market_cap_usd,
-    pool?.current_token_fdv_usd,
     pool?.fdv_usd,
+    pool?.current_token_fdv_usd,
+    pool?.market_cap_usd,
   ];
   for (const candidate of candidates) {
     const value = parseMetricNumber(candidate);
@@ -798,11 +800,9 @@ function resolveHotPoolMarketCapDisplay(pool) {
 }
 
 function resolveHotPoolMarketCapLabel(pool) {
-  const marketCap = parseMetricNumber(pool?.market_cap_usd);
-  if (Number.isFinite(marketCap) && marketCap > 0) return '市值';
-  const fdv = parseMetricNumber(pool?.current_token_fdv_usd);
+  const fdv = parseMetricNumber(pool?.fdv_usd);
   if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
-  const legacyFDV = parseMetricNumber(pool?.fdv_usd);
+  const legacyFDV = parseMetricNumber(pool?.current_token_fdv_usd);
   if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
   return '市值';
 }
@@ -2810,7 +2810,7 @@ export default function App() {
                 </label>
 
                 <label className="kline-filter-field">
-                  <span>市值 ≥ (USD)</span>
+                  <span>FDV ≥ (USD)</span>
                   <input
                     value={hotPoolsFilterDraft.minMarketCap}
                     onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minMarketCap: e.target.value }))}

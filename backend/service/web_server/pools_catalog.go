@@ -27,7 +27,7 @@ type poolCatalogOptions struct {
 	IncludePools     []string
 	Dexes            []string
 	MaxFeeRate       *float64
-	MinMarketCapUSD  *float64
+	MinFDVUSD        *float64
 }
 
 func parsePoolCatalogOptions(r *http.Request) (poolCatalogOptions, error) {
@@ -73,13 +73,19 @@ func parsePoolCatalogOptions(r *http.Request) (poolCatalogOptions, error) {
 		}
 		maxFeeRate = &value
 	}
-	var minMarketCapUSD *float64
-	if raw := strings.TrimSpace(query.Get("min_market_cap_usd")); raw != "" {
-		value, err := strconv.ParseFloat(raw, 64)
+	var minFDVUSD *float64
+	minFDVParam := "min_fdv_usd"
+	rawMinFDV := strings.TrimSpace(query.Get(minFDVParam))
+	if rawMinFDV == "" {
+		minFDVParam = "min_market_cap_usd"
+		rawMinFDV = strings.TrimSpace(query.Get(minFDVParam))
+	}
+	if rawMinFDV != "" {
+		value, err := strconv.ParseFloat(rawMinFDV, 64)
 		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			return poolCatalogOptions{}, fmt.Errorf("invalid min_market_cap_usd")
+			return poolCatalogOptions{}, fmt.Errorf("invalid %s", minFDVParam)
 		}
-		minMarketCapUSD = &value
+		minFDVUSD = &value
 	}
 
 	return poolCatalogOptions{
@@ -91,7 +97,7 @@ func parsePoolCatalogOptions(r *http.Request) (poolCatalogOptions, error) {
 		IncludePools:     normalizeCatalogHexList(query.Get("include_pools")),
 		Dexes:            splitCatalogCSV(query.Get("dex")),
 		MaxFeeRate:       maxFeeRate,
-		MinMarketCapUSD:  minMarketCapUSD,
+		MinFDVUSD:        minFDVUSD,
 	}, nil
 }
 
@@ -99,7 +105,7 @@ func buildPoolCatalogCacheKey(opts poolCatalogOptions) string {
 	if len(opts.IncludePools) > 0 || opts.TokenAddress != "" || len(opts.Dexes) > 0 {
 		return ""
 	}
-	if opts.MaxFeeRate != nil || opts.MinMarketCapUSD != nil {
+	if opts.MaxFeeRate != nil || opts.MinFDVUSD != nil {
 		return ""
 	}
 	return fmt.Sprintf(
@@ -120,11 +126,11 @@ func loadPoolCatalogRows(ctx context.Context, opts poolCatalogOptions) ([]models
 	if topLimit < 100 {
 		topLimit = 100
 	}
-	if opts.MinMarketCapUSD != nil && topLimit < 1000 {
+	if opts.MinFDVUSD != nil && topLimit < 1000 {
 		topLimit = 1000
 	}
 	maxTopLimit := 500
-	if opts.MinMarketCapUSD != nil {
+	if opts.MinFDVUSD != nil {
 		maxTopLimit = 2000
 	}
 	if topLimit > maxTopLimit {
@@ -256,10 +262,10 @@ func (s *Server) buildPoolCatalogResponse(ctx context.Context, rows []models.Poo
 	}
 
 	s.enrichHotPoolMarketData(ctx, opts.Chain, items)
-	if opts.MinMarketCapUSD != nil {
+	if opts.MinFDVUSD != nil {
 		filtered := items[:0]
 		for _, item := range items {
-			if sanitizeFloat(item.MarketCapUSD) < *opts.MinMarketCapUSD {
+			if poolCatalogFDVUSD(item) < *opts.MinFDVUSD {
 				continue
 			}
 			filtered = append(filtered, item)
@@ -313,6 +319,13 @@ func poolCatalogLiquidityUSD(row models.Pool) float64 {
 
 func isFinitePositiveOrZero(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
+}
+
+func poolCatalogFDVUSD(item HotPoolResponse) float64 {
+	if value := sanitizeFloat(item.FDVUSD); value > 0 {
+		return value
+	}
+	return sanitizeFloat(item.CurrentTokenFDVUSD)
 }
 
 func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolResponse {
