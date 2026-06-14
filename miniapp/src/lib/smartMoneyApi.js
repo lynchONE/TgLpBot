@@ -67,9 +67,16 @@ async function readErrorMessage(resp) {
         const json = JSON.parse(text);
         if (json?.message) return String(json.message);
     } catch {
-        // ignore JSON parse errors and fall back to raw text
+        // ignore JSON parse errors and fall back to a sanitized text message
     }
-    return text;
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (resp.status === 502) return '扫描服务暂时不可用（502 Bad Gateway），请稍后重试。';
+    if (resp.status === 504) return '扫描服务超时（504 Gateway Timeout），请缩小时间范围后重试。';
+    if (/cloudflare/i.test(normalized) || /bad gateway/i.test(normalized) || /<html/i.test(normalized)) {
+        return `请求失败（HTTP ${resp.status}），服务返回了非 JSON 页面。`;
+    }
+    if (normalized.length > 240) return `${normalized.slice(0, 240)}...`;
+    return normalized || `HTTP ${resp.status}`;
 }
 
 async function smRequest(url, options = {}) {

@@ -74,7 +74,6 @@ export function resolveHotPoolMarketCapDisplay(pool) {
     const candidates = [
         pool?.fdv_usd,
         pool?.current_token_fdv_usd,
-        pool?.market_cap_usd,
     ];
     for (const candidate of candidates) {
         const value = parseMetricNumber(candidate);
@@ -84,11 +83,7 @@ export function resolveHotPoolMarketCapDisplay(pool) {
 }
 
 export function resolveHotPoolMarketCapLabel(pool) {
-    const fdv = parseMetricNumber(pool?.fdv_usd);
-    if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
-    const legacyFDV = parseMetricNumber(pool?.current_token_fdv_usd);
-    if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
-    return '市值';
+    return 'FDV';
 }
 
 export function normalizeHotPoolsFilter(value) {

@@ -3,6 +3,15 @@ import { AlertTriangle, Check, Eye, EyeOff } from 'lucide-react';
 import { formatUsdCompact, tokenRiskLabel, tokenRiskSummary } from '../../../lib/format';
 import { tokenRiskPanelClass } from '../tokenRiskClass';
 
+const OPEN_POSITION_AMOUNT_PRESETS = [200, 500, 1000, 1500, 2000];
+
+function formatAmountPresetValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '';
+    if (Number.isInteger(num)) return String(num);
+    return num.toFixed(num >= 1 ? 2 : 4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 export function OpenPositionWalletSelector({
     multiWalletEnabled,
     walletsLoading,
@@ -130,6 +139,7 @@ export function OpenPositionTokenRiskPanel({ tokenRisk, tokenRiskTone, tokenRisk
 
 export function OpenPositionAmountSlippagePanel({
     amount,
+    maxAmount,
     slippage,
     slippagePlaceholder,
     globalSlippageHint,
@@ -139,6 +149,10 @@ export function OpenPositionAmountSlippagePanel({
     onAmountChange,
     onSlippageChange,
 }) {
+    const maxAmountValue = Number(maxAmount);
+    const hasMaxAmount = Number.isFinite(maxAmountValue) && maxAmountValue > 0;
+    const amountValue = Number(amount);
+
     return (
         <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
             {/* 金额：大字主输入 */}
@@ -153,6 +167,39 @@ export function OpenPositionAmountSlippagePanel({
                 placeholder="0.00"
                 className="mt-1 w-full border-0 bg-transparent p-0 text-[26px] font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-white/20"
             />
+            <div className="mt-2 grid grid-cols-3 gap-1.5" aria-label="快捷开仓金额">
+                {OPEN_POSITION_AMOUNT_PRESETS.map((value) => {
+                    const active = Number.isFinite(amountValue) && amountValue === value;
+                    return (
+                        <button
+                            key={value}
+                            type="button"
+                            onClick={() => onAmountChange(String(value))}
+                            className={`h-8 rounded-lg border px-2 text-[11px] font-extrabold transition active:scale-[0.99] ${active
+                                ? `${brand.selectionClass} text-zinc-900 dark:text-white`
+                                : 'border-zinc-200/70 bg-white/70 text-zinc-600 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10'
+                                }`}
+                        >
+                            {value}
+                        </button>
+                    );
+                })}
+                <button
+                    type="button"
+                    onClick={() => {
+                        const next = formatAmountPresetValue(maxAmountValue);
+                        if (next) onAmountChange(next);
+                    }}
+                    disabled={!hasMaxAmount}
+                    className={`h-8 rounded-lg border px-2 text-[11px] font-extrabold transition active:scale-[0.99] ${hasMaxAmount && Number.isFinite(amountValue) && Math.abs(amountValue - maxAmountValue) < 0.000001
+                        ? `${brand.selectionClass} text-zinc-900 dark:text-white`
+                        : 'border-sky-200/70 bg-sky-50/70 text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-sky-400/15 dark:bg-sky-400/10 dark:text-sky-200 dark:hover:bg-sky-400/15'
+                        }`}
+                    title={hasMaxAmount ? `使用当前钱包余额 ${formatAmountPresetValue(maxAmountValue)} USDT` : '当前钱包余额不可用'}
+                >
+                    MAX
+                </button>
+            </div>
             {/* 滑点：紧凑次级一行 */}
             <div className="mt-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
                 <div className="flex items-center justify-between gap-3">
@@ -223,6 +270,7 @@ export function OpenPositionFundingStep({
     tokenRiskTone,
     tokenRiskSymbol,
     amount,
+    maxAmount,
     slippage,
     slippagePlaceholder,
     globalSlippageHint,
@@ -261,6 +309,7 @@ export function OpenPositionFundingStep({
 
             <OpenPositionAmountSlippagePanel
                 amount={amount}
+                maxAmount={maxAmount}
                 slippage={slippage}
                 slippagePlaceholder={slippagePlaceholder}
                 globalSlippageHint={globalSlippageHint}

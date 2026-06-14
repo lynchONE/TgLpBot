@@ -178,6 +178,33 @@ const Icon = ({ path: IconCmp, className = '' }) => {
     return <IconCmp className={className} strokeWidth={2} />;
 };
 
+function hotPoolsRiskFilterSummary(filterKey) {
+    const normalized = normalizeHotPoolsRiskFilter(filterKey);
+    const option = HOT_POOLS_RISK_FILTER_OPTIONS.find((item) => item.value === normalized);
+    return option?.label || '';
+}
+
+function buildHotPoolsFilterSummaryItems(filter) {
+    if (!filter?.enabled) return [];
+    const items = [];
+    const keyword = String(filter.keyword || '').trim();
+    if (keyword) items.push(`关键词 ${keyword}`);
+    const riskFilter = normalizeHotPoolsRiskFilter(filter.riskFilter);
+    if (riskFilter !== HOT_POOLS_RISK_FILTER_ALL) {
+        const label = hotPoolsRiskFilterSummary(riskFilter);
+        if (label) items.push(label);
+    }
+    if (Number.isFinite(filter.minMarketCap)) items.push(`FDV ≥ ${formatUsdCompact(filter.minMarketCap)}`);
+    if (Number.isFinite(filter.maxFeeRate)) items.push(`费率 ≤ ${filter.maxFeeRate}%`);
+    if (Number.isFinite(filter.minTvl)) items.push(`TVL ≥ ${formatUsdCompact(filter.minTvl)}`);
+    if (Number.isFinite(filter.minFees)) items.push(`费用 ≥ ${formatUsdCompact(filter.minFees)}`);
+    if (Number.isFinite(filter.minFeeRate)) items.push(`费率 ≥ ${filter.minFeeRate}%`);
+    if (Number.isFinite(filter.minActiveFeeRate)) items.push(`活跃费率 ≥ ${filter.minActiveFeeRate}%`);
+    if (Number.isFinite(filter.minVolume)) items.push(`交易量 ≥ ${formatUsdCompact(filter.minVolume)}`);
+    if (Number.isFinite(filter.minTxCount)) items.push(`交易 ≥ ${filter.minTxCount}`);
+    return items;
+}
+
 export default function App() {
     const initData = useInitData();
     const tick = useTick();
@@ -416,6 +443,15 @@ export default function App() {
     const openPositionShowPrivateZapProtectionHint = Boolean(activeOpenPositionPrivateZapInfo?.show_protection_hint);
     const openPositionRecommendedPositions = [];
     const openPositionWalletOptions = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
+    const openPositionSelectedWalletStableBalance = useMemo(() => {
+        if (!Array.isArray(openPositionWalletOptions) || openPositionWalletOptions.length === 0) return NaN;
+        const selectedWallet = openPositionWalletOptions.find((wallet) => String(wallet?.id || '') === String(openPositionWalletId || ''))
+            || openPositionWalletOptions.find((wallet) => wallet?.is_default)
+            || openPositionWalletOptions[0];
+        if (!selectedWallet || selectedWallet.stable_balance === 'N/A') return NaN;
+        const value = Number(selectedWallet.stable_balance);
+        return Number.isFinite(value) && value > 0 ? value : NaN;
+    }, [openPositionWalletId, openPositionWalletOptions]);
     const openPositionTickLowerValue = Number(String(openPositionTickLower || '').trim());
     const openPositionTickUpperValue = Number(String(openPositionTickUpper || '').trim());
     const openPositionToken0Decimals = Number(openPositionPool?.token0_decimals ?? openPositionPool?.token0?.decimals ?? 18) || 18;
@@ -928,6 +964,10 @@ export default function App() {
         ].some((v) => Number.isFinite(v));
         return hasKeyword || hasRiskFilter || hasNumbers;
     }, [hotPoolsFilter]);
+    const hotPoolsFilterSummaryItems = useMemo(
+        () => buildHotPoolsFilterSummaryItems(hotPoolsFilter),
+        [hotPoolsFilter],
+    );
 
     const hotPoolsVisibleRows = useMemo(() => {
         let filtered = hotPoolsRows;
@@ -2810,7 +2850,34 @@ export default function App() {
                                 </button>
                             </>
                         )}
-                    />
+                    >
+                        <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                            {hotPoolsFilterSummaryItems.length > 0 ? (
+                                <>
+                                    <span className={`inline-flex items-center rounded-full px-2 py-1 font-semibold ${brand.softButtonClass}`}>
+                                        已筛选
+                                    </span>
+                                    {hotPoolsFilterSummaryItems.slice(0, 4).map((item) => (
+                                        <span
+                                            key={item}
+                                            className="inline-flex max-w-full items-center rounded-full border border-zinc-200 bg-white/70 px-2 py-1 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/55"
+                                        >
+                                            <span className="truncate">{item}</span>
+                                        </span>
+                                    ))}
+                                    {hotPoolsFilterSummaryItems.length > 4 ? (
+                                        <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white/70 px-2 py-1 text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/45">
+                                            +{hotPoolsFilterSummaryItems.length - 4}
+                                        </span>
+                                    ) : null}
+                                </>
+                            ) : (
+                                <span className="text-zinc-500 dark:text-white/40">
+                                    筛选可排除低 FDV、高费率和低流动性池子
+                                </span>
+                            )}
+                        </div>
+                    </ModuleHeader>
                 ) : showWalletSummaryCard ? (
                     <div className="mt-3 overflow-hidden rounded-[24px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
                         <div className="flex flex-col gap-2.5">
@@ -3220,7 +3287,7 @@ export default function App() {
                                         <div className="min-w-0">
                                             <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/80">热门池筛选</div>
                                             <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
-                                                {hotPoolsFilterDraft.enabled ? '已启用筛选，结果会按当前条件即时过滤。' : '未启用筛选，将展示完整热门池列表。'}
+                                                {hotPoolsFilterDraft.enabled ? '已启用筛选，可排除低 FDV、高费率和低流动性池子。' : '未启用筛选，将展示完整热门池列表。'}
                                             </div>
                                         </div>
                                         <button
@@ -3278,7 +3345,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">费率 &lt;= (%)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">排除高费率：费率 &lt;= (%)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.maxFeeRate}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, maxFeeRate: e.target.value }))}
@@ -3308,7 +3375,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">FDV &gt;= (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">排除低 FDV：FDV &gt;= (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minMarketCap}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minMarketCap: e.target.value }))}
@@ -3563,6 +3630,7 @@ export default function App() {
                                 tokenRiskTone={openPositionTokenRiskTone}
                                 tokenRiskSymbol={openPositionTokenRiskSymbol}
                                 amount={openPositionAmount}
+                                maxAmount={openPositionSelectedWalletStableBalance}
                                 slippage={openPositionSlippage}
                                 slippagePlaceholder={openPositionSlippagePlaceholder}
                                 globalSlippageHint={openPositionGlobalSlippageHint}

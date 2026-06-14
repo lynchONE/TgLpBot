@@ -12,6 +12,7 @@ import {
 } from '../utils';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
+const OPEN_POSITION_AMOUNT_PRESETS = [200, 500, 1000, 1500, 2000];
 const RANGE_INPUT_OPTIONS = [
   { key: 'percentage', label: '快捷%' },
   { key: 'grid', label: 'Tick格子' },
@@ -60,6 +61,13 @@ function formatUSDTValue(value) {
   if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   return num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function formatAmountPresetValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(num >= 1 ? 2 : 4).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function resolveOpenPositionErrorPayload(error) {
@@ -592,6 +600,13 @@ export default function OpenPositionModal({
     const def = wallets.find((w) => w.is_default);
     return def ? def.id : wallets[0].id;
   }, [wallets, selectedWalletId]);
+  const selectedWalletStableBalance = useMemo(() => {
+    if (!Array.isArray(wallets) || wallets.length === 0) return NaN;
+    const selected = wallets.find((wallet) => Number(wallet?.id) === Number(resolvedWalletId)) || wallets[0];
+    if (!selected || selected.stable_balance === 'N/A') return NaN;
+    const value = Number(selected.stable_balance);
+    return Number.isFinite(value) && value > 0 ? value : NaN;
+  }, [resolvedWalletId, wallets]);
 
   const taskSlippage = useMemo(() => parseOptionalPercent(slippage), [slippage]);
   const entrySwapSlippageValue = useMemo(() => parseOptionalPercent(entrySwapSlippage), [entrySwapSlippage]);
@@ -699,6 +714,12 @@ export default function OpenPositionModal({
     if (entrySwapPreviewError) setEntrySwapPreviewError('');
     if (typeof onClearSubmitError === 'function') onClearSubmitError();
   }, [error, entrySwapPreviewError, onClearSubmitError]);
+  const applyAmountPreset = useCallback((value) => {
+    const next = formatAmountPresetValue(value);
+    if (!next) return;
+    clearErrors();
+    setAmount(next);
+  }, [clearErrors]);
   const applyResolvedTickRange = useCallback((lowerTick, upperTick, options = {}) => {
     if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return false;
     setTickLowerInput(String(lowerTick));
@@ -2561,6 +2582,31 @@ export default function OpenPositionModal({
                     min="1"
                     step="10"
                   />
+                  <div className="opm-amount-presets" aria-label="快捷开仓金额">
+                    {OPEN_POSITION_AMOUNT_PRESETS.map((value) => {
+                      const presetValue = String(value);
+                      const active = Number(amount) === value;
+                      return (
+                        <button
+                          key={presetValue}
+                          type="button"
+                          className={`opm-amount-preset${active ? ' active' : ''}`}
+                          onClick={() => applyAmountPreset(value)}
+                        >
+                          {presetValue}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      className={`opm-amount-preset is-max${Number.isFinite(selectedWalletStableBalance) && Math.abs(Number(amount) - selectedWalletStableBalance) < 0.000001 ? ' active' : ''}`}
+                      onClick={() => applyAmountPreset(selectedWalletStableBalance)}
+                      disabled={!Number.isFinite(selectedWalletStableBalance)}
+                      title={Number.isFinite(selectedWalletStableBalance) ? `使用当前钱包余额 ${formatUSDTValue(selectedWalletStableBalance)} USDT` : '当前钱包余额不可用'}
+                    >
+                      MAX
+                    </button>
+                  </div>
                 </label>
 
                 <label className="modal-field">

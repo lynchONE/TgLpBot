@@ -961,7 +961,6 @@ function resolveSmartMoneyPoolMarketCapDisplay(pool) {
     const candidates = [
         pool?.fdv_usd,
         pool?.current_token_fdv_usd,
-        pool?.market_cap_usd,
     ];
     for (const candidate of candidates) {
         const value = parsePoolMetricNumber(candidate);
@@ -971,11 +970,7 @@ function resolveSmartMoneyPoolMarketCapDisplay(pool) {
 }
 
 function resolveSmartMoneyPoolMarketCapLabel(pool) {
-    const fdv = parsePoolMetricNumber(pool?.fdv_usd);
-    if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
-    const legacyFDV = parsePoolMetricNumber(pool?.current_token_fdv_usd);
-    if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
-    return '市值';
+    return 'FDV';
 }
 
 function getPairLabel(value) {
@@ -1971,11 +1966,13 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
     const [data, setData] = useState(null);
     const [selected, setSelected] = useState({});
     const [importResult, setImportResult] = useState(null);
+    const [scanStep, setScanStep] = useState('');
 
     useEffect(() => {
         if (!open) return;
         setError('');
         setImportResult(null);
+        setScanStep('');
         setTimeRange(createDefaultTokenLiquidityRange());
     }, [open]);
 
@@ -1992,22 +1989,29 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         const poolTarget = parsePoolLiquidityInput(poolInput);
         if (!poolTarget) {
             setError('请输入有效的 V3 池子合约地址或 V4 poolId');
+            setScanStep('扫描失败');
             return;
         }
+        setScanStep('校验扫描参数');
         const startTime = tokenLiquidityLocalToISO(timeRange.start);
         const endTime = tokenLiquidityLocalToISO(timeRange.end);
         if (!startTime || !endTime) {
             setError('请选择有效的开始和结束时间。');
+            setScanStep('扫描失败');
             return;
         }
         if (new Date(endTime).getTime() <= new Date(startTime).getTime()) {
             setError('结束时间必须晚于开始时间。');
+            setScanStep('扫描失败');
             return;
         }
         setLoading(true);
         setError('');
         setImportResult(null);
+        setData(null);
+        setSelected({});
         try {
+            setScanStep('请求节点扫描池子加池事件');
             const resp = await fetchSMPoolLiquidityWalletCandidates({
                 apiBaseUrl,
                 chain: 'bsc',
@@ -2017,6 +2021,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                 endTime,
                 limit: Number(limit),
             });
+            setScanStep('整理候选钱包');
             const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
             const nextSelected = {};
             list.forEach((item) => {
@@ -2024,8 +2029,10 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
             });
             setData(resp);
             setSelected(nextSelected);
+            setScanStep(list.length > 0 ? `扫描完成，找到 ${list.length} 个候选钱包` : '扫描完成，未找到符合条件的钱包');
         } catch (err) {
             setError(String(err?.message || err || '扫描失败'));
+            setScanStep('扫描失败');
         } finally {
             setLoading(false);
         }
@@ -2043,6 +2050,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         }
         setSaving(true);
         setError('');
+        setScanStep('导入选中的候选钱包');
         try {
             const resp = await importSMPoolLiquidityWallets({
                 apiBaseUrl,
@@ -2052,9 +2060,11 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                 labelPrefix: '雷达',
             });
             setImportResult(resp);
+            setScanStep('导入完成');
             await onImported?.();
         } catch (err) {
             setError(String(err?.message || err || '导入失败'));
+            setScanStep('导入失败');
         } finally {
             setSaving(false);
         }
@@ -2127,6 +2137,24 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                             {loading ? '扫描中...' : '扫描候选钱包'}
                         </button>
                     </div>
+
+                    {(loading || saving || scanStep) ? (
+                        <div className={`mt-3 rounded-2xl border px-3 py-2 ${error ? 'border-red-400/20 bg-red-500/10' : 'border-sky-400/20 bg-sky-400/10'}`}>
+                            <div className="flex items-center justify-between gap-3 text-xs font-semibold text-zinc-100">
+                                <span>{scanStep || (loading ? '准备扫描' : '等待操作')}</span>
+                                <span className="text-[10px] text-zinc-500">{loading ? '运行中' : saving ? '导入中' : error ? '失败' : data ? '完成' : '就绪'}</span>
+                            </div>
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                                <div className={`h-full rounded-full bg-gradient-to-r from-sky-400/20 via-lime-400 to-sky-400/20 ${loading || saving ? 'animate-[radarScan_1.15s_ease-in-out_infinite]' : 'w-full'}`} />
+                            </div>
+                            <div className="mt-2 text-[10px] leading-relaxed text-zinc-500">
+                                {loading ? '正在通过后端 RPC 扫描链上加池事件，时间范围越大耗时越久。' : null}
+                                {saving ? '正在写入监控钱包，请保持弹窗打开。' : null}
+                                {!loading && !saving && data ? `候选 ${candidates.length} 个，已排除 ${Number(data?.excluded_count || 0)} 条事件。` : null}
+                                {!loading && !saving && error ? '请求未完成，参数保留，可直接重试。' : null}
+                            </div>
+                        </div>
+                    ) : null}
 
                     {error ? <div className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
                     {importResult ? (
@@ -2580,6 +2608,13 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
             || Number.isFinite(poolFilter.minMarketCapUsd),
         [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd],
     );
+    const poolFilterSummaryItems = useMemo(() => {
+        const items = [];
+        if (Number.isFinite(poolFilter.minMarketCapUsd)) items.push(`FDV ≥ ${formatUSDCompact(poolFilter.minMarketCapUsd)}`);
+        if (Number.isFinite(poolFilter.maxFeeRate)) items.push(`费率 ≤ ${poolFilter.maxFeeRate}%`);
+        if (Number.isFinite(poolFilter.minSmartMoneyUsd)) items.push(`聪明钱 ≥ ${formatUSDCompact(poolFilter.minSmartMoneyUsd)}`);
+        return items;
+    }, [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd]);
     const openPoolFilter = useCallback(() => {
         setPoolFilterDraft({
             minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
@@ -2668,13 +2703,32 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                     筛选
                 </button>
             </div>
+            {poolFilterSummaryItems.length > 0 ? (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className={`inline-flex items-center rounded-full px-2 py-1 font-semibold ${getFilterButtonClass(true, brand)}`}>
+                        已筛选
+                    </span>
+                    {poolFilterSummaryItems.map((item) => (
+                        <span
+                            key={item}
+                            className="inline-flex max-w-full items-center rounded-full border border-white/[0.06] bg-zinc-900/60 px-2 py-1 text-zinc-400"
+                        >
+                            <span className="truncate">{item}</span>
+                        </span>
+                    ))}
+                </div>
+            ) : (
+                <div className="mb-3 px-1 text-[10px] text-zinc-500">
+                    筛选可排除低 FDV 和高费率池子
+                </div>
+            )}
 
             {filterOpen ? (
                 <div className="mb-4 rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-3 shadow-[0_18px_50px_-32px_rgba(0,0,0,0.95)]">
                     <div className="mb-3 flex items-start justify-between gap-3">
                         <div>
                             <div className="text-sm font-semibold text-zinc-100">池子筛选</div>
-                            <div className="mt-0.5 text-[11px] text-zinc-500">按聪明钱仓位和池子费率过滤全部池子</div>
+                            <div className="mt-0.5 text-[11px] text-zinc-500">按聪明钱仓位、排除高费率和排除低 FDV 过滤池子</div>
                         </div>
                         <button
                             type="button"
@@ -2697,7 +2751,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                             />
                         </label>
                         <label className="text-[11px] text-zinc-500">
-                            <span className="mb-1 block">池子费率 ≤ (%)</span>
+                            <span className="mb-1 block">排除高费率：费率 ≤ (%)</span>
                             <input
                                 className={getInputClass(brand)}
                                 value={poolFilterDraft.maxFeeRate}
@@ -2707,7 +2761,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                             />
                         </label>
                         <label className="text-[11px] text-zinc-500">
-                            <span className="mb-1 block">FDV ≥ (USD)</span>
+                            <span className="mb-1 block">排除低 FDV：FDV ≥ (USD)</span>
                             <input
                                 className={getInputClass(brand)}
                                 value={poolFilterDraft.minMarketCapUsd}
@@ -2767,11 +2821,12 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-200">
                                                 总仓位 {Number(pool.total_position_amount_usd) > 0 ? formatUSDCompact(pool.total_position_amount_usd) : '--'}
                                             </Badge>
-                                            {marketCapAvailable ? (
-                                                <Badge className="border-cyan-400/20 bg-cyan-400/10 text-cyan-200">
-                                                    {marketCapLabel} {formatUSDCompact(marketCap)}
-                                                </Badge>
-                                            ) : null}
+                                            <Badge className={marketCapAvailable
+                                                ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200'
+                                                : 'border-white/10 bg-zinc-800/70 text-zinc-500'}
+                                            >
+                                                {marketCapLabel} {marketCapAvailable ? formatUSDCompact(marketCap) : '--'}
+                                            </Badge>
                                         </div>
                                         <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
                                             <span>{pool.wallet_count} 钱包</span>
@@ -3081,12 +3136,10 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
                         <span>{row.open_position_count} 仓位</span>
                         <span>·</span>
                         <span>仓位 {formatHeatmapUSD(row.total_position_amount_usd)}</span>
-                        {marketCapAvailable ? (
-                            <>
-                                <span>·</span>
-                                <span>{marketCapLabel} {formatUSDCompact(marketCap)}</span>
-                            </>
-                        ) : null}
+                        <span>·</span>
+                        <span className={marketCapAvailable ? 'text-zinc-400' : 'text-zinc-600'}>
+                            {marketCapLabel} {marketCapAvailable ? formatUSDCompact(marketCap) : '--'}
+                        </span>
                         <span>·</span>
                         <span>均龄 {formatHeatmapAge(row.average_position_age_seconds)}</span>
                     </div>
@@ -3214,9 +3267,12 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                     <StatCard label="钱包数" value={poolStats.wallet_count} compact />
                     <StatCard label="持仓笔数" value={poolStats.open_position_count} compact />
                     <StatCard label="今日关闭" value={poolStats.closed_today_count} color="text-red-400" compact />
-                    {poolStatsMarketCapAvailable ? (
-                        <StatCard label={poolStatsMarketCapLabel} value={formatUSDCompact(poolStatsMarketCap)} compact valueClassName="text-[13px]" />
-                    ) : null}
+                    <StatCard
+                        label={poolStatsMarketCapLabel}
+                        value={poolStatsMarketCapAvailable ? formatUSDCompact(poolStatsMarketCap) : '--'}
+                        compact
+                        valueClassName="text-[13px]"
+                    />
                 </div>
             )}
 

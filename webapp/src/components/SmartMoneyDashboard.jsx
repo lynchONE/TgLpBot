@@ -946,11 +946,13 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
     const [data, setData] = useState(null);
     const [selected, setSelected] = useState({});
     const [importResult, setImportResult] = useState(null);
+    const [scanStep, setScanStep] = useState('');
 
     useEffect(() => {
         if (!open) return;
         setError('');
         setImportResult(null);
+        setScanStep('');
         setTimeRange(createDefaultTokenLiquidityRange());
     }, [open]);
 
@@ -967,22 +969,29 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         const poolTarget = parsePoolLiquidityInput(poolInput);
         if (!poolTarget) {
             setError('请输入有效的 V3 池子合约地址或 V4 poolId');
+            setScanStep('扫描失败');
             return;
         }
+        setScanStep('校验扫描参数');
         const startTime = tokenLiquidityLocalToISO(timeRange.start);
         const endTime = tokenLiquidityLocalToISO(timeRange.end);
         if (!startTime || !endTime) {
             setError('请选择有效的开始和结束时间');
+            setScanStep('扫描失败');
             return;
         }
         if (new Date(endTime).getTime() <= new Date(startTime).getTime()) {
             setError('结束时间必须晚于开始时间');
+            setScanStep('扫描失败');
             return;
         }
         setLoading(true);
         setError('');
         setImportResult(null);
+        setData(null);
+        setSelected({});
         try {
+            setScanStep('请求节点扫描池子加池事件');
             const resp = await fetchSMPoolLiquidityWalletCandidates({
                 apiBaseUrl,
                 chain: 'bsc',
@@ -992,6 +1001,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 endTime,
                 limit: Number(limit),
             });
+            setScanStep('整理候选钱包');
             const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
             const nextSelected = {};
             list.forEach((item) => {
@@ -999,8 +1009,10 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             });
             setData(resp);
             setSelected(nextSelected);
+            setScanStep(list.length > 0 ? `扫描完成，找到 ${list.length} 个候选钱包` : '扫描完成，未找到符合条件的钱包');
         } catch (err) {
             setError(String(err?.message || err || '预览失败'));
+            setScanStep('扫描失败');
         } finally {
             setLoading(false);
         }
@@ -1018,6 +1030,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
         }
         setSaving(true);
         setError('');
+        setScanStep('导入选中的候选钱包');
         try {
             const resp = await importSMPoolLiquidityWallets({
                 apiBaseUrl,
@@ -1027,9 +1040,11 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                 labelPrefix: '雷达',
             });
             setImportResult(resp);
+            setScanStep('导入完成');
             await onImported?.();
         } catch (err) {
             setError(String(err?.message || err || '导入失败'));
+            setScanStep('导入失败');
         } finally {
             setSaving(false);
         }
@@ -1090,6 +1105,23 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                         {loading ? '扫描中...' : '扫描候选钱包'}
                     </button>
                 </div>
+                {(loading || saving || scanStep) ? (
+                    <div className={`smd-token-liquidity-scan-state${error ? ' error' : ''}`}>
+                        <div className="smd-token-liquidity-scan-head">
+                            <span>{scanStep || (loading ? '准备扫描' : '等待操作')}</span>
+                            <strong>{loading ? '运行中' : saving ? '导入中' : error ? '失败' : data ? '完成' : '就绪'}</strong>
+                        </div>
+                        <div className="smd-token-liquidity-progress" aria-hidden="true">
+                            <span className={loading || saving ? 'active' : ''} />
+                        </div>
+                        <div className="smd-token-liquidity-scan-meta">
+                            {loading ? '正在通过后端 RPC 扫描链上加池事件，时间范围越大耗时越久。' : null}
+                            {saving ? '正在写入监控钱包，请保持弹窗打开。' : null}
+                            {!loading && !saving && data ? `候选 ${candidates.length} 个，已排除 ${Number(data?.excluded_count || 0)} 条事件。` : null}
+                            {!loading && !saving && error ? '请求未完成，参数保留，可直接重试。' : null}
+                        </div>
+                    </div>
+                ) : null}
                 {error ? <div className="smd-inline-error">{error}</div> : null}
                 {importResult ? (
                     <div className="smd-inline-success">

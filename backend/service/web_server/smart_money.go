@@ -11,6 +11,7 @@ import (
 	smwoa "TgLpBot/service/smart_money_watch_open_alert"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -34,6 +35,8 @@ var (
 
 	smPositionRepairRunning int32
 )
+
+const smartMoneyPoolLiquidityScanTimeout = 75 * time.Second
 
 func initSmartMoney() {
 	smService = sm.NewService()
@@ -639,7 +642,9 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 		jsonError(w, smartMoneyPoolLiquidityConfigErrorMessage(err), http.StatusBadRequest)
 		return
 	}
-	resp, err := provider.FindCandidates(ctx, sm.TokenLiquidityCandidateQuery{
+	scanCtx, cancel := context.WithTimeout(ctx, smartMoneyPoolLiquidityScanTimeout)
+	defer cancel()
+	resp, err := provider.FindCandidates(scanCtx, sm.TokenLiquidityCandidateQuery{
 		Chain:        chain,
 		ChainID:      chainID,
 		PoolAddress:  poolAddress,
@@ -652,14 +657,30 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 		Provider:     providerName,
 	})
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(scanCtx.Err(), context.DeadlineExceeded) {
+			jsonError(w, "扫描超时，请缩小时间范围后重试", http.StatusGatewayTimeout)
+			return
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(scanCtx.Err(), context.Canceled) {
+			jsonError(w, "扫描请求已取消，请重试", http.StatusRequestTimeout)
+			return
+		}
 		jsonError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	repo := smService.Repo()
 	if repo != nil && resp != nil {
-		activeWallets, err := repo.GetAllActiveWalletAddresses(ctx, chainID)
+		activeWallets, err := repo.GetAllActiveWalletAddresses(scanCtx, chainID)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(scanCtx.Err(), context.DeadlineExceeded) {
+				jsonError(w, "扫描超时，请缩小时间范围后重试", http.StatusGatewayTimeout)
+				return
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(scanCtx.Err(), context.Canceled) {
+				jsonError(w, "扫描请求已取消，请重试", http.StatusRequestTimeout)
+				return
+			}
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

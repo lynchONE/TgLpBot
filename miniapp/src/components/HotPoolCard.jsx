@@ -582,14 +582,17 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                 />
                             </div>
                         ) : null}
-                        {showMarketCap ? (
-                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                                {marketCapLabel}:{' '}
-                                <span className="font-semibold text-emerald-700 dark:text-emerald-200 tabular-nums">
+                        <div
+                            className="text-zinc-500 dark:text-white/40 flex items-center"
+                            title="非稳定币/非 WBNB 代币的实时 FDV"
+                        >
+                            {marketCapLabel}:{' '}
+                            <span className={`font-semibold tabular-nums ${showMarketCap ? 'text-emerald-700 dark:text-emerald-200' : 'text-zinc-400 dark:text-white/35'}`}>
+                                {showMarketCap ? (
                                     <NumberFlowValue value={marketCapValue} formatter={(v) => formatUsdCompact(v)} />
-                                </span>
-                            </div>
-                        ) : null}
+                                ) : '--'}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
