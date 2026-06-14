@@ -206,6 +206,114 @@ export async function fetchSMPoolLiquidityWalletCandidates({
     return smRequest(buildSMUrl(apiBaseUrl, 'pool_liquidity_wallet_candidates', params.toString()), { signal });
 }
 
+function buildPoolLiquidityCandidateParams({
+    chain = 'bsc',
+    poolAddress,
+    poolId,
+    minAmountUsd,
+    windowHours,
+    startTime,
+    endTime,
+    limit,
+}) {
+    const params = new URLSearchParams();
+    if (chain) params.set('chain', String(chain));
+    if (poolAddress) params.set('pool_address', String(poolAddress));
+    if (poolId) params.set('pool_id', String(poolId));
+    params.set('min_amount_usd', String(minAmountUsd));
+    if (startTime) params.set('start_time', String(startTime));
+    if (endTime) params.set('end_time', String(endTime));
+    if (!startTime && !endTime && windowHours !== undefined) params.set('window_hours', String(windowHours));
+    params.set('limit', String(limit));
+    return params;
+}
+
+function parseSSEBlocks(buffer, onEvent) {
+    let rest = buffer;
+    for (;;) {
+        const index = rest.indexOf('\n\n');
+        if (index < 0) break;
+        const block = rest.slice(0, index);
+        rest = rest.slice(index + 2);
+        let event = 'message';
+        const data = [];
+        block.split('\n').forEach((line) => {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+        });
+        if (data.length > 0) {
+            onEvent(event, data.join('\n'));
+        }
+    }
+    return rest;
+}
+
+export async function streamSMPoolLiquidityWalletCandidates({
+    apiBaseUrl,
+    chain = 'bsc',
+    poolAddress,
+    poolId,
+    minAmountUsd,
+    windowHours,
+    startTime,
+    endTime,
+    limit,
+    signal,
+    onStage,
+    onCandidate,
+    onWarning,
+    onSummary,
+    onDone,
+    onError,
+}) {
+    if (typeof ReadableStream === 'undefined') {
+        throw new Error('当前浏览器不支持流式扫描');
+    }
+    const params = buildPoolLiquidityCandidateParams({ chain, poolAddress, poolId, minAmountUsd, windowHours, startTime, endTime, limit });
+    const resp = await fetch(buildSMUrl(apiBaseUrl, 'pool_liquidity_wallet_candidates_stream', params.toString()), {
+        method: 'GET',
+        signal,
+    });
+    if (!resp.ok) {
+        throw new Error(await readErrorMessage(resp));
+    }
+    if (!resp.body) {
+        throw new Error('流式扫描响应为空');
+    }
+    const decoder = new TextDecoder();
+    const reader = resp.body.getReader();
+    let buffer = '';
+    const dispatch = (event, raw) => {
+        let payload;
+        try {
+            payload = JSON.parse(raw);
+        } catch {
+            throw new Error('流式扫描事件格式错误');
+        }
+        if (event === 'stage') onStage?.(payload);
+        else if (event === 'candidate') onCandidate?.(payload);
+        else if (event === 'warning') onWarning?.(payload);
+        else if (event === 'summary') onSummary?.(payload);
+        else if (event === 'done') onDone?.(payload);
+        else if (event === 'error') {
+            onError?.(payload);
+            throw new Error(sanitizeErrorMessage(payload?.message || '流式扫描失败'));
+        }
+    };
+    try {
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+            buffer = parseSSEBlocks(buffer, dispatch);
+        }
+        buffer += decoder.decode().replace(/\r\n/g, '\n');
+        if (buffer.trim()) parseSSEBlocks(`${buffer}\n\n`, dispatch);
+    } finally {
+        reader.releaseLock();
+    }
+}
+
 export async function importSMPoolLiquidityWallets({
     apiBaseUrl,
     chain = 'bsc',

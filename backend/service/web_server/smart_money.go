@@ -36,7 +36,10 @@ var (
 	smPositionRepairRunning int32
 )
 
-const smartMoneyPoolLiquidityScanTimeout = 50 * time.Second
+const (
+	smartMoneyPoolLiquidityScanTimeout     = 50 * time.Second
+	smartMoneyPoolLiquidityAnnotationLimit = 3 * time.Second
+)
 
 func initSmartMoney() {
 	smService = sm.NewService()
@@ -93,6 +96,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/wallets", s.handleSMWallets)
 	mux.HandleFunc("/api/sm/wallet_zombies", s.handleSMWalletZombies)
 	mux.HandleFunc("/api/sm/pool_liquidity_wallet_candidates", s.handleSMPoolLiquidityWalletCandidates)
+	mux.HandleFunc("/api/sm/pool_liquidity_wallet_candidates_stream", s.handleSMPoolLiquidityWalletCandidatesStream)
 	mux.HandleFunc("/api/sm/pool_liquidity_wallet_import", s.handleSMPoolLiquidityWalletImport)
 	mux.HandleFunc("/api/sm/token_liquidity_wallet_candidates", s.handleSMTokenLiquidityWalletCandidates)
 	mux.HandleFunc("/api/sm/token_liquidity_wallet_import", s.handleSMTokenLiquidityWalletImport)
@@ -134,6 +138,8 @@ func (s *Server) handleSMCompat(w http.ResponseWriter, r *http.Request) {
 			s.handleSMWalletZombies(w, r)
 		case "pool_liquidity_wallet_candidates":
 			s.handleSMPoolLiquidityWalletCandidates(w, r)
+		case "pool_liquidity_wallet_candidates_stream":
+			s.handleSMPoolLiquidityWalletCandidatesStream(w, r)
 		case "pool_liquidity_wallet_import":
 			s.handleSMPoolLiquidityWalletImport(w, r)
 		case "token_liquidity_wallet_candidates":
@@ -175,7 +181,7 @@ func (s *Server) handleSMUploadCompat(w http.ResponseWriter, r *http.Request) {
 
 func smartMoneyCompatEndpointPath(endpoint string) (string, bool) {
 	switch endpoint {
-	case "wallets", "wallet_zombies", "pool_liquidity_wallet_candidates", "pool_liquidity_wallet_import", "token_liquidity_wallet_candidates", "token_liquidity_wallet_import", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
+	case "wallets", "wallet_zombies", "pool_liquidity_wallet_candidates", "pool_liquidity_wallet_candidates_stream", "pool_liquidity_wallet_import", "token_liquidity_wallet_candidates", "token_liquidity_wallet_import", "contracts", "pools", "pool_fee_heatmap", "positions", "position_detail", "events", "stats":
 		return "/api/sm/" + endpoint, true
 	case "watch_activity":
 		return "/api/smart_money_watch_activity", true
@@ -588,6 +594,54 @@ func (s *Server) handleSMTokenLiquidityWalletCandidates(w http.ResponseWriter, r
 	s.handleSMPoolLiquidityWalletCandidates(w, r)
 }
 
+func parseSMPoolLiquidityCandidateQuery(r *http.Request) (sm.TokenLiquidityCandidateQuery, int, error) {
+	if r == nil {
+		return sm.TokenLiquidityCandidateQuery{}, 0, fmt.Errorf("request is nil")
+	}
+	q := r.URL.Query()
+	chainID := resolveSmartMoneyRequestChainID(r)
+	chain := smartMoneyChainSlug(chainID)
+	poolAddress := smartMoneyNormalizePoolIdentifier(q.Get("pool_address"))
+	poolID := smartMoneyNormalizePoolID(q.Get("pool_id"))
+	if poolAddress == "" && poolID == "" && strings.TrimSpace(q.Get("token_address")) != "" {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, fmt.Errorf("token_address is no longer supported; use pool_address or pool_id")
+	}
+	if poolAddress == "" && poolID == "" {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, fmt.Errorf("pool_address or pool_id is required")
+	}
+	if poolAddress != "" && poolID != "" {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, fmt.Errorf("pool_address and pool_id cannot both be set")
+	}
+	minAmountUSD, err := strconv.ParseFloat(strings.TrimSpace(q.Get("min_amount_usd")), 64)
+	if err != nil || minAmountUSD <= 0 {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, fmt.Errorf("min_amount_usd must be greater than 0")
+	}
+	startTime, endTime, windowHours, err := parseSMTokenLiquidityTimeRange(q)
+	if err != nil {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, err
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(q.Get("limit")))
+	if err != nil || limit <= 0 {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, fmt.Errorf("limit must be greater than 0")
+	}
+	providerName := strings.TrimSpace(q.Get("provider"))
+	if providerName != "" {
+		return sm.TokenLiquidityCandidateQuery{}, chainID, fmt.Errorf("provider is no longer supported")
+	}
+	return sm.TokenLiquidityCandidateQuery{
+		Chain:        chain,
+		ChainID:      chainID,
+		PoolAddress:  poolAddress,
+		PoolID:       poolID,
+		MinAmountUSD: minAmountUSD,
+		WindowHours:  windowHours,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		Limit:        limit,
+		Provider:     providerName,
+	}, chainID, nil
+}
+
 func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -599,41 +653,9 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 	}
 
 	ctx := r.Context()
-	q := r.URL.Query()
-	chainID := resolveSmartMoneyRequestChainID(r)
-	chain := smartMoneyChainSlug(chainID)
-	poolAddress := smartMoneyNormalizePoolIdentifier(q.Get("pool_address"))
-	poolID := smartMoneyNormalizePoolID(q.Get("pool_id"))
-	if poolAddress == "" && poolID == "" && strings.TrimSpace(q.Get("token_address")) != "" {
-		jsonError(w, "token_address is no longer supported; use pool_address or pool_id", http.StatusBadRequest)
-		return
-	}
-	if poolAddress == "" && poolID == "" {
-		jsonError(w, "pool_address or pool_id is required", http.StatusBadRequest)
-		return
-	}
-	if poolAddress != "" && poolID != "" {
-		jsonError(w, "pool_address and pool_id cannot both be set", http.StatusBadRequest)
-		return
-	}
-	minAmountUSD, err := strconv.ParseFloat(strings.TrimSpace(q.Get("min_amount_usd")), 64)
-	if err != nil || minAmountUSD <= 0 {
-		jsonError(w, "min_amount_usd must be greater than 0", http.StatusBadRequest)
-		return
-	}
-	startTime, endTime, windowHours, err := parseSMTokenLiquidityTimeRange(q)
+	query, chainID, err := parseSMPoolLiquidityCandidateQuery(r)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	limit, err := strconv.Atoi(strings.TrimSpace(q.Get("limit")))
-	if err != nil || limit <= 0 {
-		jsonError(w, "limit must be greater than 0", http.StatusBadRequest)
-		return
-	}
-	providerName := strings.TrimSpace(q.Get("provider"))
-	if providerName != "" {
-		jsonError(w, "provider is no longer supported", http.StatusBadRequest)
 		return
 	}
 
@@ -644,18 +666,7 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, smartMoneyPoolLiquidityScanTimeout)
 	defer cancel()
-	resp, err := provider.FindCandidates(scanCtx, sm.TokenLiquidityCandidateQuery{
-		Chain:        chain,
-		ChainID:      chainID,
-		PoolAddress:  poolAddress,
-		PoolID:       poolID,
-		MinAmountUSD: minAmountUSD,
-		WindowHours:  windowHours,
-		StartTime:    startTime,
-		EndTime:      endTime,
-		Limit:        limit,
-		Provider:     providerName,
-	})
+	resp, err := provider.FindCandidates(scanCtx, query)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(scanCtx.Err(), context.DeadlineExceeded) {
 			jsonError(w, "扫描超时，请缩小时间范围后重试", http.StatusGatewayTimeout)
@@ -671,25 +682,156 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 
 	repo := smService.Repo()
 	if repo != nil && resp != nil {
-		activeWallets, err := repo.GetAllActiveWalletAddresses(scanCtx, chainID)
+		annotationCtx, annotationCancel := context.WithTimeout(ctx, smartMoneyPoolLiquidityAnnotationLimit)
+		defer annotationCancel()
+		activeWallets, err := repo.GetAllActiveWalletAddresses(annotationCtx, chainID)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(scanCtx.Err(), context.DeadlineExceeded) {
-				jsonError(w, "扫描超时，请缩小时间范围后重试", http.StatusGatewayTimeout)
-				return
+			resp.Partial = true
+			resp.Warnings = append(resp.Warnings, "已返回候选钱包，但未能标记是否已在监控列表中")
+		} else {
+			for i := range resp.Candidates {
+				addr := strings.ToLower(strings.TrimSpace(resp.Candidates[i].WalletAddress))
+				_, resp.Candidates[i].AlreadyMonitored = activeWallets[addr]
 			}
-			if errors.Is(err, context.Canceled) || errors.Is(scanCtx.Err(), context.Canceled) {
-				jsonError(w, "扫描请求已取消，请重试", http.StatusRequestTimeout)
-				return
-			}
-			jsonError(w, smartMoneyPoolLiquidityScanErrorMessage(err, http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		for i := range resp.Candidates {
-			addr := strings.ToLower(strings.TrimSpace(resp.Candidates[i].WalletAddress))
-			_, resp.Candidates[i].AlreadyMonitored = activeWallets[addr]
 		}
 	}
 	jsonOK(w, resp)
+}
+
+func (s *Server) handleSMPoolLiquidityWalletCandidatesStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if smService == nil {
+		jsonError(w, "smart money service not initialized", http.StatusInternalServerError)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		jsonError(w, "streaming is not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	query, chainID, err := parseSMPoolLiquidityCandidateQuery(r)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	provider, err := sm.NewTokenLiquidityProviderFromConfig(config.AppConfig)
+	if err != nil {
+		jsonError(w, smartMoneyPoolLiquidityConfigErrorMessage(err), http.StatusBadRequest)
+		return
+	}
+	streamProvider, ok := provider.(sm.TokenLiquidityStreamProvider)
+	if !ok {
+		jsonError(w, "liquidity provider does not support streaming", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeEvent := func(event string, payload interface{}) error {
+		return writeSmartMoneySSEEvent(w, flusher, event, payload)
+	}
+	if err := writeEvent("stage", sm.TokenLiquidityStreamStage{
+		Stage:   "accepted",
+		Message: "已接收扫描请求",
+	}); err != nil {
+		return
+	}
+
+	activeWallets := map[string]struct{}{}
+	if repo := smService.Repo(); repo != nil {
+		annotationCtx, annotationCancel := context.WithTimeout(ctx, smartMoneyPoolLiquidityAnnotationLimit)
+		wallets, err := repo.GetAllActiveWalletAddresses(annotationCtx, chainID)
+		annotationCancel()
+		if err != nil {
+			_ = writeEvent("warning", sm.TokenLiquidityStreamWarning{
+				Message: "已开始扫描，但未能标记是否已在监控列表中",
+				Code:    "annotation_failed",
+			})
+		} else {
+			activeWallets = wallets
+		}
+	}
+
+	scanCtx, cancel := context.WithTimeout(ctx, smartMoneyPoolLiquidityScanTimeout)
+	defer cancel()
+	resp, err := streamProvider.StreamCandidates(scanCtx, query, sm.TokenLiquidityCandidateStreamCallbacks{
+		Stage: func(event sm.TokenLiquidityStreamStage) error {
+			return writeEvent("stage", event)
+		},
+		Candidate: func(event sm.TokenLiquidityStreamCandidate) error {
+			addr := strings.ToLower(strings.TrimSpace(event.Candidate.WalletAddress))
+			_, event.Candidate.AlreadyMonitored = activeWallets[addr]
+			return writeEvent("candidate", event)
+		},
+		Warning: func(event sm.TokenLiquidityStreamWarning) error {
+			return writeEvent("warning", event)
+		},
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(scanCtx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			_ = writeEvent("error", map[string]interface{}{
+				"message":     "扫描请求已取消",
+				"recoverable": true,
+			})
+			return
+		}
+		message := smartMoneyPoolLiquidityScanErrorMessage(err, http.StatusBadGateway)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(scanCtx.Err(), context.DeadlineExceeded) {
+			message = "扫描超时，请缩小时间范围后重试"
+		}
+		_ = writeEvent("error", map[string]interface{}{
+			"message":     message,
+			"recoverable": true,
+		})
+		return
+	}
+	if resp == nil {
+		resp = &sm.TokenLiquidityCandidateResponse{}
+	}
+	for i := range resp.Candidates {
+		addr := strings.ToLower(strings.TrimSpace(resp.Candidates[i].WalletAddress))
+		_, resp.Candidates[i].AlreadyMonitored = activeWallets[addr]
+	}
+	if err := writeEvent("summary", map[string]interface{}{
+		"candidate_count": len(resp.Candidates),
+		"excluded_count":  resp.ExcludedCount,
+		"partial":         resp.Partial,
+		"warnings":        resp.Warnings,
+		"response":        resp,
+	}); err != nil {
+		return
+	}
+	_ = writeEvent("done", map[string]interface{}{
+		"partial": resp.Partial,
+	})
+}
+
+func writeSmartMoneySSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, payload interface{}) error {
+	if w == nil || flusher == nil {
+		return fmt.Errorf("sse writer is not initialized")
+	}
+	event = strings.TrimSpace(event)
+	if event == "" {
+		return fmt.Errorf("sse event name is required")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func parseSMTokenLiquidityTimeRange(q url.Values) (time.Time, time.Time, int, error) {

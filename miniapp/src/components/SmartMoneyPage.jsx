@@ -13,7 +13,7 @@ import {
     fetchSMZombieWallets, deleteSMZombieWallets,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
-    fetchSMPoolLiquidityWalletCandidates, importSMPoolLiquidityWallets,
+    fetchSMPoolLiquidityWalletCandidates, importSMPoolLiquidityWallets, streamSMPoolLiquidityWalletCandidates,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchWallets, fetchSMWatchActivity, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
@@ -123,6 +123,20 @@ function parsePoolLiquidityInput(value) {
         return { poolAddress: '', poolId: text.toLowerCase() };
     }
     return null;
+}
+
+function upsertPoolLiquidityCandidate(list, candidate) {
+    const wallet = String(candidate?.wallet_address || '').toLowerCase();
+    if (!wallet) return Array.isArray(list) ? list : [];
+    const next = Array.isArray(list) ? [...list] : [];
+    const index = next.findIndex((item) => String(item?.wallet_address || '').toLowerCase() === wallet);
+    if (index >= 0) next[index] = { ...next[index], ...candidate, wallet_address: wallet };
+    else next.push({ ...candidate, wallet_address: wallet });
+    return next.sort((a, b) => {
+        const amountDiff = Number(b?.max_amount_usd || 0) - Number(a?.max_amount_usd || 0);
+        if (amountDiff !== 0) return amountDiff;
+        return String(b?.tx_time || '').localeCompare(String(a?.tx_time || ''));
+    });
 }
 
 function GoldenDogPageContent({
@@ -1991,6 +2005,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
     const [scanElapsedMs, setScanElapsedMs] = useState(0);
     const [scanTarget, setScanTarget] = useState(null);
     const [scanLogs, setScanLogs] = useState([]);
+    const scanAbortRef = useRef(null);
 
     const appendScanLog = useCallback((text, tone = 'info') => {
         setScanLogs((prev) => [...prev.slice(-7), createRadarLogEntry(text, tone)]);
@@ -2006,6 +2021,8 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         setScanTarget(null);
         setScanLogs([]);
         setTimeRange(createDefaultTokenLiquidityRange());
+        scanAbortRef.current?.abort();
+        scanAbortRef.current = null;
     }, [open]);
 
     useEffect(() => {
@@ -2015,8 +2032,6 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         const timer = window.setInterval(tick, 1000);
         return () => window.clearInterval(timer);
     }, [open, loading, saving, scanStartedAt]);
-
-    if (!open) return null;
 
     const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
     const selectedWallets = candidates
@@ -2029,6 +2044,23 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         : (scanStep ? 100 : 0);
     const scanTargetText = scanTarget ? `${scanTarget.kind} ${shortAddr(scanTarget.value)}` : '';
     const scanStatusText = loading ? '运行中' : saving ? '导入中' : error ? '失败' : data ? '完成' : '就绪';
+
+    const stopScan = useCallback(() => {
+        scanAbortRef.current?.abort();
+        scanAbortRef.current = null;
+        setLoading(false);
+        setScanStep('扫描已停止');
+        appendScanLog('已停止当前扫描。', 'warn');
+    }, [appendScanLog]);
+
+    const closeSheet = useCallback(() => {
+        if (loading) {
+            stopScan();
+        }
+        onClose?.();
+    }, [loading, onClose, stopScan]);
+
+    if (!open) return null;
 
     const preview = async () => {
         const poolTarget = parsePoolLiquidityInput(poolInput);
@@ -2069,7 +2101,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         setLoading(true);
         setError('');
         setImportResult(null);
-        setData(null);
+        setData({ candidates: [], excluded_count: 0, warnings: [] });
         setSelected({});
         setScanStartedAt(startedAt);
         setScanElapsedMs(0);
@@ -2083,23 +2115,23 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
         });
         setScanLogs([
             createRadarLogEntry(`参数已校验：${targetKind} ${shortAddr(targetValue)}，约 ${rangeHours} 小时时间窗。`),
-            createRadarLogEntry(`提交后端 RPC 扫描请求，最低金额 ${formatUSDCompact(Number(minAmountUsd))}，最多返回 ${Number(limit)} 个候选。`),
+            createRadarLogEntry(`提交后端流式 RPC 扫描，最低金额 ${formatUSDCompact(Number(minAmountUsd))}，最多返回 ${Number(limit)} 个候选。`),
         ]);
-        try {
-            setScanStep('请求节点扫描池子加池事件');
-            const resp = await fetchSMPoolLiquidityWalletCandidates({
-                apiBaseUrl,
-                chain: 'bsc',
-                ...poolTarget,
-                minAmountUsd: Number(minAmountUsd),
-                startTime,
-                endTime,
-                limit: Number(limit),
-            });
+        scanAbortRef.current?.abort();
+        const controller = new AbortController();
+        scanAbortRef.current = controller;
+        const applyBatchResponse = (resp) => {
             setScanStep('整理候选钱包');
             const list = Array.isArray(resp?.candidates) ? resp.candidates : [];
             const excludedCount = Number(resp?.excluded_count || 0);
-            appendScanLog(`后端返回：候选 ${list.length} 个，排除 ${excludedCount} 条事件。`, list.length > 0 ? 'success' : 'info');
+            const isPartial = Boolean(resp?.partial);
+            appendScanLog(
+                `后端返回：候选 ${list.length} 个，排除 ${excludedCount} 条事件。`,
+                isPartial ? 'warn' : (list.length > 0 ? 'success' : 'info'),
+            );
+            if (isPartial) {
+                appendScanLog('本次只返回部分扫描结果，列表可先查看/勾选；完整结果请缩小时间范围后再扫。', 'warn');
+            }
             if (Array.isArray(resp?.warnings) && resp.warnings.length > 0) {
                 appendScanLog(`扫描提示：${resp.warnings.slice(0, 2).join('；')}`, 'warn');
             }
@@ -2109,13 +2141,106 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
             });
             setData(resp);
             setSelected(nextSelected);
-            setScanStep(list.length > 0 ? `扫描完成，找到 ${list.length} 个候选钱包` : '扫描完成，未找到符合条件的钱包');
+            setScanStep(isPartial
+                ? `已返回部分结果，找到 ${list.length} 个候选钱包`
+                : (list.length > 0 ? `扫描完成，找到 ${list.length} 个候选钱包` : '扫描完成，未找到符合条件的钱包'));
+        };
+        try {
+            setScanStep('建立流式扫描连接');
+            let lastStage = '';
+            await streamSMPoolLiquidityWalletCandidates({
+                apiBaseUrl,
+                chain: 'bsc',
+                ...poolTarget,
+                minAmountUsd: Number(minAmountUsd),
+                startTime,
+                endTime,
+                limit: Number(limit),
+                signal: controller.signal,
+                onStage: (event) => {
+                    const stageText = event?.message || event?.stage || '扫描中';
+                    if (event?.current_block && event?.to_block) {
+                        setScanStep(`${stageText}：${event.current_block}/${event.to_block}`);
+                    } else {
+                        setScanStep(stageText);
+                    }
+                    if (event?.stage && event.stage !== lastStage) {
+                        lastStage = event.stage;
+                        appendScanLog(stageText);
+                    }
+                },
+                onCandidate: (event) => {
+                    const candidate = event?.candidate;
+                    const wallet = String(candidate?.wallet_address || '').toLowerCase();
+                    if (!wallet) return;
+                    setData((prev) => ({
+                        ...(prev || {}),
+                        candidates: upsertPoolLiquidityCandidate(prev?.candidates, candidate),
+                        excluded_count: Number(event?.excluded_count || prev?.excluded_count || 0),
+                    }));
+                    setSelected((prev) => {
+                        if (candidate.already_monitored || Object.prototype.hasOwnProperty.call(prev, wallet)) return prev;
+                        return { ...prev, [wallet]: true };
+                    });
+                    setScanStep(`实时发现 ${Number(event?.candidate_count || 1)} 个候选钱包`);
+                    appendScanLog(`发现候选：${shortAddr(wallet)}，最大加池 ${formatUSDCompact(Number(candidate.max_amount_usd || 0))}。`, 'success');
+                },
+                onWarning: (event) => {
+                    appendScanLog(`扫描提示：${event?.message || '扫描过程中出现提示'}`, 'warn');
+                },
+                onSummary: (event) => {
+                    const resp = event?.response;
+                    if (resp) {
+                        setData(resp);
+                    } else {
+                        setData((prev) => ({
+                            ...(prev || {}),
+                            excluded_count: Number(event?.excluded_count || prev?.excluded_count || 0),
+                            partial: Boolean(event?.partial),
+                            warnings: Array.isArray(event?.warnings) ? event.warnings : (prev?.warnings || []),
+                        }));
+                    }
+                    const count = Number(event?.candidate_count || resp?.candidates?.length || 0);
+                    setScanStep(event?.partial ? `已返回部分结果，找到 ${count} 个候选钱包` : `扫描完成，找到 ${count} 个候选钱包`);
+                },
+                onDone: (event) => {
+                    appendScanLog(event?.partial ? '流式扫描结束：当前为部分结果。' : '流式扫描完成。', event?.partial ? 'warn' : 'success');
+                },
+                onError: (event) => {
+                    appendScanLog(`流式扫描失败：${event?.message || '未知错误'}`, 'error');
+                },
+            });
         } catch (err) {
+            if (controller.signal.aborted) {
+                return;
+            }
             const message = String(err?.message || err || '扫描失败');
+            if (/不支持流式扫描/.test(message)) {
+                appendScanLog('当前环境不支持流式扫描，降级为普通扫描。', 'warn');
+                try {
+                    const resp = await fetchSMPoolLiquidityWalletCandidates({
+                        apiBaseUrl,
+                        chain: 'bsc',
+                        ...poolTarget,
+                        minAmountUsd: Number(minAmountUsd),
+                        startTime,
+                        endTime,
+                        limit: Number(limit),
+                    });
+                    applyBatchResponse(resp);
+                } catch (fallbackErr) {
+                    const fallbackMessage = String(fallbackErr?.message || fallbackErr || '扫描失败');
+                    setError(fallbackMessage);
+                    setScanStep('扫描失败');
+                    appendScanLog(`普通扫描失败：${fallbackMessage}`, 'error');
+                }
+                return;
+            }
             setError(message);
             setScanStep('扫描失败');
             appendScanLog(`扫描失败：${message}`, 'error');
         } finally {
+            if (scanAbortRef.current === controller) scanAbortRef.current = null;
             setScanElapsedMs(Date.now() - startedAt);
             setLoading(false);
         }
@@ -2169,7 +2294,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                         <div className="text-base font-semibold text-zinc-100">聪明钱雷达</div>
                         <div className="text-xs text-zinc-500">RPC 池子加池事件扫描 · 支持 V3/V4</div>
                     </div>
-                    <button type="button" className={getIconButtonClass(false)} onClick={onClose} disabled={loading || saving}>
+                    <button type="button" className={getIconButtonClass(false)} onClick={closeSheet} disabled={saving}>
                         <X size={16} />
                     </button>
                 </div>
@@ -2227,6 +2352,16 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                         >
                             {loading ? '扫描中...' : '扫描候选钱包'}
                         </button>
+                        {loading ? (
+                            <button
+                                type="button"
+                                className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-zinc-200"
+                                onClick={stopScan}
+                                disabled={saving}
+                            >
+                                停止扫描
+                            </button>
+                        ) : null}
                     </div>
 
                     {(loading || saving || scanStep) ? (
@@ -2242,7 +2377,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                                 />
                             </div>
                             <div className="mt-2 text-[10px] leading-relaxed text-zinc-500">
-                                {loading ? `后端正在通过 RPC 扫描链上加池事件，约 ${Math.round(SMART_MONEY_RADAR_SCAN_TIMEOUT_MS / 1000)}s 未完成会自动超时。` : null}
+                                {loading ? '后端正在流式扫描链上加池事件，找到候选会立即插入列表。' : null}
                                 {saving ? '正在写入监控钱包，请保持弹窗打开。' : null}
                                 {!loading && !saving && data ? `候选 ${candidates.length} 个，已排除 ${Number(data?.excluded_count || 0)} 条事件。` : null}
                                 {!loading && !saving && error ? '请求未完成，参数保留，可直接重试。' : null}
@@ -2349,7 +2484,7 @@ function TokenLiquidityImportSheet({ open, apiBaseUrl, brand, onClose, onImporte
                                 type="button"
                                 className={`${brand.solidButtonClass} ${brand.solidRingClass} mt-2 w-full rounded-2xl px-3 py-2 text-sm font-semibold disabled:opacity-50`}
                                 onClick={importSelected}
-                                disabled={saving || selectedWallets.length === 0}
+                                disabled={loading || saving || selectedWallets.length === 0}
                             >
                                 {saving ? '导入中...' : `导入 ${selectedWallets.length} 个钱包`}
                             </button>

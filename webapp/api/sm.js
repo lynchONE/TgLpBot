@@ -135,6 +135,7 @@ export default async function handler(req, res) {
     'wallets',
     'wallet_zombies',
     'pool_liquidity_wallet_candidates',
+    'pool_liquidity_wallet_candidates_stream',
     'pool_liquidity_wallet_import',
     'token_liquidity_wallet_candidates',
     'token_liquidity_wallet_import',
@@ -170,6 +171,29 @@ export default async function handler(req, res) {
 
   try {
     const upstream = await fetch(url, fetchOpts);
+    if (endpoint === 'pool_liquidity_wallet_candidates_stream') {
+      res.statusCode = upstream.status;
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (!upstream.body) {
+        res.end();
+        return;
+      }
+      const reader = upstream.body.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) res.write(Buffer.from(value));
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      res.end();
+      return;
+    }
     const text = await upstream.text();
 
     res.statusCode = upstream.status;

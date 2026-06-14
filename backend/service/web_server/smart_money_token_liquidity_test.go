@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -59,5 +60,38 @@ func TestSmartMoneyPoolLiquidityScanErrorMessageSanitizesCloudflareHTML(t *testi
 	}
 	if !strings.Contains(msg, "扫描服务超时") {
 		t.Fatalf("expected timeout message, got %q", msg)
+	}
+}
+
+func TestWriteSmartMoneySSEEventWritesAndFlushes(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := writeSmartMoneySSEEvent(rr, rr, "candidate", map[string]interface{}{
+		"wallet": "0x0000000000000000000000000000000000000001",
+	})
+	if err != nil {
+		t.Fatalf("expected sse event to be written: %v", err)
+	}
+	body := rr.Body.String()
+	if !strings.HasPrefix(body, "event: candidate\n") {
+		t.Fatalf("expected candidate event prefix, got %q", body)
+	}
+	if !strings.Contains(body, `"wallet":"0x0000000000000000000000000000000000000001"`) {
+		t.Fatalf("expected json data payload, got %q", body)
+	}
+	if !strings.HasSuffix(body, "\n\n") {
+		t.Fatalf("expected sse event delimiter, got %q", body)
+	}
+	if !rr.Flushed {
+		t.Fatal("expected sse event to flush")
+	}
+}
+
+func TestWriteSmartMoneySSEEventRejectsEmptyName(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := writeSmartMoneySSEEvent(rr, rr, " ", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected empty event name error")
 	}
 }

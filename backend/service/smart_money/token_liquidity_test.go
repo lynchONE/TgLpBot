@@ -2,10 +2,16 @@ package smart_money
 
 import (
 	"TgLpBot/base/config"
+	"context"
 	"encoding/json"
+	"errors"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func TestNormalizeTokenLiquidityCandidateQuery(t *testing.T) {
@@ -82,6 +88,107 @@ func TestNewTokenLiquidityProviderFromConfigUsesRPCWithoutProviderConfig(t *test
 	}
 	if _, ok := provider.(*RPCTokenLiquidityProvider); !ok {
 		t.Fatalf("expected rpc provider, got %T", provider)
+	}
+}
+
+func TestTokenLiquidityPartialScanWarning(t *testing.T) {
+	timeoutMsg := tokenLiquidityPartialScanWarning(context.DeadlineExceeded)
+	if !strings.Contains(timeoutMsg, "timed out") {
+		t.Fatalf("expected timeout partial warning, got %q", timeoutMsg)
+	}
+
+	upstreamMsg := tokenLiquidityPartialScanWarning(json.Unmarshal([]byte("{"), &struct{}{}))
+	if !strings.Contains(upstreamMsg, "upstream error") {
+		t.Fatalf("expected upstream partial warning, got %q", upstreamMsg)
+	}
+}
+
+func TestTokenLiquidityStreamCallbacksPropagateEventsAndErrors(t *testing.T) {
+	var stages []TokenLiquidityStreamStage
+	var candidates []TokenLiquidityStreamCandidate
+	var warnings []TokenLiquidityStreamWarning
+	cbErr := errors.New("client disconnected")
+	callbacks := TokenLiquidityCandidateStreamCallbacks{
+		Stage: func(event TokenLiquidityStreamStage) error {
+			stages = append(stages, event)
+			return nil
+		},
+		Candidate: func(event TokenLiquidityStreamCandidate) error {
+			candidates = append(candidates, event)
+			return nil
+		},
+		Warning: func(event TokenLiquidityStreamWarning) error {
+			warnings = append(warnings, event)
+			return cbErr
+		},
+	}
+
+	if err := callbacks.emitStage(TokenLiquidityStreamStage{Stage: "scanning"}); err != nil {
+		t.Fatalf("expected stage callback to succeed: %v", err)
+	}
+	if err := callbacks.emitCandidate(TokenLiquidityStreamCandidate{
+		Candidate: TokenLiquidityCandidate{WalletAddress: "0x0000000000000000000000000000000000000001"},
+	}); err != nil {
+		t.Fatalf("expected candidate callback to succeed: %v", err)
+	}
+	if err := callbacks.emitWarning(TokenLiquidityStreamWarning{Message: "partial"}); !errors.Is(err, cbErr) {
+		t.Fatalf("expected warning callback error %v, got %v", cbErr, err)
+	}
+	if len(stages) != 1 || stages[0].Stage != "scanning" {
+		t.Fatalf("unexpected stages: %+v", stages)
+	}
+	if len(candidates) != 1 || candidates[0].Candidate.WalletAddress == "" {
+		t.Fatalf("unexpected candidates: %+v", candidates)
+	}
+	if len(warnings) != 1 || warnings[0].Message != "partial" {
+		t.Fatalf("unexpected warnings: %+v", warnings)
+	}
+}
+
+func TestWrapTokenLiquidityStreamCallbackError(t *testing.T) {
+	cbErr := errors.New("write failed")
+	err := wrapTokenLiquidityStreamCallbackError(cbErr)
+	if !errors.Is(err, errTokenLiquidityStreamCallback) {
+		t.Fatalf("expected stream callback sentinel, got %v", err)
+	}
+	if !errors.Is(err, cbErr) {
+		t.Fatalf("expected original callback error, got %v", err)
+	}
+}
+
+func TestPoolLiquidityStopIsPartial(t *testing.T) {
+	tests := []struct {
+		name      string
+		truncated bool
+		reason    poolLiquidityStopReason
+		want      bool
+	}{
+		{name: "completed", reason: poolLiquidityStopNone, want: false},
+		{name: "limit reached by visitor", reason: poolLiquidityStopVisitor, want: false},
+		{name: "empty range", reason: poolLiquidityStopRangeZero, want: false},
+		{name: "context stopped", reason: poolLiquidityStopCtx, want: true},
+		{name: "upstream stopped", reason: poolLiquidityStopUpstream, want: true},
+		{name: "log limit stopped", reason: poolLiquidityStopLogLimit, want: true},
+		{name: "truncated", truncated: true, reason: poolLiquidityStopVisitor, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := poolLiquidityStopIsPartial(tt.truncated, tt.reason); got != tt.want {
+				t.Fatalf("poolLiquidityStopIsPartial(%v, %q) = %v, want %v", tt.truncated, tt.reason, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilterPoolLiquidityLogsRejectsMissingClient(t *testing.T) {
+	_, _, err := filterPoolLiquidityLogs(context.Background(), nil, ethereum.FilterQuery{
+		FromBlock: big.NewInt(1),
+		ToBlock:   big.NewInt(2),
+	}, func(vlog types.Log) (bool, error) {
+		return false, nil
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "rpc client not initialized") {
+		t.Fatalf("expected missing client error, got %v", err)
 	}
 }
 
