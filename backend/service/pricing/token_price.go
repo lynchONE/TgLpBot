@@ -67,6 +67,35 @@ func (e *ProviderHTTPError) IsRateLimit() bool {
 	return e != nil && e.Status == http.StatusTooManyRequests
 }
 
+func sanitizeProviderHTTPBody(body []byte, statusCode int) string {
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return ""
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	switch {
+	case statusCode == http.StatusGatewayTimeout ||
+		strings.Contains(normalized, "gateway time-out") ||
+		strings.Contains(normalized, "gateway timeout") ||
+		strings.Contains(normalized, "504"):
+		return "upstream gateway timeout"
+	case statusCode == http.StatusBadGateway ||
+		strings.Contains(normalized, "bad gateway") ||
+		strings.Contains(normalized, "502"):
+		return "upstream bad gateway"
+	case strings.Contains(normalized, "cloudflare") ||
+		strings.Contains(normalized, "cdn-cgi") ||
+		strings.Contains(normalized, "cf-error") ||
+		strings.Contains(normalized, "<!doctype") ||
+		strings.Contains(normalized, "<html"):
+		return "upstream returned a non-json html page"
+	}
+	if len(text) > 320 {
+		return text[:320]
+	}
+	return text
+}
+
 func NewTokenPriceService() *TokenPriceService {
 	return &TokenPriceService{
 		client:            &http.Client{Timeout: 12 * time.Second},
@@ -387,11 +416,7 @@ func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		bodyText := strings.TrimSpace(string(body))
-		if len(bodyText) > 320 {
-			bodyText = bodyText[:320]
-		}
-		return nil, &ProviderHTTPError{Provider: "geckoterminal", Status: resp.StatusCode, Body: bodyText}
+		return nil, &ProviderHTTPError{Provider: "geckoterminal", Status: resp.StatusCode, Body: sanitizeProviderHTTPBody(body, resp.StatusCode)}
 	}
 
 	var parsed geckoTokenPriceResponse
@@ -471,11 +496,7 @@ func (s *TokenPriceService) fetchDexScreenerTokenPrices(network string, tokenAdd
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyText := strings.TrimSpace(string(body))
-		if len(bodyText) > 320 {
-			bodyText = bodyText[:320]
-		}
-		return nil, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: resp.StatusCode, Body: bodyText}
+		return nil, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: resp.StatusCode, Body: sanitizeProviderHTTPBody(body, resp.StatusCode)}
 	}
 
 	var pairs []dexScreenerTokenPair
@@ -588,11 +609,7 @@ func (s *TokenPriceService) fetchDexScreenerTokenMarketDataBatch(ctx context.Con
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyText := strings.TrimSpace(string(body))
-		if len(bodyText) > 320 {
-			bodyText = bodyText[:320]
-		}
-		return nil, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: resp.StatusCode, Body: bodyText}
+		return nil, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: resp.StatusCode, Body: sanitizeProviderHTTPBody(body, resp.StatusCode)}
 	}
 
 	var pairs []dexScreenerTokenPair

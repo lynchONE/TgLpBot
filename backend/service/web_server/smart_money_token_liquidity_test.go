@@ -1,7 +1,9 @@
 package web_server
 
 import (
+	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -44,5 +46,18 @@ func TestParseSMTokenLiquidityTimeRangeRejectsTooLargeRange(t *testing.T) {
 	_, _, _, err := parseSMTokenLiquidityTimeRange(values)
 	if err == nil {
 		t.Fatal("expected too large range error")
+	}
+}
+
+func TestSmartMoneyPoolLiquidityScanErrorMessageSanitizesCloudflareHTML(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><title>hotpool.ink | 504: Gateway time-out</title></head><body>Cloudflare Error code 504</body></html>`
+
+	msg := smartMoneyPoolLiquidityScanErrorMessage(fmt.Errorf("price lookup failed: %s", html), 502)
+
+	if strings.Contains(strings.ToLower(msg), "<html") || strings.Contains(strings.ToLower(msg), "cloudflare") {
+		t.Fatalf("expected sanitized message, got %q", msg)
+	}
+	if !strings.Contains(msg, "扫描服务超时") {
+		t.Fatalf("expected timeout message, got %q", msg)
 	}
 }

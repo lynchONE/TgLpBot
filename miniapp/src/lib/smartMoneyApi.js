@@ -60,23 +60,45 @@ function buildSMUploadUrl(apiBaseUrl, endpoint, params) {
     return `${base}${SM_BASE}/${endpoint}${search}`;
 }
 
+function sanitizeErrorMessage(value, status, useStatusFallback = false) {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return status ? `HTTP ${status}` : '请求失败';
+    if (/(?:^|\D)504(?:\D|$)|gateway time-?out/i.test(normalized)) {
+        return '扫描服务超时（504 Gateway Timeout），请缩小时间范围后重试。';
+    }
+    if (/(?:^|\D)502(?:\D|$)|bad gateway/i.test(normalized)) {
+        return '扫描服务暂时不可用（502 Bad Gateway），请稍后重试。';
+    }
+    if (/cloudflare|cdn-cgi|cf-error|<!doctype|<html/i.test(normalized)) {
+        return `请求失败（HTTP ${status || '未知'}），服务返回了非 JSON 页面。`;
+    }
+    if (useStatusFallback && status === 504) return '扫描服务超时（504 Gateway Timeout），请缩小时间范围后重试。';
+    if (useStatusFallback && status === 502) return '扫描服务暂时不可用（502 Bad Gateway），请稍后重试。';
+    if (normalized.length > 240) return `${normalized.slice(0, 240)}...`;
+    return normalized;
+}
+
 async function readErrorMessage(resp) {
     const text = await resp.text().catch(() => '');
     if (!text) return `HTTP ${resp.status}`;
     try {
         const json = JSON.parse(text);
-        if (json?.message) return String(json.message);
+        if (json?.message) return sanitizeErrorMessage(json.message, resp.status);
+        if (json?.error) return sanitizeErrorMessage(json.error, resp.status);
     } catch {
         // ignore JSON parse errors and fall back to a sanitized text message
     }
-    const normalized = text.replace(/\s+/g, ' ').trim();
-    if (resp.status === 502) return '扫描服务暂时不可用（502 Bad Gateway），请稍后重试。';
-    if (resp.status === 504) return '扫描服务超时（504 Gateway Timeout），请缩小时间范围后重试。';
-    if (/cloudflare/i.test(normalized) || /bad gateway/i.test(normalized) || /<html/i.test(normalized)) {
-        return `请求失败（HTTP ${resp.status}），服务返回了非 JSON 页面。`;
+    return sanitizeErrorMessage(text, resp.status, true);
+}
+
+async function readResponseJson(resp) {
+    const text = await resp.text().catch(() => '');
+    if (!text) throw new Error(`HTTP ${resp.status}: empty response`);
+    try {
+        return JSON.parse(text);
+    } catch {
+        throw new Error(sanitizeErrorMessage(text, resp.status, true));
     }
-    if (normalized.length > 240) return `${normalized.slice(0, 240)}...`;
-    return normalized || `HTTP ${resp.status}`;
 }
 
 async function smRequest(url, options = {}) {
@@ -84,9 +106,9 @@ async function smRequest(url, options = {}) {
     if (!resp.ok) {
         throw new Error(await readErrorMessage(resp));
     }
-    const json = await resp.json();
+    const json = await readResponseJson(resp);
     if (json.code !== 0 && json.code !== undefined) {
-        throw new Error(json.message || 'unknown error');
+        throw new Error(sanitizeErrorMessage(json.message || json.error || 'unknown error', resp.status));
     }
     return json.data;
 }
@@ -96,9 +118,9 @@ async function goldenDogRequest(url, options = {}) {
     if (!resp.ok) {
         throw new Error(await readErrorMessage(resp));
     }
-    const json = await resp.json();
+    const json = await readResponseJson(resp);
     if (!json?.ok) {
-        throw new Error(json?.message || 'unknown error');
+        throw new Error(sanitizeErrorMessage(json?.message || json?.error || 'unknown error', resp.status));
     }
     return json;
 }

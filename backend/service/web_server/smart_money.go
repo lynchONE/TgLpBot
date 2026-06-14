@@ -36,7 +36,7 @@ var (
 	smPositionRepairRunning int32
 )
 
-const smartMoneyPoolLiquidityScanTimeout = 75 * time.Second
+const smartMoneyPoolLiquidityScanTimeout = 50 * time.Second
 
 func initSmartMoney() {
 	smService = sm.NewService()
@@ -665,7 +665,7 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 			jsonError(w, "扫描请求已取消，请重试", http.StatusRequestTimeout)
 			return
 		}
-		jsonError(w, err.Error(), http.StatusBadGateway)
+		jsonError(w, smartMoneyPoolLiquidityScanErrorMessage(err, http.StatusBadGateway), http.StatusBadGateway)
 		return
 	}
 
@@ -681,7 +681,7 @@ func (s *Server) handleSMPoolLiquidityWalletCandidates(w http.ResponseWriter, r 
 				jsonError(w, "扫描请求已取消，请重试", http.StatusRequestTimeout)
 				return
 			}
-			jsonError(w, err.Error(), http.StatusInternalServerError)
+			jsonError(w, smartMoneyPoolLiquidityScanErrorMessage(err, http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 		for i := range resp.Candidates {
@@ -732,6 +732,45 @@ func smartMoneyPoolLiquidityConfigErrorMessage(err error) string {
 	msg := strings.TrimSpace(err.Error())
 	if msg == "" {
 		return "smart money radar scan failed"
+	}
+	return msg
+}
+
+func smartMoneyPoolLiquidityScanErrorMessage(err error, statusCode int) string {
+	msg := ""
+	if err != nil {
+		msg = strings.TrimSpace(err.Error())
+	}
+	if msg == "" {
+		return "聪明钱雷达扫描失败，请稍后重试"
+	}
+
+	normalized := strings.ToLower(strings.Join(strings.Fields(msg), " "))
+	if statusCode == http.StatusGatewayTimeout ||
+		strings.Contains(normalized, "gateway time-out") ||
+		strings.Contains(normalized, "gateway timeout") ||
+		strings.Contains(normalized, "context deadline exceeded") ||
+		strings.Contains(normalized, "timeout") ||
+		strings.Contains(normalized, "504") {
+		return "扫描服务超时（504 Gateway Timeout），请缩小时间范围后重试。"
+	}
+	if statusCode == http.StatusBadGateway ||
+		strings.Contains(normalized, "bad gateway") ||
+		strings.Contains(normalized, "502") {
+		return "扫描服务暂时不可用（502 Bad Gateway），请稍后重试。"
+	}
+	if strings.Contains(normalized, "cloudflare") ||
+		strings.Contains(normalized, "cdn-cgi") ||
+		strings.Contains(normalized, "cf-error") ||
+		strings.Contains(normalized, "<!doctype") ||
+		strings.Contains(normalized, "<html") {
+		if statusCode > 0 {
+			return fmt.Sprintf("请求失败（HTTP %d），服务返回了非 JSON 页面。", statusCode)
+		}
+		return "请求失败，服务返回了非 JSON 页面。"
+	}
+	if len(msg) > 240 {
+		return msg[:240] + "..."
 	}
 	return msg
 }

@@ -131,7 +131,21 @@ export default async function handler(req, res) {
     return;
   }
 
-  const validEndpoints = new Set(['wallets', 'contracts', 'pools', 'pool_fee_heatmap', 'positions', 'position_detail', 'events', 'stats']);
+  const validEndpoints = new Set([
+    'wallets',
+    'wallet_zombies',
+    'pool_liquidity_wallet_candidates',
+    'pool_liquidity_wallet_import',
+    'token_liquidity_wallet_candidates',
+    'token_liquidity_wallet_import',
+    'contracts',
+    'pools',
+    'pool_fee_heatmap',
+    'positions',
+    'position_detail',
+    'events',
+    'stats',
+  ]);
   if (!validEndpoints.has(endpoint)) {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');

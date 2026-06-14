@@ -1432,12 +1432,41 @@ func (p *BitqueryTokenLiquidityProvider) postGraphQL(ctx context.Context, query 
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("bitquery http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("bitquery http %d: %s", resp.StatusCode, sanitizeTokenLiquidityUpstreamBody(body, resp.StatusCode))
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("decode bitquery response: %w", err)
 	}
 	return nil
+}
+
+func sanitizeTokenLiquidityUpstreamBody(body []byte, statusCode int) string {
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return "empty response"
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	switch {
+	case statusCode == http.StatusGatewayTimeout ||
+		strings.Contains(normalized, "gateway time-out") ||
+		strings.Contains(normalized, "gateway timeout") ||
+		strings.Contains(normalized, "504"):
+		return "upstream gateway timeout"
+	case statusCode == http.StatusBadGateway ||
+		strings.Contains(normalized, "bad gateway") ||
+		strings.Contains(normalized, "502"):
+		return "upstream bad gateway"
+	case strings.Contains(normalized, "cloudflare") ||
+		strings.Contains(normalized, "cdn-cgi") ||
+		strings.Contains(normalized, "cf-error") ||
+		strings.Contains(normalized, "<!doctype") ||
+		strings.Contains(normalized, "<html"):
+		return "upstream returned a non-json html page"
+	}
+	if len(text) > 320 {
+		return text[:320]
+	}
+	return text
 }
 
 func joinBitqueryErrors(errors []bitqueryGraphErr) string {

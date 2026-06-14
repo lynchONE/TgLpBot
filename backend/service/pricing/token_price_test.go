@@ -293,6 +293,32 @@ func TestFetchGeckoTokenPrices_ReturnsProviderHTTPError(t *testing.T) {
 	}
 }
 
+func TestFetchGeckoTokenPrices_SanitizesCloudflareHTML(t *testing.T) {
+	svc := NewTokenPriceService()
+	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusGatewayTimeout,
+			Body:       io.NopCloser(strings.NewReader(`<!DOCTYPE html><html><head><title>hotpool.ink | 504: Gateway time-out</title></head><body>Cloudflare</body></html>`)),
+			Header:     make(http.Header),
+		}, nil
+	}}}
+
+	_, err := svc.fetchGeckoTokenPrices("bsc", []string{"0x1111111111111111111111111111111111111111"})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	httpErr, ok := err.(*ProviderHTTPError)
+	if !ok {
+		t.Fatalf("expected ProviderHTTPError, got %T (%v)", err, err)
+	}
+	if strings.Contains(strings.ToLower(httpErr.Body), "<html") || strings.Contains(strings.ToLower(httpErr.Body), "cloudflare") {
+		t.Fatalf("expected sanitized provider body, got %q", httpErr.Body)
+	}
+	if httpErr.Body != "upstream gateway timeout" {
+		t.Fatalf("unexpected body: %q", httpErr.Body)
+	}
+}
+
 func TestGetTokenMarketDataUsesDexScreenerLargestLiquidityPair(t *testing.T) {
 	svc := NewTokenPriceService()
 	token := "0x1111111111111111111111111111111111111111"
