@@ -78,6 +78,47 @@ remove_container() {
   fi
 }
 
+print_docker_network_repair_hint() {
+  cat >&2 <<EOF
+
+Docker port publishing is not ready. This is usually caused by missing Docker
+iptables chains after firewall/iptables rules were changed.
+
+Run on the server:
+  sudo systemctl restart docker
+  docker rm -f ${BOT_CONTAINER_NAME} ${WEBAPP_CONTAINER_NAME} ${MINIAPP_CONTAINER_NAME} 2>/dev/null || true
+  ${0}
+
+If it still fails, check:
+  sudo iptables -t filter -L DOCKER -n
+  sudo iptables -t nat -L DOCKER -n
+  cat /etc/docker/daemon.json 2>/dev/null
+
+EOF
+}
+
+ensure_docker_port_publish_ready() {
+  docker info >/dev/null
+
+  if [ "${SKIP_DOCKER_IPTABLES_PREFLIGHT:-0}" = "1" ]; then
+    return
+  fi
+  if [ "$(id -u)" -ne 0 ] || ! command -v iptables >/dev/null 2>&1; then
+    return
+  fi
+
+  if ! iptables -t filter -S DOCKER >/dev/null 2>&1; then
+    echo "ERROR: iptables filter/DOCKER chain is missing." >&2
+    print_docker_network_repair_hint
+    exit 1
+  fi
+  if ! iptables -t nat -S DOCKER >/dev/null 2>&1; then
+    echo "ERROR: iptables nat/DOCKER chain is missing." >&2
+    print_docker_network_repair_hint
+    exit 1
+  fi
+}
+
 start_bot() {
   if [ ! -f "${ENV_FILE_HOST_PATH}" ]; then
     echo "ERROR: env file not found: ${ENV_FILE_HOST_PATH}" >&2
@@ -85,13 +126,17 @@ start_bot() {
     exit 1
   fi
 
-  docker run -d \
+  if ! docker run -d \
     --name "${BOT_CONTAINER_NAME}" \
     --restart unless-stopped \
     --network "${NETWORK_NAME}" \
     -p "${BOT_HOST_PORT}:${BOT_CONTAINER_PORT}" \
     -v "${ENV_FILE_HOST_PATH}:${ENV_FILE_CONTAINER_PATH}:ro" \
-    "${BOT_IMAGE}"
+    "${BOT_IMAGE}"; then
+    echo "ERROR: failed to start backend container: ${BOT_CONTAINER_NAME}" >&2
+    print_docker_network_repair_hint
+    exit 1
+  fi
 }
 
 start_frontend() {
@@ -101,17 +146,22 @@ start_frontend() {
   local container_port="$4"
   local backend_upstream="$5"
 
-  docker run -d \
+  if ! docker run -d \
     --name "${name}" \
     --restart unless-stopped \
     --network "${NETWORK_NAME}" \
     -p "${host_port}:${container_port}" \
     -e "BACKEND_UPSTREAM=${backend_upstream}" \
-    "${image}"
+    "${image}"; then
+    echo "ERROR: failed to start frontend container: ${name}" >&2
+    print_docker_network_repair_hint
+    exit 1
+  fi
 }
 
 echo "[1/5] Ensure Docker network: ${NETWORK_NAME}"
 ensure_network
+ensure_docker_port_publish_ready
 
 echo "[2/5] Pull latest images"
 pull_image "${BOT_IMAGE}"
