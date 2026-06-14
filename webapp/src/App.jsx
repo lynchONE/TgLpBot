@@ -737,6 +737,7 @@ const HOT_POOLS_FILTER_DEFAULTS = {
   maxFeeRate: null,
   minActiveFeeRate: null,
   minTvl: 1000,
+  minMarketCap: null,
   minVolume: 2000,
   minTxCount: null,
 };
@@ -779,6 +780,33 @@ function parseMetricNumber(value) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function resolveHotPoolMarketCap(pool) {
+  return parseMetricNumber(pool?.market_cap_usd);
+}
+
+function resolveHotPoolMarketCapDisplay(pool) {
+  const candidates = [
+    pool?.market_cap_usd,
+    pool?.current_token_fdv_usd,
+    pool?.fdv_usd,
+  ];
+  for (const candidate of candidates) {
+    const value = parseMetricNumber(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return NaN;
+}
+
+function resolveHotPoolMarketCapLabel(pool) {
+  const marketCap = parseMetricNumber(pool?.market_cap_usd);
+  if (Number.isFinite(marketCap) && marketCap > 0) return '市值';
+  const fdv = parseMetricNumber(pool?.current_token_fdv_usd);
+  if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
+  const legacyFDV = parseMetricNumber(pool?.fdv_usd);
+  if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
+  return '市值';
+}
+
 function normalizeHotPoolsFilter(value) {
   const base = { ...defaultHotPoolsFilter };
   if (!value || typeof value !== 'object') return base;
@@ -806,6 +834,9 @@ function normalizeHotPoolsFilter(value) {
   }
   if (Object.prototype.hasOwnProperty.call(value, 'minTvl')) {
     base.minTvl = parseNullableNumber(value.minTvl);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'minMarketCap')) {
+    base.minMarketCap = parseNullableNumber(value.minMarketCap);
   }
   if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
     base.minVolume = parseNullableNumber(value.minVolume);
@@ -857,6 +888,7 @@ function buildHotPoolsFilterDraft(filter) {
     maxFeeRate: formatDraftNumber(filter?.maxFeeRate),
     minActiveFeeRate: formatDraftNumber(filter?.minActiveFeeRate),
     minTvl: formatDraftNumber(filter?.minTvl),
+    minMarketCap: formatDraftNumber(filter?.minMarketCap),
     minVolume: formatDraftNumber(filter?.minVolume),
     minTxCount: formatDraftNumber(filter?.minTxCount),
   };
@@ -1141,6 +1173,7 @@ export default function App() {
       hotPoolsFilter.maxFeeRate,
       hotPoolsFilter.minActiveFeeRate,
       hotPoolsFilter.minTvl,
+      hotPoolsFilter.minMarketCap,
       hotPoolsFilter.minVolume,
       hotPoolsFilter.minTxCount,
     ].some((value) => Number.isFinite(value));
@@ -1197,6 +1230,7 @@ export default function App() {
     const maxFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.maxFeeRate : null;
     const minActiveFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.minActiveFeeRate : null;
     const minTvl = hotPoolsFilterEnabled ? hotPoolsFilter.minTvl : null;
+    const minMarketCap = hotPoolsFilterEnabled ? hotPoolsFilter.minMarketCap : null;
     const minVolume = hotPoolsFilterEnabled ? hotPoolsFilter.minVolume : null;
     const minTxCount = hotPoolsFilterEnabled ? hotPoolsFilter.minTxCount : null;
     const riskFilter = hotPoolsFilterEnabled
@@ -1243,12 +1277,14 @@ export default function App() {
 
         const activeFeeRate = computeHotPoolActiveFeeRate(row);
         const tvl = parseMetricNumber(row?.current_pool_value);
+        const marketCap = resolveHotPoolMarketCap(row);
         const volume = parseMetricNumber(row?.total_volume);
         const txCount = parseMetricNumber(row?.transaction_count);
         if (Number.isFinite(minFees) && fees < minFees) return false;
         if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
         if (Number.isFinite(minActiveFeeRate) && (!Number.isFinite(activeFeeRate) || activeFeeRate < minActiveFeeRate)) return false;
         if (Number.isFinite(minTvl) && tvl < minTvl) return false;
+        if (Number.isFinite(minMarketCap) && (!Number.isFinite(marketCap) || marketCap < minMarketCap)) return false;
         if (Number.isFinite(minVolume) && volume < minVolume) return false;
         if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
         if (!hotPoolMatchesRiskFilter(row, riskFilter)) return false;
@@ -1525,6 +1561,7 @@ export default function App() {
       maxFeeRate: parseDraftNumber(hotPoolsFilterDraft.maxFeeRate),
       minActiveFeeRate: parseDraftNumber(hotPoolsFilterDraft.minActiveFeeRate),
       minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
+      minMarketCap: parseDraftNumber(hotPoolsFilterDraft.minMarketCap),
       minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
       minTxCount: parseDraftNumber(hotPoolsFilterDraft.minTxCount),
     });
@@ -1554,6 +1591,7 @@ export default function App() {
       maxFeeRate: null,
       minActiveFeeRate: null,
       minTvl: null,
+      minMarketCap: null,
       minVolume: null,
       minTxCount: null,
     });
@@ -1723,6 +1761,8 @@ export default function App() {
           limit: hotPoolsLimit,
           tokenAddress: hotTokenFilter?.address || '',
           includePools: hotTokenFilter?.address ? undefined : (hotPoolIncludeKey ? hotPoolIncludeKey.split(',') : undefined),
+          maxFeeRate: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.maxFeeRate) ? hotPoolsFilter.maxFeeRate : undefined,
+          minMarketCapUsd: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
           signal,
         });
         setHotPools(Array.isArray(resp?.data) ? resp.data : []);
@@ -1733,7 +1773,7 @@ export default function App() {
         setHotPoolsLoading(false);
       }
     },
-    [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotPoolsLimit, hotSort, hotTokenFilter?.address, initData]
+    [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotPoolsFilter.maxFeeRate, hotPoolsFilter.minMarketCap, hotPoolsFilterEnabled, hotPoolsLimit, hotSort, hotTokenFilter?.address, initData]
   );
 
   const loadNewsFeeds = useCallback(
@@ -2770,6 +2810,16 @@ export default function App() {
                 </label>
 
                 <label className="kline-filter-field">
+                  <span>市值 ≥ (USD)</span>
+                  <input
+                    value={hotPoolsFilterDraft.minMarketCap}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minMarketCap: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder="可选"
+                  />
+                </label>
+
+                <label className="kline-filter-field">
                   <span>交易量 ≥ (USD)</span>
                   <input
                     value={hotPoolsFilterDraft.minVolume}
@@ -2855,6 +2905,9 @@ export default function App() {
               const volume = Number(pool?.total_volume || 0);
               const totalFees = Number(pool?.total_fees || 0);
               const tvl = Number(pool?.current_pool_value || 0);
+              const marketCap = resolveHotPoolMarketCapDisplay(pool);
+              const marketCapLabel = resolveHotPoolMarketCapLabel(pool);
+              const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
               const activeLiquidityFeeRate = computeHotPoolActiveFeeRate(pool);
               const txCount = Number(pool?.transaction_count || 0);
               const priceDisplay = String(pool?.price_display || '');
@@ -2989,6 +3042,15 @@ export default function App() {
                         <span>TVL</span>
                         <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b>
                       </button>
+                      {marketCapAvailable ? (
+                        <>
+                          <span className="dot-sep" />
+                          <span className="pool-meta-static meta-green">
+                            <span>{marketCapLabel}</span>
+                            <b><NumberFlowValue value={marketCap} formatter={(v) => formatUsdCompact(v)} /></b>
+                          </span>
+                        </>
+                      ) : null}
                       <span className="dot-sep" />
                       <button
                         type="button"

@@ -189,6 +189,9 @@ export function OpenPositionPrecheckPanel({
 export function OpenPositionEntrySwapPreviewPanel({
     loading,
     preview,
+    slippage,
+    brand,
+    onSlippageChange,
 }) {
     if (!loading && !preview?.required) return null;
 
@@ -200,17 +203,35 @@ export function OpenPositionEntrySwapPreviewPanel({
                     正在获取前置兑换预览...
                 </div>
             ) : preview?.required ? (
-                <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-600 dark:text-amber-300"><path d="M7 17l5-5-5-5M13 17l5-5-5-5"/></svg>
-                        <span className="text-[11px] font-bold text-amber-700 dark:text-amber-200">需要前置兑换</span>
-                        <span className="truncate text-[11px] text-zinc-600 dark:text-white/60">
-                            {preview?.amount_in || '--'} {preview?.from_token_symbol || ''} → <span className="font-semibold text-zinc-900 dark:text-white/90">{preview?.expected_amount_out || '--'} {preview?.to_token_symbol || ''}</span>
+                <div>
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-600 dark:text-amber-300"><path d="M7 17l5-5-5-5M13 17l5-5-5-5"/></svg>
+                            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-200">需要前置兑换</span>
+                            <span className="truncate text-[11px] text-zinc-600 dark:text-white/60">
+                                {preview?.amount_in || '--'} {preview?.from_token_symbol || ''} → <span className="font-semibold text-zinc-900 dark:text-white/90">{preview?.expected_amount_out || '--'} {preview?.to_token_symbol || ''}</span>
+                            </span>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
+                            建议滑点 {Number(preview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
                         </span>
                     </div>
-                    <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
-                        建议滑点 {Number(preview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
-                    </span>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                        <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-200">本次前置兑换滑点</span>
+                        <label className="relative w-28">
+                            <input
+                                type="number"
+                                value={slippage ?? ''}
+                                onChange={(event) => onSlippageChange?.(event.target.value)}
+                                min="0"
+                                step="0.1"
+                                inputMode="decimal"
+                                className={`h-8 w-full rounded-xl border border-amber-500/25 bg-white/70 py-1 pl-3 pr-7 text-right text-xs font-semibold tabular-nums text-zinc-900 shadow-sm outline-none ring-0 ${brand.inputFocusClass} dark:border-amber-400/20 dark:bg-white/5 dark:text-white/90`}
+                                placeholder="0.1"
+                            />
+                            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-zinc-500 dark:text-white/45">%</span>
+                        </label>
+                    </div>
                 </div>
             ) : null}
         </div>

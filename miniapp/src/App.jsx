@@ -88,6 +88,7 @@ import {
     normalizeHotPoolsRiskFilter,
     parseDraftNumber,
     parseMetricNumber,
+    resolveHotPoolMarketCap,
 } from './features/hotPools/filter';
 import { buildGmgnUrl } from './features/pools/gmgn';
 import { comparePositionsByCreatedAt } from './features/positions/sort';
@@ -209,8 +210,10 @@ export default function App() {
         riskFilter: defaultHotPoolsFilter.riskFilter,
         minFees: String(defaultHotPoolsFilter.minFees),
         minFeeRate: String(defaultHotPoolsFilter.minFeeRate),
+        maxFeeRate: formatDraftNumber(defaultHotPoolsFilter.maxFeeRate),
         minActiveFeeRate: formatDraftNumber(defaultHotPoolsFilter.minActiveFeeRate),
         minTvl: String(defaultHotPoolsFilter.minTvl),
+        minMarketCap: formatDraftNumber(defaultHotPoolsFilter.minMarketCap),
         minVolume: String(defaultHotPoolsFilter.minVolume),
         minTxCount: formatDraftNumber(defaultHotPoolsFilter.minTxCount),
     }));
@@ -913,7 +916,16 @@ export default function App() {
         if (!hotPoolsFilter.enabled) return false;
         const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
         const hasRiskFilter = normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter) !== HOT_POOLS_RISK_FILTER_ALL;
-        const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minActiveFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume, hotPoolsFilter.minTxCount].some((v) => Number.isFinite(v));
+        const hasNumbers = [
+            hotPoolsFilter.minFees,
+            hotPoolsFilter.minFeeRate,
+            hotPoolsFilter.maxFeeRate,
+            hotPoolsFilter.minActiveFeeRate,
+            hotPoolsFilter.minTvl,
+            hotPoolsFilter.minMarketCap,
+            hotPoolsFilter.minVolume,
+            hotPoolsFilter.minTxCount,
+        ].some((v) => Number.isFinite(v));
         return hasKeyword || hasRiskFilter || hasNumbers;
     }, [hotPoolsFilter]);
 
@@ -922,8 +934,10 @@ export default function App() {
         if (hotPoolsFilterEnabled) {
             const minFees = hotPoolsFilter.minFees;
             const minFeeRate = hotPoolsFilter.minFeeRate;
+            const maxFeeRate = hotPoolsFilter.maxFeeRate;
             const minActiveFeeRate = hotPoolsFilter.minActiveFeeRate;
             const minTvl = hotPoolsFilter.minTvl;
+            const minMarketCap = hotPoolsFilter.minMarketCap;
             const minVolume = hotPoolsFilter.minVolume;
             const minTxCount = hotPoolsFilter.minTxCount;
             const riskFilter = normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter);
@@ -933,10 +947,9 @@ export default function App() {
                 const feeRate = parseMetricNumber(row?.fee_rate);
                 const activeFeeRate = computeHotPoolActiveFeeRate(row);
                 const tvl = parseMetricNumber(row?.current_pool_value);
+                const marketCap = resolveHotPoolMarketCap(row);
                 const volume = parseMetricNumber(row?.total_volume);
                 const txCount = parseMetricNumber(row?.transaction_count);
-                const poolAddr = String(row?.pool_address || '').toLowerCase();
-                if (positionsPoolMap.has(poolAddr)) return true;
                 if (keyword) {
                     const pair = String(row?.trading_pair || '').toLowerCase();
                     const addr = String(row?.pool_address || '').toLowerCase();
@@ -947,8 +960,10 @@ export default function App() {
                 }
                 if (Number.isFinite(minFees) && fees < minFees) return false;
                 if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
+                if (Number.isFinite(maxFeeRate) && (!Number.isFinite(feeRate) || feeRate > maxFeeRate)) return false;
                 if (Number.isFinite(minActiveFeeRate) && (!Number.isFinite(activeFeeRate) || activeFeeRate < minActiveFeeRate)) return false;
                 if (Number.isFinite(minTvl) && tvl < minTvl) return false;
+                if (Number.isFinite(minMarketCap) && (!Number.isFinite(marketCap) || marketCap < minMarketCap)) return false;
                 if (Number.isFinite(minVolume) && volume < minVolume) return false;
                 if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
                 if (!hotPoolMatchesRiskFilter(row, riskFilter)) return false;
@@ -1159,8 +1174,10 @@ export default function App() {
             riskFilter: normalizeHotPoolsRiskFilter(hotPoolsFilter.riskFilter),
             minFees: formatDraftNumber(hotPoolsFilter.minFees),
             minFeeRate: formatDraftNumber(hotPoolsFilter.minFeeRate),
+            maxFeeRate: formatDraftNumber(hotPoolsFilter.maxFeeRate),
             minActiveFeeRate: formatDraftNumber(hotPoolsFilter.minActiveFeeRate),
             minTvl: formatDraftNumber(hotPoolsFilter.minTvl),
+            minMarketCap: formatDraftNumber(hotPoolsFilter.minMarketCap),
             minVolume: formatDraftNumber(hotPoolsFilter.minVolume),
             minTxCount: formatDraftNumber(hotPoolsFilter.minTxCount),
         });
@@ -1338,6 +1355,8 @@ export default function App() {
                     timeframeMinutes: 5,
                     limit: 20,
                     includePools: positionsPoolAddresses,
+                    maxFeeRate: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.maxFeeRate) ? hotPoolsFilter.maxFeeRate : undefined,
+                    minMarketCapUsd: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
                     signal: controller.signal,
                 });
                 if (aborted) return;
@@ -1374,7 +1393,7 @@ export default function App() {
             controller.abort();
             if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
         };
-    }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(','), multiChainEnabled, userDefaultChain]);
+    }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(','), multiChainEnabled, userDefaultChain, hotPoolsFilterEnabled, hotPoolsFilter.maxFeeRate, hotPoolsFilter.minMarketCap]);
 
     const persistModulePollOverrides = useCallback((next) => {
         storage.set(STORAGE_MODULE_POLL_SECS, JSON.stringify(next));
@@ -1433,8 +1452,10 @@ export default function App() {
             riskFilter: hotPoolsFilterDraft.riskFilter,
             minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
+            maxFeeRate: parseDraftNumber(hotPoolsFilterDraft.maxFeeRate),
             minActiveFeeRate: parseDraftNumber(hotPoolsFilterDraft.minActiveFeeRate),
             minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
+            minMarketCap: parseDraftNumber(hotPoolsFilterDraft.minMarketCap),
             minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
             minTxCount: parseDraftNumber(hotPoolsFilterDraft.minTxCount),
         });
@@ -1456,8 +1477,10 @@ export default function App() {
             riskFilter: HOT_POOLS_RISK_FILTER_ALL,
             minFees: null,
             minFeeRate: null,
+            maxFeeRate: null,
             minActiveFeeRate: null,
             minTvl: null,
+            minMarketCap: null,
             minVolume: null,
             minTxCount: null,
         });
@@ -3255,6 +3278,16 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">费率 &lt;= (%)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.maxFeeRate}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, maxFeeRate: e.target.value }))}
+                                                inputMode="decimal"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder="留空"
+                                            />
+                                        </div>
+                                        <div>
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">活跃费率 &gt;= (%)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minActiveFeeRate}
@@ -3272,6 +3305,16 @@ export default function App() {
                                                 inputMode="decimal"
                                                 className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minTvl)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">市值 &gt;= (USD)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minMarketCap}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minMarketCap: e.target.value }))}
+                                                inputMode="decimal"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder="留空"
                                             />
                                         </div>
                                         <div>
@@ -3961,6 +4004,13 @@ export default function App() {
                             <OpenPositionEntrySwapPreviewPanel
                                 loading={openPositionEntrySwapPreviewLoading}
                                 preview={openPositionEntrySwapPreview}
+                                slippage={openPositionEntrySwapSlippage}
+                                brand={brand}
+                                onSlippageChange={(value) => {
+                                    setOpenPositionEntrySwapSlippageDirty(true);
+                                    setOpenPositionEntrySwapSlippage(value);
+                                    setOpenPositionError('');
+                                }}
                             />
 
                             {/* footer action rendered above */}

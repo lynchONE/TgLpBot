@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"TgLpBot/base/models"
+	"context"
 	"testing"
 	"time"
 )
@@ -35,7 +36,7 @@ func TestBuildPoolCatalogResponseFiltersLowLiquidityPools(t *testing.T) {
 		},
 	}
 
-	resp := buildPoolCatalogResponse(rows, poolCatalogOptions{
+	resp := (&Server{}).buildPoolCatalogResponse(context.Background(), rows, poolCatalogOptions{
 		Chain:            "bsc",
 		Sort:             "fees",
 		TimeframeMinutes: 5,
@@ -47,5 +48,20 @@ func TestBuildPoolCatalogResponseFiltersLowLiquidityPools(t *testing.T) {
 	}
 	if resp.Data[0].PoolAddress != "0x2222222222222222222222222222222222222222" {
 		t.Fatalf("unexpected pool left after filtering: %s", resp.Data[0].PoolAddress)
+	}
+}
+
+func TestPoolCatalogPickMarketCapTokenExcludesQuoteToken(t *testing.T) {
+	t.Parallel()
+
+	addr, symbol := poolCatalogPickMarketCapToken("bsc", HotPoolResponse{
+		Token0Address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+		Token0Symbol:  "WBNB",
+		Token1Address: "0x1111111111111111111111111111111111111111",
+		Token1Symbol:  "AAA",
+	})
+
+	if addr != "0x1111111111111111111111111111111111111111" || symbol != "AAA" {
+		t.Fatalf("market cap token = %s/%s, want AAA token", addr, symbol)
 	}
 }

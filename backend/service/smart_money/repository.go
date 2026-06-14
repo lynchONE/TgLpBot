@@ -1761,6 +1761,12 @@ type PoolAggRow struct {
 	DisplayTokenAddress    string           `json:"display_token_address,omitempty"`
 	DisplayTokenSymbol     string           `json:"display_token_symbol,omitempty"`
 	DisplayTokenLogoURL    string           `json:"display_token_logo_url,omitempty"`
+	MarketCapUSD           float64          `json:"market_cap_usd,omitempty"`
+	FDVUSD                 float64          `json:"fdv_usd,omitempty"`
+	CurrentTokenFDVUSD     float64          `json:"current_token_fdv_usd,omitempty"`
+	MarketCapTokenAddress  string           `json:"market_cap_token_address,omitempty"`
+	MarketCapTokenSymbol   string           `json:"market_cap_token_symbol,omitempty"`
+	MarketCapProvider      string           `json:"market_cap_provider,omitempty"`
 	TotalPositionAmountUSD float64          `json:"total_position_amount_usd"`
 	RangeGroups            []PoolRangeGroup `gorm:"-" json:"range_groups,omitempty"`
 }
@@ -1787,6 +1793,12 @@ type PoolFeeHeatmapRow struct {
 	DisplayTokenAddress       string    `json:"display_token_address,omitempty"`
 	DisplayTokenSymbol        string    `json:"display_token_symbol,omitempty"`
 	DisplayTokenLogoURL       string    `json:"display_token_logo_url,omitempty"`
+	MarketCapUSD              float64   `json:"market_cap_usd,omitempty"`
+	FDVUSD                    float64   `json:"fdv_usd,omitempty"`
+	CurrentTokenFDVUSD        float64   `json:"current_token_fdv_usd,omitempty"`
+	MarketCapTokenAddress     string    `json:"market_cap_token_address,omitempty"`
+	MarketCapTokenSymbol      string    `json:"market_cap_token_symbol,omitempty"`
+	MarketCapProvider         string    `json:"market_cap_provider,omitempty"`
 	TotalPositionAmountUSD    float64   `json:"total_position_amount_usd"`
 	FeeUSD                    float64   `json:"fee_usd"`
 	ProjectedFeeUSD           float64   `json:"projected_fee_usd"`
@@ -2197,6 +2209,12 @@ type PoolStats struct {
 	DisplayTokenAddress    string           `json:"display_token_address,omitempty"`
 	DisplayTokenSymbol     string           `json:"display_token_symbol,omitempty"`
 	DisplayTokenLogoURL    string           `json:"display_token_logo_url,omitempty"`
+	MarketCapUSD           float64          `json:"market_cap_usd,omitempty"`
+	FDVUSD                 float64          `json:"fdv_usd,omitempty"`
+	CurrentTokenFDVUSD     float64          `json:"current_token_fdv_usd,omitempty"`
+	MarketCapTokenAddress  string           `json:"market_cap_token_address,omitempty"`
+	MarketCapTokenSymbol   string           `json:"market_cap_token_symbol,omitempty"`
+	MarketCapProvider      string           `json:"market_cap_provider,omitempty"`
 	RangeGroups            []PoolRangeGroup `gorm:"-" json:"range_groups,omitempty"`
 }
 

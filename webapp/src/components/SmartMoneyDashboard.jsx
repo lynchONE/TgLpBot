@@ -185,8 +185,42 @@ function formatOptionalNumber(value) {
     return Number.isFinite(value) ? String(value) : '';
 }
 
+function parseMetricNumber(value) {
+    if (value === null || value === undefined || value === '') return NaN;
+    const raw = typeof value === 'string' ? value.replace(/,/g, '').trim() : value;
+    const direct = Number(raw);
+    if (Number.isFinite(direct)) return direct;
+    const match = String(value).match(/-?\d+(\.\d+)?/);
+    if (!match) return NaN;
+    const parsed = Number(match[0]);
+    return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function resolveSmartMoneyPoolMarketCapDisplay(pool) {
+    const candidates = [
+        pool?.market_cap_usd,
+        pool?.current_token_fdv_usd,
+        pool?.fdv_usd,
+    ];
+    for (const candidate of candidates) {
+        const value = parseMetricNumber(candidate);
+        if (Number.isFinite(value) && value > 0) return value;
+    }
+    return NaN;
+}
+
+function resolveSmartMoneyPoolMarketCapLabel(pool) {
+    const marketCap = parseMetricNumber(pool?.market_cap_usd);
+    if (Number.isFinite(marketCap) && marketCap > 0) return '市值';
+    const fdv = parseMetricNumber(pool?.current_token_fdv_usd);
+    if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
+    const legacyFDV = parseMetricNumber(pool?.fdv_usd);
+    if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
+    return '市值';
+}
+
 const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
-const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
+const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null, minMarketCapUsd: null };
 const SMART_MONEY_POOL_SOURCE_TABS = [
     { key: 'all', label: '全部', source: '' },
     { key: 'manual', label: '手动添加', source: 'manual' },
@@ -203,6 +237,7 @@ function normalizeStoredSmartMoneyPoolFilter(value) {
     return {
         minSmartMoneyUsd: Number.isFinite(Number(value.minSmartMoneyUsd)) ? Number(value.minSmartMoneyUsd) : null,
         maxFeeRate: Number.isFinite(Number(value.maxFeeRate)) ? Number(value.maxFeeRate) : null,
+        minMarketCapUsd: Number.isFinite(Number(value.minMarketCapUsd)) ? Number(value.minMarketCapUsd) : null,
     };
 }
 
@@ -225,7 +260,9 @@ function writeStoredSmartMoneyPoolFilter(value) {
     }
     try {
         const normalized = normalizeStoredSmartMoneyPoolFilter(value);
-        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd) && !Number.isFinite(normalized.maxFeeRate);
+        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd)
+            && !Number.isFinite(normalized.maxFeeRate)
+            && !Number.isFinite(normalized.minMarketCapUsd);
         if (isEmpty) {
             window.localStorage.removeItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
             return;
@@ -1662,7 +1699,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     const [page, setPage] = useState(1);
     const [filterOpen, setFilterOpen] = useState(false);
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
-    const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
+    const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '', minMarketCapUsd: '' });
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const sourceFilter = SMART_MONEY_POOL_SOURCE_BY_KEY[sourceScope];
@@ -1690,6 +1727,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             source: sourceFilter,
             minSmartMoneyUsd: poolFilter.minSmartMoneyUsd,
             maxFeeRate: poolFilter.maxFeeRate,
+            minMarketCapUsd: poolFilter.minMarketCapUsd,
         })
             .then((d) => {
                 if (seq !== loadSeqRef.current) return;
@@ -1718,7 +1756,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) setLoading(false);
             });
-    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceFilter]);
+    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceFilter]);
 
     useEffect(() => {
         loadPools();
@@ -1733,35 +1771,39 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
 
     useEffect(() => {
         setPage(1);
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceScope]);
+    }, [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceScope]);
 
     const poolFilterActive = useMemo(
-        () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
-        [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]
+        () => Number.isFinite(poolFilter.minSmartMoneyUsd)
+            || Number.isFinite(poolFilter.maxFeeRate)
+            || Number.isFinite(poolFilter.minMarketCapUsd),
+        [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd]
     );
     const hasFilter = Boolean(searchKeyword) || proto !== 'all' || sourceScope !== 'all' || poolFilterActive;
     const openPoolFilter = useCallback(() => {
         setPoolFilterDraft({
             minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
             maxFeeRate: formatOptionalNumber(poolFilter.maxFeeRate),
+            minMarketCapUsd: formatOptionalNumber(poolFilter.minMarketCapUsd),
         });
         setFilterOpen((prev) => !prev);
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]);
+    }, [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd]);
     const applyPoolFilter = useCallback(() => {
         const next = {
             minSmartMoneyUsd: parseOptionalNumber(poolFilterDraft.minSmartMoneyUsd),
             maxFeeRate: parseOptionalNumber(poolFilterDraft.maxFeeRate),
+            minMarketCapUsd: parseOptionalNumber(poolFilterDraft.minMarketCapUsd),
         };
         setPoolFilter(next);
         writeStoredSmartMoneyPoolFilter(next);
         setFilterOpen(false);
         setPage(1);
-    }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minSmartMoneyUsd]);
+    }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minMarketCapUsd, poolFilterDraft.minSmartMoneyUsd]);
     const clearPoolFilter = useCallback(() => {
-        const next = { minSmartMoneyUsd: null, maxFeeRate: null };
+        const next = { ...EMPTY_SMART_MONEY_POOL_FILTER };
         setPoolFilter(next);
         writeStoredSmartMoneyPoolFilter(next);
-        setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '' });
+        setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '', minMarketCapUsd: '' });
         setFilterOpen(false);
         setPage(1);
     }, []);
@@ -1862,6 +1904,16 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                     />
                                 </label>
 
+                                <label className="kline-filter-field">
+                                    <span>市值 ≥ (USD)</span>
+                                    <input
+                                        value={poolFilterDraft.minMarketCapUsd}
+                                        onChange={(e) => setPoolFilterDraft((prev) => ({ ...prev, minMarketCapUsd: e.target.value }))}
+                                        inputMode="decimal"
+                                        placeholder="可选"
+                                    />
+                                </label>
+
                                 <div className="kline-filter-actions">
                                     <button type="button" className="ghost-chip active" onClick={applyPoolFilter}>
                                         应用
@@ -1887,6 +1939,9 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                     <div className="smd-pool-cards">
                         {pools.map((p) => {
                             const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
+                            const marketCap = resolveSmartMoneyPoolMarketCapDisplay(p);
+                            const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel(p);
+                            const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
                             return (
                                 <div
                                     key={p.pool_address}
@@ -1912,6 +1967,11 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                         {p.total_position_amount_usd > 0 && (
                                             <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
                                         )}
+                                        {marketCapAvailable ? (
+                                            <span className="smd-pool-card-tvl smd-pool-card-market-cap">
+                                                {marketCapLabel} {formatUSDCompact(marketCap)}
+                                            </span>
+                                        ) : null}
                                     </div>
                                     <div className="smd-pool-card-range-row">
                                         <PoolCardRangeSummary pool={p} />
@@ -2182,6 +2242,9 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect
     const intensity = maxIntensity > 0 ? Math.max(0.08, Math.min(1, metricValue / maxIntensity)) : 0.08;
     const reliable = String(row?.sample_status || '') === 'ok';
     const partial = String(row?.sample_status || '') === 'partial';
+    const marketCap = resolveSmartMoneyPoolMarketCapDisplay(row);
+    const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel(row);
+    const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
     return (
         <div className="smd-heatmap-card" onClick={() => onSelect?.(row)}>
             <div className="smd-heatmap-card-rail" style={{ opacity: 0.2 + intensity * 0.75 }} />
@@ -2212,6 +2275,7 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect
                 <span>{row.wallet_count} 钱包</span>
                 <span>{row.open_position_count} 仓位</span>
                 <span>仓位 {formatHeatmapUSD(row.total_position_amount_usd)}</span>
+                {marketCapAvailable ? <span>{marketCapLabel} {formatUSDCompact(marketCap)}</span> : null}
                 <span>均龄 {formatHeatmapAge(row.average_position_age_seconds)}</span>
             </div>
             <div className="smd-heatmap-foot">
@@ -2332,6 +2396,9 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
         setSelectedPosition(null);
     }, [positions, selectedPosition]);
     const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
+    const statsMarketCap = resolveSmartMoneyPoolMarketCapDisplay(stats || pool);
+    const statsMarketCapLabel = resolveSmartMoneyPoolMarketCapLabel(stats || pool);
+    const statsMarketCapAvailable = Number.isFinite(statsMarketCap) && statsMarketCap > 0;
 
     return (
         <div>
@@ -2373,6 +2440,9 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                     <StatCard label="钱包数" value={stats.wallet_count} />
                     <StatCard label="持仓笔数" value={stats.open_position_count} />
                     <StatCard label="今日关闭" value={stats.closed_today_count} color="red" />
+                    {statsMarketCapAvailable ? (
+                        <StatCard label={statsMarketCapLabel} value={formatUSDCompact(statsMarketCap)} />
+                    ) : null}
                 </div>
             )}
 

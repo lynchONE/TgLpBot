@@ -3,10 +3,12 @@ package web_server
 import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/pricing"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -24,9 +26,11 @@ type poolCatalogOptions struct {
 	TokenAddress     string
 	IncludePools     []string
 	Dexes            []string
+	MaxFeeRate       *float64
+	MinMarketCapUSD  *float64
 }
 
-func parsePoolCatalogOptions(r *http.Request) poolCatalogOptions {
+func parsePoolCatalogOptions(r *http.Request) (poolCatalogOptions, error) {
 	query := r.URL.Query()
 
 	chain := strings.ToLower(strings.TrimSpace(query.Get("chain")))
@@ -61,6 +65,23 @@ func parsePoolCatalogOptions(r *http.Request) poolCatalogOptions {
 		limit = 100
 	}
 
+	var maxFeeRate *float64
+	if raw := strings.TrimSpace(query.Get("max_fee_rate")); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return poolCatalogOptions{}, fmt.Errorf("invalid max_fee_rate")
+		}
+		maxFeeRate = &value
+	}
+	var minMarketCapUSD *float64
+	if raw := strings.TrimSpace(query.Get("min_market_cap_usd")); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return poolCatalogOptions{}, fmt.Errorf("invalid min_market_cap_usd")
+		}
+		minMarketCapUSD = &value
+	}
+
 	return poolCatalogOptions{
 		Chain:            chain,
 		Sort:             sortKey,
@@ -69,11 +90,16 @@ func parsePoolCatalogOptions(r *http.Request) poolCatalogOptions {
 		TokenAddress:     normalizeCatalogHex(query.Get("token_address")),
 		IncludePools:     normalizeCatalogHexList(query.Get("include_pools")),
 		Dexes:            splitCatalogCSV(query.Get("dex")),
-	}
+		MaxFeeRate:       maxFeeRate,
+		MinMarketCapUSD:  minMarketCapUSD,
+	}, nil
 }
 
 func buildPoolCatalogCacheKey(opts poolCatalogOptions) string {
 	if len(opts.IncludePools) > 0 || opts.TokenAddress != "" || len(opts.Dexes) > 0 {
+		return ""
+	}
+	if opts.MaxFeeRate != nil || opts.MinMarketCapUSD != nil {
 		return ""
 	}
 	return fmt.Sprintf(
@@ -94,8 +120,15 @@ func loadPoolCatalogRows(ctx context.Context, opts poolCatalogOptions) ([]models
 	if topLimit < 100 {
 		topLimit = 100
 	}
-	if topLimit > 500 {
-		topLimit = 500
+	if opts.MinMarketCapUSD != nil && topLimit < 1000 {
+		topLimit = 1000
+	}
+	maxTopLimit := 500
+	if opts.MinMarketCapUSD != nil {
+		maxTopLimit = 2000
+	}
+	if topLimit > maxTopLimit {
+		topLimit = maxTopLimit
 	}
 
 	topRows := make([]models.Pool, 0, topLimit)
@@ -174,7 +207,7 @@ type poolCatalogEnvelope struct {
 	Data                []HotPoolResponse `json:"data"`
 }
 
-func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) poolCatalogEnvelope {
+func (s *Server) buildPoolCatalogResponse(ctx context.Context, rows []models.Pool, opts poolCatalogOptions) poolCatalogEnvelope {
 	items := make([]HotPoolResponse, 0, len(rows))
 	var updatedAt time.Time
 	meta := poolCatalogEnvelope{
@@ -216,7 +249,22 @@ func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) poolC
 		if item.PoolAddress == "" {
 			continue
 		}
+		if opts.MaxFeeRate != nil && (!isFinitePositiveOrZero(item.FeeRate) || item.FeeRate > *opts.MaxFeeRate) {
+			continue
+		}
 		items = append(items, item)
+	}
+
+	s.enrichHotPoolMarketData(ctx, opts.Chain, items)
+	if opts.MinMarketCapUSD != nil {
+		filtered := items[:0]
+		for _, item := range items {
+			if sanitizeFloat(item.MarketCapUSD) < *opts.MinMarketCapUSD {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		items = filtered
 	}
 
 	sort.SliceStable(items, func(i, j int) bool {
@@ -261,6 +309,10 @@ func poolCatalogLiquidityUSD(row models.Pool) float64 {
 		return liq
 	}
 	return sanitizeFloat(row.ReserveInUSD)
+}
+
+func isFinitePositiveOrZero(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }
 
 func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolResponse {
@@ -324,7 +376,9 @@ func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolRespo
 		CurrentTokenPrice:       sanitizeFloat(firstPositiveFloat(row.CurrentTokenPrice, row.BaseTokenPriceUSD)),
 		PricedTokenAddress:      normalizeCatalogHex(row.PricedTokenAddress),
 		CurrentTokenTotalSupply: sanitizeFloat(row.CurrentTokenTotalSupply),
-		CurrentTokenFDVUSD:      sanitizeFloat(firstPositiveFloat(row.CurrentTokenFDVUSD, row.FDVUSD)),
+		CurrentTokenFDVUSD:      0,
+		MarketCapUSD:            0,
+		FDVUSD:                  0,
 		TokenSupplyUpdatedAt:    row.TokenSupplyUpdatedAt,
 		TickSpacing:             cloneCatalogInt(row.TickSpacing),
 		CurrentTick:             row.CurrentTick,
@@ -347,6 +401,53 @@ func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolRespo
 	}
 }
 
+func (s *Server) enrichHotPoolMarketData(ctx context.Context, chain string, items []HotPoolResponse) {
+	if s == nil || s.TokenPrice == nil || len(items) == 0 {
+		return
+	}
+
+	addresses := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for i := range items {
+		addr, symbol := poolCatalogPickMarketCapToken(chain, items[i])
+		items[i].MarketCapTokenAddress = addr
+		items[i].MarketCapTokenSymbol = symbol
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+	if len(addresses) == 0 {
+		return
+	}
+
+	data, err := s.TokenPrice.GetTokenMarketDataWithContext(ctx, chain, addresses)
+	if err != nil {
+		log.Printf("[Pools API] load realtime token market data failed chain=%s err=%v", chain, err)
+	}
+	if len(data) == 0 {
+		return
+	}
+	for i := range items {
+		addr := strings.ToLower(strings.TrimSpace(items[i].MarketCapTokenAddress))
+		if addr == "" {
+			continue
+		}
+		info, ok := data[addr]
+		if !ok {
+			continue
+		}
+		items[i].MarketCapUSD = sanitizeFloat(info.MarketCapUSD)
+		items[i].FDVUSD = sanitizeFloat(info.FDVUSD)
+		items[i].CurrentTokenFDVUSD = sanitizeFloat(info.FDVUSD)
+		items[i].MarketCapProvider = strings.TrimSpace(info.Provider)
+	}
+}
+
 var poolCatalogStableSymbols = map[string]struct{}{
 	"usdc":  {},
 	"usdt":  {},
@@ -366,6 +467,37 @@ var poolCatalogStableSymbols = map[string]struct{}{
 func poolCatalogStableLikeSymbol(symbol string) bool {
 	_, ok := poolCatalogStableSymbols[strings.ToLower(strings.TrimSpace(symbol))]
 	return ok
+}
+
+func poolCatalogQuoteLikeToken(chain string, address string, symbol string) bool {
+	if pricing.IsStableAddress(chain, address) || pricing.IsWrappedNativeAddress(chain, address) {
+		return true
+	}
+	return pricing.IsQuoteLikeSymbol(symbol)
+}
+
+func poolCatalogPickMarketCapToken(chain string, item HotPoolResponse) (string, string) {
+	leftAddress := normalizeCatalogHex(item.Token0Address)
+	rightAddress := normalizeCatalogHex(item.Token1Address)
+	leftSymbol := strings.TrimSpace(firstNonEmpty(item.Token0Symbol, poolCatalogPairSymbolsLeft(item.TradingPair)))
+	rightSymbol := strings.TrimSpace(firstNonEmpty(item.Token1Symbol, poolCatalogPairSymbolsRight(item.TradingPair)))
+
+	leftQuote := poolCatalogQuoteLikeToken(chain, leftAddress, leftSymbol)
+	rightQuote := poolCatalogQuoteLikeToken(chain, rightAddress, rightSymbol)
+	switch {
+	case leftQuote && !rightQuote:
+		return rightAddress, rightSymbol
+	case rightQuote && !leftQuote:
+		return leftAddress, leftSymbol
+	case !leftQuote && !rightQuote:
+		displayAddress := normalizeCatalogHex(item.DisplayTokenAddress)
+		if displayAddress != "" && displayAddress == rightAddress {
+			return rightAddress, rightSymbol
+		}
+		return leftAddress, leftSymbol
+	default:
+		return "", ""
+	}
 }
 
 func poolCatalogPairSymbols(pair string) (string, string) {

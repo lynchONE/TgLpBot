@@ -12,6 +12,10 @@ import {
     tokenRiskSummary,
     tokenRiskToneClass,
 } from '../lib/format';
+import {
+    resolveHotPoolMarketCapDisplay,
+    resolveHotPoolMarketCapLabel,
+} from '../features/hotPools/filter';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -457,6 +461,8 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const tvlValue = useMemo(() => Number(pool?.current_pool_value ?? 0), [pool?.current_pool_value]);
     const feeRateValue = useMemo(() => Number(pool?.fee_rate ?? 0), [pool?.fee_rate]);
     const totalFeesValue = useMemo(() => Number(pool?.total_fees ?? 0), [pool?.total_fees]);
+    const marketCapValue = useMemo(() => resolveHotPoolMarketCapDisplay(pool), [pool]);
+    const marketCapLabel = useMemo(() => resolveHotPoolMarketCapLabel(pool), [pool]);
     const activeLiquidityFeeRateValue = useMemo(
         () => computeActiveLiquidityFeeRate(pool),
         [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],
@@ -465,6 +471,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const tokenRisk = useMemo(() => normalizeTokenRisk(pool?.token_risk), [pool?.token_risk]);
     const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
     const showTVL = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0, [tvlValue]);
+    const showMarketCap = useMemo(() => Number.isFinite(marketCapValue) && marketCapValue > 0, [marketCapValue]);
     const feeRateAvailable = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0 && Number.isFinite(feeRateValue), [tvlValue, feeRateValue]);
     const activeLiquidityFeeRateAvailable = useMemo(() => Number.isFinite(activeLiquidityFeeRateValue), [activeLiquidityFeeRateValue]);
     const showTotalFees = useMemo(() => Number.isFinite(totalFeesValue) && totalFeesValue > 0, [totalFeesValue]);
@@ -573,6 +580,14 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                     previousValue={previousData?.current_pool_value}
                                     label="TVL变化"
                                 />
+                            </div>
+                        ) : null}
+                        {showMarketCap ? (
+                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                {marketCapLabel}:{' '}
+                                <span className="font-semibold text-emerald-700 dark:text-emerald-200 tabular-nums">
+                                    <NumberFlowValue value={marketCapValue} formatter={(v) => formatUsdCompact(v)} />
+                                </span>
                             </div>
                         ) : null}
                     </div>

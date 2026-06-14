@@ -41,6 +41,11 @@ type HotPoolResponse struct {
 	PricedTokenAddress      string          `json:"priced_token_address,omitempty"`
 	CurrentTokenTotalSupply float64         `json:"current_token_total_supply,omitempty"`
 	CurrentTokenFDVUSD      float64         `json:"current_token_fdv_usd,omitempty"`
+	MarketCapUSD            float64         `json:"market_cap_usd,omitempty"`
+	FDVUSD                  float64         `json:"fdv_usd,omitempty"`
+	MarketCapTokenAddress   string          `json:"market_cap_token_address,omitempty"`
+	MarketCapTokenSymbol    string          `json:"market_cap_token_symbol,omitempty"`
+	MarketCapProvider       string          `json:"market_cap_provider,omitempty"`
 	TokenSupplyUpdatedAt    *time.Time      `json:"token_supply_updated_at,omitempty"`
 	TickSpacing             *int            `json:"tick_spacing,omitempty"`
 	CurrentTick             int             `json:"current_tick,omitempty"`

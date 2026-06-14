@@ -53,7 +53,20 @@ func dexPriceResponse(chain string, token string, price string, liquidity string
 		Body: io.NopCloser(strings.NewReader(`[{"chainId":"` + chain +
 			`","baseToken":{"address":"` + strings.ToLower(token) +
 			`"},"priceUsd":"` + price +
-			`","liquidity":{"usd":` + liquidity + `}}]`)),
+			`","marketCap":12345,"fdv":23456` +
+			`,"liquidity":{"usd":` + liquidity + `}}]`)),
+		Header: make(http.Header),
+	}
+}
+
+func dexMarketDataResponse(chain string, token string) *http.Response {
+	token = strings.ToLower(token)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(`[` +
+			`{"chainId":"` + chain + `","baseToken":{"address":"` + token + `"},"marketCap":100,"fdv":200,"liquidity":{"usd":10}},` +
+			`{"chainId":"` + chain + `","baseToken":{"address":"` + token + `"},"marketCap":300,"fdv":400,"liquidity":{"usd":99}}` +
+			`]`)),
 		Header: make(http.Header),
 	}
 }
@@ -277,6 +290,34 @@ func TestFetchGeckoTokenPrices_ReturnsProviderHTTPError(t *testing.T) {
 	}
 	if httpErr.Status != http.StatusTooManyRequests {
 		t.Fatalf("expected status 429, got %d", httpErr.Status)
+	}
+}
+
+func TestGetTokenMarketDataUsesDexScreenerLargestLiquidityPair(t *testing.T) {
+	svc := NewTokenPriceService()
+	token := "0x1111111111111111111111111111111111111111"
+	calls := 0
+	svc.client = &http.Client{Transport: stubRoundTripper{fn: func(req *http.Request) (*http.Response, error) {
+		calls++
+		if !isDexScreenerTokenRequest(req) {
+			t.Fatalf("unexpected request url: %s", req.URL.String())
+		}
+		return dexMarketDataResponse("bsc", token), nil
+	}}}
+
+	data, err := svc.GetTokenMarketData("bsc", []string{token})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	got, ok := data[token]
+	if !ok {
+		t.Fatalf("expected market data for token, got %+v", data)
+	}
+	if got.MarketCapUSD != 300 || got.FDVUSD != 400 || got.Provider != tokenPriceProviderDexScreener {
+		t.Fatalf("unexpected market data: %+v", got)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one DexScreener request, got %d", calls)
 	}
 }
 

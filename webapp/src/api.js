@@ -86,6 +86,8 @@ export async function fetchHotPools({
   limit = 50,
   tokenAddress,
   includePools,
+  maxFeeRate,
+  minMarketCapUsd,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
@@ -97,6 +99,8 @@ export async function fetchHotPools({
     params.set('timeframe_minutes', String(timeframeMinutes));
   if (Number.isFinite(limit)) params.set('limit', String(limit));
   if (tokenAddress) params.set('token_address', String(tokenAddress));
+  if (Number.isFinite(maxFeeRate)) params.set('max_fee_rate', String(maxFeeRate));
+  if (Number.isFinite(minMarketCapUsd)) params.set('min_market_cap_usd', String(minMarketCapUsd));
   if (Array.isArray(includePools) && includePools.length > 0) {
     params.set('include_pools', includePools.join(','));
   }

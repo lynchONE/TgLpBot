@@ -117,6 +117,11 @@ func isQuoteLikeSymbol(sym string) bool {
 	return ok
 }
 
+// IsQuoteLikeSymbol exposes stable/wrapped-native quote symbol checks to other packages.
+func IsQuoteLikeSymbol(sym string) bool {
+	return isQuoteLikeSymbol(sym)
+}
+
 func isStableAddress(chain string, addr string) bool {
 	if config.AppConfig == nil {
 		return false
@@ -164,6 +169,11 @@ func isWrappedNativeAddress(chain string, addr string) bool {
 	addr = strings.ToLower(strings.TrimSpace(addr))
 	wrapped := strings.ToLower(strings.TrimSpace(cc.WrappedNativeAddress))
 	return wrapped != "" && common.IsHexAddress(wrapped) && addr == wrapped
+}
+
+// IsWrappedNativeAddress exposes wrapped-native address checks to other packages.
+func IsWrappedNativeAddress(chain string, addr string) bool {
+	return isWrappedNativeAddress(chain, addr)
 }
 
 const DefaultTokenDecimals = 18

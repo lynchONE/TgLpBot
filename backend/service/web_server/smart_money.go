@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/pricing"
 	sm "TgLpBot/service/smart_money"
 	smfollow "TgLpBot/service/smart_money_follow"
 	smgd "TgLpBot/service/smart_money_golden_dog"
@@ -932,6 +933,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			stats.Token0Symbol,
 			stats.Token1Symbol,
 		)
+		s.enrichSmartMoneyPoolStatsMarketData(ctx, stats)
 		stats.CurrentPrice, stats.PriceChange24h = loadSmartMoneyPoolMarketSnapshot(ctx, poolAddr)
 		applySmartMoneyDisplayToken(
 			smartMoneyChainSlug(stats.ChainID),
@@ -988,6 +990,17 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		maxFeeRate = value
 		hasMaxFeeRate = true
 	}
+	var minMarketCapUSD float64
+	hasMinMarketCapUSD := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("min_market_cap_usd")); raw != "" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			jsonError(w, "invalid min_market_cap_usd", http.StatusBadRequest)
+			return
+		}
+		minMarketCapUSD = value
+		hasMinMarketCapUSD = true
+	}
 
 	sqlStarted := time.Now()
 	pools, err := repo.ListPoolsWithPositions(ctx, source)
@@ -1005,6 +1018,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			pools[i].Token1Symbol,
 		)
 	}
+	s.enrichSmartMoneyPoolMarketData(ctx, pools)
 
 	filtered := make([]sm.PoolAggRow, 0, len(pools))
 	for _, pool := range pools {
@@ -1029,6 +1043,9 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			if feePercent > maxFeeRate {
 				continue
 			}
+		}
+		if hasMinMarketCapUSD && sanitizeFloat(pool.MarketCapUSD) < minMarketCapUSD {
+			continue
 		}
 		filtered = append(filtered, pool)
 	}
@@ -1147,6 +1164,7 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 		end = len(rows)
 	}
 	pagedRows := rows[start:end]
+	s.enrichSmartMoneyHeatmapMarketData(ctx, pagedRows)
 
 	addressesByChain := make(map[string][]string)
 	for i := range pagedRows {
@@ -1953,6 +1971,37 @@ func smartMoneyIsStableLikeSymbol(symbol string) bool {
 	return ok
 }
 
+func smartMoneyQuoteLikeToken(chain string, address string, symbol string) bool {
+	if pricing.IsStableAddress(chain, address) || pricing.IsWrappedNativeAddress(chain, address) {
+		return true
+	}
+	return pricing.IsQuoteLikeSymbol(symbol)
+}
+
+func smartMoneyPickMarketCapToken(chain string, token0Address string, token1Address string, token0Symbol string, token1Symbol string, displayTokenAddress string) (string, string) {
+	token0Address = smartMoneyNormalizeTokenAddress(token0Address)
+	token1Address = smartMoneyNormalizeTokenAddress(token1Address)
+	token0Symbol = strings.TrimSpace(token0Symbol)
+	token1Symbol = strings.TrimSpace(token1Symbol)
+
+	token0Quote := smartMoneyQuoteLikeToken(chain, token0Address, token0Symbol)
+	token1Quote := smartMoneyQuoteLikeToken(chain, token1Address, token1Symbol)
+	switch {
+	case token0Quote && !token1Quote:
+		return token1Address, token1Symbol
+	case token1Quote && !token0Quote:
+		return token0Address, token0Symbol
+	case !token0Quote && !token1Quote:
+		displayTokenAddress = smartMoneyNormalizeTokenAddress(displayTokenAddress)
+		if displayTokenAddress != "" && displayTokenAddress == token1Address {
+			return token1Address, token1Symbol
+		}
+		return token0Address, token0Symbol
+	default:
+		return "", ""
+	}
+}
+
 func smartMoneyPickDisplayToken(token0Address string, token1Address string, token0Symbol string, token1Symbol string) (string, string) {
 	token0Address = smartMoneyNormalizeTokenAddress(token0Address)
 	token1Address = smartMoneyNormalizeTokenAddress(token1Address)
@@ -2079,6 +2128,178 @@ func firstSmartMoneyDisplayToken(primaryAddress string, primarySymbol string, fa
 		return primaryAddress, primarySymbol
 	}
 	return fallbackAddress, fallbackSymbol
+}
+
+func (s *Server) enrichSmartMoneyPoolMarketData(ctx context.Context, pools []sm.PoolAggRow) {
+	if s == nil || s.TokenPrice == nil || len(pools) == 0 {
+		return
+	}
+	addressesByChain := make(map[string][]string)
+	seenByChain := make(map[string]map[string]struct{})
+	for i := range pools {
+		chain := smartMoneyChainSlug(pools[i].ChainID)
+		addr, symbol := smartMoneyPickMarketCapToken(
+			chain,
+			pools[i].Token0Address,
+			pools[i].Token1Address,
+			pools[i].Token0Symbol,
+			pools[i].Token1Symbol,
+			pools[i].DisplayTokenAddress,
+		)
+		pools[i].MarketCapTokenAddress = addr
+		pools[i].MarketCapTokenSymbol = symbol
+		if addr == "" {
+			continue
+		}
+		seen := seenByChain[chain]
+		if seen == nil {
+			seen = make(map[string]struct{})
+			seenByChain[chain] = seen
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addressesByChain[chain] = append(addressesByChain[chain], addr)
+	}
+
+	marketDataByChain := s.loadTokenMarketDataByChain(ctx, addressesByChain)
+	for i := range pools {
+		applySmartMoneyMarketDataToFields(
+			smartMoneyChainSlug(pools[i].ChainID),
+			pools[i].MarketCapTokenAddress,
+			&pools[i].MarketCapUSD,
+			&pools[i].FDVUSD,
+			&pools[i].CurrentTokenFDVUSD,
+			&pools[i].MarketCapProvider,
+			marketDataByChain,
+		)
+	}
+}
+
+func (s *Server) enrichSmartMoneyHeatmapMarketData(ctx context.Context, rows []sm.PoolFeeHeatmapRow) {
+	if s == nil || s.TokenPrice == nil || len(rows) == 0 {
+		return
+	}
+	addressesByChain := make(map[string][]string)
+	seenByChain := make(map[string]map[string]struct{})
+	for i := range rows {
+		chain := smartMoneyChainSlug(rows[i].ChainID)
+		addr, symbol := smartMoneyPickMarketCapToken(
+			chain,
+			rows[i].Token0Address,
+			rows[i].Token1Address,
+			rows[i].Token0Symbol,
+			rows[i].Token1Symbol,
+			rows[i].DisplayTokenAddress,
+		)
+		rows[i].MarketCapTokenAddress = addr
+		rows[i].MarketCapTokenSymbol = symbol
+		if addr == "" {
+			continue
+		}
+		seen := seenByChain[chain]
+		if seen == nil {
+			seen = make(map[string]struct{})
+			seenByChain[chain] = seen
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addressesByChain[chain] = append(addressesByChain[chain], addr)
+	}
+
+	marketDataByChain := s.loadTokenMarketDataByChain(ctx, addressesByChain)
+	for i := range rows {
+		applySmartMoneyMarketDataToFields(
+			smartMoneyChainSlug(rows[i].ChainID),
+			rows[i].MarketCapTokenAddress,
+			&rows[i].MarketCapUSD,
+			&rows[i].FDVUSD,
+			&rows[i].CurrentTokenFDVUSD,
+			&rows[i].MarketCapProvider,
+			marketDataByChain,
+		)
+	}
+}
+
+func (s *Server) enrichSmartMoneyPoolStatsMarketData(ctx context.Context, stats *sm.PoolStats) {
+	if s == nil || s.TokenPrice == nil || stats == nil {
+		return
+	}
+	chain := smartMoneyChainSlug(stats.ChainID)
+	addr, symbol := smartMoneyPickMarketCapToken(
+		chain,
+		stats.Token0Address,
+		stats.Token1Address,
+		stats.Token0Symbol,
+		stats.Token1Symbol,
+		stats.DisplayTokenAddress,
+	)
+	stats.MarketCapTokenAddress = addr
+	stats.MarketCapTokenSymbol = symbol
+	if addr == "" {
+		return
+	}
+	dataByChain := s.loadTokenMarketDataByChain(ctx, map[string][]string{chain: []string{addr}})
+	applySmartMoneyMarketDataToFields(
+		chain,
+		addr,
+		&stats.MarketCapUSD,
+		&stats.FDVUSD,
+		&stats.CurrentTokenFDVUSD,
+		&stats.MarketCapProvider,
+		dataByChain,
+	)
+}
+
+func (s *Server) loadTokenMarketDataByChain(ctx context.Context, addressesByChain map[string][]string) map[string]map[string]pricing.TokenMarketData {
+	out := make(map[string]map[string]pricing.TokenMarketData, len(addressesByChain))
+	if s == nil || s.TokenPrice == nil {
+		return out
+	}
+	for chain, addresses := range addressesByChain {
+		if len(addresses) == 0 {
+			continue
+		}
+		data, err := s.TokenPrice.GetTokenMarketDataWithContext(ctx, chain, addresses)
+		if err != nil {
+			log.Printf("[smart_money] load realtime token market data failed chain=%s err=%v", chain, err)
+		}
+		if len(data) == 0 {
+			continue
+		}
+		out[chain] = data
+	}
+	return out
+}
+
+func applySmartMoneyMarketDataToFields(
+	chain string,
+	tokenAddress string,
+	marketCapUSD *float64,
+	fdvUSD *float64,
+	currentTokenFDVUSD *float64,
+	provider *string,
+	dataByChain map[string]map[string]pricing.TokenMarketData,
+) {
+	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
+	if tokenAddress == "" {
+		return
+	}
+	dataByAddress := dataByChain[chain]
+	if len(dataByAddress) == 0 {
+		return
+	}
+	data, ok := dataByAddress[tokenAddress]
+	if !ok {
+		return
+	}
+	*marketCapUSD = sanitizeFloat(data.MarketCapUSD)
+	*fdvUSD = sanitizeFloat(data.FDVUSD)
+	*currentTokenFDVUSD = sanitizeFloat(data.FDVUSD)
+	*provider = strings.TrimSpace(data.Provider)
 }
 
 func (s *Server) loadSmartMoneyTokenMetadataByChain(ctx context.Context, addressesByChain map[string][]string) map[string]map[string]models.TokenMetadata {

@@ -31,6 +31,13 @@ type TokenPriceService struct {
 	fetchGroup singleflight.Group
 }
 
+type TokenMarketData struct {
+	Address      string  `json:"address"`
+	MarketCapUSD float64 `json:"market_cap_usd,omitempty"`
+	FDVUSD       float64 `json:"fdv_usd,omitempty"`
+	Provider     string  `json:"provider,omitempty"`
+}
+
 const (
 	tokenPriceProviderGecko       = "geckoterminal"
 	tokenPriceProviderDexScreener = "dexscreener"
@@ -417,7 +424,9 @@ type dexScreenerTokenPair struct {
 	BaseToken struct {
 		Address string `json:"address"`
 	} `json:"baseToken"`
-	PriceUSD  string `json:"priceUsd"`
+	PriceUSD  string  `json:"priceUsd"`
+	FDV       float64 `json:"fdv"`
+	MarketCap float64 `json:"marketCap"`
 	Liquidity struct {
 		USD float64 `json:"usd"`
 	} `json:"liquidity"`
@@ -495,6 +504,134 @@ func (s *TokenPriceService) fetchDexScreenerTokenPrices(network string, tokenAdd
 		out[addr] = price
 	}
 	return out, nil
+}
+
+func (s *TokenPriceService) GetTokenMarketData(network string, tokenAddresses []string) (map[string]TokenMarketData, error) {
+	return s.GetTokenMarketDataWithContext(context.Background(), network, tokenAddresses)
+}
+
+func (s *TokenPriceService) GetTokenMarketDataWithContext(ctx context.Context, network string, tokenAddresses []string) (map[string]TokenMarketData, error) {
+	network = strings.TrimSpace(strings.ToLower(network))
+	if network == "" {
+		network = "bsc"
+	}
+	addresses := normalizeTokenAddresses(tokenAddresses)
+	if len(addresses) == 0 {
+		return map[string]TokenMarketData{}, nil
+	}
+	return s.fetchDexScreenerTokenMarketData(ctx, network, addresses)
+}
+
+func (s *TokenPriceService) fetchDexScreenerTokenMarketData(ctx context.Context, network string, tokenAddresses []string) (map[string]TokenMarketData, error) {
+	tokenAddresses = normalizeTokenAddresses(tokenAddresses)
+	if len(tokenAddresses) == 0 {
+		return map[string]TokenMarketData{}, nil
+	}
+	if s.isProviderRateLimited(tokenPriceProviderDexScreener) {
+		return map[string]TokenMarketData{}, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: http.StatusTooManyRequests}
+	}
+	chainID := dexScreenerChainID(network)
+	if chainID == "" {
+		return map[string]TokenMarketData{}, fmt.Errorf("unsupported dexscreener chain: %s", network)
+	}
+
+	out := make(map[string]TokenMarketData, len(tokenAddresses))
+	for start := 0; start < len(tokenAddresses); start += dexScreenerBatchSize {
+		end := start + dexScreenerBatchSize
+		if end > len(tokenAddresses) {
+			end = len(tokenAddresses)
+		}
+		part, err := s.fetchDexScreenerTokenMarketDataBatch(ctx, chainID, tokenAddresses[start:end])
+		if err != nil {
+			if isProviderRateLimitError(err, tokenPriceProviderDexScreener) {
+				s.markProviderRateLimited(tokenPriceProviderDexScreener)
+			}
+			return out, err
+		}
+		for addr, data := range part {
+			out[addr] = data
+		}
+	}
+	return out, nil
+}
+
+func (s *TokenPriceService) fetchDexScreenerTokenMarketDataBatch(ctx context.Context, chainID string, tokenAddresses []string) (map[string]TokenMarketData, error) {
+	tokenAddresses = normalizeTokenAddresses(tokenAddresses)
+	if len(tokenAddresses) == 0 {
+		return map[string]TokenMarketData{}, nil
+	}
+
+	lookup := make(map[string]struct{}, len(tokenAddresses))
+	for _, addr := range tokenAddresses {
+		lookup[addr] = struct{}{}
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://api.dexscreener.com/tokens/v1/%s/%s",
+		url.PathEscape(chainID),
+		url.PathEscape(strings.Join(tokenAddresses, ",")),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyText := strings.TrimSpace(string(body))
+		if len(bodyText) > 320 {
+			bodyText = bodyText[:320]
+		}
+		return nil, &ProviderHTTPError{Provider: tokenPriceProviderDexScreener, Status: resp.StatusCode, Body: bodyText}
+	}
+
+	var pairs []dexScreenerTokenPair
+	if err := json.Unmarshal(body, &pairs); err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]TokenMarketData, len(tokenAddresses))
+	bestLiquidity := make(map[string]float64, len(tokenAddresses))
+	for _, pair := range pairs {
+		if !strings.EqualFold(strings.TrimSpace(pair.ChainID), chainID) {
+			continue
+		}
+		addr := strings.ToLower(strings.TrimSpace(pair.BaseToken.Address))
+		if _, ok := lookup[addr]; !ok {
+			continue
+		}
+		if pair.MarketCap <= 0 && pair.FDV <= 0 {
+			continue
+		}
+		if existing, ok := bestLiquidity[addr]; ok && existing > pair.Liquidity.USD {
+			continue
+		}
+		bestLiquidity[addr] = pair.Liquidity.USD
+		out[addr] = TokenMarketData{
+			Address:      addr,
+			MarketCapUSD: sanitizeProviderMetric(pair.MarketCap),
+			FDVUSD:       sanitizeProviderMetric(pair.FDV),
+			Provider:     tokenPriceProviderDexScreener,
+		}
+	}
+	return out, nil
+}
+
+func sanitizeProviderMetric(value float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return value
 }
 
 func dexScreenerChainID(chain string) string {

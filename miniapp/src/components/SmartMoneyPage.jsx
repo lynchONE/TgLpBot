@@ -946,6 +946,40 @@ function walletSourceContractLabel(value) {
     return '';
 }
 
+function parsePoolMetricNumber(value) {
+    if (value === null || value === undefined || value === '') return NaN;
+    const raw = typeof value === 'string' ? value.replace(/,/g, '').trim() : value;
+    const direct = Number(raw);
+    if (Number.isFinite(direct)) return direct;
+    const match = String(value).match(/-?\d+(\.\d+)?/);
+    if (!match) return NaN;
+    const parsed = Number(match[0]);
+    return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function resolveSmartMoneyPoolMarketCapDisplay(pool) {
+    const candidates = [
+        pool?.market_cap_usd,
+        pool?.current_token_fdv_usd,
+        pool?.fdv_usd,
+    ];
+    for (const candidate of candidates) {
+        const value = parsePoolMetricNumber(candidate);
+        if (Number.isFinite(value) && value > 0) return value;
+    }
+    return NaN;
+}
+
+function resolveSmartMoneyPoolMarketCapLabel(pool) {
+    const marketCap = parsePoolMetricNumber(pool?.market_cap_usd);
+    if (Number.isFinite(marketCap) && marketCap > 0) return '市值';
+    const fdv = parsePoolMetricNumber(pool?.current_token_fdv_usd);
+    if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
+    const legacyFDV = parsePoolMetricNumber(pool?.fdv_usd);
+    if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
+    return '市值';
+}
+
 function getPairLabel(value) {
     const pair = String(value?.trading_pair || '').trim();
     if (pair && pair !== '/') return pair;
@@ -975,7 +1009,7 @@ function getPairInitials(value) {
 }
 
 const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
-const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
+const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null, minMarketCapUsd: null };
 const SMART_MONEY_POOL_SOURCE_TABS = [
     { key: 'all', label: '全部', source: '' },
     { key: 'manual', label: '手动添加', source: 'manual' },
@@ -992,6 +1026,7 @@ function normalizeStoredSmartMoneyPoolFilter(value) {
     return {
         minSmartMoneyUsd: Number.isFinite(Number(value.minSmartMoneyUsd)) ? Number(value.minSmartMoneyUsd) : null,
         maxFeeRate: Number.isFinite(Number(value.maxFeeRate)) ? Number(value.maxFeeRate) : null,
+        minMarketCapUsd: Number.isFinite(Number(value.minMarketCapUsd)) ? Number(value.minMarketCapUsd) : null,
     };
 }
 
@@ -1018,7 +1053,9 @@ function writeStoredSmartMoneyPoolFilter(value) {
     }
     try {
         const normalized = normalizeStoredSmartMoneyPoolFilter(value);
-        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd) && !Number.isFinite(normalized.maxFeeRate);
+        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd)
+            && !Number.isFinite(normalized.maxFeeRate)
+            && !Number.isFinite(normalized.minMarketCapUsd);
         if (isEmpty) {
             window.localStorage.removeItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
             return;
@@ -2475,7 +2512,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     const [page, setPage] = useState(1);
     const [filterOpen, setFilterOpen] = useState(false);
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
-    const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '' });
+    const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '', minMarketCapUsd: '' });
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const sourceFilter = SMART_MONEY_POOL_SOURCE_BY_KEY[sourceScope];
@@ -2495,6 +2532,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
             source: sourceFilter,
             minSmartMoneyUsd: poolFilter.minSmartMoneyUsd,
             maxFeeRate: poolFilter.maxFeeRate,
+            minMarketCapUsd: poolFilter.minMarketCapUsd,
         })
             .then((d) => {
                 if (seq !== loadSeqRef.current) return;
@@ -2525,7 +2563,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                     setLoading(false);
                 }
             });
-    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceFilter]);
+    }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceFilter]);
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
@@ -2536,34 +2574,38 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     }, [load, pollIntervalSec]);
     useEffect(() => {
         setPage(1);
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceScope]);
+    }, [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceScope]);
 
     const poolFilterActive = useMemo(
-        () => Number.isFinite(poolFilter.minSmartMoneyUsd) || Number.isFinite(poolFilter.maxFeeRate),
-        [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd],
+        () => Number.isFinite(poolFilter.minSmartMoneyUsd)
+            || Number.isFinite(poolFilter.maxFeeRate)
+            || Number.isFinite(poolFilter.minMarketCapUsd),
+        [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd],
     );
     const openPoolFilter = useCallback(() => {
         setPoolFilterDraft({
             minSmartMoneyUsd: formatOptionalNumber(poolFilter.minSmartMoneyUsd),
             maxFeeRate: formatOptionalNumber(poolFilter.maxFeeRate),
+            minMarketCapUsd: formatOptionalNumber(poolFilter.minMarketCapUsd),
         });
         setFilterOpen((prev) => !prev);
-    }, [poolFilter.maxFeeRate, poolFilter.minSmartMoneyUsd]);
+    }, [poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd]);
     const applyPoolFilter = useCallback(() => {
         const next = {
             minSmartMoneyUsd: parseOptionalNumber(poolFilterDraft.minSmartMoneyUsd),
             maxFeeRate: parseOptionalNumber(poolFilterDraft.maxFeeRate),
+            minMarketCapUsd: parseOptionalNumber(poolFilterDraft.minMarketCapUsd),
         };
         setPoolFilter(next);
         writeStoredSmartMoneyPoolFilter(next);
         setFilterOpen(false);
         setPage(1);
-    }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minSmartMoneyUsd]);
+    }, [poolFilterDraft.maxFeeRate, poolFilterDraft.minMarketCapUsd, poolFilterDraft.minSmartMoneyUsd]);
     const clearPoolFilter = useCallback(() => {
-        const next = { minSmartMoneyUsd: null, maxFeeRate: null };
+        const next = { ...EMPTY_SMART_MONEY_POOL_FILTER };
         setPoolFilter(next);
         writeStoredSmartMoneyPoolFilter(next);
-        setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '' });
+        setPoolFilterDraft({ minSmartMoneyUsd: '', maxFeeRate: '', minMarketCapUsd: '' });
         setFilterOpen(false);
         setPage(1);
     }, []);
@@ -2666,6 +2708,16 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                                 placeholder="可选"
                             />
                         </label>
+                        <label className="text-[11px] text-zinc-500">
+                            <span className="mb-1 block">市值 ≥ (USD)</span>
+                            <input
+                                className={getInputClass(brand)}
+                                value={poolFilterDraft.minMarketCapUsd}
+                                onChange={(e) => setPoolFilterDraft((prev) => ({ ...prev, minMarketCapUsd: e.target.value }))}
+                                inputMode="decimal"
+                                placeholder="可选"
+                            />
+                        </label>
                     </div>
                     <div className="mt-3 flex gap-2">
                         <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(true, brand)}`} onClick={applyPoolFilter}>
@@ -2693,59 +2745,69 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                     <div className="px-1 text-[10px] text-zinc-500">
                         第 {page} 页 · 当前显示 {pools.length} 个 / 共 {poolsTotal} 个池子
                     </div>
-                    {pools.map(pool => (
-                        <button
-                            key={pool.pool_address}
-                            type="button"
-                            className="w-full rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-3 text-left shadow-[0_18px_50px_-32px_rgba(0,0,0,0.95)] transition active:scale-[0.995]"
-                            onClick={() => onSelectPool(pool)}
-                        >
-                            <div className="flex items-start gap-3">
-                                <PairAvatar item={pool} size="md" />
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                        <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(pool)}</span>
-                                        <ProtocolBadge protocol={pool.protocol} />
-                                        <FeeBadge fee={pool.fee_tier} />
+                    {pools.map(pool => {
+                        const marketCap = resolveSmartMoneyPoolMarketCapDisplay(pool);
+                        const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel(pool);
+                        const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
+                        return (
+                            <button
+                                key={pool.pool_address}
+                                type="button"
+                                className="w-full rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-3 text-left shadow-[0_18px_50px_-32px_rgba(0,0,0,0.95)] transition active:scale-[0.995]"
+                                onClick={() => onSelectPool(pool)}
+                            >
+                                <div className="flex items-start gap-3">
+                                    <PairAvatar item={pool} size="md" />
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(pool)}</span>
+                                            <ProtocolBadge protocol={pool.protocol} />
+                                            <FeeBadge fee={pool.fee_tier} />
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                            <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-200">
+                                                总仓位 {Number(pool.total_position_amount_usd) > 0 ? formatUSDCompact(pool.total_position_amount_usd) : '--'}
+                                            </Badge>
+                                            {marketCapAvailable ? (
+                                                <Badge className="border-cyan-400/20 bg-cyan-400/10 text-cyan-200">
+                                                    {marketCapLabel} {formatUSDCompact(marketCap)}
+                                                </Badge>
+                                            ) : null}
+                                        </div>
+                                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                                            <span>{pool.wallet_count} 钱包</span>
+                                            <span className="text-zinc-700">·</span>
+                                            <span>{pool.open_position_count} 仓位</span>
+                                            <span className="text-zinc-700">·</span>
+                                            <span className={`inline-flex items-center gap-1 ${pool.latest_event_at && (Date.now() - new Date(pool.latest_event_at).getTime()) < 120000 ? 'text-green-300' : ''}`}>
+                                                <span className={`inline-block h-1.5 w-1.5 rounded-full ${pool.latest_event_at && (Date.now() - new Date(pool.latest_event_at).getTime()) < 120000 ? 'bg-green-400' : 'bg-zinc-600'}`} />
+                                                {relativeTime(pool.latest_event_at)}
+                                            </span>
+                                        </div>
+                                        <div className="mt-1.5">
+                                            <PoolCardRangeSummary pool={pool} />
+                                        </div>
                                     </div>
-                                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                        <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-200">
-                                            总仓位 {Number(pool.total_position_amount_usd) > 0 ? formatUSDCompact(pool.total_position_amount_usd) : '--'}
-                                        </Badge>
-                                    </div>
-                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                                        <span>{pool.wallet_count} 钱包</span>
-                                        <span className="text-zinc-700">·</span>
-                                        <span>{pool.open_position_count} 仓位</span>
-                                        <span className="text-zinc-700">·</span>
-                                        <span className={`inline-flex items-center gap-1 ${pool.latest_event_at && (Date.now() - new Date(pool.latest_event_at).getTime()) < 120000 ? 'text-green-300' : ''}`}>
-                                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${pool.latest_event_at && (Date.now() - new Date(pool.latest_event_at).getTime()) < 120000 ? 'bg-green-400' : 'bg-zinc-600'}`} />
-                                            {relativeTime(pool.latest_event_at)}
-                                        </span>
-                                    </div>
-                                    <div className="mt-1.5">
-                                        <PoolCardRangeSummary pool={pool} />
-                                    </div>
+                                    {typeof onOpenPosition === 'function' ? (
+                                        <button
+                                            type="button"
+                                            className={`mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                onOpenPosition(pool);
+                                            }}
+                                        >
+                                            <FlashIcon className="h-2.5 w-2.5 shrink-0" />
+                                            跟单
+                                        </button>
+                                    ) : (
+                                        <ChevronRight size={16} className="mt-1 shrink-0 text-zinc-600" />
+                                    )}
                                 </div>
-                                {typeof onOpenPosition === 'function' ? (
-                                    <button
-                                        type="button"
-                                        className={`mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
-                                        onClick={(event) => {
-                                            event.stopPropagation();
-                                            onOpenPosition(pool);
-                                        }}
-                                    >
-                                        <FlashIcon className="h-2.5 w-2.5 shrink-0" />
-                                        跟单
-                                    </button>
-                                ) : (
-                                    <ChevronRight size={16} className="mt-1 shrink-0 text-zinc-600" />
-                                )}
-                            </div>
-                        </button>
-                    ))}
+                            </button>
+                        );
+                    })}
                 </div>
             )}
             <PositionPagination page={page} total={poolsTotal} brand={brand} pageSize={POOL_LIST_PAGE_SIZE} onChange={setPage} />
@@ -2969,6 +3031,9 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
     const intensity = maxIntensity > 0 ? Math.max(0.08, Math.min(1, metricValue / maxIntensity)) : 0.08;
     const reliable = String(row?.sample_status || '') === 'ok';
     const partial = String(row?.sample_status || '') === 'partial';
+    const marketCap = resolveSmartMoneyPoolMarketCapDisplay(row);
+    const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel(row);
+    const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
     return (
         <button
             type="button"
@@ -3018,6 +3083,12 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
                         <span>{row.open_position_count} 仓位</span>
                         <span>·</span>
                         <span>仓位 {formatHeatmapUSD(row.total_position_amount_usd)}</span>
+                        {marketCapAvailable ? (
+                            <>
+                                <span>·</span>
+                                <span>{marketCapLabel} {formatUSDCompact(marketCap)}</span>
+                            </>
+                        ) : null}
                         <span>·</span>
                         <span>均龄 {formatHeatmapAge(row.average_position_age_seconds)}</span>
                     </div>
@@ -3096,6 +3167,9 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
         setSelectedPosition(null);
     }, [positions, selectedPosition]);
     const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
+    const poolStatsMarketCap = resolveSmartMoneyPoolMarketCapDisplay(poolStats || pool);
+    const poolStatsMarketCapLabel = resolveSmartMoneyPoolMarketCapLabel(poolStats || pool);
+    const poolStatsMarketCapAvailable = Number.isFinite(poolStatsMarketCap) && poolStatsMarketCap > 0;
 
     return (
         <div>
@@ -3142,6 +3216,9 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                     <StatCard label="钱包数" value={poolStats.wallet_count} compact />
                     <StatCard label="持仓笔数" value={poolStats.open_position_count} compact />
                     <StatCard label="今日关闭" value={poolStats.closed_today_count} color="text-red-400" compact />
+                    {poolStatsMarketCapAvailable ? (
+                        <StatCard label={poolStatsMarketCapLabel} value={formatUSDCompact(poolStatsMarketCap)} compact valueClassName="text-[13px]" />
+                    ) : null}
                 </div>
             )}
 

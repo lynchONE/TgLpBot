@@ -503,7 +503,7 @@ export async function publishAdminAnnouncement({ apiBaseUrl, initData, title, co
     });
 }
 
-export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {
+export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timeframeMinutes, limit, dex, includePools, maxFeeRate, minMarketCapUsd, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
     if (initData) params.set('initData', String(initData));
@@ -512,6 +512,8 @@ export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timefra
     if (Number.isFinite(timeframeMinutes)) params.set('timeframe_minutes', String(timeframeMinutes));
     if (Number.isFinite(limit)) params.set('limit', String(limit));
     if (dex) params.set('dex', String(dex));
+    if (Number.isFinite(maxFeeRate)) params.set('max_fee_rate', String(maxFeeRate));
+    if (Number.isFinite(minMarketCapUsd)) params.set('min_market_cap_usd', String(minMarketCapUsd));
     // 添加 include_pools 参数（逗号分隔的池子地址列表）
     if (Array.isArray(includePools) && includePools.length > 0) {
         params.set('include_pools', includePools.join(','));

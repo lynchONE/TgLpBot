@@ -3713,6 +3713,15 @@ body {
 .pool-meta-sort b {
   color: inherit;
 }
+.pool-meta-static {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.pool-meta-static b {
+  color: inherit;
+  font-weight: 600;
+}
 .dot-sep {
   width: 2px;
   height: 2px;
@@ -3747,6 +3756,12 @@ body {
 }
 .meta-cyan b {
   color: #a5f3fc;
+}
+.meta-green {
+  color: #34d399;
+}
+.meta-green b {
+  color: #86efac;
 }
 .meta-orange {
   color: #fb923c;
@@ -8450,6 +8465,10 @@ body {
   color: var(--positive);
   margin-left: auto;
   white-space: nowrap;
+}
+.smd-pool-card-market-cap {
+  color: #67e8f9;
+  margin-left: 0;
 }
 .smd-pool-card-foot {
   display: flex;

@@ -222,7 +222,11 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opts := parsePoolCatalogOptions(r)
+	opts, err := parsePoolCatalogOptions(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	cacheKey := buildPoolCatalogCacheKey(opts)
 	if cacheKey != "" {
 		if cached, ok := readRedisRawCache(cacheKey); ok {
@@ -242,7 +246,7 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := buildPoolCatalogResponse(poolRows, opts)
+	resp := s.buildPoolCatalogResponse(ctx, poolRows, opts)
 	s.enrichHotPoolDisplayTokens(ctx, opts.Chain, resp.Data)
 	s.enrichHotPoolTokenRisks(ctx, opts.Chain, resp.Data)
 	s.enrichHotPoolBinanceAlpha(ctx, opts.Chain, resp.Data)

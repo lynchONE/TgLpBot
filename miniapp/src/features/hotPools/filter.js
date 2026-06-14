@@ -8,8 +8,10 @@ export const defaultHotPoolsFilter = {
     riskFilter: 'all',
     minFees: 60,
     minFeeRate: 0.3,
+    maxFeeRate: null,
     minActiveFeeRate: null,
     minTvl: 1000,
+    minMarketCap: null,
     minVolume: 2000,
     minTxCount: null,
 };
@@ -62,6 +64,33 @@ export function computeHotPoolActiveFeeRate(pool) {
     return (totalFees / activeLiquidityUsd) * 100;
 }
 
+export function resolveHotPoolMarketCap(pool) {
+    return parseMetricNumber(pool?.market_cap_usd);
+}
+
+export function resolveHotPoolMarketCapDisplay(pool) {
+    const candidates = [
+        pool?.market_cap_usd,
+        pool?.current_token_fdv_usd,
+        pool?.fdv_usd,
+    ];
+    for (const candidate of candidates) {
+        const value = parseMetricNumber(candidate);
+        if (Number.isFinite(value) && value > 0) return value;
+    }
+    return NaN;
+}
+
+export function resolveHotPoolMarketCapLabel(pool) {
+    const marketCap = parseMetricNumber(pool?.market_cap_usd);
+    if (Number.isFinite(marketCap) && marketCap > 0) return '市值';
+    const fdv = parseMetricNumber(pool?.current_token_fdv_usd);
+    if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
+    const legacyFDV = parseMetricNumber(pool?.fdv_usd);
+    if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
+    return '市值';
+}
+
 export function normalizeHotPoolsFilter(value) {
     const base = { ...defaultHotPoolsFilter };
     if (!value || typeof value !== 'object') return base;
@@ -81,11 +110,17 @@ export function normalizeHotPoolsFilter(value) {
     if (Object.prototype.hasOwnProperty.call(value, 'minFeeRate')) {
         base.minFeeRate = parseNullableNumber(value.minFeeRate);
     }
+    if (Object.prototype.hasOwnProperty.call(value, 'maxFeeRate')) {
+        base.maxFeeRate = parseNullableNumber(value.maxFeeRate);
+    }
     if (Object.prototype.hasOwnProperty.call(value, 'minActiveFeeRate')) {
         base.minActiveFeeRate = parseNullableNumber(value.minActiveFeeRate);
     }
     if (Object.prototype.hasOwnProperty.call(value, 'minTvl')) {
         base.minTvl = parseNullableNumber(value.minTvl);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minMarketCap')) {
+        base.minMarketCap = parseNullableNumber(value.minMarketCap);
     }
     if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
         base.minVolume = parseNullableNumber(value.minVolume);
