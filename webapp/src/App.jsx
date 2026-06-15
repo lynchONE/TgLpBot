@@ -8,6 +8,7 @@ import {
   Flame,
   Newspaper,
   GripVertical,
+  LockKeyhole,
   LogOut,
   Maximize,
   Minimize,
@@ -114,6 +115,7 @@ const KLINE_INTERVALS = [
   { key: '1H', label: '1H', bucketSec: 3600, limit: 240, timeframe: 'hour', aggregate: 1, poolLimit: 200 },
 ];
 const HOT_POOLS_DISPLAY_LIMIT = 20;
+const GUEST_HOT_POOLS_DISPLAY_LIMIT = 8;
 const DEFAULT_KLINE_CHART_HEIGHT = 520;
 const MIN_KLINE_CHART_HEIGHT = 360;
 const MAX_KLINE_CHART_HEIGHT = 1200;
@@ -968,6 +970,224 @@ function getDexIcon(factoryName) {
   return null;
 }
 
+function LoginCodePanel({ loginCode, onCancel, className = '' }) {
+  if (!loginCode) return null;
+  return (
+    <div className={`login-code-box ${className}`.trim()}>
+      <div className="login-code-top">
+        <div className="login-code-badge">验证码</div>
+        <div className="login-code-value">{loginCode}</div>
+      </div>
+      <div className="login-code-cmd-row">
+        <code className="login-code-cmd">/weblogin {loginCode}</code>
+        <button
+          type="button"
+          className="login-copy-btn"
+          onClick={(e) => {
+            navigator.clipboard.writeText(`/weblogin ${loginCode}`);
+            const btn = e.currentTarget;
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1500);
+          }}
+          aria-label="复制登录指令"
+        >
+          <Copy size={12} className="copy-icon" />
+          <Check size={12} className="check-icon" />
+        </button>
+      </div>
+      <div className="login-code-hint">在 Telegram Bot 中发送上方指令完成登录</div>
+      {onCancel ? (
+        <button type="button" className="ghost-chip" onClick={onCancel}>
+          取消
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function GuestHotPoolsLanding({
+  chain,
+  hotPools,
+  hotPoolsLoading,
+  hotPoolsError,
+  hotPoolsUpdatedAt,
+  loginBusy,
+  loginCode,
+  loginError,
+  onStartLogin,
+  onCancelLogin,
+  onChainChange,
+}) {
+  const rows = Array.isArray(hotPools) ? hotPools.slice(0, GUEST_HOT_POOLS_DISPLAY_LIMIT) : [];
+  const totalFees = rows.reduce((sum, row) => {
+    const value = parseMetricNumber(row?.total_fees);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+  const totalVolume = rows.reduce((sum, row) => {
+    const value = parseMetricNumber(row?.total_volume);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+  const topFeeRate = rows.reduce((max, row) => {
+    const value = parseMetricNumber(row?.fee_rate);
+    return Number.isFinite(value) ? Math.max(max, value) : max;
+  }, 0);
+
+  return (
+    <main className="guest-shell">
+      <section className="guest-hero">
+        <div className="guest-copy">
+          <div className="guest-kicker">
+            <Flame size={14} />
+            实时热门池子预览
+          </div>
+          <h2>先看市场，再决定是否登录开仓。</h2>
+          <p>
+            未登录状态展示热门池子的部分榜单和核心交易指标。登录后可查看完整工作台、K 线、仓位和开仓操作。
+          </p>
+          <div className="guest-actions">
+            <button
+              type="button"
+              className="primary-btn guest-login-btn"
+              onClick={onStartLogin}
+              disabled={loginBusy}
+            >
+              {loginBusy ? <RefreshCw size={15} className="spin" /> : <img src={telegramLogo} alt="" />}
+              获取 Telegram 登录码
+            </button>
+            <div className="guest-chain-switch" aria-label="切换链">
+              <button
+                type="button"
+                className={`guest-chain-btn ${chain === 'bsc' ? 'active' : ''}`}
+                onClick={() => onChainChange('bsc')}
+              >
+                <img src={bnbLogo} alt="" />
+                BSC
+              </button>
+              <button
+                type="button"
+                className={`guest-chain-btn ${chain === 'base' ? 'active' : ''}`}
+                onClick={() => onChainChange('base')}
+              >
+                <img src={baseLogo} alt="" />
+                Base
+              </button>
+            </div>
+          </div>
+          {loginCode ? (
+            <LoginCodePanel
+              loginCode={loginCode}
+              onCancel={onCancelLogin}
+              className="guest-login-code"
+            />
+          ) : null}
+          {loginError ? <div className="error-text guest-error">{loginError}</div> : null}
+        </div>
+
+        <div className="guest-market-board">
+          <div className="guest-board-head">
+            <div>
+              <span className="guest-board-label">{chain === 'base' ? 'Base' : 'BSC'} 热门池子</span>
+              <strong>热门池子榜</strong>
+            </div>
+            <div className="guest-board-time">
+              {hotPoolsUpdatedAt ? formatUtc8Time(hotPoolsUpdatedAt, true) : '同步中'}
+            </div>
+          </div>
+
+          <div className="guest-metrics">
+            <div>
+              <span>预览池子</span>
+              <strong>{hotPoolsLoading && rows.length === 0 ? '--' : rows.length}</strong>
+            </div>
+            <div>
+              <span>Fees</span>
+              <strong>{rows.length ? formatUsdCompact(totalFees) : '--'}</strong>
+            </div>
+            <div>
+              <span>Volume</span>
+              <strong>{rows.length ? formatUsdCompact(totalVolume) : '--'}</strong>
+            </div>
+            <div>
+              <span>最高费率</span>
+              <strong>{topFeeRate > 0 ? `${topFeeRate.toFixed(3)}%` : '--'}</strong>
+            </div>
+          </div>
+
+          <div className="guest-pool-list">
+            <div className="guest-pool-list-head">
+              <span>Pool</span>
+              <span>5m Fees</span>
+              <span>Vol</span>
+              <span>Rate</span>
+            </div>
+            {hotPoolsLoading && rows.length === 0 ? (
+              Array.from({ length: 6 }).map((_, index) => (
+                <div className="guest-pool-row skeleton" key={`guest-skeleton-${index}`}>
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              ))
+            ) : rows.length > 0 ? (
+              rows.map((pool, index) => {
+                const pair = String(pool?.trading_pair || '--');
+                const factoryName = String(pool?.factory_name || pool?.dex || '');
+                const dex = getDexIcon(factoryName);
+                const protocolVersion = String(pool?.protocol_version || '').trim().toUpperCase();
+                const protocolTagText = protocolVersion || dex?.label || '';
+                const displayTokenLogoUrl = String(pool?.display_token_logo_url || '').trim();
+                const displayTokenSymbol = String(pool?.display_token_symbol || '').trim();
+                const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
+                const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
+                const fees = parseMetricNumber(pool?.total_fees);
+                const volume = parseMetricNumber(pool?.total_volume);
+                const feeRate = parseMetricNumber(pool?.fee_rate);
+                const txCount = parseMetricNumber(pool?.transaction_count);
+                const tokenRisk = normalizeTokenRisk(pool?.token_risk);
+                const hasLowLiquidityRisk = Boolean(tokenRisk?.has_low_liquidity);
+                return (
+                  <div
+                    className={`guest-pool-row ${hasLowLiquidityRisk ? 'low-liquidity' : ''}`}
+                    key={`${pool?.protocol_version || ''}:${pool?.pool_address || pool?.pool_id || index}`}
+                  >
+                    <div className="guest-pool-main">
+                      <span className="guest-rank">{index + 1}</span>
+                      <span className="guest-pool-avatar">
+                        {displayTokenLogoUrl ? <img src={displayTokenLogoUrl} alt="" /> : avatarLabel}
+                      </span>
+                      <span className="guest-pool-name">
+                        <strong>{pair}</strong>
+                        <small>
+                          {protocolTagText ? <span>{protocolTagText}</span> : null}
+                          {Number.isFinite(txCount) && txCount > 0 ? <span>{Math.round(txCount).toLocaleString()} tx</span> : null}
+                          {hasLowLiquidityRisk ? <span className="guest-risk">低流动性</span> : null}
+                        </small>
+                      </span>
+                    </div>
+                    <div className="guest-pool-value">{Number.isFinite(fees) ? formatUsdCompact(fees) : '--'}</div>
+                    <div className="guest-pool-value muted">{Number.isFinite(volume) ? formatUsdCompact(volume) : '--'}</div>
+                    <div className="guest-pool-value accent">{Number.isFinite(feeRate) ? `${feeRate.toFixed(3)}%` : '--'}</div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="guest-empty">
+                {hotPoolsError || '暂无可预览的热门池子数据'}
+              </div>
+            )}
+          </div>
+
+          <div className="guest-board-foot">
+            <LockKeyhole size={14} />
+            登录后开放完整榜单筛选、K 线、仓位和开仓。
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function App() {
   const apiBaseUrl = WEBAPP_CONFIG.apiBaseUrl;
 
@@ -1744,25 +1964,22 @@ export default function App() {
 
   const loadHotPools = useCallback(
     async (signal) => {
-      if (!hasInitData) {
-        setHotPools([]);
-        setHotPoolsError('请先点击右上角 Telegram 图标扫码登录。');
-        return;
-      }
       setHotPoolsLoading(true);
       setHotPoolsError('');
       try {
+        const useAdvancedFilters = hasInitData && hotPoolsFilterEnabled;
+        const activeTokenFilterAddress = hasInitData ? hotTokenFilter?.address || '' : '';
         const resp = await fetchHotPools({
           apiBaseUrl,
-          initData,
+          initData: hasInitData ? initData : '',
           chain,
-          sort: resolveHotPoolServerSort(hotSort),
+          sort: hasInitData ? resolveHotPoolServerSort(hotSort) : 'fees',
           timeframeMinutes: 5,
-          limit: hotPoolsLimit,
-          tokenAddress: hotTokenFilter?.address || '',
-          includePools: hotTokenFilter?.address ? undefined : (hotPoolIncludeKey ? hotPoolIncludeKey.split(',') : undefined),
-          maxFeeRate: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.maxFeeRate) ? hotPoolsFilter.maxFeeRate : undefined,
-          minMarketCapUsd: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
+          limit: hasInitData ? hotPoolsLimit : 60,
+          tokenAddress: activeTokenFilterAddress,
+          includePools: hasInitData && !activeTokenFilterAddress && hotPoolIncludeKey ? hotPoolIncludeKey.split(',') : undefined,
+          maxFeeRate: useAdvancedFilters && Number.isFinite(hotPoolsFilter.maxFeeRate) ? hotPoolsFilter.maxFeeRate : undefined,
+          minMarketCapUsd: useAdvancedFilters && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
           signal,
         });
         setHotPools(Array.isArray(resp?.data) ? resp.data : []);
@@ -2039,10 +2256,9 @@ export default function App() {
   }, [loadKlineMarkers, klineRefreshNonce]);
 
   useEffect(() => {
-    if (!hasInitData) return undefined;
     const timer = window.setInterval(() => loadHotPools(), hotPoolsRefreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [hasInitData, hotPoolsRefreshInterval, loadHotPools]);
+  }, [hotPoolsRefreshInterval, loadHotPools]);
 
   useEffect(() => {
     const timer = window.setInterval(() => loadNewsFeeds(), 60_000);
@@ -2173,10 +2389,14 @@ export default function App() {
     setInitData('');
     setLoginUser(null);
     setAccessInfo(null);
+    setWorkMode(false);
+    setHotTokenFilter(null);
+    setHotPools([]);
+    setHotPoolsUpdatedAt('');
+    setHotPoolsError('');
     storageRemove(STORAGE.initData);
     storageRemove(STORAGE.loginUser);
     storageRemove(STORAGE.loginAccess);
-    setHotPools([]);
     setPositions(null);
     setKlineMarkers([]);
     setKlineMarkersError('');
@@ -3904,12 +4124,15 @@ export default function App() {
   };
 
   return (
-    <div className={`app-shell ${workMode ? 'work-mode-shell' : ''}`} data-accent-theme={accentTheme}>
+    <div
+      className={`app-shell ${workMode && hasInitData ? 'work-mode-shell' : ''} ${hasInitData ? '' : 'guest-shell-mode'}`}
+      data-accent-theme={accentTheme}
+    >
       <div className="bg-orb orb-a" />
       <div className="bg-orb orb-b" />
       <div className="bg-grid" />
 
-      {workMode ? (
+      {workMode && hasInitData ? (
         <div className="work-mode-bar">
           <button type="button" className="work-mode-exit-btn" onClick={() => setWorkMode(false)}>
             <Minimize size={14} />
@@ -3926,16 +4149,18 @@ export default function App() {
               </h1>
             </div>
 
-            <NewsShowcase
-              items={featuredNews}
-              loading={newsLoading}
-              error={newsError}
-              status={newsStatus}
-              onOpen={openExternal}
-            />
+            {hasInitData ? (
+              <NewsShowcase
+                items={featuredNews}
+                loading={newsLoading}
+                error={newsError}
+                status={newsStatus}
+                onOpen={openExternal}
+              />
+            ) : null}
 
             <div className="top-actions">
-          {loginUser ? (
+          {hasInitData && loginUser ? (
             <div className="user-chip">
               {loginUser?.photo_url ? (
                 <img src={loginUser.photo_url} alt="avatar" className="user-avatar" />
@@ -4033,33 +4258,11 @@ export default function App() {
                 退出
               </button>
             </div>
-          ) : loginCode ? (
-            <div className="login-code-box">
-              <div className="login-code-top">
-                <div className="login-code-badge">验证码</div>
-                <div className="login-code-value">{loginCode}</div>
-              </div>
-              <div className="login-code-cmd-row">
-                <code className="login-code-cmd">/weblogin {loginCode}</code>
-                <button
-                  type="button"
-                  className="login-copy-btn"
-                  onClick={(e) => {
-                    navigator.clipboard.writeText(`/weblogin ${loginCode}`);
-                    const btn = e.currentTarget;
-                    btn.classList.add('copied');
-                    setTimeout(() => btn.classList.remove('copied'), 1500);
-                  }}
-                >
-                  <Copy size={12} className="copy-icon" />
-                  <Check size={12} className="check-icon" />
-                </button>
-              </div>
-              <div className="login-code-hint">在 Telegram Bot 中发送上方指令完成登录</div>
-              <button type="button" className="ghost-chip" onClick={() => { setLoginCode(''); setLoginError(''); }}>
-                取消
-              </button>
-            </div>
+          ) : loginCode && hasInitData ? (
+            <LoginCodePanel
+              loginCode={loginCode}
+              onCancel={() => { setLoginCode(''); setLoginError(''); }}
+            />
           ) : (
             <button
               type="button"
@@ -4075,8 +4278,9 @@ export default function App() {
         </div>
       </header>
 
-      {loginError ? <div className="error-text top-error">{loginError}</div> : null}
+      {loginError && hasInitData ? <div className="error-text top-error">{loginError}</div> : null}
 
+      {hasInitData ? (
       <section className="config-panel">
         <div className="config-head">
           <SlidersHorizontal size={14} />
@@ -4110,17 +4314,26 @@ export default function App() {
             工作模式
           </button>
         </div>
-
-        {!hasInitData ? (
-          <div className="warning-box">
-            <AlertTriangle size={14} />
-            <span>请点击右上角 Telegram 图标获取验证码，在 Bot 中发送 /weblogin 验证码 完成登录。</span>
-          </div>
-        ) : null}
       </section>
+      ) : null}
       </>
       )}
 
+      {!hasInitData ? (
+        <GuestHotPoolsLanding
+          chain={chain}
+          hotPools={hotPools}
+          hotPoolsLoading={hotPoolsLoading}
+          hotPoolsError={hotPoolsError}
+          hotPoolsUpdatedAt={hotPoolsUpdatedAt}
+          loginBusy={loginBusy}
+          loginCode={loginCode}
+          loginError={loginError}
+          onStartLogin={startCodeLogin}
+          onCancelLogin={() => { setLoginCode(''); setLoginError(''); }}
+          onChainChange={setChain}
+        />
+      ) : (
       <main className={`workbench ${workLayoutClass}`}>
         {activeWidgets.map((widget) => (
           <div
@@ -4170,14 +4383,17 @@ export default function App() {
           </div>
         ))}
       </main>
+      )}
 
-      <NewsTicker
-        items={tickerNews}
-        loading={newsLoading}
-        error={newsError}
-        speedPxPerSec={newsTickerSpeed}
-        onOpen={openExternal}
-      />
+      {hasInitData ? (
+        <NewsTicker
+          items={tickerNews}
+          loading={newsLoading}
+          error={newsError}
+          speedPxPerSec={newsTickerSpeed}
+          onOpen={openExternal}
+        />
+      ) : null}
 
       {openPosPool && (
         <OpenPositionModal
