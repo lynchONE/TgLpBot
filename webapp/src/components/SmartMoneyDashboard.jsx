@@ -230,6 +230,13 @@ function parseMetricNumber(value) {
     return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function resolvePositionPreviewFeeUsd(detail, position) {
+    const liveFee = parseMetricNumber(detail?.totals?.fee_usd);
+    if (Number.isFinite(liveFee)) return liveFee;
+    if (String(position?.fee_status || '').trim() === 'unavailable') return NaN;
+    return parseMetricNumber(position?.fee_usd);
+}
+
 function resolveSmartMoneyPoolMarketCapDisplay(pool) {
     const candidates = [
         pool?.fdv_usd,
@@ -483,7 +490,7 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                         currentValueUsd: Number.isFinite(Number(data?.current_value_usd))
                             ? Number(data.current_value_usd)
                             : Number(data?.totals?.position_usd || 0) + Number(data?.totals?.fee_usd || 0),
-                        feeUsd: Number(data?.totals?.fee_usd ?? 0),
+                        feeUsd: resolvePositionPreviewFeeUsd(data, position),
                         netInvestedUsd: Number(data?.net_invested_usd ?? position?.position_amount_usd ?? 0),
                         rangeStatus: buildRangeStatusSummary(
                             computePriceRange(data) || (data?.in_range === undefined ? null : { inRange: Boolean(data.in_range) })
@@ -498,6 +505,7 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     [key]: {
                         ...(prev[key] || {}),
                         fetchedAt: Date.now(),
+                        feeUsd: resolvePositionPreviewFeeUsd(null, position),
                         runningSince: String(prev[key]?.runningSince || position?.opened_at || '').trim(),
                     },
                 }));
@@ -1477,8 +1485,9 @@ function PositionAmountSummary({ position, preview, compact = false }) {
 
 function PositionPreviewMetrics({ position, preview, currentPrice, compact = false }) {
     const runningText = formatDuration(preview?.runningSince || position?.opened_at) || '--';
-    const feeValue = Number(preview?.feeUsd);
-    const feeText = Number.isFinite(feeValue) ? formatUsd(preview.feeUsd) : '--';
+    const previewFeeValue = Number(preview?.feeUsd);
+    const feeValue = Number.isFinite(previewFeeValue) ? previewFeeValue : resolvePositionPreviewFeeUsd(null, position);
+    const feeText = Number.isFinite(feeValue) ? formatUsd(feeValue) : '--';
     const feeTone = Number.isFinite(feeValue)
         ? (feeValue > 0 ? ' positive' : feeValue < 0 ? ' negative' : '')
         : '';

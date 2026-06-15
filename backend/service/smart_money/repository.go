@@ -1514,10 +1514,13 @@ type PositionOpenAmountRow struct {
 	Protocol          string  `json:"protocol"`
 	NftTokenID        uint64  `json:"nft_token_id"`
 	PositionAmountUSD float64 `json:"position_amount_usd"`
+	FeeUSD            *string `json:"fee_usd"`
+	FeeStatus         string  `json:"fee_status"`
+	FeeUpdatedAt      *time.Time
 }
 
-func (r *Repository) GetPositionOpenAmountsUSD(ctx context.Context, positions []models.SmartMoneyLPPosition) (map[string]float64, error) {
-	out := make(map[string]float64)
+func (r *Repository) GetPositionOpenAmountsUSD(ctx context.Context, positions []models.SmartMoneyLPPosition) (map[string]PositionOpenAmountRow, error) {
+	out := make(map[string]PositionOpenAmountRow)
 	if len(positions) == 0 {
 		return out, nil
 	}
@@ -1563,7 +1566,10 @@ func (r *Repository) GetPositionOpenAmountsUSD(ctx context.Context, positions []
 			p.chain_id,
 			p.protocol,
 			p.nft_token_id,
-			MAX(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)) AS position_amount_usd
+			MAX(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)) AS position_amount_usd,
+			MAX(ap.fee_usd) AS fee_usd,
+			MAX(ap.fee_status) AS fee_status,
+			MAX(ap.fee_updated_at) AS fee_updated_at
 		`).
 		Joins(`
 			LEFT JOIN sm_lp_active_positions ap
@@ -1598,7 +1604,7 @@ func (r *Repository) GetPositionOpenAmountsUSD(ctx context.Context, positions []
 	}
 
 	for _, row := range rows {
-		out[SmartMoneyPositionAmountKey(row.ChainID, row.Protocol, row.NftTokenID)] = row.PositionAmountUSD
+		out[SmartMoneyPositionAmountKey(row.ChainID, row.Protocol, row.NftTokenID)] = row
 	}
 
 	return out, nil

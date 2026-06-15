@@ -986,12 +986,16 @@ func (s *RealtimePositionsService) buildV3Position(
 	if hasSlot0 && poolAddr != (common.Address{}) {
 		if snapshotBlock > 0 {
 			fee0, fee1, feeErr := pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, info, snapshotBlock)
-			if feeErr == nil && fee0 != nil && fee1 != nil {
+			if fee0 != nil && fee1 != nil {
 				owed0 = fee0
 				owed1 = fee1
+				if feeErr != nil {
+					logRealtimeFeeIssue("V3", "snapshot", tokenId.String(), feeErr)
+					warn = appendRealtimeWarning(warn, fmt.Sprintf("V3 snapshot fee calculation failed: tokenId=%s err=%v", tokenId.String(), feeErr))
+				}
 			} else if feeErr != nil {
 				logRealtimeFeeIssue("V3", "snapshot", tokenId.String(), feeErr)
-				warn = appendRealtimeWarning(warn, fmt.Sprintf("V3 snapshot fee calculation failed: tokenId=%s err=%v", tokenId.String(), feeErr))
+				warn = appendRealtimeWarning(warn, fmt.Sprintf("V3 snapshot fee read failed: tokenId=%s err=%v", tokenId.String(), feeErr))
 			}
 		} else {
 			fee0, fee1, _, _, feeErr := s.calcV3UnclaimedFeesLive(chain, poolAddr, currentTick, info)
@@ -1378,12 +1382,16 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	if v4pos != nil {
 		if snapshotBlock > 0 {
 			fee0, fee1, feeErr := pool.CalcV4UnclaimedFeesAtBlock(stateView, poolManager, task.PoolId, currentTick, v4pos, snapshotBlock)
-			if feeErr == nil && fee0 != nil && fee1 != nil {
+			if fee0 != nil && fee1 != nil {
 				owed0 = fee0
 				owed1 = fee1
+				if feeErr != nil {
+					logRealtimeFeeIssue("V4", "snapshot", tokenId, feeErr)
+					warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 snapshot fee calculation failed: tokenId=%s err=%v", tokenId, feeErr))
+				}
 			} else if feeErr != nil {
 				logRealtimeFeeIssue("V4", "snapshot", tokenId, feeErr)
-				warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 snapshot fee calculation failed: tokenId=%s err=%v", tokenId, feeErr))
+				warn = appendRealtimeWarning(warn, fmt.Sprintf("V4 snapshot fee read failed: tokenId=%s err=%v", tokenId, feeErr))
 			}
 		} else if fee0, fee1, _, _, feeErr := s.calcV4UnclaimedFeesLiveUnified(stateView, poolManager, task.PoolId, currentTick, v4pos); fee0 != nil && fee1 != nil {
 			owed0 = fee0

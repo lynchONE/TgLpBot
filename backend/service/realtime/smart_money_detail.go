@@ -192,11 +192,14 @@ func (s *RealtimePositionsService) buildSmartMoneyV3PositionWithClient(
 					}
 
 					if snapshotBlock > 0 {
-						if fee0, fee1, feeErr := calcSmartMoneyV3UnclaimedFeesAtBlockWithClient(client, poolAddr, currentTick, info, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
+						if fee0, fee1, feeErr := calcSmartMoneyV3UnclaimedFeesAtBlockWithClient(client, poolAddr, currentTick, info, snapshotBlock); fee0 != nil && fee1 != nil {
 							owed0 = fee0
 							owed1 = fee1
+							if feeErr != nil && !isTransientFeeCalcError(feeErr) {
+								warnings = appendWarning(warnings, fmt.Sprintf("v3 snapshot fee calculation failed: %v", feeErr))
+							}
 						} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
-							warnings = appendWarning(warnings, fmt.Sprintf("v3 snapshot fee calculation failed: %v", feeErr))
+							warnings = appendWarning(warnings, fmt.Sprintf("v3 snapshot fee read failed: %v", feeErr))
 						}
 					} else if fee0, fee1, _, _, feeErr := s.calcV3UnclaimedFeesLiveWithClient(client, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
 						owed0 = fee0
@@ -571,6 +574,7 @@ func (s *RealtimePositionsService) buildDynamicSmartMoneyPosition(
 		price0 = prices[strings.ToLower(token0.Hex())]
 		price1 = prices[strings.ToLower(token1.Hex())]
 	}
+	price0, price1 = s.normalizeSmartMoneyTokenPrices(chain, walletAddr, token0, token1, meta0, meta1, currentTick, sqrtP.Sign() > 0, price0, price1)
 
 	row0 := buildTokenRow(token0, meta0, price0, w0, amt0Raw, owed0)
 	row1 := buildTokenRow(token1, meta1, price1, w1, amt1Raw, owed1)
@@ -608,6 +612,7 @@ func (s *RealtimePositionsService) buildStaticSmartMoneyPosition(
 		price0 = prices[strings.ToLower(token0.Hex())]
 		price1 = prices[strings.ToLower(token1.Hex())]
 	}
+	price0, price1 = s.normalizeSmartMoneyTokenPrices(chain, walletAddr, token0, token1, meta0, meta1, currentTick, currentTick != 0, price0, price1)
 
 	row0 := buildTokenRow(token0, meta0, price0, w0, big.NewInt(0), big.NewInt(0))
 	row1 := buildTokenRow(token1, meta1, price1, w1, big.NewInt(0), big.NewInt(0))
@@ -616,6 +621,22 @@ func (s *RealtimePositionsService) buildStaticSmartMoneyPosition(
 	}
 
 	return buildSmartMoneyRealtimePosition(active, chain, version, exchange, row0, row1, currentTick, intValue(active.TickLower), intValue(active.TickUpper), warnings)
+}
+
+func (s *RealtimePositionsService) normalizeSmartMoneyTokenPrices(
+	chain string,
+	walletAddr common.Address,
+	token0 common.Address,
+	token1 common.Address,
+	meta0 realtimeTokenMeta,
+	meta1 realtimeTokenMeta,
+	currentTick int,
+	hasSlot0 bool,
+	price0 float64,
+	price1 float64,
+) (float64, float64) {
+	price0, price1 = deriveRealtimePoolTokenPrices(chain, token0, token1, meta0, meta1, currentTick, hasSlot0, price0, price1)
+	return s.fillRealtimeTokenPricesFromOKX(chain, walletAddr, token0, token1, meta0, meta1, currentTick, hasSlot0, price0, price1)
 }
 
 func buildSmartMoneyRealtimePosition(

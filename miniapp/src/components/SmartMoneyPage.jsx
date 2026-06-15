@@ -991,6 +991,13 @@ function parsePoolMetricNumber(value) {
     return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function resolvePositionPreviewFeeUsd(detail, position) {
+    const liveFee = parsePoolMetricNumber(detail?.totals?.fee_usd);
+    if (Number.isFinite(liveFee)) return liveFee;
+    if (String(position?.fee_status || '').trim() === 'unavailable') return NaN;
+    return parsePoolMetricNumber(position?.fee_usd);
+}
+
 function resolveSmartMoneyPoolMarketCapDisplay(pool) {
     const candidates = [
         pool?.fdv_usd,
@@ -1209,7 +1216,7 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     [key]: {
                         fetchedAt: Date.now(),
                         rangeText: data?.in_range === true ? '区间内' : data?.in_range === false ? '已离开区间' : '',
-                        feeUsd: Number(data?.totals?.fee_usd ?? 0),
+                        feeUsd: resolvePositionPreviewFeeUsd(data, position),
                         runningSince: String(data?.running_since || position?.opened_at || '').trim(),
                     },
                 }));
@@ -1220,6 +1227,7 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     [key]: {
                         ...(prev[key] || {}),
                         fetchedAt: Date.now(),
+                        feeUsd: resolvePositionPreviewFeeUsd(null, position),
                         runningSince: String(prev[key]?.runningSince || position?.opened_at || '').trim(),
                     },
                 }));
@@ -1481,8 +1489,9 @@ function MiniMetric({ label, value }) {
 
 function PositionPreviewMetrics({ position, preview, compact = false }) {
     const runningText = formatDurationFrom(preview?.runningSince || position?.opened_at) || '--';
-    const feeValue = Number(preview?.feeUsd);
-    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(preview.feeUsd) : '--';
+    const previewFeeValue = Number(preview?.feeUsd);
+    const feeValue = Number.isFinite(previewFeeValue) ? previewFeeValue : resolvePositionPreviewFeeUsd(null, position);
+    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(feeValue) : '--';
     const feeMetricClass = Number.isFinite(feeValue)
         ? (feeValue > 0
             ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
@@ -1531,8 +1540,9 @@ function PositionPreviewMetricsLite({ position, preview, compact = false }) {
         : rangeText === '已离开区间'
             ? 'text-red-200'
             : 'text-zinc-100';
-    const feeValue = Number(preview?.feeUsd);
-    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(preview?.feeUsd) : '--';
+    const previewFeeValue = Number(preview?.feeUsd);
+    const feeValue = Number.isFinite(previewFeeValue) ? previewFeeValue : resolvePositionPreviewFeeUsd(null, position);
+    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(feeValue) : '--';
     const feeMetricClass = Number.isFinite(feeValue)
         ? (feeValue > 0
             ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'

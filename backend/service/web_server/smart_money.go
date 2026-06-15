@@ -1666,21 +1666,24 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 	// Enrich with wallet color, label, price_lower, price_upper
 	type posResp struct {
 		models.SmartMoneyLPPosition
-		PositionRef          string  `json:"position_ref"`
-		WalletLabel          *string `json:"wallet_label"`
-		WalletAvatarURL      *string `json:"wallet_avatar_url"`
-		WalletSource         string  `json:"wallet_source,omitempty"`
-		WalletSourceContract string  `json:"wallet_source_contract,omitempty"`
-		WalletColor          string  `json:"wallet_color"`
-		PriceLower           string  `json:"price_lower"`
-		PriceUpper           string  `json:"price_upper"`
-		RangePercent         float64 `json:"range_percent"`
-		PositionAmountUSD    float64 `json:"position_amount_usd"`
-		BscscanURL           string  `json:"bscscan_url"`
-		TradingPair          string  `json:"trading_pair"`
-		DisplayTokenAddress  string  `json:"display_token_address,omitempty"`
-		DisplayTokenSymbol   string  `json:"display_token_symbol,omitempty"`
-		DisplayTokenLogoURL  string  `json:"display_token_logo_url,omitempty"`
+		PositionRef          string     `json:"position_ref"`
+		WalletLabel          *string    `json:"wallet_label"`
+		WalletAvatarURL      *string    `json:"wallet_avatar_url"`
+		WalletSource         string     `json:"wallet_source,omitempty"`
+		WalletSourceContract string     `json:"wallet_source_contract,omitempty"`
+		WalletColor          string     `json:"wallet_color"`
+		PriceLower           string     `json:"price_lower"`
+		PriceUpper           string     `json:"price_upper"`
+		RangePercent         float64    `json:"range_percent"`
+		PositionAmountUSD    float64    `json:"position_amount_usd"`
+		FeeUSD               *string    `json:"fee_usd,omitempty"`
+		FeeStatus            string     `json:"fee_status,omitempty"`
+		FeeUpdatedAt         *time.Time `json:"fee_updated_at,omitempty"`
+		BscscanURL           string     `json:"bscscan_url"`
+		TradingPair          string     `json:"trading_pair"`
+		DisplayTokenAddress  string     `json:"display_token_address,omitempty"`
+		DisplayTokenSymbol   string     `json:"display_token_symbol,omitempty"`
+		DisplayTokenLogoURL  string     `json:"display_token_logo_url,omitempty"`
 	}
 
 	list := make([]posResp, 0, len(positions))
@@ -1746,7 +1749,11 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 			),
 		)
 		resp.RangePercent = smartMoneyRangePercentFromTicks(p.TickLower, p.TickUpper)
-		resp.PositionAmountUSD = amountsByChain[sm.SmartMoneyPositionAmountKey(p.ChainID, p.Protocol, p.NftTokenID)]
+		amountRow := amountsByChain[sm.SmartMoneyPositionAmountKey(p.ChainID, p.Protocol, p.NftTokenID)]
+		resp.PositionAmountUSD = amountRow.PositionAmountUSD
+		resp.FeeUSD = amountRow.FeeUSD
+		resp.FeeStatus = amountRow.FeeStatus
+		resp.FeeUpdatedAt = amountRow.FeeUpdatedAt
 		resp.TradingPair = buildSmartMoneyTradingPair(p.Token0Symbol, p.Token1Symbol)
 		if resp.DisplayTokenAddress != "" {
 			chain := smartMoneyChainSlug(p.ChainID)
@@ -1830,6 +1837,17 @@ func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if feeUSD := detail.Totals.FeeUSD; !math.IsNaN(feeUSD) && !math.IsInf(feeUSD, 0) && feeUSD >= 0 {
+		status := "ok"
+		feeSnapshot := &feeUSD
+		if smartMoneyHeatmapFeeWarningsBlockSnapshot(detail.Warnings) {
+			status = "unavailable"
+			feeSnapshot = nil
+		}
+		if updateErr := repo.UpdateActivePositionFeeSnapshot(ctx, active.ID, feeSnapshot, status, time.Now()); updateErr != nil {
+			log.Printf("smart money position detail fee snapshot update failed: id=%d err=%v", active.ID, updateErr)
+		}
 	}
 	walletRow, walletErr := repo.GetMonitoredWalletByAddress(ctx, active.WalletAddress, active.ChainID)
 	if walletErr != nil {
