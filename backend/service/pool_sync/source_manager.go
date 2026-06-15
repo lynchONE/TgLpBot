@@ -152,7 +152,7 @@ func (s *GormPoolDataSourceStore) SetCurrent(ctx context.Context, chain string, 
 	if ctx != nil {
 		tx = tx.WithContext(ctx)
 	}
-	return tx.Transaction(func(tx *gorm.DB) error {
+	err = tx.Transaction(func(tx *gorm.DB) error {
 		var source models.PoolDataSource
 		if err := tx.First(&source, id).Error; err != nil {
 			return err
@@ -168,10 +168,20 @@ func (s *GormPoolDataSourceStore) SetCurrent(ctx context.Context, chain string, 
 			Update("is_current", false).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.PoolDataSource{}).
+		if err := tx.Model(&models.PoolDataSource{}).
 			Where("id = ?", id).
-			Update("is_current", true).Error
+			Update("is_current", true).Error; err != nil {
+			return err
+		}
+		return tx.
+			Where("chain = ? AND (pool_data_source_id IS NULL OR pool_data_source_id <> ?)", source.Chain, source.ID).
+			Delete(&models.Pool{}).Error
 	})
+	if err != nil {
+		return err
+	}
+	invalidatePoolCatalogCache(ctx, []string{chain})
+	return nil
 }
 
 func (s *GormPoolDataSourceStore) UnsetCurrent(ctx context.Context, chain string, timeframeMinutes int) error {

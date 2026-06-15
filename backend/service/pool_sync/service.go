@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -105,8 +107,8 @@ func (s *Service) runOnce() {
 		return
 	}
 
-	if err := s.upsertRows(ctx, rows); err != nil {
-		log.Printf("[PoolSync] upsert failed: %v", err)
+	if err := s.replaceRows(ctx, rows); err != nil {
+		log.Printf("[PoolSync] replace rows failed: %v", err)
 		return
 	}
 	if err := s.cleanupExpired(ctx); err != nil {
@@ -412,13 +414,42 @@ func normalizeLower(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func (s *Service) upsertRows(ctx context.Context, rows []models.Pool) error {
-	return database.DB.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			UpdateAll: true,
-		}).
-		CreateInBatches(rows, 100).Error
+func (s *Service) replaceRows(ctx context.Context, rows []models.Pool) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	scopes, err := replacementScopesFromRows(rows)
+	if err != nil {
+		return err
+	}
+	if len(scopes) == 0 {
+		return fmt.Errorf("pool replacement scope is empty")
+	}
+	if err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "id"}},
+				UpdateAll: true,
+			}).
+			CreateInBatches(rows, 100).Error; err != nil {
+			return err
+		}
+		for _, scope := range scopes {
+			if err := tx.
+				Where("chain = ? AND id NOT IN ?", scope.chain, scope.ids).
+				Delete(&models.Pool{}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	invalidatePoolCatalogCache(ctx, replacementScopeChains(scopes))
+	return nil
 }
 
 func (s *Service) cleanupExpired(ctx context.Context) error {
@@ -430,6 +461,98 @@ func (s *Service) cleanupExpired(ctx context.Context) error {
 	return database.DB.WithContext(ctx).
 		Where("updated_at < ?", cutoff).
 		Delete(&models.Pool{}).Error
+}
+
+type poolReplacementScope struct {
+	chain string
+	ids   []string
+}
+
+func replacementScopesFromRows(rows []models.Pool) ([]poolReplacementScope, error) {
+	idsByChain := make(map[string]map[string]struct{})
+	for _, row := range rows {
+		chain := strings.TrimSpace(row.Chain)
+		if chain == "" {
+			return nil, fmt.Errorf("pool replacement row missing chain id=%s", row.ID)
+		}
+		id := strings.TrimSpace(row.ID)
+		if id == "" {
+			return nil, fmt.Errorf("pool replacement row missing id chain=%s", chain)
+		}
+		if idsByChain[chain] == nil {
+			idsByChain[chain] = make(map[string]struct{})
+		}
+		idsByChain[chain][id] = struct{}{}
+	}
+	chains := make([]string, 0, len(idsByChain))
+	for chain := range idsByChain {
+		chains = append(chains, chain)
+	}
+	sort.Strings(chains)
+
+	scopes := make([]poolReplacementScope, 0, len(chains))
+	for _, chain := range chains {
+		ids := make([]string, 0, len(idsByChain[chain]))
+		for id := range idsByChain[chain] {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		scopes = append(scopes, poolReplacementScope{chain: chain, ids: ids})
+	}
+	return scopes, nil
+}
+
+func replacementScopeChains(scopes []poolReplacementScope) []string {
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope.chain) == "" {
+			continue
+		}
+		out = append(out, scope.chain)
+	}
+	return out
+}
+
+func invalidatePoolCatalogCache(ctx context.Context, chains []string) {
+	if database.RedisClient == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	seen := make(map[string]struct{}, len(chains))
+	for _, chain := range chains {
+		chain = strings.TrimSpace(chain)
+		if chain == "" {
+			continue
+		}
+		if _, ok := seen[chain]; ok {
+			continue
+		}
+		seen[chain] = struct{}{}
+		pattern := fmt.Sprintf("pools:catalog:v6:chain=%s:*", chain)
+		iter := database.RedisClient.Scan(ctx, 0, pattern, 100).Iterator()
+		keys := make([]string, 0, 16)
+		for iter.Next(ctx) {
+			keys = append(keys, iter.Val())
+			if len(keys) >= 100 {
+				if err := database.RedisClient.Del(ctx, keys...).Err(); err != nil {
+					log.Printf("[PoolSync] invalidate pool cache failed chain=%s err=%v", chain, err)
+					return
+				}
+				keys = keys[:0]
+			}
+		}
+		if err := iter.Err(); err != nil {
+			log.Printf("[PoolSync] scan pool cache failed chain=%s err=%v", chain, err)
+			continue
+		}
+		if len(keys) > 0 {
+			if err := database.RedisClient.Del(ctx, keys...).Err(); err != nil {
+				log.Printf("[PoolSync] invalidate pool cache failed chain=%s err=%v", chain, err)
+			}
+		}
+	}
 }
 
 func poolSyncDexList(raw string) []string {
