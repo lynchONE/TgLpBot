@@ -63,6 +63,17 @@ func TestSmartMoneyPoolLiquidityScanErrorMessageSanitizesCloudflareHTML(t *testi
 	}
 }
 
+func TestSmartMoneyPoolLiquidityScanErrorMessageDoesNotHidePlainErrorAsBadGateway(t *testing.T) {
+	msg := smartMoneyPoolLiquidityScanErrorMessage(fmt.Errorf("pool_address does not match configured v3 deployments"), 502)
+
+	if strings.Contains(msg, "502 Bad Gateway") {
+		t.Fatalf("expected plain error to be preserved, got %q", msg)
+	}
+	if !strings.Contains(msg, "pool_address does not match configured v3 deployments") {
+		t.Fatalf("expected original error message, got %q", msg)
+	}
+}
+
 func TestWriteSmartMoneySSEEventWritesAndFlushes(t *testing.T) {
 	rr := httptest.NewRecorder()
 

@@ -34,6 +34,7 @@ export {
     switchAdminPoolDataSource,
     switchAdminRPCEndpoint,
     updateAdminOKXConfig,
+    updateAdminPoolDataSource,
     updateSystemConfig,
 } from './api/adminConfig';
 export {

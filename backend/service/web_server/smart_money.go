@@ -896,8 +896,7 @@ func smartMoneyPoolLiquidityScanErrorMessage(err error, statusCode int) string {
 		strings.Contains(normalized, "504") {
 		return "扫描服务超时（504 Gateway Timeout），请缩小时间范围后重试。"
 	}
-	if statusCode == http.StatusBadGateway ||
-		strings.Contains(normalized, "bad gateway") ||
+	if strings.Contains(normalized, "bad gateway") ||
 		strings.Contains(normalized, "502") {
 		return "扫描服务暂时不可用（502 Bad Gateway），请稍后重试。"
 	}

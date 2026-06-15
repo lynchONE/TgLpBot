@@ -39,6 +39,7 @@ import {
   switchAdminPoolDataSource,
   switchAdminRPCEndpoint,
   updateAdminOKXConfig,
+  updateAdminPoolDataSource,
   updateSystemConfig,
 } from '../api';
 import { formatUsd, shortAddress } from '../utils';
@@ -348,6 +349,43 @@ function splitCSV(raw) {
     .filter(Boolean);
 }
 
+function poolSourceToDraft(source) {
+  return {
+    sourceType: String(source?.source_type || 'market_pools'),
+    chain: String(source?.chain || 'bsc'),
+    baseUrl: String(source?.base_url || ''),
+    pathTemplate: String(source?.path_template || ''),
+    timeframeMinutes: Number(source?.timeframe_minutes || 5),
+    limit: Number(source?.limit || 100),
+    protocols: Array.isArray(source?.protocols) ? source.protocols.join(',') : '',
+    dexes: Array.isArray(source?.dexes) ? source.dexes.join(',') : '',
+    name: String(source?.name || ''),
+    setCurrent: false,
+  };
+}
+
+function nextPoolSourceDraft(prev, key, value) {
+  const next = { ...prev, [key]: value };
+  if (key === 'sourceType') {
+    if (value === 'poolm_top_fees') {
+      next.pathTemplate = '';
+      next.protocols = '';
+      next.dexes = 'pcsv3,univ3,univ4';
+      if (!String(prev.baseUrl || '').trim() || prev.baseUrl === 'http://localhost:8080') {
+        next.baseUrl = 'https://mapi.poolm.xyz';
+      }
+    } else {
+      next.pathTemplate = '/api/market/pools';
+      next.protocols = 'v3,v4';
+      next.dexes = 'PancakeswapV3,UniswapV3,UniswapV4';
+      if (!String(prev.baseUrl || '').trim() || prev.baseUrl === 'https://mapi.poolm.xyz') {
+        next.baseUrl = 'http://localhost:8080';
+      }
+    }
+  }
+  return next;
+}
+
 function formatCoverage(source) {
   const coverage = source?.last_field_coverage;
   if (!coverage || typeof coverage !== 'object') return '';
@@ -487,6 +525,195 @@ function PoolDataSourceRow({
         )}
         <button type="button" className="am-action-btn" onClick={() => onDelete?.(source)}>删除</button>
       </div>
+    </div>
+  );
+}
+
+function EditablePoolDataSourceRow({
+  source,
+  onUpdate,
+  onCheck,
+  onSwitch,
+  onDisable,
+  onEnable,
+  onDelete,
+  updating = false,
+}) {
+  const enabled = Boolean(source?.is_enabled);
+  const current = Boolean(source?.is_current);
+  const coverage = formatCoverage(source);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(() => poolSourceToDraft(source));
+
+  useEffect(() => {
+    setDraft(poolSourceToDraft(source));
+    setEditing(false);
+  }, [source?.id, source?.name, source?.source_type, source?.chain, source?.timeframe_minutes, source?.limit, source?.base_url, source?.path_template]);
+
+  const updateDraft = useCallback((key, value) => {
+    setDraft((prev) => nextPoolSourceDraft(prev, key, value));
+  }, []);
+
+  const submit = useCallback(() => {
+    onUpdate?.(source, {
+      ...draft,
+      protocols: splitCSV(draft.protocols),
+      dexes: splitCSV(draft.dexes),
+    });
+  }, [draft, onUpdate, source]);
+
+  return (
+    <div className="am-list-item am-list-item-wrap">
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="am-item-title">{poolSourceDisplayName(source)}</div>
+        <div className="am-item-sub">
+          {formatPoolSourceUrl(source)} / {formatPoolDataSourceType(source?.source_type)} / {Number(source?.timeframe_minutes || 5)}m / limit {Number(source?.limit || 100)}
+        </div>
+        <div className="am-actions" style={{ justifyContent: 'flex-start' }}>
+          <span className={enabled ? 'am-badge am-badge-ok' : 'am-badge am-badge-warn'}>
+            {enabled ? '启用' : '停用'}
+          </span>
+          {current ? <span className="am-badge">当前来源</span> : null}
+          {source?.is_env_fallback ? <span className="am-badge">ENV 兜底</span> : null}
+          {Number(source?.last_latency_ms || 0) > 0 ? (
+            <span className="am-badge">延迟 {Number(source.last_latency_ms)}ms</span>
+          ) : null}
+        </div>
+        <div className="am-item-sub">
+          检测 {formatDateTime(source?.last_checked_at)} / 成功 {formatDateTime(source?.last_success_at)}
+          {coverage ? ` / ${coverage}` : ''}
+        </div>
+        {source?.last_error ? <div className="am-error">{source.last_error}</div> : null}
+      </div>
+
+      <div className="am-btn-group">
+        <button type="button" className="am-action-btn" onClick={() => setEditing((prev) => !prev)}>
+          {editing ? '收起' : '编辑'}
+        </button>
+        <button type="button" className="am-action-btn" onClick={() => onCheck?.(source)}>检测</button>
+        <button
+          type="button"
+          className="am-action-btn"
+          disabled={!enabled || current}
+          onClick={() => onSwitch?.(source)}
+        >
+          切换
+        </button>
+        {enabled ? (
+          <button type="button" className="am-action-btn" onClick={() => onDisable?.(source)}>停用</button>
+        ) : (
+          <button type="button" className="am-action-btn" onClick={() => onEnable?.(source)}>启用</button>
+        )}
+        <button type="button" className="am-action-btn" onClick={() => onDelete?.(source)}>删除</button>
+      </div>
+
+      {editing ? (
+        <div className="am-form" style={{ flexBasis: '100%', marginTop: 12 }}>
+          <label className="am-field">
+            <span>来源类型</span>
+            <CustomSelect
+              value={draft.sourceType}
+              onChange={(value) => updateDraft('sourceType', value)}
+              options={POOL_SOURCE_TYPE_OPTIONS}
+            />
+          </label>
+          <label className="am-field">
+            <span>链</span>
+            <CustomSelect
+              value={draft.chain}
+              onChange={(value) => updateDraft('chain', value)}
+              options={CHAIN_OPTIONS}
+            />
+          </label>
+          <label className="am-field am-field-grow">
+            <span>Base URL</span>
+            <input
+              value={draft.baseUrl}
+              onChange={(event) => updateDraft('baseUrl', event.target.value)}
+              placeholder={draft.sourceType === 'poolm_top_fees' ? 'https://mapi.poolm.xyz' : 'http://localhost:8080'}
+            />
+          </label>
+          <label className="am-field">
+            <span>路径</span>
+            <input
+              value={draft.pathTemplate}
+              onChange={(event) => updateDraft('pathTemplate', event.target.value)}
+              placeholder={draft.sourceType === 'poolm_top_fees' ? '默认 /top-fees' : '/api/market/pools'}
+            />
+          </label>
+          <label className="am-field">
+            <span>窗口(分钟)</span>
+            <input
+              type="number"
+              min="1"
+              value={draft.timeframeMinutes}
+              onChange={(event) => updateDraft('timeframeMinutes', event.target.value)}
+            />
+          </label>
+          <label className="am-field">
+            <span>Limit</span>
+            <input
+              type="number"
+              min="1"
+              value={draft.limit}
+              onChange={(event) => updateDraft('limit', event.target.value)}
+            />
+          </label>
+          <label className="am-field am-field-grow">
+            <span>Protocols</span>
+            <input
+              value={draft.protocols}
+              onChange={(event) => updateDraft('protocols', event.target.value)}
+              placeholder="v3,v4"
+            />
+          </label>
+          <label className="am-field am-field-grow">
+            <span>DEX</span>
+            <input
+              value={draft.dexes}
+              onChange={(event) => updateDraft('dexes', event.target.value)}
+              placeholder="PancakeswapV3,UniswapV3,UniswapV4"
+            />
+          </label>
+          <label className="am-field">
+            <span>名称</span>
+            <input
+              value={draft.name}
+              onChange={(event) => updateDraft('name', event.target.value)}
+              placeholder="留空使用域名"
+            />
+          </label>
+          <label className="am-field am-field-check">
+            <input
+              type="checkbox"
+              checked={Boolean(draft.setCurrent)}
+              onChange={(event) => updateDraft('setCurrent', event.target.checked)}
+            />
+            <span>保存后切为当前来源</span>
+          </label>
+          <div className="am-actions" style={{ marginLeft: 'auto' }}>
+            <button
+              type="button"
+              className="am-action-btn"
+              disabled={updating || !String(draft.baseUrl || '').trim()}
+              onClick={submit}
+            >
+              {updating ? '保存中...' : '保存修改'}
+            </button>
+            <button
+              type="button"
+              className="am-action-btn"
+              disabled={updating}
+              onClick={() => {
+                setDraft(poolSourceToDraft(source));
+                setEditing(false);
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -676,6 +903,7 @@ export default function AdminPanel({
   const [poolSourceLoading, setPoolSourceLoading] = useState(false);
   const [poolSourceError, setPoolSourceError] = useState('');
   const [poolSourceAdding, setPoolSourceAdding] = useState(false);
+  const [poolSourceUpdatingId, setPoolSourceUpdatingId] = useState(0);
   const [poolSourceAddDraft, setPoolSourceAddDraft] = useState({
     sourceType: 'market_pools',
     chain: 'bsc',
@@ -1046,27 +1274,7 @@ export default function AdminPanel({
   }, [apiBaseUrl, initData, isReady, loadRPCPool, rpcAddDraft, showNotice]);
 
   const updatePoolSourceDraft = useCallback((key, value) => {
-    setPoolSourceAddDraft((prev) => {
-      const next = { ...prev, [key]: value };
-      if (key === 'sourceType') {
-        if (value === 'poolm_top_fees') {
-          next.pathTemplate = '';
-          next.protocols = '';
-          next.dexes = 'pcsv3,univ3,univ4';
-          if (!String(prev.baseUrl || '').trim() || prev.baseUrl === 'http://localhost:8080') {
-            next.baseUrl = 'https://mapi.poolm.xyz';
-          }
-        } else {
-          next.pathTemplate = '/api/market/pools';
-          next.protocols = 'v3,v4';
-          next.dexes = 'PancakeswapV3,UniswapV3,UniswapV4';
-          if (!String(prev.baseUrl || '').trim() || prev.baseUrl === 'https://mapi.poolm.xyz') {
-            next.baseUrl = 'http://localhost:8080';
-          }
-        }
-      }
-      return next;
-    });
+    setPoolSourceAddDraft((prev) => nextPoolSourceDraft(prev, key, value));
   }, []);
 
   const runPoolSourceAction = useCallback(async (runner, successMessage) => {
@@ -1112,6 +1320,45 @@ export default function AdminPanel({
       setPoolSourceAdding(false);
     }
   }, [apiBaseUrl, initData, isReady, loadPoolDataSources, poolSourceAddDraft, showNotice]);
+
+  const handleUpdatePoolSource = useCallback(async (source, draft) => {
+    if (!isReady) return;
+    const sourceId = Number(source?.id);
+    const baseUrl = String(draft?.baseUrl || '').trim();
+    if (!sourceId) {
+      setPoolSourceError('缺少池子数据源 ID');
+      return;
+    }
+    if (!baseUrl) {
+      setPoolSourceError('请先填写 Base URL');
+      return;
+    }
+    setPoolSourceUpdatingId(sourceId);
+    setPoolSourceError('');
+    try {
+      await updateAdminPoolDataSource({
+        apiBaseUrl,
+        initData,
+        sourceId,
+        name: String(draft.name || '').trim(),
+        sourceType: draft.sourceType,
+        chain: draft.chain,
+        timeframeMinutes: Number(draft.timeframeMinutes) || 5,
+        limit: Number(draft.limit) || 100,
+        baseUrl,
+        pathTemplate: String(draft.pathTemplate || '').trim(),
+        protocols: Array.isArray(draft.protocols) ? draft.protocols : [],
+        dexes: Array.isArray(draft.dexes) ? draft.dexes : [],
+        setCurrent: Boolean(draft.setCurrent),
+      });
+      await loadPoolDataSources();
+      showNotice('池子数据源已保存');
+    } catch (err) {
+      setPoolSourceError(errorText(err));
+    } finally {
+      setPoolSourceUpdatingId(0);
+    }
+  }, [apiBaseUrl, initData, isReady, loadPoolDataSources, showNotice]);
 
   const runOKXAction = useCallback(async (runner, successMessage) => {
     try {
@@ -1807,9 +2054,11 @@ export default function AdminPanel({
                       </div>
                       <div className="am-list">
                         {Array.isArray(group?.sources) && group.sources.length > 0 ? group.sources.map((source) => (
-                          <PoolDataSourceRow
+                          <EditablePoolDataSourceRow
                             key={source.id || `${group?.chain}:${group?.timeframe_minutes}:${source?.base_url}`}
                             source={source}
+                            updating={poolSourceUpdatingId === Number(source?.id)}
+                            onUpdate={handleUpdatePoolSource}
                             onCheck={(item) => runPoolSourceAction(
                               () => checkAdminPoolDataSource({ apiBaseUrl, initData, sourceId: item?.id }),
                               '池子数据源检测完成'

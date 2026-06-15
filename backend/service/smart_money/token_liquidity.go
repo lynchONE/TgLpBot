@@ -37,6 +37,7 @@ const (
 	rpcPoolLiquidityMaxWindowHours  = int(rpcPoolLiquidityMaxWindow / time.Hour)
 	rpcPoolLiquidityMaxLogs         = 5000
 	rpcPoolLiquidityBlockChunk      = uint64(2000)
+	rpcPoolLiquidityApproxBlockTime = 3 * time.Second
 	rpcPoolLiquidityHeaderCacheSize = 512
 )
 
@@ -381,7 +382,7 @@ func (p *RPCTokenLiquidityProvider) StreamCandidates(ctx context.Context, query 
 	}); err != nil {
 		return nil, err
 	}
-	fromBlock, toBlock, err := resolveRPCBlockRangeByTime(ctx, client, since, till)
+	fromBlock, toBlock, blockRangeWarning, err := resolveRPCBlockRangeByTime(ctx, client, since, till)
 	if err != nil {
 		return nil, err
 	}
@@ -399,27 +400,27 @@ func (p *RPCTokenLiquidityProvider) StreamCandidates(ctx context.Context, query 
 		return nil, err
 	}
 	if query.PoolID != "" {
-		return p.findV4Candidates(ctx, client, watcher, query, since, till, fromBlock, toBlock, callbacks)
+		return p.findV4Candidates(ctx, client, watcher, query, since, till, fromBlock, toBlock, callbacks, blockRangeWarning)
 	}
-	return p.findV3Candidates(ctx, client, watcher, query, since, till, fromBlock, toBlock, callbacks)
+	return p.findV3Candidates(ctx, client, watcher, query, since, till, fromBlock, toBlock, callbacks, blockRangeWarning)
 }
 
-func (p *RPCTokenLiquidityProvider) findV3Candidates(ctx context.Context, client *ethclient.Client, watcher *Watcher, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, fromBlock uint64, toBlock uint64, callbacks TokenLiquidityCandidateStreamCallbacks) (*TokenLiquidityCandidateResponse, error) {
-	poolAddress := common.HexToAddress(query.PoolAddress)
-	deployment, err := resolveV3DeploymentForPool(ctx, client, query.Chain, poolAddress)
-	if err != nil {
-		return nil, err
+func (p *RPCTokenLiquidityProvider) findV3Candidates(ctx context.Context, client *ethclient.Client, watcher *Watcher, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, fromBlock uint64, toBlock uint64, callbacks TokenLiquidityCandidateStreamCallbacks, initialWarnings ...string) (*TokenLiquidityCandidateResponse, error) {
+	deployments := configuredV3Deployments(query.Chain)
+	positionManagers := v3PositionManagerAddresses(deployments)
+	if len(positionManagers) == 0 {
+		return nil, fmt.Errorf("v3 position managers are not configured")
 	}
 	headerCache := newRPCHeaderCache(client)
 	items := make([]*models.SmartMoneyLPEvent, 0, query.Limit)
 	seenWallets := make(map[string]struct{}, query.Limit)
 	excluded := 0
-	warnings := []string{}
+	warnings := compactTokenLiquidityWarnings(initialWarnings...)
 	candidateByWallet := make(map[string]TokenLiquidityCandidate, query.Limit)
 	truncated, stopReason, err := filterPoolLiquidityLogs(ctx, client, ethereum.FilterQuery{
 		FromBlock: new(big.Int).SetUint64(fromBlock),
 		ToBlock:   new(big.Int).SetUint64(toBlock),
-		Addresses: []common.Address{deployment.PositionManager},
+		Addresses: positionManagers,
 		Topics: [][]common.Hash{{
 			TopicIncreaseLiquidity,
 		}},
@@ -443,7 +444,7 @@ func (p *RPCTokenLiquidityProvider) findV3Candidates(ctx context.Context, client
 			excluded++
 			return false, nil
 		}
-		owner, ownerSource, err := resolveV3LiquidityOwner(ctx, client, deployment.PositionManager, event, vlog.BlockNumber)
+		owner, ownerSource, err := resolveV3LiquidityOwner(ctx, client, vlog.Address, event, vlog.BlockNumber)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return false, ctxErr
@@ -500,7 +501,7 @@ func (p *RPCTokenLiquidityProvider) findV3Candidates(ctx context.Context, client
 		if errors.Is(err, errTokenLiquidityStreamCallback) {
 			return nil, err
 		}
-		if len(items) > 0 {
+		if len(items) > 0 || isRecoverableRPCScanError(err) {
 			partial = true
 			warnings = appendLimitedWarning(warnings, tokenLiquidityPartialScanWarning(err))
 		} else {
@@ -523,7 +524,7 @@ func (p *RPCTokenLiquidityProvider) findV3Candidates(ctx context.Context, client
 	return resp, nil
 }
 
-func (p *RPCTokenLiquidityProvider) findV4Candidates(ctx context.Context, client *ethclient.Client, watcher *Watcher, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, fromBlock uint64, toBlock uint64, callbacks TokenLiquidityCandidateStreamCallbacks) (*TokenLiquidityCandidateResponse, error) {
+func (p *RPCTokenLiquidityProvider) findV4Candidates(ctx context.Context, client *ethclient.Client, watcher *Watcher, query TokenLiquidityCandidateQuery, since time.Time, till time.Time, fromBlock uint64, toBlock uint64, callbacks TokenLiquidityCandidateStreamCallbacks, initialWarnings ...string) (*TokenLiquidityCandidateResponse, error) {
 	poolManager, err := resolveV4PoolManagerAddress(query.Chain)
 	if err != nil {
 		return nil, err
@@ -537,7 +538,7 @@ func (p *RPCTokenLiquidityProvider) findV4Candidates(ctx context.Context, client
 	items := make([]*models.SmartMoneyLPEvent, 0, query.Limit)
 	seenWallets := make(map[string]struct{}, query.Limit)
 	excluded := 0
-	warnings := []string{}
+	warnings := compactTokenLiquidityWarnings(initialWarnings...)
 	candidateByWallet := make(map[string]TokenLiquidityCandidate, query.Limit)
 	truncated, stopReason, err := filterPoolLiquidityLogs(ctx, client, ethereum.FilterQuery{
 		FromBlock: new(big.Int).SetUint64(fromBlock),
@@ -629,7 +630,7 @@ func (p *RPCTokenLiquidityProvider) findV4Candidates(ctx context.Context, client
 		if errors.Is(err, errTokenLiquidityStreamCallback) {
 			return nil, err
 		}
-		if len(items) > 0 {
+		if len(items) > 0 || isRecoverableRPCScanError(err) {
 			partial = true
 			warnings = appendLimitedWarning(warnings, tokenLiquidityPartialScanWarning(err))
 		} else {
@@ -656,37 +657,6 @@ type v3PoolDeployment struct {
 	Protocol        string
 	Factory         common.Address
 	PositionManager common.Address
-}
-
-func resolveV3DeploymentForPool(ctx context.Context, client *ethclient.Client, chain string, poolAddress common.Address) (*v3PoolDeployment, error) {
-	if poolAddress == (common.Address{}) {
-		return nil, fmt.Errorf("pool_address is empty")
-	}
-	token0, token1, err := blockchain.GetV3PoolTokensWithClient(client, poolAddress)
-	if err != nil {
-		return nil, err
-	}
-	fee, err := blockchain.GetV3PoolFeeWithClient(client, poolAddress)
-	if err != nil {
-		return nil, err
-	}
-	deployments := configuredV3Deployments(chain)
-	if len(deployments) == 0 {
-		return nil, fmt.Errorf("v3 deployments are not configured")
-	}
-	for _, dep := range deployments {
-		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		resolvedPool, err := blockchain.GetV3PoolFromFactoryCtxWithClient(client, callCtx, dep.Factory, token0, token1, uint64(fee))
-		cancel()
-		if err != nil {
-			continue
-		}
-		if resolvedPool == poolAddress {
-			matched := dep
-			return &matched, nil
-		}
-	}
-	return nil, fmt.Errorf("pool_address does not match configured v3 deployments")
 }
 
 func configuredV3Deployments(chain string) []v3PoolDeployment {
@@ -720,6 +690,22 @@ func configuredV3Deployments(chain string) []v3PoolDeployment {
 		}
 		add("PancakeSwap V3", "0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865", config.AppConfig.PancakeV3PositionManagerAddress)
 		add("Uniswap V3", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7", config.AppConfig.UniswapV3PositionManagerAddress)
+	}
+	return out
+}
+
+func v3PositionManagerAddresses(deployments []v3PoolDeployment) []common.Address {
+	out := []common.Address{}
+	seen := map[common.Address]struct{}{}
+	for _, dep := range deployments {
+		if dep.PositionManager == (common.Address{}) {
+			continue
+		}
+		if _, ok := seen[dep.PositionManager]; ok {
+			continue
+		}
+		seen[dep.PositionManager] = struct{}{}
+		out = append(out, dep.PositionManager)
 	}
 	return out
 }
@@ -834,7 +820,7 @@ func filterPoolLiquidityLogs(ctx context.Context, client *ethclient.Client, base
 		query.ToBlock = new(big.Int).SetUint64(end)
 		logs, err := client.FilterLogs(ctx, query)
 		if err != nil {
-			if isRPCLogRangeLimitError(err) && chunk > 1 {
+			if (isRPCLogRangeLimitError(err) || isRecoverableRPCScanError(err)) && chunk > 1 {
 				chunk = chunk / 2
 				if chunk == 0 {
 					chunk = 1
@@ -920,6 +906,32 @@ func isRPCLogRangeLimitError(err error) bool {
 	return false
 }
 
+func isRecoverableRPCScanError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"bad gateway",
+		"gateway time-out",
+		"gateway timeout",
+		"502",
+		"503",
+		"504",
+		"temporarily unavailable",
+		"too many requests",
+		"rate limit",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func tokenLiquidityPartialScanWarning(err error) string {
 	if err == nil {
 		return "scan stopped after returning partial candidates; narrow the time range for complete results"
@@ -938,6 +950,8 @@ func tokenLiquidityPartialScanWarning(err error) string {
 func tokenLiquidityWarningCode(warning string) string {
 	warning = strings.ToLower(strings.TrimSpace(warning))
 	switch {
+	case strings.Contains(warning, "区块范围"):
+		return "estimated_block_range"
 	case strings.Contains(warning, "timed out") || strings.Contains(warning, "timeout"):
 		return "partial_timeout"
 	case strings.Contains(warning, "requested number"):
@@ -949,6 +963,18 @@ func tokenLiquidityWarningCode(warning string) string {
 	default:
 		return "scan_warning"
 	}
+}
+
+func compactTokenLiquidityWarnings(warnings ...string) []string {
+	out := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		warning = strings.TrimSpace(warning)
+		if warning == "" {
+			continue
+		}
+		out = append(out, warning)
+	}
+	return out
 }
 
 func findTokenLiquidityCandidateIndex(candidates []TokenLiquidityCandidate, wallet string) int {
@@ -1157,31 +1183,65 @@ func (c *rpcHeaderCache) HeaderByNumber(ctx context.Context, client *ethclient.C
 	return header, nil
 }
 
-func resolveRPCBlockRangeByTime(ctx context.Context, client *ethclient.Client, start time.Time, end time.Time) (uint64, uint64, error) {
+func resolveRPCBlockRangeByTime(ctx context.Context, client *ethclient.Client, start time.Time, end time.Time) (uint64, uint64, string, error) {
 	if client == nil {
-		return 0, 0, fmt.Errorf("rpc client not initialized")
+		return 0, 0, "", fmt.Errorf("rpc client not initialized")
 	}
 	latest, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("load latest block: %w", err)
+		return 0, 0, "", fmt.Errorf("load latest block: %w", err)
 	}
 	if latest == nil || latest.Number == nil {
-		return 0, 0, fmt.Errorf("latest block header is missing")
+		return 0, 0, "", fmt.Errorf("latest block header is missing")
 	}
 	latestNumber := latest.Number.Uint64()
 	latestTime := time.Unix(int64(latest.Time), 0).UTC()
 	if latestTime.Before(start) {
-		return latestNumber + 1, latestNumber, nil
+		return latestNumber + 1, latestNumber, "", nil
 	}
 	startBlock, err := firstBlockAtOrAfter(ctx, client, latestNumber, start)
 	if err != nil {
-		return 0, 0, err
+		if isRecoverableRPCScanError(err) {
+			from, to := approximateRPCBlockRangeByTime(latestNumber, latestTime, start, end)
+			return from, to, "精确区块范围解析遇到临时 RPC 错误，已使用估算区块范围继续扫描", nil
+		}
+		return 0, 0, "", err
 	}
 	endBlock, err := lastBlockAtOrBefore(ctx, client, latestNumber, end)
 	if err != nil {
-		return 0, 0, err
+		if isRecoverableRPCScanError(err) {
+			from, to := approximateRPCBlockRangeByTime(latestNumber, latestTime, start, end)
+			return from, to, "精确区块范围解析遇到临时 RPC 错误，已使用估算区块范围继续扫描", nil
+		}
+		return 0, 0, "", err
 	}
-	return startBlock, endBlock, nil
+	return startBlock, endBlock, "", nil
+}
+
+func approximateRPCBlockRangeByTime(latestNumber uint64, latestTime time.Time, start time.Time, end time.Time) (uint64, uint64) {
+	if latestNumber == 0 || latestTime.IsZero() {
+		return 0, 0
+	}
+	if end.After(latestTime) {
+		end = latestTime
+	}
+	if !end.After(start) {
+		return latestNumber + 1, latestNumber
+	}
+	blocksBackToEnd := uint64(latestTime.Sub(end) / rpcPoolLiquidityApproxBlockTime)
+	blocksBackToStart := uint64(latestTime.Sub(start)/rpcPoolLiquidityApproxBlockTime) + 1
+	to := latestNumber
+	if blocksBackToEnd < latestNumber {
+		to = latestNumber - blocksBackToEnd
+	}
+	from := uint64(0)
+	if blocksBackToStart < latestNumber {
+		from = latestNumber - blocksBackToStart
+	}
+	if from > to {
+		return to + 1, to
+	}
+	return from, to
 }
 
 func firstBlockAtOrAfter(ctx context.Context, client *ethclient.Client, latest uint64, target time.Time) (uint64, error) {

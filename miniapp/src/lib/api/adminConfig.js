@@ -187,6 +187,45 @@ export async function addAdminPoolDataSource({
     });
 }
 
+export async function updateAdminPoolDataSource({
+    apiBaseUrl,
+    initData,
+    sourceId,
+    name,
+    sourceType,
+    chain,
+    timeframeMinutes,
+    limit,
+    baseUrl,
+    pathTemplate,
+    queryTemplate,
+    protocols,
+    dexes,
+    setCurrent,
+    signal,
+}) {
+    return adminPoolDataSourcesRequest({
+        apiBaseUrl,
+        payload: {
+            initData,
+            action: 'update',
+            source_id: Number(sourceId),
+            name,
+            source_type: sourceType,
+            chain,
+            timeframe_minutes: Number(timeframeMinutes),
+            limit: Number(limit),
+            base_url: baseUrl,
+            path_template: pathTemplate,
+            query_template: queryTemplate || {},
+            protocols: Array.isArray(protocols) ? protocols : [],
+            dexes: Array.isArray(dexes) ? dexes : [],
+            set_current: Boolean(setCurrent),
+        },
+        signal,
+    });
+}
+
 export async function switchAdminPoolDataSource({ apiBaseUrl, initData, sourceId, signal }) {
     return adminPoolDataSourcesRequest({
         apiBaseUrl,

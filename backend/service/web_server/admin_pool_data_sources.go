@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -32,6 +33,72 @@ type adminPoolDataSourceRequest struct {
 	Protocols        []string          `json:"protocols,omitempty"`
 	Dexes            []string          `json:"dexes,omitempty"`
 	SetCurrent       bool              `json:"set_current,omitempty"`
+
+	fields map[string]json.RawMessage `json:"-"`
+}
+
+func (req adminPoolDataSourceRequest) hasField(name string) bool {
+	_, ok := req.fields[name]
+	return ok
+}
+
+func (req adminPoolDataSourceRequest) poolDataSourceInput() pool_sync.PoolDataSourceInput {
+	return pool_sync.PoolDataSourceInput{
+		Name:             strings.TrimSpace(req.Name),
+		NameSet:          req.hasField("name"),
+		SourceType:       strings.TrimSpace(req.SourceType),
+		Chain:            strings.TrimSpace(req.Chain),
+		TimeframeMinutes: req.TimeframeMinutes,
+		Limit:            req.Limit,
+		BaseURL:          strings.TrimSpace(req.BaseURL),
+		PathTemplate:     strings.TrimSpace(req.PathTemplate),
+		PathTemplateSet:  req.hasField("path_template"),
+		QueryTemplate:    req.QueryTemplate,
+		Protocols:        req.Protocols,
+		Dexes:            req.Dexes,
+		SetCurrent:       req.SetCurrent,
+	}
+}
+
+func (req *adminPoolDataSourceRequest) UnmarshalJSON(data []byte) error {
+	type alias adminPoolDataSourceRequest
+	allowed := map[string]struct{}{
+		"initData":          {},
+		"action":            {},
+		"source_id":         {},
+		"name":              {},
+		"source_type":       {},
+		"chain":             {},
+		"timeframe_minutes": {},
+		"limit":             {},
+		"base_url":          {},
+		"path_template":     {},
+		"query_template":    {},
+		"protocols":         {},
+		"dexes":             {},
+		"set_current":       {},
+	}
+	var parsed alias
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for key := range fields {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("json: unknown field %q", key)
+		}
+	}
+	*req = adminPoolDataSourceRequest(parsed)
+	req.fields = fields
+	return nil
+}
+
+func (req adminPoolDataSourceRequest) MarshalJSON() ([]byte, error) {
+	type alias adminPoolDataSourceRequest
+	return json.Marshal(alias(req))
 }
 
 type adminPoolDataSourceDTO struct {
@@ -225,19 +292,7 @@ func (s *Server) handleAdminPoolDataSources(w http.ResponseWriter, r *http.Reque
 }
 
 func poolDataSourceInputFromAdminRequest(req adminPoolDataSourceRequest) pool_sync.PoolDataSourceInput {
-	return pool_sync.PoolDataSourceInput{
-		Name:             strings.TrimSpace(req.Name),
-		SourceType:       strings.TrimSpace(req.SourceType),
-		Chain:            strings.TrimSpace(req.Chain),
-		TimeframeMinutes: req.TimeframeMinutes,
-		Limit:            req.Limit,
-		BaseURL:          strings.TrimSpace(req.BaseURL),
-		PathTemplate:     strings.TrimSpace(req.PathTemplate),
-		QueryTemplate:    req.QueryTemplate,
-		Protocols:        req.Protocols,
-		Dexes:            req.Dexes,
-		SetCurrent:       req.SetCurrent,
-	}
+	return req.poolDataSourceInput()
 }
 
 func writePoolDataSourcesList(w http.ResponseWriter, ctx context.Context, mgr *pool_sync.PoolDataSourceManager) {

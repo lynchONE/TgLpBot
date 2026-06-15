@@ -190,12 +190,14 @@ func (s *GormPoolDataSourceStore) UnsetCurrent(ctx context.Context, chain string
 
 type PoolDataSourceInput struct {
 	Name             string
+	NameSet          bool
 	SourceType       string
 	Chain            string
 	TimeframeMinutes int
 	Limit            int
 	BaseURL          string
 	PathTemplate     string
+	PathTemplateSet  bool
 	QueryTemplate    map[string]string
 	Protocols        []string
 	Dexes            []string
@@ -353,6 +355,10 @@ func (m *PoolDataSourceManager) UpdateSource(ctx context.Context, id uint, input
 	}
 	if input.SetCurrent {
 		if err := m.SwitchCurrent(ctx, id); err != nil {
+			return nil, err
+		}
+	} else if source.IsCurrent {
+		if err := m.store.SetCurrent(ctx, source.Chain, source.TimeframeMinutes, id); err != nil {
 			return nil, err
 		}
 	}
@@ -517,7 +523,7 @@ func normalizePoolDataSourceInput(input PoolDataSourceInput, existing *models.Po
 		*source = *existing
 	}
 
-	if strings.TrimSpace(input.Name) != "" || existing == nil {
+	if input.NameSet || strings.TrimSpace(input.Name) != "" || existing == nil {
 		source.Name = strings.TrimSpace(input.Name)
 	}
 	if strings.TrimSpace(input.SourceType) != "" || existing == nil {
@@ -535,7 +541,7 @@ func normalizePoolDataSourceInput(input PoolDataSourceInput, existing *models.Po
 	if strings.TrimSpace(input.BaseURL) != "" || existing == nil {
 		source.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	}
-	if input.PathTemplate != "" || existing == nil {
+	if input.PathTemplateSet || input.PathTemplate != "" || existing == nil {
 		source.PathTemplate = strings.TrimSpace(input.PathTemplate)
 	}
 	if input.QueryTemplate != nil || existing == nil {

@@ -184,3 +184,85 @@ func TestPoolDataSourceManager_SwitchRejectsDisabled(t *testing.T) {
 		t.Fatalf("expected disabled source switch to fail")
 	}
 }
+
+func TestPoolDataSourceManager_UpdateSourceAllowsClearingPath(t *testing.T) {
+	store := &memPoolDataSourceStore{sources: []models.PoolDataSource{
+		{
+			ID:               1,
+			Name:             "market",
+			SourceType:       PoolDataSourceTypeMarketPools,
+			Chain:            "bsc",
+			TimeframeMinutes: 5,
+			Limit:            100,
+			BaseURL:          "http://backup.example",
+			PathTemplate:     "/api/market/pools",
+			IsEnabled:        true,
+		},
+	}}
+	mgr := NewPoolDataSourceManager(store)
+	updated, err := mgr.UpdateSource(context.Background(), 1, PoolDataSourceInput{
+		Name:            "poolm",
+		NameSet:         true,
+		SourceType:      PoolDataSourceTypePoolMTopFees,
+		BaseURL:         "https://mapi.poolm.xyz",
+		PathTemplate:    "",
+		PathTemplateSet: true,
+		Protocols:       []string{},
+		Dexes:           []string{"pcsv3", "univ3", "univ4"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateSource() error = %v", err)
+	}
+	if updated.PathTemplate != "" {
+		t.Fatalf("PathTemplate = %q, want empty", updated.PathTemplate)
+	}
+	if updated.SourceType != PoolDataSourceTypePoolMTopFees {
+		t.Fatalf("SourceType = %q, want %q", updated.SourceType, PoolDataSourceTypePoolMTopFees)
+	}
+	if updated.Name != "poolm" {
+		t.Fatalf("Name = %q, want poolm", updated.Name)
+	}
+}
+
+func TestPoolDataSourceManager_UpdateCurrentSourceResetsTargetGroupCurrent(t *testing.T) {
+	store := &memPoolDataSourceStore{sources: []models.PoolDataSource{
+		{
+			ID:               1,
+			Name:             "bsc current",
+			SourceType:       PoolDataSourceTypeMarketPools,
+			Chain:            "bsc",
+			TimeframeMinutes: 5,
+			BaseURL:          "http://bsc.example",
+			IsEnabled:        true,
+			IsCurrent:        true,
+		},
+		{
+			ID:               2,
+			Name:             "base current",
+			SourceType:       PoolDataSourceTypeMarketPools,
+			Chain:            "base",
+			TimeframeMinutes: 5,
+			BaseURL:          "http://base.example",
+			IsEnabled:        true,
+			IsCurrent:        true,
+		},
+	}}
+	mgr := NewPoolDataSourceManager(store)
+	updated, err := mgr.UpdateSource(context.Background(), 1, PoolDataSourceInput{
+		Chain:   "base",
+		BaseURL: "http://bsc.example",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSource() error = %v", err)
+	}
+	if updated.Chain != "base" || !updated.IsCurrent {
+		t.Fatalf("updated source = %+v, want base current", updated)
+	}
+	other, err := mgr.GetSource(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("GetSource() error = %v", err)
+	}
+	if other.IsCurrent {
+		t.Fatalf("target group old current remained current")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -177,6 +178,62 @@ func TestPoolLiquidityStopIsPartial(t *testing.T) {
 				t.Fatalf("poolLiquidityStopIsPartial(%v, %q) = %v, want %v", tt.truncated, tt.reason, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRecoverableRPCScanError(t *testing.T) {
+	if !isRecoverableRPCScanError(errors.New("rpc returned 502 Bad Gateway")) {
+		t.Fatal("expected bad gateway to be recoverable")
+	}
+	if !isRecoverableRPCScanError(errors.New("rate limit exceeded")) {
+		t.Fatal("expected rate limit to be recoverable")
+	}
+	if isRecoverableRPCScanError(context.Canceled) {
+		t.Fatal("expected context canceled to stay non-recoverable")
+	}
+	if isRecoverableRPCScanError(errors.New("invalid pool address")) {
+		t.Fatal("expected local validation error to stay non-recoverable")
+	}
+}
+
+func TestApproximateRPCBlockRangeByTime(t *testing.T) {
+	latestTime := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	start := latestTime.Add(-30 * time.Minute)
+	end := latestTime.Add(-15 * time.Minute)
+
+	from, to := approximateRPCBlockRangeByTime(1000, latestTime, start, end)
+
+	if from == 0 || to == 0 || from > to {
+		t.Fatalf("expected valid approximate range, got %d-%d", from, to)
+	}
+	if to >= 1000 {
+		t.Fatalf("expected end before latest block, got %d", to)
+	}
+}
+
+func TestCompactTokenLiquidityWarnings(t *testing.T) {
+	got := compactTokenLiquidityWarnings("", "  a  ", "b")
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("unexpected warnings: %#v", got)
+	}
+}
+
+func TestV3PositionManagerAddressesDedupes(t *testing.T) {
+	a := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	b := common.HexToAddress("0x0000000000000000000000000000000000000002")
+
+	got := v3PositionManagerAddresses([]v3PoolDeployment{
+		{PositionManager: a},
+		{PositionManager: a},
+		{PositionManager: common.Address{}},
+		{PositionManager: b},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 managers, got %d", len(got))
+	}
+	if got[0] != a || got[1] != b {
+		t.Fatalf("unexpected manager order: %v", got)
 	}
 }
 
