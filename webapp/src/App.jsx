@@ -2427,7 +2427,7 @@ export default function App() {
     setKlineFocusedWalletAddress('');
   }, [klineActiveMarkerId]);
 
-  const handleToggleKlineWatch = useCallback((walletAddress) => {
+  const handleToggleKlineWatch = useCallback((walletAddress, nextWatched) => {
     const address = normalizeWalletAddress(walletAddress);
     if (!address) return;
     setKlineWatchToggleMap((prev) => ({ ...prev, [address]: true }));
@@ -2444,15 +2444,16 @@ export default function App() {
     if (!hasInitData) {
       setKlineWatchedWallets((prev) => {
         const next = new Set(prev);
-        if (next.has(address)) next.delete(address);
-        else next.add(address);
+        const shouldWatch = typeof nextWatched === 'boolean' ? nextWatched : !next.has(address);
+        if (shouldWatch) next.add(address);
+        else next.delete(address);
         return Array.from(next).sort();
       });
       window.setTimeout(clearBusy, 0);
       return;
     }
 
-    const watched = !klineWatchedWalletSet.has(address);
+    const watched = typeof nextWatched === 'boolean' ? nextWatched : !klineWatchedWalletSet.has(address);
     saveSMWatchWallets({ apiBaseUrl, initData, chain, walletAddress: address, watched })
       .then((resp) => {
         applyKlineWatchWalletResponse(resp);

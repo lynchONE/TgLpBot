@@ -7742,10 +7742,47 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
-.smd-watch-wallet-chip span:last-child {
+.smd-watch-wallet-chip-main {
+  min-width: 0;
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+.smd-watch-wallet-chip-main span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.smd-watch-wallet-remove-btn {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: currentColor;
+  cursor: pointer;
+  opacity: 0.72;
+}
+.smd-watch-wallet-remove-btn:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fecdd3;
+  opacity: 1;
+}
+.smd-watch-wallet-remove-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .smd-watch-wallet-chip.active {
   background: var(--accent);

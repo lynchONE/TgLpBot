@@ -2627,6 +2627,8 @@ function WatchActivityPage({
     hasInitData,
     brand,
     watchedWallets = [],
+    watchToggleMap = {},
+    onToggleWatchWallet,
     onSelectWallet,
     onSelectPool,
     onOpenWallets,
@@ -2642,13 +2644,28 @@ function WatchActivityPage({
     const [error, setError] = useState('');
     const loadSeqRef = useRef(0);
     const activeWallet = normalizeWalletAddress(selectedWallet);
+    const normalizedWatchedWallets = useMemo(
+        () => Array.from(new Set((Array.isArray(watchedWallets) ? watchedWallets : [])
+            .map((item) => normalizeWalletAddress(item))
+            .filter(Boolean))).sort(),
+        [watchedWallets],
+    );
 
     useEffect(() => {
+        loadSeqRef.current += 1;
         setWalletItems((prev) => {
-            const normalized = normalizeWatchWalletItems({ items: prev }, watchedWallets);
-            return normalized;
+            const allowed = new Set(normalizedWatchedWallets);
+            if (allowed.size === 0) return [];
+            return normalizeWatchWalletItems({
+                items: prev.filter((item) => allowed.has(normalizeWalletAddress(item?.wallet_address))),
+            }, normalizedWatchedWallets);
         });
-    }, [watchedWallets]);
+    }, [normalizedWatchedWallets]);
+
+    useEffect(() => {
+        if (!activeWallet || normalizedWatchedWallets.includes(activeWallet)) return;
+        setSelectedWallet('');
+    }, [activeWallet, normalizedWatchedWallets]);
 
     const load = useCallback((silent = false) => {
         if (!canLoad) {
@@ -2679,7 +2696,7 @@ function WatchActivityPage({
                 }
                 const nextTotal = Number(resp.total);
                 const totalPages = Math.max(1, Math.ceil(nextTotal / WATCH_ACTIVITY_PAGE_SIZE));
-                setWalletItems(normalizeWatchWalletItems(resp, watchedWallets));
+                setWalletItems(normalizeWatchWalletItems(resp, normalizedWatchedWallets));
                 if (page > totalPages) {
                     setActivities([]);
                     setTotal(nextTotal);
@@ -2701,7 +2718,7 @@ function WatchActivityPage({
                     setLoading(false);
                 }
             });
-    }, [activeWallet, apiBaseUrl, canLoad, initData, page, watchedWallets]);
+    }, [activeWallet, apiBaseUrl, canLoad, initData, normalizedWatchedWallets, page]);
 
     useEffect(() => {
         load();
@@ -2743,16 +2760,34 @@ function WatchActivityPage({
                 {filterWallets.map((item) => {
                     const address = normalizeWalletAddress(item.wallet_address);
                     const active = activeWallet === address;
+                    const busy = Boolean(watchToggleMap[address]);
                     return (
-                        <button
+                        <div
                             key={address}
-                            type="button"
-                            className={`inline-flex max-w-[190px] shrink-0 items-center gap-2 rounded-2xl px-2.5 py-1.5 font-semibold ${getFilterButtonClass(active, brand)}`}
-                            onClick={() => setSelectedWallet(address)}
+                            className={`inline-flex max-w-[220px] shrink-0 items-center gap-1 rounded-2xl pl-2.5 pr-1 py-1.5 font-semibold ${getFilterButtonClass(active, brand)}`}
                         >
-                            <WalletAvatar address={address} color={item.wallet_color} avatarUrl={item.wallet_avatar_url} size={26} />
-                            <span className="min-w-0 truncate">{item.wallet_label || shortAddr(address)}</span>
-                        </button>
+                            <button
+                                type="button"
+                                className="inline-flex min-w-0 flex-1 items-center gap-2"
+                                onClick={() => setSelectedWallet(address)}
+                            >
+                                <WalletAvatar address={address} color={item.wallet_color} avatarUrl={item.wallet_avatar_url} size={26} />
+                                <span className="min-w-0 truncate">{item.wallet_label || shortAddr(address)}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-red-500/10 hover:text-red-200 disabled:opacity-50"
+                                disabled={busy}
+                                onClick={() => {
+                                    onToggleWatchWallet?.(address, false);
+                                    if (active) setSelectedWallet('');
+                                }}
+                                title="移除特别关注"
+                                aria-label={`移除特别关注 ${shortAddr(address)}`}
+                            >
+                                {busy ? <span className="text-[10px]">...</span> : <X size={12} />}
+                            </button>
+                        </div>
                     );
                 })}
             </div>
@@ -6090,7 +6125,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         setSelectedWallet(null);
     }, []);
 
-    const handleToggleWatchWallet = useCallback((walletAddress) => {
+    const handleToggleWatchWallet = useCallback((walletAddress, nextWatched) => {
         const address = normalizeWalletAddress(walletAddress);
         if (!address) return;
         setWatchToggleMap((prev) => ({ ...prev, [address]: true }));
@@ -6107,15 +6142,16 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         if (!hasInitData) {
             setWatchedWallets((prev) => {
                 const next = new Set(prev);
-                if (next.has(address)) next.delete(address);
-                else next.add(address);
+                const shouldWatch = typeof nextWatched === 'boolean' ? nextWatched : !next.has(address);
+                if (shouldWatch) next.add(address);
+                else next.delete(address);
                 return Array.from(next).sort();
             });
             window.setTimeout(clearBusy, 0);
             return;
         }
 
-        const watched = !watchedWalletSet.has(address);
+        const watched = typeof nextWatched === 'boolean' ? nextWatched : !watchedWalletSet.has(address);
         saveSMWatchWallets({ apiBaseUrl, initData, chain: 'bsc', walletAddress: address, watched })
             .then((resp) => {
                 applyWatchWalletResponse(resp);
@@ -6266,6 +6302,8 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         hasInitData={hasInitData}
                         brand={brand}
                         watchedWallets={watchedWallets}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={handleToggleWatchWallet}
                         onSelectWallet={handleSelectWallet}
                         onSelectPool={handleSelectPool}
                         onOpenWallets={() => setView('wallets')}
