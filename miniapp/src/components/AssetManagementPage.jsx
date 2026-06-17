@@ -340,32 +340,6 @@ function RankBadge({ rank }) {
     );
 }
 
-function previousAreaChartDay(day) {
-    const parts = String(day || '').split('-').map((item) => Number(item));
-    if (parts.length !== 3 || parts.some((item) => !Number.isFinite(item))) return '';
-    const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-    date.setUTCDate(date.getUTCDate() - 1);
-    return date.toISOString().slice(0, 10);
-}
-
-function buildAreaChartData(rows) {
-    const mapped = Array.isArray(rows)
-        ? rows
-            .filter((d) => d.day && Number.isFinite(Number(d.value)))
-            .map((d) => ({ time: d.day, value: Number(d.value) }))
-        : [];
-    if (mapped.length !== 1) return mapped;
-    const previousDay = previousAreaChartDay(mapped[0].time);
-    if (!previousDay) return mapped;
-    return [{ time: previousDay, value: mapped[0].value }, mapped[0]];
-}
-
-function measureChartWidth(host) {
-    if (!host) return 0;
-    const rectWidth = host.getBoundingClientRect?.().width;
-    return Math.floor(rectWidth || host.clientWidth || 0);
-}
-
 /* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
 const AREA_CHART_HEIGHT = 200;
 
@@ -373,42 +347,12 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
-    const chartData = useMemo(() => buildAreaChartData(data), [data]);
-    const chartDataRef = useRef(chartData);
-    chartDataRef.current = chartData;
-
-    const reflowChart = useCallback(() => {
-        const host = containerRef.current;
-        const chart = chartRef.current;
-        if (!host || !chart) return;
-        const width = Math.max(1, measureChartWidth(host));
-        chart.applyOptions({ width, height: AREA_CHART_HEIGHT });
-        if (chartDataRef.current.length > 0) {
-            chart.timeScale().fitContent();
-        }
-    }, []);
-
-    const scheduleReflow = useCallback(() => {
-        reflowChart();
-        window.requestAnimationFrame?.(() => reflowChart());
-        window.setTimeout(() => reflowChart(), 120);
-        window.setTimeout(() => reflowChart(), 360);
-    }, [reflowChart]);
-
-    const applyChartData = useCallback(() => {
-        if (!seriesRef.current) return;
-        seriesRef.current.setData(chartDataRef.current);
-        if (chartDataRef.current.length > 0) {
-            scheduleReflow();
-        }
-    }, [scheduleReflow]);
 
     useEffect(() => {
-        if (loading || !containerRef.current) return undefined;
-        const host = containerRef.current;
+        if (!containerRef.current) return undefined;
         const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
-        const chart = createChart(host, {
-            width: Math.max(1, measureChartWidth(host)),
+        const chart = createChart(containerRef.current, {
+            width: containerRef.current.clientWidth,
             height: AREA_CHART_HEIGHT,
             layout: {
                 background: { type: ColorType.Solid, color: 'transparent' },
@@ -454,44 +398,38 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
         });
         chartRef.current = chart;
         seriesRef.current = series;
-        applyChartData();
 
-        let ro = null;
-        if (typeof ResizeObserver !== 'undefined') {
-            ro = new ResizeObserver(() => reflowChart());
-            ro.observe(host);
-        } else {
-            window.addEventListener('resize', reflowChart);
-        }
-        scheduleReflow();
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
+        });
+        ro.observe(containerRef.current);
 
         return () => {
-            ro?.disconnect();
-            window.removeEventListener('resize', reflowChart);
+            ro.disconnect();
             chart.remove();
             chartRef.current = null;
             seriesRef.current = null;
         };
-    }, [applyChartData, color, loading, reflowChart, scheduleReflow]);
+    }, [color]);
 
     useEffect(() => {
-        applyChartData();
-    }, [applyChartData, chartData]);
+        if (!seriesRef.current) return;
+        const mapped = data
+            ? data
+                .filter((d) => d.day && Number.isFinite(d.value))
+                .map((d) => ({ time: d.day, value: d.value }))
+            : [];
+        seriesRef.current.setData(mapped);
+        if (mapped.length > 0) {
+            chartRef.current?.timeScale().fitContent();
+        }
+    }, [data]);
 
     if (loading) {
         return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: AREA_CHART_HEIGHT }} />;
     }
 
-    return (
-        <div className="relative w-full overflow-hidden rounded-lg" style={{ height: AREA_CHART_HEIGHT }}>
-            <div ref={containerRef} className="h-full w-full" />
-            {chartData.length < 2 ? (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-zinc-400 dark:text-white/35">
-                    暂无趋势数据
-                </div>
-            ) : null}
-        </div>
-    );
+    return <div ref={containerRef} className="mini-am-lw-chart w-full rounded-lg overflow-hidden" style={{ minHeight: AREA_CHART_HEIGHT }} />;
 }
 
 /* ─── PnL Calendar (盈亏日历) ─── */

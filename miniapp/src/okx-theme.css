@@ -691,9 +691,19 @@ body::before {
 }
 
 /* Charts */
-.miniapp-shell :is(.kline-native-wrap, .dex-embed-wrap, canvas) {
+.miniapp-shell :is(.kline-native-wrap, .dex-embed-wrap) {
     border-color: var(--okx-line) !important;
     background: #030303 !important;
+}
+
+.miniapp-shell :is(.kline-native-wrap, .dex-embed-wrap) canvas {
+    background: #030303 !important;
+}
+
+.miniapp-shell .mini-am-lw-chart,
+.miniapp-shell .mini-am-lw-chart canvas {
+    border-color: transparent !important;
+    background: transparent !important;
 }
 
 /* Mobile OKX alignment: mirror webapp panel/list schemes with single-column ergonomics. */
