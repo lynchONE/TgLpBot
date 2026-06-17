@@ -2,7 +2,7 @@
 import {
     Wallet, Search, Plus, ExternalLink, X, Check, Activity,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
-    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar,
+    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
@@ -44,6 +44,17 @@ const WALLET_AVATAR_ICONS = Object.entries(
 
 const SMART_MONEY_AVATAR_ACCEPT = 'image/png,image/jpeg,image/webp';
 const SMART_MONEY_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+
+function StatCard({ label, value, color }) {
+    const valueClassName = ['smd-stat-value', color].filter(Boolean).join(' ');
+    return (
+        <div className="smd-stat-card">
+            <div className="smd-stat-label">{label}</div>
+            <div className={valueClassName}>{value}</div>
+        </div>
+    );
+}
+
 function formatDateTimeLocalValue(date) {
     const pad = (value) => String(value).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;

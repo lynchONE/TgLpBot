@@ -191,18 +191,6 @@ type Config struct {
 	WalletSwapLimitOrderBatchSize       int
 	WalletSwapLimitOrderMaxParallel     int
 
-	// SoSoValue news feed
-	SoSoValueAPIKey                  string
-	SoSoValueAPIBaseURL              string
-	SoSoValueNewsSyncEnabled         bool
-	SoSoValueNewsSyncIntervalSeconds int
-	SoSoValueNewsPageSize            int
-	SoSoValueNewsCategoryList        string
-	SoSoValueNewsTickerCategoryList  string
-	SoSoValueNewsMonthlySafetyLimit  int
-	SoSoValueNewsFeaturedEndpoint    string
-	SoSoValueNewsTickerEndpoint      string
-
 	// Token Addresses
 	USDTAddress      string
 	USDCAddress      string
@@ -294,9 +282,6 @@ func LoadConfig() error {
 	walletSwapLimitOrderInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_SWAP_LIMIT_ORDER_INTERVAL_SECONDS", "15")))
 	walletSwapLimitOrderBatchSize, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_SWAP_LIMIT_ORDER_BATCH_SIZE", "20")))
 	walletSwapLimitOrderMaxParallel, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_SWAP_LIMIT_ORDER_MAX_PARALLEL", "2")))
-	sosoNewsSyncInterval := getEnvInt("SOSO_VALUE_NEWS_SYNC_INTERVAL_SECONDS", 60)
-	sosoNewsPageSize := getEnvInt("SOSO_VALUE_NEWS_PAGE_SIZE", 30)
-	sosoNewsMonthlySafetyLimit := getEnvInt("SOSO_VALUE_NEWS_MONTHLY_SAFETY_LIMIT", 95000)
 	webAppDebugUserID, _ := strconv.ParseInt(strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USER_ID", "0")), 10, 64)
 	webAppDebugUsername := strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USERNAME", "local_debug"))
 	bscRPCURL := strings.TrimSpace(getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"))
@@ -317,18 +302,6 @@ func LoadConfig() error {
 	}
 	if walletSwapLimitOrderMaxParallel <= 0 {
 		walletSwapLimitOrderMaxParallel = 1
-	}
-	if sosoNewsSyncInterval <= 0 {
-		sosoNewsSyncInterval = 60
-	}
-	if sosoNewsPageSize <= 0 {
-		sosoNewsPageSize = 30
-	}
-	if sosoNewsPageSize > 100 {
-		sosoNewsPageSize = 100
-	}
-	if sosoNewsMonthlySafetyLimit <= 0 || sosoNewsMonthlySafetyLimit > 100000 {
-		sosoNewsMonthlySafetyLimit = 95000
 	}
 	if poolsSyncIntervalSeconds <= 0 {
 		poolsSyncIntervalSeconds = 60
@@ -445,17 +418,6 @@ func LoadConfig() error {
 		WalletSwapLimitOrderBatchSize:       walletSwapLimitOrderBatchSize,
 		WalletSwapLimitOrderMaxParallel:     walletSwapLimitOrderMaxParallel,
 
-		SoSoValueAPIKey:                  strings.TrimSpace(getEnv("SOSO_VALUE_API_KEY", "")),
-		SoSoValueAPIBaseURL:              strings.TrimRight(strings.TrimSpace(getEnv("SOSO_VALUE_API_BASE_URL", "https://openapi.sosovalue.com")), "/"),
-		SoSoValueNewsSyncEnabled:         getEnvBool("SOSO_VALUE_NEWS_SYNC_ENABLED", true),
-		SoSoValueNewsSyncIntervalSeconds: sosoNewsSyncInterval,
-		SoSoValueNewsPageSize:            sosoNewsPageSize,
-		SoSoValueNewsCategoryList:        strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_CATEGORY_LIST", "1,2,3,4,5,6,7,9,10")),
-		SoSoValueNewsTickerCategoryList:  strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_CATEGORY_LIST", "13")),
-		SoSoValueNewsMonthlySafetyLimit:  sosoNewsMonthlySafetyLimit,
-		SoSoValueNewsFeaturedEndpoint:    strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_FEATURED_ENDPOINT", "/api/v1/news/featured/currency")),
-		SoSoValueNewsTickerEndpoint:      strings.TrimSpace(getEnv("SOSO_VALUE_NEWS_TICKER_ENDPOINT", "/api/v1/news/featured/currency")),
-
 		// Token Addresses
 		USDTAddress:      getEnv("USDT_ADDRESS", "0x55d398326f99059fF775485246999027B3197955"),
 		USDCAddress:      getEnv("USDC_ADDRESS", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"),
@@ -566,13 +528,6 @@ func LoadConfig() error {
 		AppConfig.WalletSwapLimitOrderIntervalSeconds,
 		AppConfig.WalletSwapLimitOrderBatchSize,
 		AppConfig.WalletSwapLimitOrderMaxParallel)
-	log.Printf("   - SoSoValue News Sync Enabled: %v", AppConfig.SoSoValueNewsSyncEnabled)
-	log.Printf("   - SoSoValue API Key: %s", maskString(AppConfig.SoSoValueAPIKey))
-	log.Printf("   - SoSoValue API Base URL: %s", maskURL(AppConfig.SoSoValueAPIBaseURL))
-	log.Printf("   - SoSoValue News Interval/PageSize/MonthlyLimit: %d/%d/%d",
-		AppConfig.SoSoValueNewsSyncIntervalSeconds,
-		AppConfig.SoSoValueNewsPageSize,
-		AppConfig.SoSoValueNewsMonthlySafetyLimit)
 	log.Printf("   - MinIO Endpoint: %s", maskURL(AppConfig.MinIOEndpoint))
 	log.Printf("   - MinIO Use SSL: %v", AppConfig.MinIOUseSSL)
 	log.Printf("   - MinIO Public Base URL: %s", maskURL(AppConfig.MinIOPublicBaseURL))

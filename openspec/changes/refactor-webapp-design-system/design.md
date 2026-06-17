@@ -83,7 +83,7 @@
    - 迁移仓位、Swap、钱包、交易历史、聪明钱核心列表。
    - 把重复样式沉淀到 UI 组件或 feature 层组件。
 4. 结构收敛阶段：
-   - 从 `App.jsx` 拆出 `WorkbenchLayout`、`TopBar`、`HotPoolsPanel`、`PositionsPanel`、`NewsTicker` 等。
+   - 从 `App.jsx` 拆出 `WorkbenchLayout`、`TopBar`、`HotPoolsPanel`、`PositionsPanel` 等。
    - 从 `SmartMoneyDashboard.jsx` 拆出独立子面板和 hooks。
    - 清理不再使用的 CSS 类，并做针对性 diff 检查。
 

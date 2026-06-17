@@ -13,7 +13,7 @@
 - [x] 2.5 保持现有数据请求、鉴权、交易参数和本地存储 key 不变。
 
 ## 3. 组件结构收敛
-- [x] 3.1 从 `App.jsx` 拆出 TopBar、登录验证码、游客热门池子、NewsShowcase、NewsTicker 和工作台配置展示组件。
+- [x] 3.1 从 `App.jsx` 拆出 TopBar、登录验证码、游客热门池子和工作台配置展示组件。
 - [x] 3.2 继续从 `App.jsx` 拆出 WorkbenchLayout、HotPoolsPanel、PositionsPanel 等大面板。
 - [x] 3.3 从 `SmartMoneyDashboard.jsx` 拆出独立子面板和局部 hooks，避免继续扩大单文件。
 - [x] 3.4 清理已迁移区域不再使用的 CSS 类，并保留仍被未迁移模块使用的样式。

@@ -17,7 +17,6 @@ import {
   fetchHotPools,
   fetchMe,
   fetchMyTradeMarkers,
-  fetchNewsFeed,
   fetchRealtimePositions,
   fetchSmartMoneyPoolMarkers,
   fetchTokenCandles,
@@ -48,7 +47,6 @@ import SwapPanel from './components/SwapPanel';
 import TradeHistoryPanel from './components/TradeHistoryPanel';
 import GuestHotPoolsLanding from './components/GuestHotPoolsLanding';
 import { TopBar, WorkbenchConfigPanel, WorkModeBar } from './components/WorkbenchChrome';
-import { NewsShowcase, NewsTicker } from './components/NewsPanels';
 import WorkbenchLayout from './components/WorkbenchLayout';
 import PositionsPanel, { normalizePositionSmartMoneyGroups } from './components/PositionsPanel';
 import HotPoolsPanel from './components/HotPoolsPanel';
@@ -121,58 +119,6 @@ const HOT_POOL_SORT_OPTIONS = [
 ];
 const POSITION_SM_RANGE_STALE_MS = 60_000;
 const POSITION_SM_RANGE_BATCH_SIZE = 8;
-const NEWS_TICKER_MIN_SPEED = 2;
-const NEWS_TICKER_MAX_SPEED = 80;
-const NEWS_TICKER_DEFAULT_SPEED = 8;
-
-function normalizeNewsTickerSpeed(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return NEWS_TICKER_DEFAULT_SPEED;
-  return Math.min(NEWS_TICKER_MAX_SPEED, Math.max(NEWS_TICKER_MIN_SPEED, Math.round(n)));
-}
-
-function normalizeNewsTextKey(value, maxLength) {
-  const key = String(value || '')
-    .replace(/<[^>]*>/g, '')
-    .toLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
-    .trim();
-  if (!key) return '';
-  return maxLength && key.length > maxLength ? key.slice(0, maxLength) : key;
-}
-
-function normalizeNewsUrlKey(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    const url = new URL(raw);
-    url.hash = '';
-    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'from', 'ref'].forEach((key) => {
-      url.searchParams.delete(key);
-    });
-    return url.toString().toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-function dedupeNewsItems(items, limit) {
-  const rows = Array.isArray(items) ? items : [];
-  const seen = new Set();
-  const out = [];
-  rows.forEach((item) => {
-    if (!item?.title) return;
-    const keys = [
-      `title:${normalizeNewsTextKey(item.title, 160)}`,
-      `content:${normalizeNewsTextKey(item.content, 220)}`,
-      `url:${normalizeNewsUrlKey(item.source_link)}`,
-    ].filter((key) => !key.endsWith(':'));
-    if (keys.some((key) => seen.has(key))) return;
-    keys.forEach((key) => seen.add(key));
-    out.push(item);
-  });
-  return Number.isFinite(limit) && limit > 0 ? out.slice(0, limit) : out;
-}
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -320,7 +266,6 @@ const STORAGE = {
   hotPoolsHeight: 'tglp_web_hot_pools_height',
   hotPoolsFilter: 'tglp_web_hot_pools_filter_v1',
   smartMoneyWatchWallets: 'tglp_web_sm_watch_wallets',
-  newsTickerSpeed: 'tglp_web_news_ticker_speed',
 };
 
 const MIN_REFRESH_INTERVAL_SEC = 2;
@@ -765,15 +710,6 @@ export default function App() {
       hotPoolsDefaultHeightRef.current
     )
   );
-  const [featuredNews, setFeaturedNews] = useState([]);
-  const [tickerNews, setTickerNews] = useState([]);
-  const [newsLoading, setNewsLoading] = useState(false);
-  const [newsError, setNewsError] = useState('');
-  const [newsStatus, setNewsStatus] = useState('empty');
-  const [newsTickerSpeed, setNewsTickerSpeed] = useState(() =>
-    normalizeNewsTickerSpeed(storageGet(STORAGE.newsTickerSpeed))
-  );
-
   const [positions, setPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState('');
@@ -1519,52 +1455,6 @@ export default function App() {
     [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotPoolsFilter.maxFeeRate, hotPoolsFilter.minMarketCap, hotPoolsFilterEnabled, hotPoolsLimit, hotSort, hotTokenFilter?.address, initData]
   );
 
-  const loadNewsFeeds = useCallback(
-    async (signal) => {
-      setNewsLoading(true);
-      setNewsError('');
-      try {
-        const [featuredResp, tickerResp] = await Promise.allSettled([
-          fetchNewsFeed({ apiBaseUrl, feed: 'featured', limit: 6, signal }),
-          fetchNewsFeed({ apiBaseUrl, feed: 'ticker', limit: 24, signal }),
-        ]);
-
-        let nextError = '';
-        let nextStatus = 'ok';
-        if (featuredResp.status === 'fulfilled') {
-          setFeaturedNews(dedupeNewsItems(featuredResp.value?.items, 6));
-          nextStatus = featuredResp.value?.status || nextStatus;
-          if (featuredResp.value?.message) nextError = String(featuredResp.value.message);
-        } else if (featuredResp.reason?.name !== 'AbortError') {
-          setFeaturedNews([]);
-          nextError = String(featuredResp.reason?.message || featuredResp.reason || '新闻读取失败');
-          nextStatus = 'error';
-        }
-
-        if (tickerResp.status === 'fulfilled') {
-          setTickerNews(dedupeNewsItems(tickerResp.value?.items, 24));
-          if (!nextError && tickerResp.value?.message) nextError = String(tickerResp.value.message);
-        } else if (tickerResp.reason?.name !== 'AbortError') {
-          setTickerNews([]);
-          if (!nextError) nextError = String(tickerResp.reason?.message || tickerResp.reason || 'ticker 读取失败');
-          nextStatus = 'error';
-        }
-
-        setNewsStatus(nextStatus);
-        setNewsError(nextError);
-      } finally {
-        setNewsLoading(false);
-      }
-    },
-    [apiBaseUrl]
-  );
-
-  const updateNewsTickerSpeed = useCallback((speedKey) => {
-    const normalized = normalizeNewsTickerSpeed(speedKey);
-    setNewsTickerSpeed(normalized);
-    storageSet(STORAGE.newsTickerSpeed, String(normalized));
-  }, []);
-
   const loadPositions = useCallback(
     async (signal) => {
       if (!hasInitData) {
@@ -1753,12 +1643,6 @@ export default function App() {
 
   useEffect(() => {
     const ctrl = new AbortController();
-    loadNewsFeeds(ctrl.signal);
-    return () => ctrl.abort();
-  }, [loadNewsFeeds]);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
     loadPositions(ctrl.signal);
     return () => ctrl.abort();
   }, [loadPositions]);
@@ -1785,11 +1669,6 @@ export default function App() {
     const timer = window.setInterval(() => loadHotPools(), hotPoolsRefreshInterval * 1000);
     return () => window.clearInterval(timer);
   }, [hotPoolsRefreshInterval, loadHotPools]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => loadNewsFeeds(), 60_000);
-    return () => window.clearInterval(timer);
-  }, [loadNewsFeeds]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -2902,15 +2781,6 @@ export default function App() {
             onStartLogin={startCodeLogin}
             onCancelLogin={() => { setLoginCode(''); setLoginError(''); }}
             onLogout={logout}
-            newsShowcase={(
-              <NewsShowcase
-                items={featuredNews}
-                loading={newsLoading}
-                error={newsError}
-                status={newsStatus}
-                onOpen={openExternal}
-              />
-            )}
             settings={{
               refreshModuleConfig: REFRESH_MODULE_CONFIG,
               maxRefreshIntervalSec: MAX_REFRESH_INTERVAL_SEC,
@@ -2922,10 +2792,6 @@ export default function App() {
               accentThemes: ACCENT_THEMES,
               accentTheme,
               onAccentThemeChange: setAccentTheme,
-              newsTickerSpeed,
-              newsTickerMinSpeed: NEWS_TICKER_MIN_SPEED,
-              newsTickerMaxSpeed: NEWS_TICKER_MAX_SPEED,
-              onNewsTickerSpeedChange: updateNewsTickerSpeed,
               hasTrackedPositions,
               klineHasTrackedPositionToken,
             }}
@@ -2994,16 +2860,6 @@ export default function App() {
         }}
       />
       )}
-
-      {hasInitData ? (
-        <NewsTicker
-          items={tickerNews}
-          loading={newsLoading}
-          error={newsError}
-          speedPxPerSec={newsTickerSpeed}
-          onOpen={openExternal}
-        />
-      ) : null}
 
       {openPosPool && (
         <OpenPositionModal

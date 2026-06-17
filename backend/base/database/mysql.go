@@ -77,8 +77,6 @@ func autoMigrate() error {
 		&models.AuthCode{},
 		&models.UserAccess{},
 		&models.Announcement{},
-		&models.SosoValueNewsItem{},
-		&models.SosoValueAPIUsage{},
 		&models.TradeRecord{},
 		&models.WalletBalanceSnapshot{},
 		&models.UserAssetDailySnapshot{},

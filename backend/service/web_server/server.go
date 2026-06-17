@@ -22,7 +22,6 @@ type Server struct {
 	TokenMeta       *token_metadata.Service
 	Assets          *assets.Service
 	SwapLimitOrders *WalletSwapLimitOrderWorker
-	SosoValueNews   *SosoValueNewsService
 }
 
 func NewServer() *Server {
@@ -32,7 +31,6 @@ func NewServer() *Server {
 		TokenMeta:       token_metadata.NewService(),
 		Assets:          assets.NewService(),
 		SwapLimitOrders: NewWalletSwapLimitOrderWorker(),
-		SosoValueNews:   NewSosoValueNewsService(),
 	}
 }
 
@@ -40,9 +38,6 @@ func (s *Server) Start(port string) {
 	initSmartMoney()
 	if s.SwapLimitOrders != nil {
 		s.SwapLimitOrders.Start()
-	}
-	if s.SosoValueNews != nil {
-		s.SosoValueNews.Start()
 	}
 
 	mux := http.NewServeMux()
@@ -114,7 +109,6 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/admin/okx_pool", s.handleAdminOKXPool)
 	mux.HandleFunc("/api/admin/private_zap", s.handleAdminPrivateZap)
 	mux.HandleFunc("/api/web_login", s.handleWebLogin)
-	mux.HandleFunc("/api/news_feed", s.handleSosoValueNews)
 
 	// Smart Money routes
 	s.registerSmartMoneyRoutes(mux)

@@ -74,9 +74,6 @@ func main() {
 	if webServer.SwapLimitOrders != nil {
 		defer webServer.SwapLimitOrders.Stop()
 	}
-	if webServer.SosoValueNews != nil {
-		defer webServer.SosoValueNews.Stop()
-	}
 
 	telegramBot, err := bot.NewBot()
 	if err != nil {
@@ -92,9 +89,6 @@ func main() {
 		poolSyncService.Stop()
 		if webServer.SwapLimitOrders != nil {
 			webServer.SwapLimitOrders.Stop()
-		}
-		if webServer.SosoValueNews != nil {
-			webServer.SosoValueNews.Stop()
 		}
 		telegramBot.Stop()
 		rpcpool.StopDefaultHealthChecker()

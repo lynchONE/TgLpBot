@@ -13,12 +13,10 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  Slider,
 } from './ui';
 import telegramLogo from '../img/telegram.svg';
 import bnbLogo from '../img/bnb.svg';
 import baseLogo from '../img/base.svg';
-import siteLogo from '../img/logo.png';
 
 export function WorkModeBar({ onExit }) {
   return (
@@ -44,10 +42,6 @@ function SettingsPopover({
   accentThemes,
   accentTheme,
   onAccentThemeChange,
-  newsTickerSpeed,
-  newsTickerMinSpeed,
-  newsTickerMaxSpeed,
-  onNewsTickerSpeedChange,
   hasTrackedPositions,
   klineHasTrackedPositionToken,
 }) {
@@ -116,25 +110,6 @@ function SettingsPopover({
                 ))}
               </div>
             </div>
-            <div className="settings-row settings-row-stack">
-              <div className="settings-label-line">
-                <span className="settings-label">底部新闻速度</span>
-                <span className="settings-value">{newsTickerSpeed}px/s</span>
-              </div>
-              <Slider
-                className="settings-range"
-                min={newsTickerMinSpeed}
-                max={newsTickerMaxSpeed}
-                step={1}
-                value={[newsTickerSpeed]}
-                onValueChange={([value]) => onNewsTickerSpeedChange(value)}
-                aria-label="底部新闻滚动速度"
-              />
-              <div className="settings-range-scale">
-                <span>很慢</span>
-                <span>更快</span>
-              </div>
-            </div>
             <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
             <div className="settings-hint">
               各模块独立保存到当前浏览器；仓位会按当前是否有仓位自动切换，当前是{hasTrackedPositions ? '有仓位' : '无仓位'}档。
@@ -161,7 +136,6 @@ export function TopBar({
   onStartLogin,
   onCancelLogin,
   onLogout,
-  newsShowcase,
   settings,
 }) {
   const firstName = loginUser && typeof loginUser.first_name === 'string' ? loginUser.first_name.trim() : '';
@@ -172,12 +146,7 @@ export function TopBar({
     <header className="top-bar">
       <div className="title-block">
         <div className="eyebrow">lynchL</div>
-        <h1>
-          <img src={siteLogo} alt="lynchL" className="title-logo" />
-        </h1>
       </div>
-
-      {hasInitData ? newsShowcase : null}
 
       <div className="top-actions">
         {hasInitData && loginUser ? (
