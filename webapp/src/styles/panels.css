@@ -2038,20 +2038,6 @@
   align-items: center;
   gap: 4px;
 }
-.pool-badge-chip-alpha > span::before {
-  content: "伪";
-  display: inline-grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 34% 28%, #fff8c7, #facc15 50%, #b45309 100%);
-  color: #241300;
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1;
-  box-shadow: 0 0 10px rgba(250, 204, 21, 0.42);
-}
 .pool-badge-chip:hover,
 .pool-badge-chip:focus-visible {
   transform: translateY(-1px);

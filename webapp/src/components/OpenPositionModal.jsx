@@ -1729,13 +1729,10 @@ export default function OpenPositionModal({
             </div>
 
             <div className="modal-range-section opm-section">
-              <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'grid', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                   <div style={{ display: 'grid', gap: 4 }}>
                     <span className="modal-range-label">区间设置</span>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      快捷区间、聪明钱区间和 Tick 微调统一在这里。
-                    </div>
                   </div>
                   {priceRange?.gridStepPctText && priceRange.gridStepPctText !== '--' ? (
                     <div style={{
@@ -1782,8 +1779,8 @@ export default function OpenPositionModal({
                 ) : null}
 
                 <div style={{
-                  padding: 12,
-                  borderRadius: 16,
+                  padding: 8,
+                  borderRadius: 10,
                   border: rangeInputMode === 'percentage'
                     ? '1px solid rgba(188, 255, 47, 0.28)'
                     : '1px solid rgba(148, 163, 184, 0.18)',
@@ -1791,21 +1788,16 @@ export default function OpenPositionModal({
                     ? 'rgba(188, 255, 47, 0.06)'
                     : 'rgba(15, 23, 42, 0.14)',
                   display: 'grid',
-                  gap: 10,
+                  gap: 7,
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'grid', gap: 4 }}>
-                      <strong style={{ fontSize: 13, color: 'var(--text)' }}>自定义百分比</strong>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        不止固定档位。这里可以直接输入下限 / 上限百分比。
-                      </span>
-                    </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: 12, color: 'var(--text)' }}>自定义百分比</strong>
                     <button
                       type="button"
                       className="ghost-chip"
                       style={{
                         minWidth: 0,
-                        padding: '4px 10px',
+                        padding: '3px 8px',
                         fontSize: 11,
                         borderColor: rangeInputMode === 'percentage' ? 'rgba(188, 255, 47, 0.4)' : undefined,
                         color: rangeInputMode === 'percentage' ? 'var(--text)' : undefined,
@@ -1813,7 +1805,7 @@ export default function OpenPositionModal({
                       }}
                       onClick={() => handleRangeInputModeChange('percentage')}
                     >
-                      {rangeInputMode === 'percentage' ? '当前按百分比编辑' : '切换到百分比编辑'}
+                      {rangeInputMode === 'percentage' ? '百分比编辑中' : '切换百分比'}
                     </button>
                   </div>
                   <div className="modal-row" style={{ marginTop: 0 }}>
@@ -1837,9 +1829,6 @@ export default function OpenPositionModal({
                         step="0.1"
                       />
                     </label>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    示例：`1 / 3` 表示下跌 1%、上涨 3%。如果后续拖动图表或格子，界面会自动切到 Tick 结果。
                   </div>
                 </div>
 
@@ -2674,16 +2663,18 @@ export default function OpenPositionModal({
                 ) : null}
 
             <div className="opm-section" style={{
-              padding: 14,
-              borderRadius: 16,
+              padding: 10,
+              borderRadius: 10,
               border: '1px solid rgba(168, 85, 247, 0.18)',
               background: 'rgba(168, 85, 247, 0.06)',
               display: 'grid',
-              gap: 8,
+              gap: 7,
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{'\u672c\u6b21\u5f00\u4ed3'}</span>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</span>
+                <span style={{ fontWeight: 600, fontSize: 12 }}>{'\u672c\u6b21\u5f00\u4ed3'}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  上破 {outOfRangeActions.above} / 下破 {outOfRangeActions.below}
+                </span>
               </div>
               <div className="opm-toggle-grid">
                 {TASK_MODE_OPTIONS.map((option) => (
@@ -2699,27 +2690,18 @@ export default function OpenPositionModal({
                   >
                     <span className="opm-toggle-copy">
                       <span className="opm-toggle-title">{option.label}</span>
-                      <span className="opm-toggle-desc">{option.description}</span>
                     </span>
                     <span className="opm-toggle-pill">
-                      {taskMode === option.value ? '当前' : '切换'}
+                      {taskMode === option.value ? '当前' : '选'}
                     </span>
                   </button>
                 ))}
               </div>
-              <div className="opm-inline-hint">
-                <div style={{ marginBottom: 4, fontSize: 11 }}>
-                  上破区间：{outOfRangeActions.above}；下破区间：{outOfRangeActions.below}
-                </div>
-                {isSingleSidedSelection
-                  ? `当前区间会开成单边池，首次进入区间前不会触发自动处理。进入过区间后，会按当前再平衡模式处理越界。${resolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${resolvedSelectionShape.dominantTokenSymbol}。` : ''}`
-                  : '关闭再平衡后，超区间会在缓冲结束后自动撤仓并终止任务。'}
-              </div>
             </div>
 
             <div className="opm-section" style={{
-              padding: 16,
-              borderRadius: 16,
+              padding: 10,
+              borderRadius: 10,
               border: '1px solid rgba(6, 182, 212, 0.25)',
               background: 'rgba(6, 182, 212, 0.06)',
             }}>
@@ -2746,9 +2728,9 @@ export default function OpenPositionModal({
                 disabled={busy}
                 style={{
                   width: '100%',
-                  marginTop: 10,
-                  padding: '9px 10px',
-                  borderRadius: 12,
+                  marginTop: 7,
+                  padding: '7px 9px',
+                  borderRadius: 9,
                   border: '1px solid rgba(6, 182, 212, 0.18)',
                   background: 'rgba(8, 47, 73, 0.22)',
                   color: 'inherit',
@@ -2834,21 +2816,11 @@ export default function OpenPositionModal({
                   {dcaExpanded ? '收起 ▲' : '修改 ▾'}
                 </span>
               </button>
-              {dcaExpanded ? (
-                <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6, lineHeight: 1.5 }}>
-                  首批按正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
-                </div>
-              ) : null}
-              {dcaExpanded && effectiveGlobalDcaMinSplitAmount > 0 ? (
-                <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
-                  低于 {formatUSDTValue(effectiveGlobalDcaMinSplitAmount)} USDT 的本次开仓不会拆成多批。
-                </div>
-              ) : null}
               {dcaExpanded && isSingleSidedSelection ? (
                 <div style={{
-                  marginTop: 8,
-                  padding: '8px 10px',
-                  borderRadius: 12,
+                  marginTop: 6,
+                  padding: '6px 8px',
+                  borderRadius: 8,
                   border: '1px solid rgba(251, 191, 36, 0.28)',
                   background: 'rgba(245, 158, 11, 0.1)',
                   color: '#fde68a',
@@ -2860,9 +2832,9 @@ export default function OpenPositionModal({
               ) : null}
               {dcaExpanded && dcaEnabled && dcaAmountBelowThreshold ? (
                 <div style={{
-                  marginTop: 8,
-                  padding: '8px 10px',
-                  borderRadius: 12,
+                  marginTop: 6,
+                  padding: '6px 8px',
+                  borderRadius: 8,
                   border: '1px solid rgba(251, 191, 36, 0.28)',
                   background: 'rgba(245, 158, 11, 0.1)',
                   color: '#fde68a',
@@ -2872,16 +2844,12 @@ export default function OpenPositionModal({
                   当前金额 {formatUSDTValue(amountValue)} USDT 低于阈值，本次提交会按单笔开仓处理。
                 </div>
               ) : null}
-              {dcaExpanded && !dcaEnabled && !isSingleSidedSelection ? (
-                <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
-                  当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
-                </div>
-              ) : null}
               {dcaExpanded && dcaEnabled ? (
-                <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>每批占比（共 {dcaPercentages.length} 批）</div>
+                  <div style={{ display: 'grid', gap: 5 }}>
                   {dcaPercentages.map((value, idx) => (
-                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <span style={{ minWidth: 56, fontSize: 11, opacity: 0.7 }}>
                         {idx === 0 ? '首批' : `第 ${idx + 1} 批`}
                       </span>
@@ -2898,7 +2866,7 @@ export default function OpenPositionModal({
                           setDcaPercentages(next);
                         }}
                         disabled={busy}
-                        style={{ flex: 1, padding: '4px 8px' }}
+                        style={{ flex: 1, padding: '3px 8px' }}
                       />
                       <span style={{ fontSize: 11, opacity: 0.6 }}>%</span>
                       {dcaPercentages.length > 2 ? (
@@ -2916,6 +2884,7 @@ export default function OpenPositionModal({
                       ) : null}
                     </div>
                   ))}
+                  </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 11 }}>
                     <span style={{ color: dcaSumValid ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
                       合计：{dcaSum.toFixed(2)}% {dcaSumValid ? '✓' : '（必须等于 100%）'}
