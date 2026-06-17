@@ -2662,7 +2662,10 @@ export default function App() {
     );
 
     return (
-        <div className={`min-h-screen max-w-[720px] xl:max-w-[960px] 2xl:max-w-[1080px] mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] ${(isPositions || isSwap) ? 'pb-[calc(96px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'}`}>
+        <div
+            className={`miniapp-shell min-h-screen max-w-[720px] xl:max-w-[960px] 2xl:max-w-[1080px] mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] ${(isPositions || isSwap) ? 'pb-[calc(96px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'}`}
+            data-accent-theme={accentTheme}
+        >
             {notice ? (
                 <div className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+64px)] z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
                     <div className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-lg ${noticeClass}`}>
@@ -3058,7 +3061,7 @@ export default function App() {
                 )
             }
 
-            <div className="space-y-4 animate-fade-in-up">
+            <div className={`${isHotPools ? 'mini-data-list mini-data-list--pools' : 'mini-data-list mini-data-list--positions'} space-y-4 animate-fade-in-up`}>
                 {isHotPools
                     ? hotPoolsVisibleRows.map((row, index) => {
                         const proto = String(row?.protocol_version || '').trim();

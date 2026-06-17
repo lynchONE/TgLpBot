@@ -90,6 +90,7 @@ func (s *Service) InvalidateSmartMoneyWalletCaches(wallets []sm.WalletRef) {
 		_ = database.DeleteCache(smartMoneyWalletLiveCacheKey(wallet.ChainID, wallet.Address))
 	}
 	today := dayStart(timeutil.Now())
+	s.deleteCachedSmartMoneyLiveLeaderboards(today.AddDate(0, 0, -1))
 	for i := 0; i < 3; i++ {
 		s.deleteCachedSmartMoneyLeaderboards(today.AddDate(0, 0, -1-i))
 	}

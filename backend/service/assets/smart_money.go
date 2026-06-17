@@ -24,9 +24,9 @@ import (
 const (
 	recognizedAssetBasis = "原生币 + 稳定币 + 近30天参与LP/普通转账记录代币余额 + 当前open LP估算持仓"
 	// Reuse one short-lived Redis entry for all smart-money wallet balance reads.
-	smartMoneyWalletLiveCacheTTL        = 5 * time.Minute
-	smartMoneyWalletLiveRefreshInterval = 5 * time.Minute
-	smartMoneyWalletLiveRefreshTimeout  = 4 * time.Minute
+	smartMoneyWalletLiveCacheTTL        = 30 * time.Minute
+	smartMoneyWalletLiveRefreshInterval = 30 * time.Minute
+	smartMoneyWalletLiveRefreshTimeout  = 20 * time.Minute
 	smartMoneyWalletLiveRefreshWorkers  = 3
 	smartMoneyWalletMaxHistoryDays      = 365
 	smartMoneyLeaderboardCacheTTL       = 72 * time.Hour
@@ -91,10 +91,12 @@ type smartMoneyHistoryDayRow struct {
 }
 
 type smartMoneyLeaderboardSnapshotInput struct {
-	Wallet    models.MonitoredWallet
-	Current   *models.SmartMoneyWalletDailySnapshot
-	Previous  *models.SmartMoneyWalletDailySnapshot
-	DailyStat *models.SmartMoneyLPDailyStat
+	Wallet             models.MonitoredWallet
+	Current            *models.SmartMoneyWalletDailySnapshot
+	Previous           *models.SmartMoneyWalletDailySnapshot
+	DailyStat          *models.SmartMoneyLPDailyStat
+	UseRawAssetDelta   bool
+	IgnoreDailyStatPnL bool
 }
 
 type cachedSmartMoneyWalletLiveState struct {
@@ -175,6 +177,10 @@ func smartMoneyWalletLiveCacheKey(chainID int, address string) string {
 
 func smartMoneyLeaderboardDailyCacheKey(snapshotDay time.Time, metric string, days int) string {
 	return fmt.Sprintf("assets:smart-money:leaderboard:v3:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
+}
+
+func smartMoneyLeaderboardLiveCacheKey(snapshotDay time.Time, metric string, days int) string {
+	return fmt.Sprintf("assets:smart-money:leaderboard-live:v1:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
 }
 
 func transferNetUSD(transferInUSD float64, transferOutUSD float64) float64 {
@@ -340,10 +346,18 @@ func paginateSmartMoneyLeaderboardResponse(resp *SmartMoneyLeaderboardResponse, 
 }
 
 func readCachedSmartMoneyLeaderboard(snapshotDay time.Time, metric string, days int) (*SmartMoneyLeaderboardResponse, bool) {
+	return readCachedSmartMoneyLeaderboardByKey(smartMoneyLeaderboardDailyCacheKey(snapshotDay, metric, days))
+}
+
+func readCachedSmartMoneyLiveLeaderboard(snapshotDay time.Time, metric string, days int) (*SmartMoneyLeaderboardResponse, bool) {
+	return readCachedSmartMoneyLeaderboardByKey(smartMoneyLeaderboardLiveCacheKey(snapshotDay, metric, days))
+}
+
+func readCachedSmartMoneyLeaderboardByKey(key string) (*SmartMoneyLeaderboardResponse, bool) {
 	if database.RedisClient == nil {
 		return nil, false
 	}
-	raw, err := database.GetCache(smartMoneyLeaderboardDailyCacheKey(snapshotDay, metric, days))
+	raw, err := database.GetCache(key)
 	if err != nil || strings.TrimSpace(raw) == "" {
 		return nil, false
 	}
@@ -355,6 +369,14 @@ func readCachedSmartMoneyLeaderboard(snapshotDay time.Time, metric string, days 
 }
 
 func writeCachedSmartMoneyLeaderboard(snapshotDay time.Time, metric string, days int, resp *SmartMoneyLeaderboardResponse) {
+	writeCachedSmartMoneyLeaderboardByKey(smartMoneyLeaderboardDailyCacheKey(snapshotDay, metric, days), resp, smartMoneyLeaderboardCacheTTL)
+}
+
+func writeCachedSmartMoneyLiveLeaderboard(snapshotDay time.Time, metric string, days int, resp *SmartMoneyLeaderboardResponse) {
+	writeCachedSmartMoneyLeaderboardByKey(smartMoneyLeaderboardLiveCacheKey(snapshotDay, metric, days), resp, smartMoneyWalletLiveCacheTTL)
+}
+
+func writeCachedSmartMoneyLeaderboardByKey(key string, resp *SmartMoneyLeaderboardResponse, ttl time.Duration) {
 	if database.RedisClient == nil || resp == nil {
 		return
 	}
@@ -362,7 +384,7 @@ func writeCachedSmartMoneyLeaderboard(snapshotDay time.Time, metric string, days
 	if err != nil {
 		return
 	}
-	_ = database.SetCache(smartMoneyLeaderboardDailyCacheKey(snapshotDay, metric, days), string(body), smartMoneyLeaderboardCacheTTL)
+	_ = database.SetCache(key, string(body), ttl)
 }
 
 func applySmartMoneyLeaderboardWalletMeta(resp *SmartMoneyLeaderboardResponse, wallets []models.MonitoredWallet) {
@@ -553,7 +575,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 	}
 
 	if sectionSet[smartMoneyOverviewSectionWallets] {
-		pageWallets, total, err := s.loadPagedSmartMoneyWallets(ctx, snapshotDay, page, size, keyword)
+		pageWallets, total, err := s.loadPagedSmartMoneyWallets(ctx, page, size, keyword)
 		if err != nil {
 			return nil, err
 		}
@@ -1002,6 +1024,27 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	metric = normalizeLeaderboardMetric(metric)
 	days = clampLPDays(days)
 	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	if days == 1 {
+		if !forceRefresh {
+			if cached, ok := readCachedSmartMoneyLiveLeaderboard(snapshotDay, metric, days); ok {
+				cached.Timezone = timeutil.LocationName()
+				return paginateSmartMoneyLeaderboardResponse(cached, page, pageSize, keyword), nil
+			}
+		}
+		inputs, err := s.buildSmartMoneyLeaderboardLiveInputs(ctx, snapshotDay)
+		if err != nil {
+			return nil, err
+		}
+		fullResp := buildSmartMoneySnapshotLeaderboard(metric, timeutil.Now(), snapshotDay, days, 0, inputs)
+		fullResp.Timezone = timeutil.LocationName()
+		fullResp.SnapshotDay = formatDay(timeutil.Now())
+		fullResp.ComparedDay = formatDay(snapshotDay)
+		fullResp.StartDay = formatDay(snapshotDay)
+		fullResp.EndDay = formatDay(timeutil.Now())
+		fullResp.Description = liveLeaderboardDescription(metric)
+		writeCachedSmartMoneyLiveLeaderboard(snapshotDay, metric, days, fullResp)
+		return paginateSmartMoneyLeaderboardResponse(fullResp, page, pageSize, keyword), nil
+	}
 	startDay := snapshotDay.AddDate(0, 0, -(days - 1))
 	comparedDay := startDay.AddDate(0, 0, -1)
 
@@ -1031,6 +1074,15 @@ func (s *Service) deleteCachedSmartMoneyLeaderboards(snapshotDay time.Time) {
 		for _, days := range []int{1, 7, 30} {
 			_ = database.DeleteCache(smartMoneyLeaderboardDailyCacheKey(snapshotDay, metric, days))
 		}
+	}
+}
+
+func (s *Service) deleteCachedSmartMoneyLiveLeaderboards(snapshotDay time.Time) {
+	if database.RedisClient == nil {
+		return
+	}
+	for _, metric := range smartMoneyLeaderboardMetrics {
+		_ = database.DeleteCache(smartMoneyLeaderboardLiveCacheKey(snapshotDay, metric, 1))
 	}
 }
 
@@ -1194,6 +1246,113 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 	return inputs, nil
 }
 
+func (s *Service) buildSmartMoneyLeaderboardLiveInputs(ctx context.Context, baseDay time.Time) ([]smartMoneyLeaderboardSnapshotInput, error) {
+	type row struct {
+		WalletAddress  string         `gorm:"column:wallet_address"`
+		ChainID        int            `gorm:"column:chain_id"`
+		Label          sql.NullString `gorm:"column:label"`
+		AvatarURL      sql.NullString `gorm:"column:avatar_url"`
+		Source         string         `gorm:"column:source"`
+		SourceContract sql.NullString `gorm:"column:source_contract"`
+
+		CurrentTotalUSD  float64 `gorm:"column:current_total_usd"`
+		PreviousTotalUSD float64 `gorm:"column:previous_total_usd"`
+
+		AddCount             int `gorm:"column:add_count"`
+		RemoveCount          int `gorm:"column:remove_count"`
+		ActivePoolCount      int `gorm:"column:active_pool_count"`
+		UnmatchedRemoveCount int `gorm:"column:unmatched_remove_count"`
+	}
+
+	now := timeutil.Now()
+	todayStart := dayStart(now)
+	var rows []row
+	if err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT
+				w.address AS wallet_address,
+				w.chain_id AS chain_id,
+				w.label AS label,
+				w.avatar_url AS avatar_url,
+				w.source AS source,
+				w.source_contract AS source_contract,
+				live.total_usd AS current_total_usd,
+				base.total_usd AS previous_total_usd,
+				COALESCE(stat.add_count, 0) AS add_count,
+				COALESCE(stat.remove_count, 0) AS remove_count,
+				COALESCE(live.active_pool_count, 0) AS active_pool_count,
+				COALESCE(stat.unmatched_remove_count, 0) AS unmatched_remove_count
+			FROM monitored_wallets w
+			INNER JOIN sm_wallet_live_states live
+				ON live.wallet_address = w.address
+				AND live.chain_id = w.chain_id
+			INNER JOIN sm_wallet_daily_snapshots base
+				ON base.wallet_address = w.address
+				AND base.chain_id = w.chain_id
+				AND base.snapshot_day = ?
+			LEFT JOIN (
+				SELECT
+					wallet_address,
+					chain_id,
+					COALESCE(SUM(CASE WHEN event_type = 'add' THEN 1 ELSE 0 END), 0) AS add_count,
+					COALESCE(SUM(CASE WHEN event_type = 'remove' THEN 1 ELSE 0 END), 0) AS remove_count,
+					0 AS unmatched_remove_count
+				FROM sm_lp_events
+				WHERE tx_timestamp >= ?
+				  AND tx_timestamp < ?
+				GROUP BY wallet_address, chain_id
+			) stat
+				ON stat.wallet_address = w.address
+				AND stat.chain_id = w.chain_id
+			WHERE w.is_active = 1
+		`, formatDay(baseDay), todayStart, now).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	inputs := make([]smartMoneyLeaderboardSnapshotInput, 0, len(rows))
+	for _, item := range rows {
+		walletRow := models.MonitoredWallet{
+			Address: normalizeAddress(item.WalletAddress),
+			ChainID: item.ChainID,
+			Source:  strings.TrimSpace(item.Source),
+		}
+		if walletRow.Address == "" {
+			continue
+		}
+		if item.Label.Valid {
+			label := strings.TrimSpace(item.Label.String)
+			walletRow.Label = &label
+		}
+		if item.AvatarURL.Valid {
+			avatarURL := strings.TrimSpace(item.AvatarURL.String)
+			walletRow.AvatarURL = &avatarURL
+		}
+		if item.SourceContract.Valid {
+			sourceContract := strings.TrimSpace(item.SourceContract.String)
+			walletRow.SourceContract = &sourceContract
+		}
+		inputs = append(inputs, smartMoneyLeaderboardSnapshotInput{
+			Wallet: walletRow,
+			Current: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD: item.CurrentTotalUSD,
+			},
+			Previous: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD: item.PreviousTotalUSD,
+			},
+			DailyStat: &models.SmartMoneyLPDailyStat{
+				AddCount:             item.AddCount,
+				RemoveCount:          item.RemoveCount,
+				ActivePoolCount:      item.ActivePoolCount,
+				UnmatchedRemoveCount: item.UnmatchedRemoveCount,
+			},
+			UseRawAssetDelta:   true,
+			IgnoreDailyStatPnL: true,
+		})
+	}
+	return inputs, nil
+}
+
 func (s *Service) refreshSmartMoneyLeaderboardCaches(ctx context.Context, snapshotDay time.Time) error {
 	if database.RedisClient == nil {
 		return nil
@@ -1212,6 +1371,28 @@ func (s *Service) refreshSmartMoneyLeaderboardCaches(ctx context.Context, snapsh
 		}
 	}
 	s.deleteCachedSmartMoneyLeaderboards(snapshotDay.AddDate(0, 0, -1))
+	return nil
+}
+
+func (s *Service) refreshSmartMoneyLiveLeaderboardCaches(ctx context.Context, baseDay time.Time) error {
+	if database.RedisClient == nil {
+		return nil
+	}
+	inputs, err := s.buildSmartMoneyLeaderboardLiveInputs(ctx, baseDay)
+	if err != nil {
+		return err
+	}
+	now := timeutil.Now()
+	for _, metric := range smartMoneyLeaderboardMetrics {
+		resp := buildSmartMoneySnapshotLeaderboard(metric, now, baseDay, 1, 0, inputs)
+		resp.Timezone = timeutil.LocationName()
+		resp.SnapshotDay = formatDay(now)
+		resp.ComparedDay = formatDay(baseDay)
+		resp.StartDay = formatDay(baseDay)
+		resp.EndDay = formatDay(now)
+		resp.Description = liveLeaderboardDescription(metric)
+		writeCachedSmartMoneyLiveLeaderboard(baseDay, metric, 1, resp)
+	}
 	return nil
 }
 
@@ -1254,6 +1435,11 @@ func (s *Service) TriggerSmartMoneyWalletLiveStateRefresh(timeout time.Duration)
 			log.Printf("[Assets] smart money live-state refresh incomplete refreshed=%d skipped=%d failed=%d err=%v", result.refreshed, result.skipped, result.failed, err)
 			return
 		}
+		snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+		s.deleteCachedSmartMoneyLiveLeaderboards(snapshotDay)
+		if cacheErr := s.refreshSmartMoneyLiveLeaderboardCaches(ctx, snapshotDay); cacheErr != nil {
+			log.Printf("[Assets] smart money live leaderboard cache refresh failed day=%s err=%v", formatDay(snapshotDay), cacheErr)
+		}
 		if result.refreshed > 0 || result.failed > 0 {
 			log.Printf("[Assets] smart money live-state refresh completed refreshed=%d skipped=%d failed=%d", result.refreshed, result.skipped, result.failed)
 		}
@@ -1283,6 +1469,11 @@ func (s *Service) tryRefreshSmartMoneyLiveStates(lastCompleted *time.Time) {
 	}
 	if lastCompleted != nil {
 		*lastCompleted = timeutil.Now()
+	}
+	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	s.deleteCachedSmartMoneyLiveLeaderboards(snapshotDay)
+	if cacheErr := s.refreshSmartMoneyLiveLeaderboardCaches(ctx, snapshotDay); cacheErr != nil {
+		log.Printf("[Assets] smart money live leaderboard cache refresh failed day=%s err=%v", formatDay(snapshotDay), cacheErr)
 	}
 	if result.refreshed > 0 || result.failed > 0 {
 		log.Printf("[Assets] smart money live-state refresh completed refreshed=%d skipped=%d failed=%d", result.refreshed, result.skipped, result.failed)
@@ -1383,6 +1574,17 @@ func leaderboardDescription(metric string) string {
 	}
 }
 
+func liveLeaderboardDescription(metric string) string {
+	switch metric {
+	case "yield_rate":
+		return "按半小时实时资产相对今日0点基准的收益率排序"
+	case "participation":
+		return "按今日 add/remove 参与次数排序，并展示实时资产相对今日0点基准的变化"
+	default:
+		return "按半小时实时资产相对今日0点基准的变化排序"
+	}
+}
+
 func smartMoneyWalletKey(chainID int, address string) string {
 	return strconv.Itoa(chainID) + "|" + normalizeAddress(address)
 }
@@ -1397,12 +1599,16 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 		estimatedPnL := 0.0
 		yieldRate := 0.0
 		if input.Previous != nil {
-			estimatedPnL = adjustedPnL(input.Current.TotalUSD-input.Previous.TotalUSD, input.Current.TransferInUSD, input.Current.TransferOutUSD)
+			if input.UseRawAssetDelta {
+				estimatedPnL = round2(input.Current.TotalUSD - input.Previous.TotalUSD)
+			} else {
+				estimatedPnL = adjustedPnL(input.Current.TotalUSD-input.Previous.TotalUSD, input.Current.TransferInUSD, input.Current.TransferOutUSD)
+			}
 			if input.Previous.TotalUSD > 0 {
 				yieldRate = round4(estimatedPnL / input.Previous.TotalUSD)
 			}
 		}
-		if input.DailyStat != nil {
+		if input.DailyStat != nil && !input.IgnoreDailyStatPnL {
 			estimatedPnL = round2(input.DailyStat.EstimatedRealizedPnLUSD)
 			if input.DailyStat.MatchedCostUSD > 0 {
 				yieldRate = round4(input.DailyStat.EstimatedRealizedPnLUSD / input.DailyStat.MatchedCostUSD)
@@ -1491,7 +1697,7 @@ func (s *Service) loadActiveSmartMoneyWallets(ctx context.Context) ([]models.Mon
 	return wallets, err
 }
 
-func (s *Service) loadPagedSmartMoneyWallets(ctx context.Context, snapshotDay time.Time, page int, size int, keyword string) ([]models.MonitoredWallet, int64, error) {
+func (s *Service) loadPagedSmartMoneyWallets(ctx context.Context, page int, size int, keyword string) ([]models.MonitoredWallet, int64, error) {
 	page = clampSmartMoneyPage(page)
 	size = clampSmartMoneyPageSize(size)
 	keyword = strings.TrimSpace(keyword)
@@ -1513,8 +1719,8 @@ func (s *Service) loadPagedSmartMoneyWallets(ctx context.Context, snapshotDay ti
 	err := db.
 		Select("monitored_wallets.*").
 		Joins("LEFT JOIN sm_wallet_live_states sml ON sml.wallet_address = monitored_wallets.address AND sml.chain_id = monitored_wallets.chain_id").
-		Joins("LEFT JOIN sm_wallet_daily_snapshots smd ON smd.wallet_address = monitored_wallets.address AND smd.chain_id = monitored_wallets.chain_id AND smd.snapshot_day = ?", formatDay(snapshotDay)).
-		Order("COALESCE(sml.total_usd, smd.total_usd, 0) DESC").
+		Order("sml.total_usd IS NULL ASC").
+		Order("sml.total_usd DESC").
 		Order("monitored_wallets.chain_id ASC").
 		Order("monitored_wallets.address ASC").
 		Offset((page - 1) * size).

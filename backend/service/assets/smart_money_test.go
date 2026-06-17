@@ -305,6 +305,53 @@ func TestBuildSmartMoneySnapshotLeaderboard_FallsBackToTransferAdjustedSnapshotD
 	}
 }
 
+func TestBuildSmartMoneySnapshotLeaderboard_UsesRawAssetDeltaForLiveInputs(t *testing.T) {
+	timeutil.Init()
+
+	now := time.Date(2026, time.March, 23, 13, 30, 0, 0, timeutil.Location())
+	baseDay := dayStart(now).AddDate(0, 0, -1)
+
+	resp := buildSmartMoneySnapshotLeaderboard("pnl", now, baseDay, 1, 20, []smartMoneyLeaderboardSnapshotInput{
+		{
+			Wallet: models.MonitoredWallet{
+				Address: "0x00000000000000000000000000000000000000f7",
+				ChainID: 56,
+			},
+			Current: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD:       155,
+				TransferInUSD:  999,
+				TransferOutUSD: 20,
+			},
+			Previous: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD: 100,
+			},
+			DailyStat: &models.SmartMoneyLPDailyStat{
+				EstimatedRealizedPnLUSD: -500,
+				MatchedCostUSD:          100,
+				AddCount:                2,
+				RemoveCount:             1,
+				ActivePoolCount:         3,
+			},
+			UseRawAssetDelta:   true,
+			IgnoreDailyStatPnL: true,
+		},
+	})
+
+	if got, want := len(resp.List), 1; got != want {
+		t.Fatalf("leaderboard size = %d, want %d", got, want)
+	}
+	entry := resp.List[0]
+	if got, want := entry.EstimatedRealizedPnLUSD, 55.0; got != want {
+		t.Fatalf("live pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := entry.YieldRate, 0.55; got != want {
+		t.Fatalf("live yield = %.4f, want %.4f", got, want)
+	}
+	if got, want := entry.ParticipationCount, 3; got != want {
+		t.Fatalf("live participation = %d, want %d", got, want)
+	}
+}
+
 func TestBuildSmartMoneySnapshotLeaderboard_UsesWindowDailyStatPnL(t *testing.T) {
 	timeutil.Init()
 
@@ -522,8 +569,8 @@ func TestBuildSmartMoneyTodayHistoryPoint_RequiresYesterdaySnapshot(t *testing.T
 	}
 }
 
-func TestSmartMoneyWalletLiveCacheTTL_IsFiveMinutes(t *testing.T) {
-	if got, want := smartMoneyWalletLiveCacheTTL, 5*time.Minute; got != want {
+func TestSmartMoneyWalletLiveCacheTTL_IsThirtyMinutes(t *testing.T) {
+	if got, want := smartMoneyWalletLiveCacheTTL, 30*time.Minute; got != want {
 		t.Fatalf("smart money wallet live cache ttl = %s, want %s", got, want)
 	}
 }

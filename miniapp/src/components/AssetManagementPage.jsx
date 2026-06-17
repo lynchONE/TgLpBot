@@ -236,7 +236,7 @@ function SmPagination({ page, totalPages, onPageChange }) {
 /* ─── Card wrapper ─── */
 function Card({ children, className = '' }) {
     return (
-        <div className={`rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c] ${className}`.trim()}>
+        <div className={`mini-am-card rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c] ${className}`.trim()}>
             {children}
         </div>
     );
@@ -255,7 +255,7 @@ function StatBlock({ label, value, sub, tone = 'default' }) {
             ? 'bg-amber-500/[0.06] dark:bg-amber-500/[0.08]'
             : 'bg-zinc-50 dark:bg-white/[0.03]';
     return (
-        <div className={`rounded-xl ${toneBg} ring-1 ${toneRing} px-3 py-2.5`}>
+        <div className={`mini-am-stat rounded-xl ${toneBg} ring-1 ${toneRing} px-3 py-2.5`}>
             <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">{label}</div>
             <div className="mt-1 text-base font-extrabold tabular-nums text-zinc-900 dark:text-white/95 leading-none">
                 <NumberFlowValue value={value} formatter={() => value} />
@@ -1166,7 +1166,7 @@ export default function AssetManagementPage({
     }, [showProfitBaselineEditor, trendMode]);
 
     return (
-        <div className="flex flex-col gap-3">
+        <div className="mini-am-page flex flex-col gap-3">
             {/* ══════ Header ══════ */}
             <Card className="!p-0 overflow-hidden">
                 <div className="px-3.5 pt-3 pb-2.5">
@@ -1190,7 +1190,7 @@ export default function AssetManagementPage({
                     </div>
                 </div>
                 <div
-                    className="grid border-t border-zinc-100 dark:border-white/[0.04]"
+                    className="mini-am-tabs grid border-t border-zinc-100 dark:border-white/[0.04]"
                     style={{ gridTemplateColumns: `repeat(${Math.max(tabs.length, 1)}, minmax(0, 1fr))` }}
                 >
                     {tabs.map((tab) => {
@@ -1235,7 +1235,7 @@ export default function AssetManagementPage({
                     )}
 
                     {/* overview metrics */}
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="mini-am-stats grid grid-cols-2 gap-2">
                         <StatBlock label="总资产" value={formatUsd(assetsData.overview?.summary?.total_usd)} tone="accent" />
                         <StatBlock label="钱包余额" value={formatUsd(assetsData.overview?.summary?.wallet_usd)} />
                         <StatBlock label="LP 持仓" value={formatUsd(assetsData.overview?.summary?.position_usd)} />

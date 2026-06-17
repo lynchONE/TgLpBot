@@ -6190,11 +6190,11 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
     }, [stats]);
 
     return (
-        <div className="max-w-3xl mx-auto pb-24">
-            <section className="rounded-[30px] border border-white/[0.04] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.04),transparent_35%),linear-gradient(180deg,rgba(24,24,27,0.92),rgba(9,9,11,0.96))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
+        <div className="mini-sm-page max-w-3xl mx-auto pb-24">
+            <section className="mini-sm-shell rounded-[30px] border border-white/[0.04] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.04),transparent_35%),linear-gradient(180deg,rgba(24,24,27,0.92),rgba(9,9,11,0.96))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
                 {stats && !isDetailView && (
                     <div
-                        className={`mb-4 rounded-[24px] border px-4 py-3 ${monitorSummary.enabled
+                        className={`mini-sm-monitor mb-4 rounded-[24px] border px-4 py-3 ${monitorSummary.enabled
                             ? 'border-white/[0.05] bg-white/[0.02]'
                             : 'border-white/[0.04] bg-zinc-900/55'
                             }`}
@@ -6208,7 +6208,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                 )}
 
                 {stats && !isDetailView && (
-                    <div className="grid grid-cols-2 gap-2 mb-4">
+                    <div className="mini-sm-stats grid grid-cols-2 gap-2 mb-4">
                         <StatCard label="活跃池子" value={stats.active_pool_count} />
                         <StatCard label="监控钱包" value={stats.monitored_wallet_count} />
                         <StatCard label="持仓笔数" value={stats.open_position_count} />
@@ -6217,7 +6217,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                 )}
 
                 {!isDetailView && (
-                    <div className={`grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-7' : 'grid-cols-3 sm:grid-cols-6'} gap-2 mb-4`}>
+                    <div className={`mini-sm-tabs grid ${isAdmin ? 'grid-cols-3 sm:grid-cols-7' : 'grid-cols-3 sm:grid-cols-6'} gap-2 mb-4`}>
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },

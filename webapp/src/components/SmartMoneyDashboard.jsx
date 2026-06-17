@@ -2068,7 +2068,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                         }}
                     />
                 </div>
-                <div className="smd-filter-group">
+                <div className="smd-filter-group smd-filter-group--pool-toolbar">
                     {['all', 'pancake_v3', 'uniswap_v3', 'uniswap_v4'].map(p => {
                         const info = PROTOCOL_MAP[p];
                         return (

@@ -53,7 +53,7 @@ export default function BottomSheet({
 
             {/* Sheet wrapper */}
             <div
-                className={`relative w-full sm:max-w-md flex flex-col overflow-hidden bg-white/80 dark:bg-[#14171c]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
+                className={`mini-bottom-sheet relative w-full sm:max-w-md flex flex-col overflow-hidden bg-white/80 dark:bg-[#14171c]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
             >
                 {/* 顶部抓手 (移动端暗示可下拉) */}
                 <div
@@ -64,8 +64,8 @@ export default function BottomSheet({
                 </div>
 
                 {/* Header */}
-                <div className={`flex items-start justify-between shrink-0 ${headerClassName}`}>
-                    <div className="text-lg font-bold text-zinc-900 dark:text-white/90 flex-1 min-w-0 pr-4">{title}</div>
+                <div className={`mini-bottom-sheet-header flex items-start justify-between shrink-0 ${headerClassName}`}>
+                    <div className="mini-bottom-sheet-title text-lg font-bold text-zinc-900 dark:text-white/90 flex-1 min-w-0 pr-4">{title}</div>
                     <div className="flex items-center gap-2 shrink-0">
                         {headerRight}
                         <button
@@ -83,14 +83,14 @@ export default function BottomSheet({
 
                 {/* Content Area */}
                 <div
-                    className={`flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y ${contentClassName}`}
+                    className={`mini-bottom-sheet-content flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y ${contentClassName}`}
                     style={{ WebkitOverflowScrolling: 'touch' }}
                 >
                     {children}
                 </div>
 
                 {footer ? (
-                    <div className={`shrink-0 border-t border-zinc-200/70 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#14171c]/95 ${footerClassName}`}>
+                    <div className={`mini-bottom-sheet-footer shrink-0 border-t border-zinc-200/70 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#14171c]/95 ${footerClassName}`}>
                         {footer}
                     </div>
                 ) : null}

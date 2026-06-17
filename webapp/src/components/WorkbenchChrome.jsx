@@ -145,7 +145,7 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="title-block">
-        <div className="eyebrow">lynchL</div>
+        <div className="eyebrow">lynch</div>
       </div>
 
       <div className="top-actions">

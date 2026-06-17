@@ -861,12 +861,15 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 82px 56px;
-  grid-template-areas: "avatar info values action";
-  align-items: center;
-  gap: 8px;
-  min-height: 62px;
-  padding: 8px 10px;
+  grid-template-columns: 36px minmax(0, 1fr) 96px 56px;
+  grid-template-areas:
+    "avatar name values action"
+    "avatar badges values action"
+    "meta meta meta meta";
+  align-items: start;
+  gap: 4px 10px;
+  min-height: 96px;
+  padding: 10px;
   overflow: hidden;
 }
 
@@ -883,7 +886,8 @@ body {
 .workbench.layout-work-4 .module-hot_pools .pool-info {
   grid-area: info;
   min-width: 0;
-  overflow: hidden;
+  display: contents;
+  overflow: visible;
 }
 
 .module-hot_pools .pool-name-line,
@@ -893,14 +897,23 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-badge-line,
 .workbench.layout-work-4 .module-hot_pools .pool-badge-line {
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 4px;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.module-hot_pools .pool-name-line,
+.workbench.layout-4 .module-hot_pools .pool-name-line,
+.workbench.layout-work-4 .module-hot_pools .pool-name-line {
+  grid-area: name;
+  align-self: end;
 }
 
 .module-hot_pools .pool-badge-line,
 .workbench.layout-4 .module-hot_pools .pool-badge-line,
 .workbench.layout-work-4 .module-hot_pools .pool-badge-line {
+  grid-area: badges;
+  align-self: start;
   margin-top: 2px;
 }
 
@@ -924,28 +937,46 @@ body {
 .module-hot_pools .pool-meta-line,
 .workbench.layout-4 .module-hot_pools .pool-meta-line,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-line {
+  grid-area: meta;
   min-width: 0;
-  flex-wrap: nowrap;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
+  margin-top: 4px;
   overflow: hidden;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .module-hot_pools .pool-meta-sort,
 .module-hot_pools .pool-meta-static {
+  width: 100%;
   min-width: 0;
-  max-width: 74px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 3px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
   line-height: 1.2;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.028);
+}
+
+.module-hot_pools .pool-meta-sort.active {
+  margin: 0;
+  padding: 3px 6px;
 }
 
 .module-hot_pools .pool-meta-sort span,
 .module-hot_pools .pool-meta-static span {
   display: inline-block;
-  max-width: 28px;
+  flex: 0 0 auto;
+  max-width: 54px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
@@ -954,26 +985,27 @@ body {
 .module-hot_pools .pool-meta-sort b,
 .module-hot_pools .pool-meta-static b {
   display: inline-block;
-  max-width: 44px;
+  min-width: 0;
+  max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: right;
   vertical-align: bottom;
 }
 
 .module-hot_pools .pool-meta-line .dot-sep {
-  flex: 0 0 auto;
-  opacity: 0.34;
+  display: none;
 }
 
 .module-hot_pools .pool-values,
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
   grid-area: values;
-  width: 82px;
-  min-width: 82px;
-  max-width: 82px;
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
   overflow: hidden;
-  align-self: center;
+  align-self: start;
   text-align: right;
 }
 
@@ -988,7 +1020,7 @@ body {
 .module-hot_pools .pool-sub-val,
 .workbench.layout-4 .module-hot_pools .pool-sub-val,
 .workbench.layout-work-4 .module-hot_pools .pool-sub-val {
-  max-width: 82px;
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -999,6 +1031,7 @@ body {
 .workbench.layout-work-4 .module-hot_pools .pool-buy-btn {
   grid-area: action;
   justify-self: end;
+  align-self: start;
   width: 56px;
   min-width: 56px;
   height: 28px;
@@ -1750,6 +1783,10 @@ body {
   gap: 4px;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.module-smart_money .smd-filter-group--pool-toolbar {
+  overflow: visible;
 }
 
 .module-smart_money .smd-filter-group::-webkit-scrollbar {

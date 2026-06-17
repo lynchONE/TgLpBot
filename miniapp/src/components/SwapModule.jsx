@@ -615,7 +615,7 @@ export default function SwapModule({
         : quote?.to_amount_float || '0.0';
 
     return (
-        <div className="space-y-3">
+        <div className="mini-swap-module space-y-3">
             <ModuleHeader
                 title="兑换"
                 subtitle={selectedWallet
@@ -635,7 +635,7 @@ export default function SwapModule({
             />
 
             {/* mode segment */}
-            <div className="flex gap-1 rounded-2xl border border-zinc-200 bg-white/70 p-1 shadow-sm dark:border-white/10 dark:bg-[#0f1116]/80 dark:shadow-none">
+            <div className="mini-swap-segment flex gap-1 rounded-2xl border border-zinc-200 bg-white/70 p-1 shadow-sm dark:border-white/10 dark:bg-[#0f1116]/80 dark:shadow-none">
                 {SWAP_MODES.map((m) => (
                     <SegmentButton key={m.key} active={mode === m.key} onClick={() => setMode(m.key)}>
                         {m.label}
@@ -644,7 +644,7 @@ export default function SwapModule({
             </div>
 
             {/* chain + slippage strip */}
-            <div className="flex items-center justify-between gap-2">
+            <div className="mini-swap-strip flex items-center justify-between gap-2">
                 {multiChainEnabled ? (
                     <div className="flex flex-wrap gap-1.5">
                         {CHAIN_OPTIONS.map((opt) => (
@@ -668,7 +668,7 @@ export default function SwapModule({
             </div>
 
             {showSlippage ? (
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-white/5">
+                <div className="mini-swap-slippage rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-white/5">
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/45">
                         滑点容忍度
                     </div>
@@ -706,7 +706,7 @@ export default function SwapModule({
                 type="button"
                 onClick={() => setWalletPickerOpen(true)}
                 disabled={!hasInitData}
-                className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-left transition active:scale-[0.99] disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116]/80"
+                className="mini-swap-wallet flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-left transition active:scale-[0.99] disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116]/80"
             >
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-white/55">
                     <Wallet size={16} />
@@ -741,9 +741,9 @@ export default function SwapModule({
             </button>
 
             {/* from-to card */}
-            <div className="relative rounded-3xl bg-zinc-50 p-1 dark:bg-[#0f1116]/80">
+            <div className="mini-swap-card relative rounded-3xl bg-zinc-50 p-1 dark:bg-[#0f1116]/80">
                 {/* FROM */}
-                <div className="rounded-[20px] bg-white p-4 dark:bg-[#14171c]">
+                <div className="mini-swap-panel mini-swap-panel--from rounded-[20px] bg-white p-4 dark:bg-[#14171c]">
                     <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/45">
                         <span className="font-semibold uppercase tracking-wider">支付</span>
                         <span className="tabular-nums">
@@ -787,7 +787,7 @@ export default function SwapModule({
                 </div>
 
                 {/* TO */}
-                <div className="mt-1 rounded-[20px] bg-white p-4 dark:bg-[#14171c]">
+                <div className="mini-swap-panel mini-swap-panel--to mt-1 rounded-[20px] bg-white p-4 dark:bg-[#14171c]">
                     <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/45">
                         <span className="font-semibold uppercase tracking-wider">获得 (估算)</span>
                         {quote?.from_amount_float ? (
@@ -834,7 +834,7 @@ export default function SwapModule({
 
             {/* limit order extra card */}
             {mode === 'limit' ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-[#0f1116]/80">
+                <div className="mini-swap-limit-card rounded-2xl border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-[#0f1116]/80">
                     <div className="flex items-center justify-between">
                         <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/45">
                             触发条件
@@ -910,7 +910,7 @@ export default function SwapModule({
             ) : null}
 
             {/* primary button (sticky-ish at bottom of view) */}
-            <div className="pt-2">
+            <div className="mini-swap-submit pt-2">
                 <button
                     type="button"
                     onClick={() => (canSubmit ? setConfirmOpen(true) : null)}

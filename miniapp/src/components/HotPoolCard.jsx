@@ -499,10 +499,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             setCopied(true);
             hapticNotification('success'); // 复制成功反馈
             setTimeout(() => setCopied(false), 1200);
-            await copyToClipboard(addr);
-            setCopied(true);
-            hapticNotification('success'); // 复制成功反馈
-            setTimeout(() => setCopied(false), 1200);
         } catch {
             hapticNotification('error'); // 复制失败反馈
         }
@@ -510,29 +506,29 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
     return (
         <div
-            className="rounded-2xl border border-zinc-200 bg-white/40 p-4 shadow-sm backdrop-blur-md transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none"
+            className="mini-pool-row rounded-2xl border border-zinc-200 bg-white/40 p-4 shadow-sm backdrop-blur-md transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchMove={handleTouchMove}
         >
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+            <div className="mini-pool-row-main flex items-start justify-between gap-3">
+                <div className="mini-pool-info min-w-0 flex-1">
+                    <div className="mini-pool-title-line flex items-center gap-2">
                         <div
-                            className="max-w-[90px] text-xs font-semibold leading-4 text-zinc-900 dark:text-white/90 truncate"
+                            className="mini-pool-pair max-w-[90px] text-xs font-semibold leading-4 text-zinc-900 dark:text-white/90 truncate"
                             title={pool?.trading_pair || ''}
                         >
                             {formatPairLabel(pool?.trading_pair)}
                         </div>
                         {pool?.fee_percentage ? (
-                            <div className="rounded-lg bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/30">
+                            <div className="mini-pool-fee rounded-lg bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/30">
                                 <NumberFlowValue value={pool.fee_percentage} formatter={(v) => formatFeePercent(v)} />
                             </div>
                         ) : null}
                         <button
                             type="button"
                             onClick={copyAddr}
-                            className={`inline-flex h-7 w-7 items-center justify-center rounded-xl border text-zinc-600 shadow-sm transition ${copied
+                            className={`mini-pool-icon-btn inline-flex h-7 w-7 items-center justify-center rounded-xl border text-zinc-600 shadow-sm transition ${copied
                                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
                                 : 'border-zinc-200 bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15'
                                 }`}
@@ -544,7 +540,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         <button
                             type="button"
                             onClick={() => onOpenKline?.(pool)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-600 shadow-sm transition hover:bg-zinc-200 active:bg-zinc-200 disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                            className="mini-pool-icon-btn inline-flex h-7 w-7 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-600 shadow-sm transition hover:bg-zinc-200 active:bg-zinc-200 disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
                             aria-label="K线图"
                             title="查看K线图"
                             disabled={!canOpenKline || typeof onOpenKline !== 'function'}
@@ -553,7 +549,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </button>
                     </div>
 
-                    <div className="mt-2 text-xs space-y-1">
+                    <div className="mini-pool-meta mt-2 text-xs space-y-1">
                         {/* 第一行：交易量 */}
                         {showVolume ? (
                             <div className="text-zinc-500 dark:text-white/40 flex items-center">
@@ -596,9 +592,9 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     </div>
                 </div>
 
-                <div className="text-right shrink-0 min-w-[110px]">
+                <div className="mini-pool-values text-right shrink-0 min-w-[110px]">
                     <div className="flex items-baseline justify-end gap-1 flex-wrap">
-                        <div className={`text-base font-extrabold tabular-nums flex items-center ${brand.textClass}`}>
+                        <div className={`mini-pool-primary text-base font-extrabold tabular-nums flex items-center ${brand.textClass}`}>
                             {metric === 'volume' ? (
                                 <NumberFlowValue value={pool?.total_volume} formatter={(v) => {
                                     const n = Number(v ?? 0);
@@ -658,15 +654,15 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                 </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
+            <div className="mini-pool-footer mt-3 flex items-center justify-between gap-2">
+                <div className="mini-pool-badges flex items-center gap-2 flex-wrap">
                     <DexBadge pool={pool} />
                     <TokenRiskBadge risk={tokenRisk} />
                     {gmgnTokenAddr ? (
                         <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); openGmgn(); }}
-                            className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10 dark:bg-[#1c2026] dark:ring-white/10 transition-colors hover:bg-zinc-700 dark:hover:bg-[#252831]"
+                            className="mini-pool-gmgn inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10 dark:bg-[#1c2026] dark:ring-white/10 transition-colors hover:bg-zinc-700 dark:hover:bg-[#252831]"
                             title="在 GMGN 查看代币"
                         >
                             <img src={gmgnIcon} alt="GMGN" className="h-3.5 w-3.5" />
@@ -676,7 +672,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     {hotPoolBadges.map((badge, badgeIdx) => (
                         <span
                             key={`${badge.text}:${badgeIdx}`}
-                            className="group relative inline-flex max-w-[120px] items-center rounded-full border border-cyan-400/20 bg-slate-900/85 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_18px_rgba(8,15,30,0.14)] backdrop-blur-sm"
+                            className="mini-pool-badge group relative inline-flex max-w-[120px] items-center rounded-full border border-cyan-400/20 bg-slate-900/85 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_18px_rgba(8,15,30,0.14)] backdrop-blur-sm"
                             title={badge.tip}
                             tabIndex={0}
                         >
@@ -693,7 +689,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     type="button"
                     onClick={() => onOpenPosition?.(pool)}
                     disabled={typeof onOpenPosition !== 'function'}
-                    className={brand.actionPillButtonClass}
+                    className={`mini-pool-open-btn ${brand.actionPillButtonClass}`}
                 >
                     <FlashIcon className="h-3 w-3 shrink-0" />
                     开仓

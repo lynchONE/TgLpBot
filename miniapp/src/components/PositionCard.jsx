@@ -546,10 +546,10 @@ export default function PositionCard({
     }, [position?.fee_tier, position?.pool?.tickSpacing, position?.tick_spacing]);
 
     return (
-        <div className="relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#14171c] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
-            <div className="px-3 pt-3 pb-2 flex flex-col gap-2">
-                <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-2 min-w-0 flex-1">
+        <div className="mini-position-card relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#14171c] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
+            <div className="mini-position-body px-3 pt-3 pb-2 flex flex-col gap-2">
+                <div className="mini-position-header flex items-start justify-between gap-2">
+                    <div className="mini-position-main flex items-start gap-2 min-w-0 flex-1">
                         {batchMode && (
                             <button type="button" onClick={onToggleSelect}
                                 className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-all active:scale-90 ${isSelected ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm shadow-emerald-500/30' : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800'}`}>
@@ -560,8 +560,8 @@ export default function PositionCard({
                                 )}
                             </button>
                         )}
-                        <div className="flex flex-col gap-1 min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap pr-1">
+                        <div className="mini-position-title-wrap flex flex-col gap-1 min-w-0 flex-1">
+                            <div className="mini-position-pair-row flex items-center gap-1.5 flex-wrap pr-1">
                                 {dexConfig ? (
                                     <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ring-1 ${dexConfig.bgClass} ${dexConfig.textClass} ${dexConfig.ringClass}`}>
                                         <img src={dexConfig.src} alt={dexConfig.alt} className="h-3.5 w-3.5" />
@@ -577,7 +577,7 @@ export default function PositionCard({
                                     </span>
                                 )}
                             </div>
-                            <div className="flex flex-wrap items-center gap-1.5 pr-1">
+                            <div className="mini-position-status-row flex flex-wrap items-center gap-1.5 pr-1">
                                 <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 shrink-0 ${statusTheme.pill}`}>
                                     <span className={`h-1 w-1 rounded-full shrink-0 ${statusTheme.dot}`} />
                                     <span className="truncate max-w-[70px]">{statusLabel || '状态未知'}</span>
@@ -596,7 +596,7 @@ export default function PositionCard({
                         </div>
                     </div>
 
-                    <div className="ml-auto flex shrink-0 items-start gap-2 pl-2">
+                    <div className="mini-position-right ml-auto flex shrink-0 items-start gap-2 pl-2">
                         {false && <>
                         <div className="text-right">
                             <div className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">仓值</div>
@@ -783,9 +783,9 @@ export default function PositionCard({
                 </div>
 
                 {canTaskAction && (
-                    <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
+                    <div className="mini-position-action-bar flex flex-wrap items-center gap-1.5 pb-0.5">
                         {exitPanelOpen && (
-                            <div className="w-full rounded-xl border border-sky-400/25 bg-sky-50/80 p-2 dark:border-sky-500/20 dark:bg-sky-500/10">
+                            <div className="mini-position-exit-panel w-full rounded-xl border border-sky-400/25 bg-sky-50/80 p-2 dark:border-sky-500/20 dark:bg-sky-500/10">
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                     <span className="text-[11px] font-bold text-sky-700 dark:text-sky-300">撤出比例</span>
                                     <button type="button" onClick={() => setExitPanelOpen(false)} className="text-[11px] font-semibold text-zinc-500 dark:text-white/50">关闭</button>
@@ -917,7 +917,7 @@ export default function PositionCard({
                     <SmartMoneyRangeSummaryClean groups={smartMoneyRangeGroups} />
                 ) : null}
 
-                <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1c2026]">
+                <div className="mini-position-detail-card rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1c2026]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">
                         <div className="flex items-center gap-1.5">

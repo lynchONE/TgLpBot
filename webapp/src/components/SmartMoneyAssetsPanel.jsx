@@ -752,7 +752,7 @@ export default function SmartMoneyAssetsPanel({
       {view === 'leaderboard' ? (
         <div className="am-card">
           <div className="am-card-header">
-            <div className="am-card-title">昨日排行榜</div>
+            <div className="am-card-title">实时排行榜</div>
             <div className="am-actions" style={{ marginLeft: 'auto' }}>
               {LEADERBOARD_METRICS.map((metric) => (
                 <button
