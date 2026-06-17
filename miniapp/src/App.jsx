@@ -59,6 +59,7 @@ import { storage } from './lib/storage';
 import { buildTopNavItems, hasModuleAccess } from './features/appShell/moduleAccess';
 import {
     MODULE_POLL_CONFIG,
+    MAX_POLL_INTERVAL_SEC,
     POSITIONS_ACTIVE_POLL_KEY,
     POSITIONS_IDLE_POLL_KEY,
     STORAGE_MODULE_POLL_SECS,

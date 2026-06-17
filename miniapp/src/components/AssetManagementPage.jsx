@@ -1,6 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, ChevronRight, Crown, Eraser, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
-import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
     fetchAssetHistory,
     fetchAssetLPStats,
@@ -378,108 +377,92 @@ function computeAreaChartPriceRange(points) {
     };
 }
 
-/* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
+/* ─── WebView-safe SVG Area Chart ─── */
 function LWAreaChart({ data, color = '#10b981', loading = false }) {
-    const containerRef = useRef(null);
-    const chartRef = useRef(null);
-    const seriesRef = useRef(null);
-    const priceRangeRef = useRef(null);
-
-    useEffect(() => {
-        if (!containerRef.current) return;
-        const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
-        const chart = createChart(containerRef.current, {
-            width: containerRef.current.clientWidth,
-            height: 200,
-            layout: {
-                background: { type: ColorType.Solid, color: 'transparent' },
-                textColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
-                fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                fontSize: 10,
-            },
-            grid: {
-                vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
-                horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
-            },
-            rightPriceScale: {
-                borderVisible: false,
-                scaleMargins: { top: 0.1, bottom: 0.05 },
-            },
-            timeScale: {
-                borderVisible: false,
-                fixLeftEdge: true,
-                fixRightEdge: true,
-                timeVisible: false,
-            },
-            crosshair: {
-                horzLine: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)', style: 2 },
-                vertLine: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)', style: 2 },
-            },
-            handleScroll: false,
-            handleScale: false,
-        });
-        const series = chart.addSeries(AreaSeries, {
-            lineColor: color,
-            lineWidth: 2,
-            topColor: `${color}40`,
-            bottomColor: `${color}05`,
-            priceFormat: { type: 'custom', formatter: (v) => {
-                const abs = Math.abs(v);
-                if (abs >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
-                if (abs >= 1000) return `$${(v / 1000).toFixed(abs >= 10000 ? 0 : 1)}K`;
-                return `$${v.toFixed(0)}`;
-            }},
-            crosshairMarkerRadius: 4,
-            crosshairMarkerBorderColor: color,
-            crosshairMarkerBackgroundColor: isDark ? '#14171c' : '#ffffff',
-            autoscaleInfoProvider: (original) => {
-                const priceRange = priceRangeRef.current;
-                const originalInfo = original();
-                if (!priceRange) return originalInfo;
-                if (originalInfo === null) {
-                    return {
-                        priceRange,
-                        margins: { above: 16, below: 18 },
-                    };
-                }
-                return {
-                    ...originalInfo,
-                    priceRange,
-                    margins: { above: 16, below: 18 },
-                };
-            },
-        });
-        chartRef.current = chart;
-        seriesRef.current = series;
-
-        const ro = new ResizeObserver((entries) => {
-            for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
-        });
-        ro.observe(containerRef.current);
-
-        return () => {
-            ro.disconnect();
-            chart.remove();
-            chartRef.current = null;
-            seriesRef.current = null;
-        };
-    }, [color]);
-
-    useEffect(() => {
-        if (!seriesRef.current) return;
-        const mapped = buildAreaChartData(data);
-        priceRangeRef.current = computeAreaChartPriceRange(mapped);
-        seriesRef.current.setData(mapped);
-        if (mapped.length > 0) {
-            chartRef.current?.timeScale().fitContent();
-        }
-    }, [data]);
-
     if (loading) {
         return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 200 }} />;
     }
 
-    return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ minHeight: 200 }} />;
+    const points = buildAreaChartData(data);
+    const priceRange = computeAreaChartPriceRange(points);
+    const hasPoints = points.length >= 2 && priceRange;
+    const width = 320;
+    const height = 200;
+    const padX = 14;
+    const padTop = 12;
+    const padBottom = 18;
+    const plotWidth = width - padX * 2;
+    const plotHeight = height - padTop - padBottom;
+    const minValue = priceRange?.minValue;
+    const maxValue = priceRange?.maxValue;
+    const valueRange = maxValue - minValue;
+    const chartPoints = hasPoints
+        ? points.map((point, index) => {
+            const x = padX + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
+            const y = padTop + (1 - ((point.value - minValue) / valueRange)) * plotHeight;
+            return { x, y };
+        })
+        : [];
+    const linePath = chartPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
+    const firstPoint = chartPoints[0];
+    const lastPoint = chartPoints[chartPoints.length - 1];
+    const areaPath = hasPoints
+        ? `${linePath} L${lastPoint.x.toFixed(2)} ${height - padBottom} L${firstPoint.x.toFixed(2)} ${height - padBottom} Z`
+        : '';
+    const guideYs = [0.2, 0.5, 0.8].map((ratio) => padTop + ratio * plotHeight);
+
+    return (
+        <div className="relative w-full overflow-hidden rounded-lg" style={{ height }}>
+            {hasPoints ? (
+                <svg
+                    viewBox={`0 0 ${width} ${height}`}
+                    preserveAspectRatio="none"
+                    className="h-full w-full"
+                    role="img"
+                    aria-label="asset trend"
+                >
+                    {guideYs.map((y) => (
+                        <line
+                            key={y}
+                            x1={padX}
+                            x2={width - padX}
+                            y1={y}
+                            y2={y}
+                            stroke="currentColor"
+                            strokeOpacity="0.08"
+                            strokeWidth="1"
+                            className="text-zinc-500 dark:text-white"
+                        />
+                    ))}
+                    <path d={areaPath} fill={color} opacity="0.18" />
+                    <path
+                        d={linePath}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                    />
+                    {lastPoint ? (
+                        <circle
+                            cx={lastPoint.x}
+                            cy={lastPoint.y}
+                            r="3.5"
+                            fill="#0f1116"
+                            stroke={color}
+                            strokeWidth="2"
+                            vectorEffect="non-scaling-stroke"
+                        />
+                    ) : null}
+                </svg>
+            ) : (
+                <div className="flex h-full items-center justify-center text-[11px] text-zinc-400 dark:text-white/35">
+                    暂无趋势数据
+                </div>
+            )}
+        </div>
+    );
 }
 
 /* ─── PnL Calendar (盈亏日历) ─── */

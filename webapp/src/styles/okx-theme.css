@@ -862,7 +862,9 @@ body {
 .workbench.layout-work-4 .module-hot_pools .pool-row {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) 84px 56px;
-  grid-template-areas: "avatar info values action";
+  grid-template-areas:
+    "avatar info values action"
+    "meta meta values action";
   align-items: start;
   gap: 8px;
   min-height: 82px;
@@ -932,6 +934,7 @@ body {
 .module-hot_pools .pool-meta-line,
 .workbench.layout-4 .module-hot_pools .pool-meta-line,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-line {
+  grid-area: meta;
   min-width: 0;
   width: 100%;
   display: grid;
@@ -1105,7 +1108,7 @@ body {
   grid-template-columns: 36px minmax(0, 1fr) 76px;
   grid-template-areas:
     "avatar info values"
-    "avatar info action";
+    "meta meta action";
   min-height: 92px;
   align-items: start;
   gap: 6px 8px;
@@ -2242,13 +2245,81 @@ body {
 }
 
 /* Hot-pool metrics should read as compact label/value chips, not stretched columns. */
+.workbench.layout-2 .module-hot_pools .pool-row,
+.workbench.layout-work-2 .module-hot_pools .pool-row,
+.workbench.layout-3 .module-hot_pools .pool-row,
+.workbench.layout-work-3 .module-hot_pools .pool-row,
+.workbench.layout-4 .module-hot_pools .pool-row,
+.workbench.layout-work-4 .module-hot_pools .pool-row {
+  min-height: 104px;
+  overflow: visible;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-row,
+.workbench.layout-work-2 .module-hot_pools .pool-row {
+  grid-template-columns: 38px minmax(0, 1fr) 86px 60px;
+  grid-template-areas:
+    "avatar info values action"
+    "meta meta values action";
+}
+
+.workbench.layout-2 .module-hot_pools .pool-values,
+.workbench.layout-work-2 .module-hot_pools .pool-values {
+  width: 86px;
+  min-width: 86px;
+  max-width: 86px;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-buy-btn,
+.workbench.layout-work-2 .module-hot_pools .pool-buy-btn {
+  width: 60px;
+  min-width: 60px;
+}
+
+.workbench.layout-3 .module-hot_pools .pool-row,
+.workbench.layout-work-3 .module-hot_pools .pool-row {
+  grid-template-columns: 36px minmax(0, 1fr) 78px 52px;
+  grid-template-areas:
+    "avatar info values action"
+    "meta meta values action";
+}
+
+.workbench.layout-3 .module-hot_pools .pool-values,
+.workbench.layout-work-3 .module-hot_pools .pool-values {
+  width: 78px;
+  min-width: 78px;
+  max-width: 78px;
+}
+
+.workbench.layout-3 .module-hot_pools .pool-buy-btn,
+.workbench.layout-work-3 .module-hot_pools .pool-buy-btn {
+  width: 52px;
+  min-width: 52px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-row,
+.workbench.layout-work-4 .module-hot_pools .pool-row {
+  grid-template-columns: 36px minmax(0, 1fr) 72px;
+  grid-template-areas:
+    "avatar info values"
+    "meta meta action";
+}
+
+.workbench.layout-4 .module-hot_pools .pool-values,
+.workbench.layout-work-4 .module-hot_pools .pool-values {
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
+}
+
 .module-hot_pools .pool-meta-line {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  grid-auto-rows: 20px;
+  grid-auto-rows: 22px;
   justify-content: stretch;
   align-items: center;
   width: 100%;
-  gap: 3px 4px;
+  margin-left: 0;
+  gap: 4px;
   overflow: visible;
   white-space: normal;
 }
@@ -2267,39 +2338,39 @@ body {
   flex: 1 1 0;
   width: 100%;
   max-width: none;
-  height: 20px;
-  min-height: 20px;
-  padding: 2px 5px;
+  height: 22px;
+  min-height: 22px;
+  padding: 3px 6px;
   align-items: center;
   justify-content: flex-start;
-  gap: 3px;
+  gap: 4px;
   line-height: 1;
   font-variant-numeric: tabular-nums lining-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;
 }
 
 .module-hot_pools .pool-meta-sort.active {
-  padding: 2px 5px;
+  padding: 3px 6px;
 }
 
 .module-hot_pools .pool-meta-sort > span,
 .module-hot_pools .pool-meta-static > span {
   display: inline-flex;
   align-items: center;
-  height: 14px;
-  line-height: 14px;
-  max-width: 30px;
+  height: 16px;
+  line-height: 16px;
+  max-width: 32px;
 }
 
 .module-hot_pools .pool-meta-sort b,
 .module-hot_pools .pool-meta-static b {
   display: inline-flex;
   align-items: center;
-  flex: 0 1 auto;
-  height: 14px;
+  flex: 1 1 auto;
+  height: 16px;
   min-width: 0;
-  max-width: calc(100% - 28px);
-  line-height: 14px;
+  max-width: calc(100% - 30px);
+  line-height: 16px;
   text-align: left;
   gap: 3px;
 }
@@ -2310,8 +2381,8 @@ body {
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  height: 14px;
-  line-height: 14px;
+  height: 16px;
+  line-height: 16px;
 }
 
 .module-hot_pools .pool-meta-sort b > span > span,
@@ -2321,8 +2392,8 @@ body {
   display: inline-flex;
   align-items: center;
   max-width: none;
-  height: 14px;
-  line-height: 14px;
+  height: 16px;
+  line-height: 16px;
   vertical-align: top;
 }
 
@@ -2331,12 +2402,12 @@ body {
   align-items: center;
   flex: 0 0 auto;
   gap: 1px;
-  height: 14px;
-  max-width: 42px;
+  height: 16px;
+  max-width: 52px;
   overflow: hidden;
   font-size: 10px;
   font-weight: 800;
-  line-height: 14px;
+  line-height: 16px;
   vertical-align: top;
 }
 
@@ -2351,11 +2422,11 @@ body {
 .module-hot_pools .pool-metric-delta-arrow {
   display: inline-flex;
   align-items: center;
-  height: 14px;
-  line-height: 14px;
+  height: 16px;
+  line-height: 16px;
 }
 
 .module-hot_pools .pool-main-val .pool-metric-delta {
-  max-width: 46px;
+  max-width: 50px;
   font-size: 10px;
 }

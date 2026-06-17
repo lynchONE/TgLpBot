@@ -481,7 +481,9 @@ function HotPoolRow({
             ))}
           </div>
         )}
-        <div className="pool-meta-line">
+      </div>
+
+      <div className="pool-meta-line">
           <button
             type="button"
             className={`pool-meta-sort meta-cyan ${hotInlineSort === 'volume' ? 'active' : ''}`}
@@ -590,7 +592,6 @@ function HotPoolRow({
               ) : activeLiquidityFeeRateText}
             </b>
           </button>
-        </div>
       </div>
 
       <div className="pool-values">
