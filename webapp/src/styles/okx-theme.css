@@ -1105,7 +1105,7 @@ body {
 
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
-  grid-template-columns: 36px minmax(0, 1fr) 76px;
+  grid-template-columns: 36px minmax(0, 1fr) 84px;
   grid-template-areas:
     "avatar info values"
     "meta meta action";
@@ -1116,19 +1116,19 @@ body {
 
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
-  width: 76px;
-  min-width: 76px;
-  max-width: 76px;
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-sub-val,
+.workbench.layout-work-4 .module-hot_pools .pool-sub-val {
+  max-width: 84px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-main-val,
 .workbench.layout-work-4 .module-hot_pools .pool-main-val {
   font-size: 12px;
-}
-
-.workbench.layout-4 .module-hot_pools .pool-sub-val,
-.workbench.layout-work-4 .module-hot_pools .pool-sub-val {
-  max-width: 76px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-buy-btn,
@@ -2299,19 +2299,19 @@ body {
 
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
-  grid-template-columns: 36px minmax(0, 1fr) 76px;
+  grid-template-columns: 36px minmax(0, 1fr) 84px;
   grid-template-areas:
     "avatar info values"
-    "meta meta meta"
-    "action action action";
-  min-height: 132px;
+    "meta meta action";
+  gap: 5px 6px;
+  min-height: 108px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
-  width: 76px;
-  min-width: 76px;
-  max-width: 76px;
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-buy-btn,
@@ -2321,7 +2321,7 @@ body {
 }
 
 .module-hot_pools .pool-meta-line {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-auto-rows: 22px;
   justify-content: stretch;
   align-items: center;
@@ -2332,41 +2332,64 @@ body {
   white-space: normal;
 }
 
-.workbench.layout-2 .module-hot_pools .pool-meta-line,
-.workbench.layout-work-2 .module-hot_pools .pool-meta-line,
-.workbench.layout-3 .module-hot_pools .pool-meta-line,
-.workbench.layout-work-3 .module-hot_pools .pool-meta-line,
 .workbench.layout-4 .module-hot_pools .pool-meta-line,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-line {
-  grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr) minmax(0, 1.12fr) !important;
-  gap: 4px;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1fr) minmax(0, 1.28fr) !important;
+  grid-auto-rows: 20px;
+  gap: 2px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-sort.meta-orange,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-sort.meta-orange {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-static.meta-green,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-static.meta-green {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-sort.meta-accent,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-sort.meta-accent {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-sort.meta-gold,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-sort.meta-gold {
+  grid-column: 3;
+  grid-row: 2;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-meta-sort,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-sort,
 .workbench.layout-4 .module-hot_pools .pool-meta-static,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-static {
-  padding: 3px 4px;
-  gap: 2px;
+  height: 20px;
+  min-height: 20px;
+  padding: 2px 3px;
+  gap: 1px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-meta-sort > span,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-sort > span,
 .workbench.layout-4 .module-hot_pools .pool-meta-static > span,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-static > span {
-  max-width: 24px;
+  max-width: 20px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-meta-sort b,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-sort b,
 .workbench.layout-4 .module-hot_pools .pool-meta-static b,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-static b {
-  max-width: calc(100% - 22px);
+  max-width: calc(100% - 18px);
 }
 
 .workbench.layout-4 .module-hot_pools .pool-metric-delta,
 .workbench.layout-work-4 .module-hot_pools .pool-metric-delta {
-  max-width: 58px;
+  max-width: 54px;
 }
 
 .module-hot_pools .pool-meta-sort,

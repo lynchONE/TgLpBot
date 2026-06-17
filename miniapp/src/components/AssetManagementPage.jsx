@@ -367,6 +367,8 @@ function measureChartWidth(host) {
 }
 
 /* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
+const AREA_CHART_HEIGHT = 200;
+
 function LWAreaChart({ data, color = '#10b981', loading = false }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
@@ -380,7 +382,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
         const chart = chartRef.current;
         if (!host || !chart) return;
         const width = Math.max(1, measureChartWidth(host));
-        chart.applyOptions({ width, height: 200 });
+        chart.applyOptions({ width, height: AREA_CHART_HEIGHT });
         if (chartDataRef.current.length > 0) {
             chart.timeScale().fitContent();
         }
@@ -407,7 +409,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
         const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
         const chart = createChart(host, {
             width: Math.max(1, measureChartWidth(host)),
-            height: 200,
+            height: AREA_CHART_HEIGHT,
             layout: {
                 background: { type: ColorType.Solid, color: 'transparent' },
                 textColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
@@ -477,11 +479,11 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
     }, [applyChartData, chartData]);
 
     if (loading) {
-        return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 200 }} />;
+        return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: AREA_CHART_HEIGHT }} />;
     }
 
     return (
-        <div className="relative w-full overflow-hidden rounded-lg" style={{ height }}>
+        <div className="relative w-full overflow-hidden rounded-lg" style={{ height: AREA_CHART_HEIGHT }}>
             <div ref={containerRef} className="h-full w-full" />
             {chartData.length < 2 ? (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-zinc-400 dark:text-white/35">
