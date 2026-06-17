@@ -254,6 +254,49 @@
   background: rgba(148, 163, 184, 0.18);
 }
 
+.am-actions,
+.am-system-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.am-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: 36px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: rgba(148, 163, 184, 0.06);
+  color: var(--text-muted);
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+  cursor: pointer;
+  transition: background var(--transition-base), border-color var(--transition-base), color var(--transition-base);
+}
+
+.am-tab-btn:hover {
+  border-color: var(--border-strong);
+  background: rgba(148, 163, 184, 0.11);
+  color: var(--text);
+}
+
+.am-tab-btn.active {
+  border-color: rgba(var(--accent-rgb), 0.48);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.am-tab-btn svg {
+  flex: 0 0 auto;
+}
+
 .am-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -1852,4 +1895,3 @@
 }
 .panel-action-btn:hover:not(:disabled) { background: var(--bg-card); }
 .panel-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-

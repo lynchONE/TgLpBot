@@ -109,6 +109,13 @@ body {
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: rgba(20, 28, 42, 0.34);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--elevation-0);
 }
 
 .guest-shell-mode .bg-orb {
@@ -119,6 +126,7 @@ body {
   width: min(1320px, 100%);
   margin-inline: auto;
   align-items: center;
+  background: rgba(20, 28, 42, 0.22);
 }
 
 .news-showcase {
@@ -484,4 +492,3 @@ body {
 .logout-btn:hover {
   border-color: rgba(var(--accent-rgb), 0.6);
 }
-

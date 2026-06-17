@@ -563,10 +563,14 @@
 .aaw-secondary-btn,
 .aaw-danger-btn {
   min-height: 38px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 0 14px;
   font-size: 12px;
   font-weight: 900;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-base), border-color var(--transition-base),
+    color var(--transition-base), filter var(--transition-base);
 }
 
 .aaw-primary-btn {
@@ -576,15 +580,29 @@
 }
 
 .aaw-secondary-btn {
-  border: 1px solid rgba(139, 160, 196, 0.2);
+  border: 1px solid var(--border-default);
   color: var(--text);
-  background: rgba(139, 160, 196, 0.1);
+  background: rgba(148, 163, 184, 0.07);
 }
 
 .aaw-danger-btn {
-  border: 1px solid rgba(255, 94, 118, 0.22);
+  border: 1px solid rgba(var(--negative-rgb), 0.26);
   color: #fecdd3;
-  background: rgba(255, 94, 118, 0.1);
+  background: rgba(var(--negative-rgb), 0.1);
+}
+
+.aaw-primary-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.aaw-secondary-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.aaw-danger-btn:hover:not(:disabled) {
+  border-color: rgba(var(--negative-rgb), 0.4);
+  background: rgba(var(--negative-rgb), 0.16);
 }
 
 .aaw-primary-btn:disabled,
