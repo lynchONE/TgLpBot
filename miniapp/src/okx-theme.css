@@ -738,19 +738,19 @@ body::before {
 }
 
 .miniapp-shell .mini-data-list--pools {
-    gap: 0 !important;
-    overflow: hidden;
-    border: 1px solid var(--okx-line);
-    border-radius: 8px;
-    background: #050505;
+    gap: 8px !important;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .miniapp-shell .mini-data-list--pools .mini-pool-row {
     margin: 0 !important;
-    border-width: 0 0 1px 0 !important;
+    border-width: 1px !important;
     border-color: var(--okx-line) !important;
-    border-radius: 0 !important;
-    background: transparent !important;
+    border-radius: 8px !important;
+    background: #050505 !important;
     padding: 10px !important;
     box-shadow: none !important;
     backdrop-filter: none !important;
@@ -767,23 +767,34 @@ body::before {
 
 .miniapp-shell .mini-pool-row-main {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(82px, 28%);
-    gap: 8px !important;
+    grid-template-columns: minmax(0, 1fr) 104px;
+    gap: 10px !important;
     align-items: start;
 }
 
 .miniapp-shell .mini-pool-title-line {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
-    gap: 6px !important;
+    display: flex !important;
+    min-width: 0;
+    gap: 5px !important;
     align-items: center;
+    flex-wrap: nowrap;
+    overflow: hidden;
 }
 
 .miniapp-shell .mini-pool-pair {
-    max-width: none !important;
+    flex: 0 1 auto;
+    min-width: 54px;
+    max-width: 92px !important;
     color: #fff !important;
-    font-size: 12px !important;
+    font-size: 13px !important;
     font-weight: 800 !important;
+}
+
+.miniapp-shell .mini-pool-fee {
+    flex: 0 0 auto;
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
 }
 
 .miniapp-shell .mini-pool-fee,
@@ -795,6 +806,7 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-icon-btn {
+    flex: 0 0 24px;
     width: 24px !important;
     height: 24px !important;
     border-color: var(--okx-line) !important;
@@ -805,9 +817,9 @@ body::before {
 
 .miniapp-shell .mini-pool-meta {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 4px 8px !important;
-    margin-top: 8px !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px !important;
+    margin-top: 10px !important;
 }
 
 .miniapp-shell .mini-pool-meta > * {
@@ -824,34 +836,51 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-values {
-    min-width: 82px !important;
+    min-width: 104px !important;
+    max-width: 104px !important;
     color: var(--okx-muted) !important;
 }
 
 .miniapp-shell .mini-pool-primary {
     justify-content: flex-end !important;
     color: var(--okx-accent-text) !important;
-    font-size: 14px !important;
+    font-size: 16px !important;
     line-height: 1.1 !important;
 }
 
 .miniapp-shell .mini-pool-values > div {
     max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    justify-content: flex-end;
+}
+
+.miniapp-shell .mini-pool-values .flex {
+    justify-content: flex-end !important;
+    flex-wrap: nowrap !important;
+}
+
+.miniapp-shell .mini-pool-values span {
+    white-space: nowrap;
 }
 
 .miniapp-shell .mini-pool-footer {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 58px;
     align-items: center !important;
     gap: 8px !important;
-    margin-top: 8px !important;
-    padding-top: 8px;
+    margin-top: 10px !important;
+    padding-top: 10px;
     border-top: 1px solid var(--okx-line-soft);
 }
 
 .miniapp-shell .mini-pool-badges {
     min-width: 0;
-    flex: 1 1 auto;
+    width: 100%;
     flex-wrap: nowrap !important;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
 }
 
@@ -861,14 +890,18 @@ body::before {
 
 .miniapp-shell .mini-pool-badges > * {
     flex: 0 0 auto;
+    max-width: 96px !important;
+    white-space: nowrap;
 }
 
 .miniapp-shell .mini-pool-open-btn {
-    min-width: 56px !important;
-    height: 28px !important;
-    padding: 0 8px !important;
+    width: 58px !important;
+    min-width: 58px !important;
+    height: 34px !important;
+    padding: 0 6px !important;
     justify-content: center !important;
     font-size: 11px !important;
+    overflow: hidden;
 }
 
 .miniapp-shell .mini-data-list--positions {
@@ -1146,6 +1179,145 @@ body::before {
     background: #080808 !important;
 }
 
+.miniapp-shell .op-funding-card {
+    border-color: var(--okx-line) !important;
+    border-radius: 8px !important;
+    background: #0b0b0b !important;
+    padding: 12px !important;
+}
+
+.miniapp-shell .op-wallet-grid {
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)) !important;
+}
+
+.miniapp-shell .op-wallet-option {
+    position: relative;
+    min-height: 48px !important;
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 5px;
+    border-color: var(--okx-line) !important;
+    border-radius: 8px !important;
+    background: #101010 !important;
+    color: var(--okx-muted) !important;
+    padding: 9px 10px !important;
+}
+
+.miniapp-shell .op-wallet-option[aria-pressed='true'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.68) !important;
+    background: rgba(var(--okx-accent-rgb), 0.1) !important;
+    color: var(--okx-accent-text) !important;
+    box-shadow: inset 0 0 0 1px rgba(var(--okx-accent-rgb), 0.26) !important;
+}
+
+.miniapp-shell .op-wallet-option[aria-pressed='true']::before {
+    content: "当前开仓";
+    position: absolute;
+    right: 8px;
+    top: 7px;
+    color: var(--okx-accent);
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.miniapp-shell .op-wallet-option > div,
+.miniapp-shell .op-wallet-option > span:not(.op-wallet-selected-mark) {
+    width: 100%;
+    padding-left: 0 !important;
+}
+
+.miniapp-shell .op-wallet-option > span:not(.op-wallet-selected-mark) {
+    color: var(--okx-text) !important;
+    font-size: 12px !important;
+}
+
+.miniapp-shell .op-wallet-selected-mark {
+    position: absolute;
+    right: 8px;
+    bottom: 7px;
+    display: inline-flex;
+    width: 15px;
+    height: 15px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--okx-accent);
+    color: #050700;
+}
+
+.miniapp-shell .op-risk-banner {
+    border-color: rgba(var(--okx-warning-rgb), 0.38) !important;
+    background: rgba(var(--okx-warning-rgb), 0.12) !important;
+    color: #f7e7a2 !important;
+    padding: 10px 12px !important;
+    line-height: 1.1 !important;
+}
+
+.miniapp-shell .op-risk-main {
+    color: #fff7ce !important;
+    font-size: 12px !important;
+}
+
+.miniapp-shell .op-risk-token {
+    text-align: right;
+    color: rgba(255, 255, 255, 0.42) !important;
+}
+
+.miniapp-shell .op-slippage-field {
+    border-color: var(--okx-line-soft) !important;
+}
+
+.miniapp-shell .op-slippage-hint {
+    max-width: 62%;
+    overflow: hidden;
+    color: var(--okx-subtle) !important;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.miniapp-shell .op-slippage-input-wrap {
+    min-height: 38px;
+    border-radius: 0;
+}
+
+.miniapp-shell .op-slippage-input-wrap input {
+    font-size: 26px !important;
+    line-height: 38px !important;
+}
+
+.miniapp-shell .op-footer-actions {
+    gap: 8px !important;
+}
+
+.miniapp-shell .op-footer-primary,
+.miniapp-shell .op-footer-secondary {
+    min-height: 48px !important;
+    border-radius: 8px !important;
+    font-size: 15px !important;
+    font-weight: 800 !important;
+}
+
+.miniapp-shell .op-footer-primary:not(:disabled) {
+    border-color: rgba(var(--okx-accent-rgb), 0.58) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .op-footer-primary:disabled {
+    border: 1px solid var(--okx-line) !important;
+    background: #111 !important;
+    color: rgba(255, 255, 255, 0.34) !important;
+    opacity: 1 !important;
+}
+
+.miniapp-shell .op-footer-secondary {
+    border-color: var(--okx-line) !important;
+    background: #101010 !important;
+    color: var(--okx-text) !important;
+}
+
 @media (max-width: 640px) {
     .miniapp-shell {
         padding-left: 10px !important;
@@ -1185,5 +1357,9 @@ body::before {
 
     .miniapp-shell .mini-position-right {
         max-width: 38%;
+    }
+
+    .miniapp-shell .op-wallet-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     }
 }

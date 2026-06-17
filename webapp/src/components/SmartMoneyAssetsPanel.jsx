@@ -338,9 +338,17 @@ export default function SmartMoneyAssetsPanel({
     if (matchedWallet) setSelectedWalletMeta(matchedWallet);
   }, [selectWallet, selectedWalletId]);
 
-  const mergeOverview = useCallback((patch) => {
+  const mergeOverview = useCallback((patch, fields = null) => {
     if (!patch) return;
-    setOverview((current) => ({ ...(current || {}), ...patch }));
+    setOverview((current) => {
+      const next = { ...(current || {}) };
+      const allowed = Array.isArray(fields) ? new Set(fields) : null;
+      Object.entries(patch).forEach(([key, value]) => {
+        if (allowed && !allowed.has(key)) return;
+        next[key] = value;
+      });
+      return next;
+    });
   }, []);
 
   const loadSmartMoneySummary = useCallback(async ({ forceRefresh = false } = {}) => {
@@ -354,7 +362,7 @@ export default function SmartMoneyAssetsPanel({
         forceRefresh,
       });
       startTransition(() => {
-        mergeOverview(summary || {});
+        mergeOverview(summary || {}, ['summary', 'today', 'updated_at', 'timezone', 'warnings', 'snapshot_day']);
       });
     } catch (err) {
       if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
@@ -375,7 +383,7 @@ export default function SmartMoneyAssetsPanel({
         forceRefresh,
       });
       startTransition(() => {
-        mergeOverview(wallets || {});
+        mergeOverview(wallets || {}, ['wallets', 'wallet_page', 'wallet_size', 'wallet_total', 'wallet_total_pages', 'updated_at', 'timezone', 'warnings', 'snapshot_day']);
       });
       applyWalletRows(Array.isArray(wallets?.wallets) ? wallets.wallets : []);
     } catch (err) {

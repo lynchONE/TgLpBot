@@ -35,13 +35,13 @@ export function OpenPositionFooter({
                     </div>
                 </div>
             ) : null}
-            <div className="flex items-center gap-2">
+            <div className="op-footer-actions flex items-center gap-2">
                 {openPositionStep > 0 ? (
                     <button
                         type="button"
                         onClick={onPrevious}
                         disabled={openPositionLoading}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                        className="op-footer-secondary inline-flex shrink-0 items-center gap-1 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                     >
                         <ChevronLeft className="h-4 w-4" />
                         上一步
@@ -52,7 +52,7 @@ export function OpenPositionFooter({
                         type="button"
                         onClick={onNext}
                         disabled={nextDisabled}
-                        className={`inline-flex flex-1 items-center justify-center gap-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] ${nextDisabled
+                        className={`op-footer-primary inline-flex flex-1 items-center justify-center gap-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition active:scale-[0.99] ${nextDisabled
                             ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
                             : brand.solidButtonClass
                             }`}
@@ -65,7 +65,7 @@ export function OpenPositionFooter({
                         type="button"
                         onClick={onSubmit}
                         disabled={openPositionSubmitDisabled}
-                        className={`flex-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
+                        className={`op-footer-primary flex-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
                             ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
                             : brand.solidButtonClass
                             }`}

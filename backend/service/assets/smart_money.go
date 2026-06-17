@@ -491,7 +491,7 @@ func smartMoneyWalletLiveStateFromModel(row models.SmartMoneyWalletLiveState) sm
 		lastActiveAt:    row.LastActiveAt,
 	}
 	if msg := strings.TrimSpace(row.ErrorMessage); msg != "" {
-		state.warnings = append(state.warnings, fmt.Sprintf("last live-state refresh error: %s", msg))
+		state.warnings = append(state.warnings, fmt.Sprintf("上次实时资产刷新失败：%s", msg))
 	}
 	return state
 }
@@ -543,9 +543,9 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 
 	if forceRefresh {
 		if started := s.TriggerSmartMoneyWalletLiveStateRefresh(smartMoneyWalletLiveRefreshTimeout); started {
-			resp.Warnings = append(resp.Warnings, "smart money live balance refresh started; refresh again shortly for updated balances")
+			resp.Warnings = append(resp.Warnings, "聪明钱实时资产刷新已开始，请稍后再刷新查看最新数据")
 		} else {
-			resp.Warnings = append(resp.Warnings, "smart money live balance refresh is already running")
+			resp.Warnings = append(resp.Warnings, "聪明钱实时资产正在刷新中，请稍后再试")
 		}
 	}
 
@@ -562,7 +562,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 	if sectionSet[smartMoneyOverviewSectionSummary] {
 		summary, today, ok, err := s.loadSmartMoneyOverviewSummaryFromLiveState(ctx, snapshotDay)
 		if err != nil {
-			resp.Warnings = append(resp.Warnings, fmt.Sprintf("live smart-money summary unavailable: %v", err))
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("实时聪明钱总览暂不可用：%v", err))
 		}
 		if !ok {
 			summary, today, err = s.loadSmartMoneyOverviewSummary(ctx, snapshotDay)
@@ -597,7 +597,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 		for _, walletRow := range pageWallets {
 			live, ok, err := s.loadSmartMoneyWalletLiveStateForOverview(ctx, walletRow)
 			if err != nil {
-				resp.Warnings = append(resp.Warnings, fmt.Sprintf("wallet %s local state unavailable: %v", walletRow.Address, err))
+				resp.Warnings = append(resp.Warnings, fmt.Sprintf("钱包 %s 本地实时资产暂不可用：%v", walletRow.Address, err))
 			}
 			if ok {
 				resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromLive(walletRow, live))
@@ -612,7 +612,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 	if sectionSet[smartMoneyOverviewSectionWindows] {
 		window, err := s.loadSmartMoneyWindowStatsFromDaily(ctx, days)
 		if err != nil {
-			resp.Warnings = append(resp.Warnings, fmt.Sprintf("daily smart-money stats unavailable: %v", err))
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("聪明钱每日统计暂不可用：%v", err))
 			resp.Windows = []SmartMoneyWindowStats{{Days: days}}
 		} else {
 			resp.Windows = []SmartMoneyWindowStats{window}

@@ -861,15 +861,12 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 96px 56px;
-  grid-template-areas:
-    "avatar name values action"
-    "avatar badges values action"
-    "meta meta meta meta";
-  align-items: start;
-  gap: 4px 10px;
-  min-height: 96px;
-  padding: 10px;
+  grid-template-columns: 36px minmax(118px, 0.86fr) minmax(246px, 1.35fr) 72px 56px;
+  grid-template-areas: "avatar info meta values action";
+  align-items: center;
+  gap: 8px;
+  min-height: 62px;
+  padding: 8px 10px;
   overflow: hidden;
 }
 
@@ -886,8 +883,10 @@ body {
 .workbench.layout-work-4 .module-hot_pools .pool-info {
   grid-area: info;
   min-width: 0;
-  display: contents;
-  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow: hidden;
 }
 
 .module-hot_pools .pool-name-line,
@@ -897,41 +896,36 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-badge-line,
 .workbench.layout-work-4 .module-hot_pools .pool-badge-line {
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  overflow: visible;
-}
-
-.module-hot_pools .pool-name-line,
-.workbench.layout-4 .module-hot_pools .pool-name-line,
-.workbench.layout-work-4 .module-hot_pools .pool-name-line {
-  grid-area: name;
-  align-self: end;
+  overflow: hidden;
 }
 
 .module-hot_pools .pool-badge-line,
 .workbench.layout-4 .module-hot_pools .pool-badge-line,
 .workbench.layout-work-4 .module-hot_pools .pool-badge-line {
-  grid-area: badges;
-  align-self: start;
-  margin-top: 2px;
+  margin-top: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .module-hot_pools .pool-name,
 .workbench.layout-4 .module-hot_pools .pool-name,
 .workbench.layout-work-4 .module-hot_pools .pool-name {
   min-width: 0;
-  max-width: clamp(96px, 18vw, 164px);
+  max-width: clamp(72px, 9vw, 132px);
   font-size: 13px;
   line-height: 1.15;
 }
 
 .module-hot_pools .tag,
 .module-hot_pools .pool-badge-chip {
-  max-width: 96px;
+  max-width: 76px;
   flex: 0 0 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 2px 6px;
+  line-height: 1.05;
 }
 
 .module-hot_pools .pool-meta-line,
@@ -942,23 +936,24 @@ body {
   width: 100%;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
   gap: 4px;
-  margin-top: 4px;
+  margin-top: 0;
   overflow: hidden;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .module-hot_pools .pool-meta-sort,
 .module-hot_pools .pool-meta-static {
-  width: 100%;
+  flex: 1 1 0;
   min-width: 0;
-  max-width: 100%;
+  max-width: none;
   min-height: 22px;
-  padding: 3px 6px;
+  padding: 3px 7px;
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 5px;
+  gap: 6px;
   overflow: hidden;
   white-space: nowrap;
   font-size: 10px;
@@ -969,14 +964,14 @@ body {
 
 .module-hot_pools .pool-meta-sort.active {
   margin: 0;
-  padding: 3px 6px;
+  padding: 3px 7px;
 }
 
 .module-hot_pools .pool-meta-sort span,
 .module-hot_pools .pool-meta-static span {
   display: inline-block;
   flex: 0 0 auto;
-  max-width: 54px;
+  max-width: 34px;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
@@ -1001,11 +996,11 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
   grid-area: values;
-  width: 96px;
-  min-width: 96px;
-  max-width: 96px;
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
   overflow: hidden;
-  align-self: start;
+  align-self: center;
   text-align: right;
 }
 
@@ -1020,7 +1015,7 @@ body {
 .module-hot_pools .pool-sub-val,
 .workbench.layout-4 .module-hot_pools .pool-sub-val,
 .workbench.layout-work-4 .module-hot_pools .pool-sub-val {
-  max-width: 96px;
+  max-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1031,7 +1026,7 @@ body {
 .workbench.layout-work-4 .module-hot_pools .pool-buy-btn {
   grid-area: action;
   justify-self: end;
-  align-self: start;
+  align-self: center;
   width: 56px;
   min-width: 56px;
   height: 28px;

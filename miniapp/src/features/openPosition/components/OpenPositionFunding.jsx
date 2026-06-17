@@ -26,8 +26,10 @@ export function OpenPositionWalletSelector({
 }) {
     if (!multiWalletEnabled) return null;
 
+    const selectedWalletId = String(openPositionWalletId || '').trim();
+
     return (
-        <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
+        <div className="op-funding-card op-wallet-panel rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
             <div className="flex items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">钱包</div>
                 <div className="text-[11px] text-zinc-500 dark:text-white/40">
@@ -62,7 +64,7 @@ export function OpenPositionWalletSelector({
             ) : null}
 
             <div
-                className="mt-2 grid gap-2"
+                className="op-wallet-grid mt-2 grid gap-2"
                 style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(openPositionWalletOptions.length, 1), 3)}, minmax(0, 1fr))` }}
             >
                 {openPositionWalletOptions.map((w) => {
@@ -70,7 +72,7 @@ export function OpenPositionWalletSelector({
                     const addr = String(w?.address || '').trim();
                     const name = String(w?.name || '').trim();
                     const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}..${addr.slice(-4)}` : addr;
-                    const selected = id && id === String(openPositionWalletId || '').trim();
+                    const selected = id && (id === selectedWalletId || (!selectedWalletId && openPositionWalletOptions.length === 1));
 
                     return (
                         <button
@@ -80,7 +82,8 @@ export function OpenPositionWalletSelector({
                                 if (!id) return;
                                 onSelectWallet(id);
                             }}
-                            className={`flex min-h-[38px] w-full min-w-0 items-center rounded-xl border px-2.5 py-1.5 text-left transition ${selected
+                            aria-pressed={selected}
+                            className={`op-wallet-option flex min-h-[38px] w-full min-w-0 items-center rounded-xl border px-2.5 py-1.5 text-left transition ${selected
                                 ? `${brand.selectionClass} shadow-sm`
                                 : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                 }`}
@@ -94,6 +97,11 @@ export function OpenPositionWalletSelector({
                             <span className="shrink-0 pl-1 text-[10px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
                                 {openPositionWalletBalancesHidden ? '****' : `$${String(w?.stable_balance ?? '--')}`}
                             </span>
+                            {selected ? (
+                                <span className="op-wallet-selected-mark" aria-hidden="true">
+                                    <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                                </span>
+                            ) : null}
                         </button>
                     );
                 })}
@@ -124,15 +132,20 @@ export function OpenPositionPrivateZapHint({ show }) {
 export function OpenPositionTokenRiskPanel({ tokenRisk, tokenRiskTone, tokenRiskSymbol }) {
     if (!tokenRisk) return null;
 
+    const riskLabel = tokenRiskLabel(tokenRisk);
+    const riskTitle = riskLabel.startsWith('风险')
+        ? `OKX 风险${riskLabel.replace(/^风险\s*/, '')}`
+        : `OKX ${riskLabel}`;
+    const riskSummary = tokenRiskSummary(tokenRisk);
+
     return (
         <div
-            className={`flex min-h-8 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] leading-none ${tokenRiskPanelClass(tokenRiskTone)}`}
-            title={tokenRiskSummary(tokenRisk)}
+            className={`op-risk-banner flex min-h-8 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] leading-none ${tokenRiskPanelClass(tokenRiskTone)}`}
+            title={riskSummary}
         >
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
-            <span className="shrink-0 font-bold">{tokenRiskLabel(tokenRisk)}</span>
-            <span className="min-w-0 flex-1 truncate opacity-80">{tokenRiskSymbol || 'Token'} · OKX 风控 · {tokenRiskSummary(tokenRisk)}</span>
-            <span className="shrink-0 rounded-full bg-white/35 px-1.5 py-0.5 text-[10px] font-bold dark:bg-black/20">等级 {tokenRisk.risk_control_label}</span>
+            <span className="op-risk-main shrink-0 font-bold">{riskTitle}</span>
+            <span className="op-risk-token min-w-0 flex-1 truncate opacity-70">{tokenRiskSymbol}</span>
         </div>
     );
 }
@@ -154,7 +167,7 @@ export function OpenPositionAmountSlippagePanel({
     const amountValue = Number(amount);
 
     return (
-        <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
+        <div className="op-funding-card op-amount-panel rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
             {/* 金额：大字主输入 */}
             <div className="flex items-baseline justify-between gap-2">
                 <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">开仓金额</span>
@@ -200,22 +213,21 @@ export function OpenPositionAmountSlippagePanel({
                     MAX
                 </button>
             </div>
-            {/* 滑点：紧凑次级一行 */}
-            <div className="mt-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
-                <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">滑点容差</span>
-                    <div className="relative w-28">
-                        <input
-                            value={slippage}
-                            onChange={(e) => onSlippageChange(e.target.value)}
-                            inputMode="decimal"
-                            className={`w-full rounded-lg border border-zinc-200/60 bg-white/80 py-1.5 pl-3 pr-8 text-sm text-right tabular-nums text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                            placeholder={slippagePlaceholder}
-                        />
-                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-400 dark:text-white/40">%</span>
-                    </div>
+            <div className="op-slippage-field mt-3 border-t border-zinc-200/60 pt-3 dark:border-white/10">
+                <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-semibold text-zinc-500 dark:text-white/50">滑点</span>
+                    <span className="op-slippage-hint text-[11px] leading-4 text-zinc-400 dark:text-white/40">{globalSlippageHint}</span>
                 </div>
-                <div className="mt-1.5 text-[11px] leading-4 text-zinc-400 dark:text-white/40">{globalSlippageHint}</div>
+                <div className="op-slippage-input-wrap relative mt-1">
+                    <input
+                        value={slippage}
+                        onChange={(e) => onSlippageChange(e.target.value)}
+                        inputMode="decimal"
+                        className={`w-full border-0 bg-transparent p-0 pr-8 text-[26px] font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 ${brand.inputFocusClass} dark:text-white dark:placeholder:text-white/20`}
+                        placeholder={slippagePlaceholder}
+                    />
+                    <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-sm font-semibold text-zinc-400 dark:text-white/40">%</span>
+                </div>
             </div>
             {needsHighSlippageConfirm ? (
                 <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">

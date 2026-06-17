@@ -499,8 +499,23 @@ export default function App() {
     const openPositionStep0Valid = useMemo(() => {
         const amount = Number(String(openPositionAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) return false;
-        return parseOptionalPercent(openPositionSlippage).valid;
-    }, [openPositionAmount, openPositionSlippage]);
+        if (!parseOptionalPercent(openPositionSlippage).valid) return false;
+        if (!multiWalletEnabled) return true;
+        if (walletsLoading || walletsError) return false;
+        if (openPositionWalletOptions.length <= 1) return openPositionWalletOptions.length === 1;
+        const walletId = Number(openPositionWalletId);
+        return Number.isFinite(walletId)
+            && walletId > 0
+            && openPositionWalletOptions.some((wallet) => Number(wallet?.id) === walletId);
+    }, [
+        multiWalletEnabled,
+        openPositionAmount,
+        openPositionSlippage,
+        openPositionWalletId,
+        openPositionWalletOptions,
+        walletsError,
+        walletsLoading,
+    ]);
     const openPositionStep1Valid = useMemo(() => {
         if (openPositionRangeInputMode === 'percentage') {
             // 内联等价于 parseRangeInput（该函数定义在本 memo 之后，此处直接调用会触发 TDZ）
@@ -668,8 +683,8 @@ export default function App() {
     const openPositionEffectiveDCAEnabled = openPositionDCAEnabled && !openPositionDCAAmountBelowThreshold;
     const openPositionGlobalSlippageHint = useMemo(() => {
         const n = Number(globalConfig?.slippage_tolerance);
-        if (!Number.isFinite(n) || n < 0) return '留空则使用全局配置';
-        return `本次开仓采用全局配置滑点: ${formatPercentValue(n)}`;
+        if (!Number.isFinite(n) || n < 0) return '默认全局配置';
+        return `默认 ${formatPercentValue(n)}`;
     }, [globalConfig?.slippage_tolerance]);
     const openPositionSlippagePlaceholder = useMemo(() => {
         const n = Number(globalConfig?.slippage_tolerance);

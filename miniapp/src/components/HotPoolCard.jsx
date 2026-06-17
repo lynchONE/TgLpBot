@@ -468,6 +468,8 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],
     );
     const hotPoolBadges = useMemo(() => parseHotPoolBadges(pool?.badges), [pool?.badges]);
+    const visibleHotPoolBadges = useMemo(() => hotPoolBadges.slice(0, 2), [hotPoolBadges]);
+    const hiddenHotPoolBadgeCount = Math.max(0, hotPoolBadges.length - visibleHotPoolBadges.length);
     const tokenRisk = useMemo(() => normalizeTokenRisk(pool?.token_risk), [pool?.token_risk]);
     const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
     const showTVL = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0, [tvlValue]);
@@ -669,7 +671,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             <span>GMGN</span>
                         </button>
                     ) : null}
-                    {hotPoolBadges.map((badge, badgeIdx) => (
+                    {visibleHotPoolBadges.map((badge, badgeIdx) => (
                         <span
                             key={`${badge.text}:${badgeIdx}`}
                             className="mini-pool-badge group relative inline-flex max-w-[120px] items-center rounded-full border border-cyan-400/20 bg-slate-900/85 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_18px_rgba(8,15,30,0.14)] backdrop-blur-sm"
@@ -683,6 +685,14 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             </span>
                         </span>
                     ))}
+                    {hiddenHotPoolBadgeCount > 0 ? (
+                        <span
+                            className="mini-pool-badge inline-flex items-center rounded-full border border-white/10 bg-zinc-900/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-400"
+                            title={hotPoolBadges.slice(visibleHotPoolBadges.length).map((badge) => badge.text).join(' / ')}
+                        >
+                            +{hiddenHotPoolBadgeCount}
+                        </span>
+                    ) : null}
                     <PositionBadge pool={pool} />
                 </div>
                 <button
