@@ -55,7 +55,7 @@ export function OpenPositionTaskModePanel({
                         disabled={loading}
                         title={option.description}
                         className={`min-h-10 min-w-0 rounded-xl px-1.5 py-1.5 text-center transition ${taskMode === option.value
-                            ? `${brand.solidButtonClass} shadow-sm`
+                            ? `${brand.solidButtonClass} mini-open-position-task-active shadow-sm`
                             : 'border border-zinc-200/50 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                             }`}
                     >
@@ -93,9 +93,9 @@ export function OpenPositionDCAPanel({
                         aria-checked={enabled}
                         onClick={onToggleEnabled}
                         disabled={loading || singleSided}
-                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ${enabled ? brand.solidButtonClass : 'bg-zinc-200 dark:bg-white/15'}`}
+                        className={`mini-open-position-dca-switch relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ${enabled ? 'is-enabled' : 'bg-zinc-200 dark:bg-white/15'}`}
                     >
-                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+                        <span className={`inline-block h-5 w-5 transform rounded-full shadow transition ${enabled ? 'translate-x-[22px]' : 'translate-x-0.5 bg-white'}`} />
                     </button>
                 </div>
             </div>

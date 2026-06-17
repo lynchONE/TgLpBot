@@ -35,6 +35,8 @@ body,
 #root {
     min-height: 100%;
     background: #000 !important;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 body {
@@ -77,6 +79,8 @@ body::before {
 
 .miniapp-shell {
     position: relative;
+    max-width: 100vw;
+    overflow-x: hidden;
     color: var(--okx-text);
     background: transparent;
 }
@@ -754,6 +758,8 @@ body::before {
     padding: 10px !important;
     box-shadow: none !important;
     backdrop-filter: none !important;
+    max-width: 100%;
+    overflow: hidden !important;
 }
 
 .miniapp-shell .mini-data-list--pools .mini-pool-row:last-child {
@@ -767,9 +773,11 @@ body::before {
 
 .miniapp-shell .mini-pool-row-main {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(96px, 108px);
-    gap: 8px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(90px, 104px);
+    gap: 6px !important;
     align-items: start;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .miniapp-shell .mini-pool-info {
@@ -850,12 +858,12 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-values {
-    width: 108px !important;
+    width: 104px !important;
     min-width: 0 !important;
-    max-width: 108px !important;
+    max-width: 104px !important;
     justify-self: start;
     color: var(--okx-muted) !important;
-    overflow: visible;
+    overflow: hidden;
     text-align: left !important;
 }
 
@@ -866,13 +874,13 @@ body::before {
     color: var(--okx-accent-text) !important;
     font-size: 15px !important;
     line-height: 1.1 !important;
-    overflow: visible;
+    overflow: hidden;
     white-space: nowrap;
 }
 
 .miniapp-shell .mini-pool-values > div {
     max-width: 100%;
-    overflow: visible;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     justify-content: flex-start;
@@ -893,6 +901,13 @@ body::before {
     white-space: nowrap;
 }
 
+.miniapp-shell .mini-pool-price {
+    max-width: 100% !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
 .miniapp-shell .mini-pool-footer {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) 58px;
@@ -907,7 +922,7 @@ body::before {
     min-width: 0;
     width: 100%;
     flex-wrap: nowrap !important;
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
     scrollbar-width: none;
 }
@@ -1209,6 +1224,11 @@ body::before {
     padding: 4px !important;
 }
 
+.miniapp-shell .mini-swap-reverse {
+    margin: -2px 0;
+    padding: 0;
+}
+
 .miniapp-shell .mini-swap-panel {
     border: 1px solid var(--okx-line) !important;
     border-radius: 8px !important;
@@ -1222,7 +1242,7 @@ body::before {
     letter-spacing: 0 !important;
 }
 
-.miniapp-shell .mini-swap-card .absolute button {
+.miniapp-shell .mini-swap-reverse button {
     width: 34px !important;
     height: 34px !important;
     border-radius: 7px !important;
@@ -1345,6 +1365,44 @@ body::before {
     color: rgba(255, 255, 255, 0.42) !important;
 }
 
+.miniapp-shell .op-step-button--visible {
+    color: var(--okx-accent-text) !important;
+    opacity: 1 !important;
+}
+
+.miniapp-shell .op-step-button--visible:disabled {
+    opacity: 1 !important;
+}
+
+.miniapp-shell .op-step-dot--visible {
+    border: 1px solid rgba(var(--okx-accent-rgb), 0.58) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+    box-shadow: 0 0 0 1px rgba(var(--okx-accent-rgb), 0.14) !important;
+}
+
+.miniapp-shell .op-step-dot--visible svg {
+    color: #050700 !important;
+}
+
+.miniapp-shell .op-step-connector--visible {
+    background: rgba(var(--okx-accent-rgb), 0.72) !important;
+}
+
+.miniapp-shell .mini-open-position-task-active,
+.miniapp-shell .mini-open-position-task-active * {
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-open-position-dca-switch.is-enabled {
+    border: 1px solid rgba(var(--okx-accent-rgb), 0.58) !important;
+    background: var(--okx-accent) !important;
+}
+
+.miniapp-shell .mini-open-position-dca-switch.is-enabled span {
+    background: #050700 !important;
+}
+
 .miniapp-shell .op-slippage-field {
     border-color: var(--okx-line-soft) !important;
 }
@@ -1420,12 +1478,12 @@ body::before {
     }
 
     .miniapp-shell .mini-pool-row-main {
-        grid-template-columns: minmax(0, 1fr) minmax(92px, 104px);
+        grid-template-columns: minmax(0, 1fr) minmax(86px, 100px);
     }
 
     .miniapp-shell .mini-pool-values {
-        width: 104px !important;
-        max-width: 104px !important;
+        width: 100px !important;
+        max-width: 100px !important;
     }
 
     .miniapp-shell .mini-pool-primary {

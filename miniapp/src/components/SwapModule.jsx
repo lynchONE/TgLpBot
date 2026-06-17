@@ -775,7 +775,7 @@ export default function SwapModule({
                 </div>
 
                 {/* reverse */}
-                <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+                <div className="mini-swap-reverse flex justify-center">
                     <button
                         type="button"
                         onClick={handleReverse}

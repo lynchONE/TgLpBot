@@ -171,6 +171,31 @@ function formatRatePct(v) {
     return `${n.toFixed(3)}%`;
 }
 
+function formatCompactPriceNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '';
+    const abs = Math.abs(n);
+    if (abs > 0 && (abs < 0.01 || abs >= 10000)) {
+        return n.toExponential(2).replace('e+', 'e');
+    }
+    if (abs > 0 && abs < 1) return n.toPrecision(4).replace(/0+$/, '').replace(/\.$/, '');
+    if (abs < 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 4, useGrouping: false });
+    return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function formatCompactPriceDisplay(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+
+    const match = text.match(/^.+?=\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*([A-Za-z]{2,})?\s*$/);
+    if (!match) return text;
+
+    const price = formatCompactPriceNumber(match[1]);
+    if (!price) return text;
+    const unit = match[2] ? ` ${match[2].toUpperCase()}` : '';
+    return `${price}${unit}`;
+}
+
 function computeActiveLiquidityFeeRate(pool) {
     const totalFees = Number(pool?.total_fees ?? 0);
     const activeLiquidityUsd = Number(pool?.activeLiquidityUSD ?? pool?.active_liquidity_usd ?? 0);
@@ -513,6 +538,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         const v = String(pool?.price_display || '').trim();
         return v ? v : '';
     }, [pool?.price_display]);
+    const compactPriceDisplay = useMemo(() => formatCompactPriceDisplay(priceDisplay), [priceDisplay]);
 
     const priceDisplayClass = useMemo(() => {
         if (!priceDisplay) return '';
@@ -733,10 +759,10 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     </div>
                     {priceDisplay ? (
                         <div
-                            className={`mt-0.5 text-[10px] font-semibold tabular-nums truncate max-w-[110px] ${priceDisplayClass}`}
+                            className={`mini-pool-price mt-0.5 text-[10px] font-semibold tabular-nums truncate ${priceDisplayClass}`}
                             title={priceDisplay}
                         >
-                            <NumberFlowValue value={priceDisplay} formatter={() => priceDisplay} />
+                            {compactPriceDisplay}
                         </div>
                     ) : null}
                     {secondaryMetricText ? (

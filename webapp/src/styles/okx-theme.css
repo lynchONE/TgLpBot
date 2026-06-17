@@ -2236,17 +2236,27 @@ body {
 
 /* Hot-pool metrics should read as compact label/value chips, not stretched columns. */
 .module-hot_pools .pool-meta-line {
-  grid-template-columns: repeat(3, max-content) !important;
-  justify-content: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  justify-content: stretch;
   align-items: center;
-  gap: 3px 5px;
+  width: 100%;
+  gap: 3px 4px;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-meta-line,
+.workbench.layout-work-2 .module-hot_pools .pool-meta-line,
+.workbench.layout-3 .module-hot_pools .pool-meta-line,
+.workbench.layout-work-3 .module-hot_pools .pool-meta-line,
+.workbench.layout-4 .module-hot_pools .pool-meta-line,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-line {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 
 .module-hot_pools .pool-meta-sort,
 .module-hot_pools .pool-meta-static {
-  flex: 0 0 auto;
-  width: auto;
-  max-width: 86px;
+  flex: 1 1 0;
+  width: 100%;
+  max-width: none;
   height: 20px;
   min-height: 20px;
   padding: 2px 5px;
