@@ -54,7 +54,7 @@ export function OpenPositionTaskModePanel({
                         onClick={() => onChangeTaskMode(option.value)}
                         disabled={loading}
                         title={option.description}
-                        className={`min-h-10 min-w-0 rounded-xl px-1.5 py-1.5 text-center transition ${taskMode === option.value
+                        className={`mini-open-position-task-option min-h-10 min-w-0 rounded-xl px-1.5 py-1.5 text-center transition ${taskMode === option.value
                             ? `${brand.solidButtonClass} mini-open-position-task-active shadow-sm`
                             : 'border border-zinc-200/50 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                             }`}

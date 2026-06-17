@@ -784,7 +784,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </div>
                     ) : null}
                     <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${activeLiquidityFeeRateAvailable ? 'text-amber-600 dark:text-amber-300' : 'text-zinc-400 dark:text-white/35'}`}>
-                        <span className="mr-1">活跃</span>
                         <NumberFlowValue value={activeMetricText} formatter={() => activeMetricText} />
                         <RateChangeIndicator
                             currentValue={activeLiquidityFeeRateValue}

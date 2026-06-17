@@ -67,6 +67,32 @@ function formatCompactCount(value) {
   return `${Math.round(num)}笔`;
 }
 
+function formatDeltaNumber(value, mode = 'usd') {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  if (mode === 'rate') return `${num.toFixed(3)}%`;
+  if (mode === 'count') return formatCompactCount(num).replace(/[^\d.KMB]+$/u, '');
+  return formatUsdCompact(num).replace('$', '');
+}
+
+function MetricDelta({ currentValue, previousValue, mode = 'usd' }) {
+  const current = Number(currentValue);
+  const previous = Number(previousValue);
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
+  const diff = current - previous;
+  if (!Number.isFinite(diff) || diff === 0) return null;
+  const up = diff > 0;
+  const text = formatDeltaNumber(Math.abs(diff), mode);
+  if (!text) return null;
+
+  return (
+    <span className={`pool-metric-delta ${up ? 'up' : 'down'}`} title={`${up ? '+' : '-'}${text}`}>
+      <span className="pool-metric-delta-arrow">{up ? '↑' : '↓'}</span>
+      <NumberFlowValue value={Math.abs(diff)} formatter={() => text} />
+    </span>
+  );
+}
+
 function HotPoolsHeightSettings({
   open,
   controlRef,
@@ -321,6 +347,7 @@ function HotPoolsFilterPopover({
 
 function HotPoolRow({
   pool,
+  previousData,
   index,
   chain,
   hotSort,
@@ -351,6 +378,13 @@ function HotPoolRow({
   const feeRateText = feeRateAvailable ? `${feeRate.toFixed(3)}%` : '--';
   const activeLiquidityFeeRateAvailable = Number.isFinite(activeLiquidityFeeRate);
   const activeLiquidityFeeRateText = activeLiquidityFeeRateAvailable ? `${activeLiquidityFeeRate.toFixed(3)}%` : '--';
+  const mainDeltaMode = hotSort === 'fee_rate' ? 'rate' : 'usd';
+  const mainDeltaCurrent = hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees;
+  const mainDeltaPrevious = hotSort === 'volume'
+    ? previousData?.total_volume
+    : hotSort === 'fee_rate'
+      ? previousData?.fee_rate
+      : previousData?.total_fees;
   const factoryName = String(pool?.factory_name || pool?.dex || '');
   const userPosUsd = Number(pool?.userPositionUsd || 0);
   const pair = String(pool?.trading_pair || '--');
@@ -459,7 +493,10 @@ function HotPoolRow({
             aria-pressed={hotInlineSort === 'volume'}
           >
             <span>Vol</span>
-            <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b>
+            <b>
+              <NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} />
+              <MetricDelta currentValue={volume} previousValue={previousData?.total_volume} />
+            </b>
           </button>
           <span className="dot-sep" />
           <button
@@ -473,14 +510,20 @@ function HotPoolRow({
             aria-pressed={hotInlineSort === 'tvl'}
           >
             <span>TVL</span>
-            <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b>
+            <b>
+              <NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} />
+              <MetricDelta currentValue={tvl} previousValue={previousData?.current_pool_value} />
+            </b>
           </button>
           {marketCapAvailable ? (
             <>
               <span className="dot-sep" />
               <span className="pool-meta-static meta-green">
                 <span>{marketCapLabel}</span>
-                <b><NumberFlowValue value={marketCap} formatter={(v) => formatUsdCompact(v)} /></b>
+                <b>
+                  <NumberFlowValue value={marketCap} formatter={(v) => formatUsdCompact(v)} />
+                  <MetricDelta currentValue={marketCap} previousValue={resolveHotPoolMarketCapDisplay(previousData)} />
+                </b>
               </span>
             </>
           ) : null}
@@ -496,7 +539,10 @@ function HotPoolRow({
             aria-label="按交易笔数降序排序"
             aria-pressed={hotInlineSort === 'tx_count'}
           >
-            <b><NumberFlowValue value={txCount} formatter={formatCompactCount} /></b>
+            <b>
+              <NumberFlowValue value={txCount} formatter={formatCompactCount} />
+              <MetricDelta currentValue={txCount} previousValue={previousData?.transaction_count} mode="count" />
+            </b>
           </button>
           <span className="dot-sep" />
           <button
@@ -512,7 +558,10 @@ function HotPoolRow({
             <span>费率</span>
             <b>
               {feeRateAvailable ? (
-                <NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} />
+                <>
+                  <NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} />
+                  <MetricDelta currentValue={feeRate} previousValue={previousData?.fee_rate} mode="rate" />
+                </>
               ) : '--'}
             </b>
           </button>
@@ -530,7 +579,14 @@ function HotPoolRow({
             <span>活跃</span>
             <b>
               {activeLiquidityFeeRateAvailable ? (
-                <NumberFlowValue value={activeLiquidityFeeRate} formatter={() => activeLiquidityFeeRateText} />
+                <>
+                  <NumberFlowValue value={activeLiquidityFeeRate} formatter={() => activeLiquidityFeeRateText} />
+                  <MetricDelta
+                    currentValue={activeLiquidityFeeRate}
+                    previousValue={computeHotPoolActiveFeeRate(previousData)}
+                    mode="rate"
+                  />
+                </>
               ) : activeLiquidityFeeRateText}
             </b>
           </button>
@@ -543,6 +599,7 @@ function HotPoolRow({
             value={hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees}
             formatter={(v) => hotSort === 'fee_rate' ? (Number(v) > 0 ? `${Number(v).toFixed(3)}%` : '--') : formatUsdCompact(v)}
           />
+          <MetricDelta currentValue={mainDeltaCurrent} previousValue={mainDeltaPrevious} mode={mainDeltaMode} />
         </div>
         {priceDisplay ? (
           <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`} title={priceDisplay}>
@@ -581,6 +638,7 @@ export default function HotPoolsPanel({
   heightControlRef,
   filterRef,
   hotPools,
+  previousHotPoolsMap,
   filteredHotPools,
   hotPoolsLoading,
   hotPoolsError,
@@ -721,24 +779,28 @@ export default function HotPoolsPanel({
         ) : filteredHotPools.length === 0 ? (
           <EmptyState text="暂无可展示的池子数据" />
         ) : (
-          filteredHotPools.slice(0, displayLimit).map((pool, index) => (
-            <HotPoolRow
-              key={`${pool?.protocol_version || ''}:${normalizePoolAddress(pool?.pool_address || '') || index}`}
-              pool={pool}
-              index={index}
-              chain={chain}
-              hotSort={hotSort}
-              hotInlineSort={hotInlineSort}
-              hotTokenFilter={hotTokenFilter}
-              selectedPoolAddress={selectedPoolAddress}
-              getDexIcon={getDexIcon}
-              onCopyAddress={onCopyAddress}
-              onSelectPool={onSelectPool}
-              onOpenPosition={onOpenPosition}
-              onInlineSortChange={onHotInlineSortChange}
-              onToggleTokenFilter={onToggleTokenFilter}
-            />
-          ))
+          filteredHotPools.slice(0, displayLimit).map((pool, index) => {
+            const poolAddress = normalizePoolAddress(pool?.pool_address || pool?.pool_id);
+            return (
+              <HotPoolRow
+                key={`${pool?.protocol_version || ''}:${poolAddress || index}`}
+                pool={pool}
+                previousData={poolAddress ? previousHotPoolsMap?.[poolAddress] : null}
+                index={index}
+                chain={chain}
+                hotSort={hotSort}
+                hotInlineSort={hotInlineSort}
+                hotTokenFilter={hotTokenFilter}
+                selectedPoolAddress={selectedPoolAddress}
+                getDexIcon={getDexIcon}
+                onCopyAddress={onCopyAddress}
+                onSelectPool={onSelectPool}
+                onOpenPosition={onOpenPosition}
+                onInlineSortChange={onHotInlineSortChange}
+                onToggleTokenFilter={onToggleTokenFilter}
+              />
+            );
+          })
         )}
       </div>
 

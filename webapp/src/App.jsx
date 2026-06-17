@@ -109,6 +109,16 @@ const KLINE_DRAW_TOOLS = [
   { key: 'line', title: 'Line', icon: Slash },
   { key: 'rect', title: 'Rect', icon: Square },
 ];
+
+function buildHotPoolsSnapshotMap(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return {};
+  const out = {};
+  rows.forEach((row) => {
+    const key = normalizePoolAddress(row?.pool_address || row?.pool_id);
+    if (key) out[key] = row;
+  });
+  return out;
+}
 const HOT_POOL_SORT_OPTIONS = [
   { key: 'fees', label: 'Fees', serverKey: 'fees' },
   { key: 'volume', label: 'Volume', serverKey: 'volume' },
@@ -685,6 +695,9 @@ export default function App() {
   const [keyword, setKeyword] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [hotPools, setHotPools] = useState([]);
+  const hotPoolsRef = useRef([]);
+  const hotPoolsSnapshotChainRef = useRef('');
+  const [previousHotPoolsMap, setPreviousHotPoolsMap] = useState({});
   const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
   const [hotPoolsError, setHotPoolsError] = useState('');
   const [hotPoolsUpdatedAt, setHotPoolsUpdatedAt] = useState('');
@@ -1444,7 +1457,16 @@ export default function App() {
           minMarketCapUsd: useAdvancedFilters && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
           signal,
         });
-        setHotPools(Array.isArray(resp?.data) ? resp.data : []);
+        const rows = Array.isArray(resp?.data) ? resp.data : [];
+        const snapshotChain = String(chain || '').toLowerCase();
+        setPreviousHotPoolsMap(
+          hotPoolsSnapshotChainRef.current === snapshotChain
+            ? buildHotPoolsSnapshotMap(hotPoolsRef.current)
+            : {}
+        );
+        hotPoolsRef.current = rows;
+        hotPoolsSnapshotChainRef.current = snapshotChain;
+        setHotPools(rows);
         setHotPoolsUpdatedAt(resp?.updated_at || new Date().toISOString());
       } catch (e) {
         if (e?.name !== 'AbortError') setHotPoolsError(String(e?.message || e));
@@ -1797,6 +1819,9 @@ export default function App() {
     setWorkMode(false);
     setHotTokenFilter(null);
     setHotPools([]);
+    hotPoolsRef.current = [];
+    hotPoolsSnapshotChainRef.current = '';
+    setPreviousHotPoolsMap({});
     setHotPoolsUpdatedAt('');
     setHotPoolsError('');
     storageRemove(STORAGE.initData);
@@ -2231,6 +2256,7 @@ export default function App() {
         heightControlRef={hotPoolsHeightControlRef}
         filterRef={hotPoolsFilterRef}
         hotPools={hotPools}
+        previousHotPoolsMap={previousHotPoolsMap}
         filteredHotPools={filteredHotPools}
         hotPoolsLoading={hotPoolsLoading}
         hotPoolsError={hotPoolsError}

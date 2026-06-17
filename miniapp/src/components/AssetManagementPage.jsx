@@ -340,11 +340,50 @@ function RankBadge({ rank }) {
     );
 }
 
+function previousAreaChartDay(day) {
+    const parts = String(day || '').split('-').map((item) => Number(item));
+    if (parts.length !== 3 || parts.some((item) => !Number.isFinite(item))) return '';
+    const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    date.setUTCDate(date.getUTCDate() - 1);
+    return date.toISOString().slice(0, 10);
+}
+
+function buildAreaChartData(rows) {
+    const mapped = Array.isArray(rows)
+        ? rows
+            .filter((d) => d.day && Number.isFinite(Number(d.value)))
+            .map((d) => ({ time: d.day, value: Number(d.value) }))
+        : [];
+    if (mapped.length !== 1) return mapped;
+    const previousDay = previousAreaChartDay(mapped[0].time);
+    if (!previousDay) return mapped;
+    return [{ time: previousDay, value: mapped[0].value }, mapped[0]];
+}
+
+function computeAreaChartPriceRange(points) {
+    if (!Array.isArray(points) || points.length === 0) return null;
+    let min = Infinity;
+    let max = -Infinity;
+    points.forEach((point) => {
+        if (!Number.isFinite(point.value)) return;
+        min = Math.min(min, point.value);
+        max = Math.max(max, point.value);
+    });
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    const spread = max - min;
+    const padding = spread > 0 ? spread * 0.12 : Math.max(Math.abs(max) * 0.02, 1);
+    return {
+        minValue: min - padding,
+        maxValue: max + padding,
+    };
+}
+
 /* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
 function LWAreaChart({ data, color = '#10b981', loading = false }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
+    const priceRangeRef = useRef(null);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -393,6 +432,22 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
             crosshairMarkerRadius: 4,
             crosshairMarkerBorderColor: color,
             crosshairMarkerBackgroundColor: isDark ? '#14171c' : '#ffffff',
+            autoscaleInfoProvider: (original) => {
+                const priceRange = priceRangeRef.current;
+                const originalInfo = original();
+                if (!priceRange) return originalInfo;
+                if (originalInfo === null) {
+                    return {
+                        priceRange,
+                        margins: { above: 16, below: 18 },
+                    };
+                }
+                return {
+                    ...originalInfo,
+                    priceRange,
+                    margins: { above: 16, below: 18 },
+                };
+            },
         });
         chartRef.current = chart;
         seriesRef.current = series;
@@ -412,11 +467,8 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
 
     useEffect(() => {
         if (!seriesRef.current) return;
-        const mapped = data
-            ? data
-            .filter((d) => d.day && Number.isFinite(d.value))
-                .map((d) => ({ time: d.day, value: d.value }))
-            : [];
+        const mapped = buildAreaChartData(data);
+        priceRangeRef.current = computeAreaChartPriceRange(mapped);
         seriesRef.current.setData(mapped);
         if (mapped.length > 0) {
             chartRef.current?.timeScale().fitContent();
