@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import {
-    Wallet, Search, Plus, ExternalLink, X, Check,
+    Wallet, Search, Plus, ExternalLink, X, Check, Activity,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
     Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar,
 } from 'lucide-react';
