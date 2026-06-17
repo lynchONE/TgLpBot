@@ -3905,10 +3905,9 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                         sourceContract={w.source_contract}
                                         size={44}
                                         showCopy
-                                        showSource
                                     />
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                        <Badge className={walletSourceBadgeClass(w.source)}>
                                             {walletSourceLabel(w.source)}
                                         </Badge>
                                         {walletSourceContractLabel(w.source_contract) ? (
@@ -4132,7 +4131,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 <CompactIdentifier value={walletAddress} label="钱包" />
-                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                <Badge className={walletSourceBadgeClass(walletInfo.source)}>
                                     {walletSourceLabel(walletInfo.source)}
                                 </Badge>
                                 {walletSourceContractLabel(walletInfo.source_contract) ? (

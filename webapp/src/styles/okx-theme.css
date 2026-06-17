@@ -2233,3 +2233,74 @@ body {
 .module-slot.module-hot_pools .data-list:has(.pool-row) {
   overflow: auto;
 }
+
+/* Hot-pool metrics should read as compact label/value chips, not stretched columns. */
+.module-hot_pools .pool-meta-line {
+  grid-template-columns: repeat(3, max-content) !important;
+  justify-content: start;
+  align-items: center;
+  gap: 3px 5px;
+}
+
+.module-hot_pools .pool-meta-sort,
+.module-hot_pools .pool-meta-static {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 86px;
+  height: 20px;
+  min-height: 20px;
+  padding: 2px 5px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.module-hot_pools .pool-meta-sort.active {
+  padding: 2px 5px;
+}
+
+.module-hot_pools .pool-meta-sort > span,
+.module-hot_pools .pool-meta-static > span {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  line-height: 14px;
+  max-width: 30px;
+}
+
+.module-hot_pools .pool-meta-sort b,
+.module-hot_pools .pool-meta-static b {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  height: 14px;
+  min-width: 0;
+  max-width: 52px;
+  line-height: 14px;
+  text-align: left;
+}
+
+.module-hot_pools .pool-meta-sort b > span,
+.module-hot_pools .pool-meta-static b > span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  height: 14px;
+  line-height: 14px;
+}
+
+.module-hot_pools .pool-meta-sort b > span > span,
+.module-hot_pools .pool-meta-static b > span > span,
+.module-hot_pools .pool-meta-sort b number-flow-react,
+.module-hot_pools .pool-meta-static b number-flow-react {
+  display: inline-flex;
+  align-items: center;
+  max-width: none;
+  height: 14px;
+  line-height: 14px;
+  vertical-align: top;
+}

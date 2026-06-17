@@ -416,11 +416,44 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
     return el;
 };
 
+const RateChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
+    const lastRef = useRef(null);
+    if (previousValue === undefined || previousValue === null) {
+        return lastRef.current ? lastRef.current.el : null;
+    }
+
+    const current = Number(currentValue);
+    const previous = Number(previousValue);
+    const diff = current - previous;
+
+    if (!Number.isFinite(diff)) return lastRef.current ? lastRef.current.el : null;
+    if (diff === 0 && lastRef.current) return lastRef.current.el;
+    if (diff === 0) return null;
+
+    const isIncrease = diff > 0;
+    const absValue = Math.abs(diff);
+    const el = (
+        <span
+            className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                }`}
+            title={`${label}: ${isIncrease ? '+' : '-'}${absValue.toFixed(4)}%`}
+        >
+            <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
+            </svg>
+            <NumberFlowValue value={absValue} formatter={(v) => `${Number(v).toFixed(3)}%`} />
+        </span>
+    );
+    lastRef.current = { el };
+    return el;
+};
+
 const STABLE_COINS = ['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol'];
 
 export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, apiBaseUrl, chain, accentTheme = 'lime' }) {
     const brand = getBrandTheme(accentTheme);
     const [copied, setCopied] = useState(false);
+    const [badgesExpanded, setBadgesExpanded] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
 
@@ -499,7 +532,9 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],
     );
     const hotPoolBadges = useMemo(() => sortHotPoolBadges(parseHotPoolBadges(pool?.badges)), [pool?.badges]);
-    const visibleHotPoolBadges = useMemo(() => hotPoolBadges.slice(0, 2), [hotPoolBadges]);
+    const visibleHotPoolBadges = useMemo(() => (
+        badgesExpanded ? hotPoolBadges : hotPoolBadges.slice(0, 2)
+    ), [badgesExpanded, hotPoolBadges]);
     const hiddenHotPoolBadgeCount = Math.max(0, hotPoolBadges.length - visibleHotPoolBadges.length);
     const tokenRisk = useMemo(() => normalizeTokenRisk(pool?.token_risk), [pool?.token_risk]);
     const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
@@ -631,19 +666,38 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                     />
                                 ))}
                                 {hiddenHotPoolBadgeCount > 0 ? (
-                                    <span
+                                    <button
+                                        type="button"
                                         className="mini-pool-badge mini-pool-badge-more inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
                                         title={hotPoolBadges.slice(visibleHotPoolBadges.length).map((badge) => `${badge.text}: ${badge.tip}`).join(' / ')}
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            setBadgesExpanded(true);
+                                        }}
+                                        aria-label={`展开另外 ${hiddenHotPoolBadgeCount} 个标签`}
                                     >
                                         +{hiddenHotPoolBadgeCount}
-                                    </span>
+                                    </button>
+                                ) : null}
+                                {badgesExpanded && hotPoolBadges.length > 2 ? (
+                                    <button
+                                        type="button"
+                                        className="mini-pool-badge mini-pool-badge-more inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            setBadgesExpanded(false);
+                                        }}
+                                        aria-label="收起池子标签"
+                                    >
+                                        收起
+                                    </button>
                                 ) : null}
                             </div>
                         ) : null}
                     </div>
                 </div>
 
-                <div className="mini-pool-values text-right min-w-0">
+                <div className="mini-pool-values min-w-0">
                     <div className="flex items-baseline justify-end gap-1 flex-wrap">
                         <div className={`mini-pool-primary text-base font-extrabold tabular-nums flex items-center ${brand.textClass}`}>
                             {metric === 'volume' ? (
@@ -662,11 +716,19 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                     return Number.isFinite(n) && n > 0 ? formatUsd(n) : '--';
                                 }} />
                             )}
-                            <ChangeIndicator
-                                currentValue={metric === 'volume' ? pool?.total_volume : pool?.total_fees}
-                                previousValue={metric === 'volume' ? previousData?.total_volume : previousData?.total_fees}
-                                label={metric === 'volume' ? '交易量变化' : '费用变化'}
-                            />
+                            {metric === 'fee_rate' ? (
+                                <RateChangeIndicator
+                                    currentValue={pool?.fee_rate}
+                                    previousValue={previousData?.fee_rate}
+                                    label="费率变化"
+                                />
+                            ) : (
+                                <ChangeIndicator
+                                    currentValue={metric === 'volume' ? pool?.total_volume : pool?.total_fees}
+                                    previousValue={metric === 'volume' ? previousData?.total_volume : previousData?.total_fees}
+                                    label={metric === 'volume' ? '交易量变化' : '费用变化'}
+                                />
+                            )}
                         </div>
                     </div>
                     {priceDisplay ? (
@@ -680,11 +742,29 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     {secondaryMetricText ? (
                         <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${secondaryMetricClass}`}>
                             <NumberFlowValue value={secondaryMetricText} formatter={() => secondaryMetricText} />
+                            {metric === 'fee_rate' ? (
+                                <ChangeIndicator
+                                    currentValue={pool?.total_fees}
+                                    previousValue={previousData?.total_fees}
+                                    label="费用变化"
+                                />
+                            ) : (
+                                <RateChangeIndicator
+                                    currentValue={pool?.fee_rate}
+                                    previousValue={previousData?.fee_rate}
+                                    label="费率变化"
+                                />
+                            )}
                         </div>
                     ) : null}
                     <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${activeLiquidityFeeRateAvailable ? 'text-amber-600 dark:text-amber-300' : 'text-zinc-400 dark:text-white/35'}`}>
                         <span className="mr-1">活跃</span>
                         <NumberFlowValue value={activeMetricText} formatter={() => activeMetricText} />
+                        <RateChangeIndicator
+                            currentValue={activeLiquidityFeeRateValue}
+                            previousValue={computeActiveLiquidityFeeRate(previousData)}
+                            label="活跃费率变化"
+                        />
                     </div>
                     {pool?.transaction_count > 0 ? (
                         <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 flex items-center justify-end">

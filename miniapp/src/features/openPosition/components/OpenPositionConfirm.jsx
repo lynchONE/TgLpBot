@@ -37,6 +37,7 @@ export function OpenPositionTaskModePanel({
     taskMode,
     outOfRangeActions,
     loading,
+    brand,
     onChangeTaskMode,
 }) {
     return (
@@ -45,7 +46,7 @@ export function OpenPositionTaskModePanel({
                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">本次开仓</div>
                 <div className="text-[10px] text-zinc-500 dark:text-white/45 truncate max-w-[200px]">上破:{outOfRangeActions.above} 下破:{outOfRangeActions.below}</div>
             </div>
-            <div className="mt-3 flex overflow-x-auto gap-1.5 pb-1" style={{ scrollbarWidth: 'none' }}>
+            <div className="mt-3 grid grid-cols-4 gap-1.5">
                 {TASK_MODE_OPTIONS.map((option) => (
                     <button
                         key={option.value}
@@ -53,12 +54,12 @@ export function OpenPositionTaskModePanel({
                         onClick={() => onChangeTaskMode(option.value)}
                         disabled={loading}
                         title={option.description}
-                        className={`shrink-0 rounded-xl px-3 py-1.5 text-center transition ${taskMode === option.value
-                            ? 'bg-zinc-800 text-white shadow-sm dark:bg-white dark:text-zinc-900 border border-transparent'
+                        className={`min-h-10 min-w-0 rounded-xl px-1.5 py-1.5 text-center transition ${taskMode === option.value
+                            ? `${brand.solidButtonClass} shadow-sm`
                             : 'border border-zinc-200/50 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                             }`}
                     >
-                        <div className="text-[11px] font-semibold">{option.shortLabel}</div>
+                        <div className="truncate text-[10px] font-bold leading-4">{option.shortLabel}</div>
                     </button>
                 ))}
             </div>

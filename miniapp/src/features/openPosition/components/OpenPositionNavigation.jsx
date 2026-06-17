@@ -90,14 +90,19 @@ export function OpenPositionStepIndicator({ openPositionStep, brand, onStepClick
                             type="button"
                             onClick={() => { if (s.k < openPositionStep) onStepClick(s.k); }}
                             disabled={s.k > openPositionStep}
-                            className={`flex items-center gap-1.5 rounded-full px-1.5 py-1 text-[12px] font-semibold transition ${active ? brand.textClass : done ? 'text-zinc-500 dark:text-white/55' : 'text-zinc-400 dark:text-white/30'}`}
+                            className={`op-step-button flex shrink-0 items-center gap-1.5 rounded-full px-1.5 py-1 text-[12px] font-semibold transition ${active ? brand.textClass : done ? 'text-zinc-500 dark:text-white/55' : 'text-zinc-400 dark:text-white/30'}`}
                         >
                             <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${active ? brand.solidButtonClass : done ? 'bg-zinc-300 text-white dark:bg-white/25 dark:text-white' : 'bg-zinc-200 text-zinc-400 dark:bg-white/10 dark:text-white/40'}`}>
                                 {done ? <Check className="h-3 w-3" strokeWidth={3} /> : i + 1}
                             </span>
                             {s.label}
                         </button>
-                        {i < 2 ? <div className={`h-px flex-1 ${done ? 'bg-zinc-300 dark:bg-white/20' : 'bg-zinc-200 dark:bg-white/10'}`} /> : null}
+                        {i < 2 ? (
+                            <div
+                                className={`op-step-connector h-[2px] flex-1 rounded-full ${done ? 'bg-zinc-300 dark:bg-white/25' : 'bg-zinc-200 dark:bg-white/15'}`}
+                                aria-hidden="true"
+                            />
+                        ) : null}
                     </React.Fragment>
                 );
             })}

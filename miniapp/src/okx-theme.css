@@ -767,7 +767,7 @@ body::before {
 
 .miniapp-shell .mini-pool-row-main {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(72px, 84px);
+    grid-template-columns: minmax(0, 1fr) minmax(96px, 108px);
     gap: 8px !important;
     align-items: start;
 }
@@ -850,35 +850,37 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-values {
-    width: 84px !important;
+    width: 108px !important;
     min-width: 0 !important;
-    max-width: 84px !important;
+    max-width: 108px !important;
+    justify-self: start;
     color: var(--okx-muted) !important;
-    overflow: hidden;
+    overflow: visible;
+    text-align: left !important;
 }
 
 .miniapp-shell .mini-pool-primary {
     max-width: 100%;
     min-width: 0;
-    justify-content: flex-end !important;
+    justify-content: flex-start !important;
     color: var(--okx-accent-text) !important;
     font-size: 15px !important;
     line-height: 1.1 !important;
-    overflow: hidden;
+    overflow: visible;
     white-space: nowrap;
 }
 
 .miniapp-shell .mini-pool-values > div {
     max-width: 100%;
-    overflow: hidden;
+    overflow: visible;
     text-overflow: ellipsis;
     white-space: nowrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
 }
 
 .miniapp-shell .mini-pool-values .flex {
     min-width: 0;
-    justify-content: flex-end !important;
+    justify-content: flex-start !important;
     flex-wrap: nowrap !important;
 }
 
@@ -940,6 +942,7 @@ body::before {
     border-color: var(--okx-line) !important;
     background: #0b0b0b !important;
     color: var(--okx-muted) !important;
+    cursor: pointer;
 }
 
 .miniapp-shell .mini-pool-open-btn {
@@ -1417,12 +1420,12 @@ body::before {
     }
 
     .miniapp-shell .mini-pool-row-main {
-        grid-template-columns: minmax(0, 1fr) minmax(68px, 78px);
+        grid-template-columns: minmax(0, 1fr) minmax(92px, 104px);
     }
 
     .miniapp-shell .mini-pool-values {
-        width: 78px !important;
-        max-width: 78px !important;
+        width: 104px !important;
+        max-width: 104px !important;
     }
 
     .miniapp-shell .mini-pool-primary {

@@ -2970,8 +2970,17 @@ function WalletList({
                                             sourceContract={w.source_contract}
                                             size={20}
                                             showCopy
-                                            showSource
                                         />
+                                        <div className="smd-wallet-source-row">
+                                            <span className={`smd-badge ${walletSourceBadgeClass(w.source)}`}>
+                                                {walletSourceLabel(w.source)}
+                                            </span>
+                                            {walletSourceContractLabel(w.source_contract) ? (
+                                                <span className="smd-badge source-contract">
+                                                    {walletSourceContractLabel(w.source_contract)}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                     </td>
                                     <td className="center">
                                         <span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>

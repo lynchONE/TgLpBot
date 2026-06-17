@@ -3942,6 +3942,7 @@ export default function App() {
                                 taskMode={openPositionTaskMode}
                                 outOfRangeActions={openPositionOutOfRangeActions}
                                 loading={openPositionLoading}
+                                brand={brand}
                                 onChangeTaskMode={(value) => {
                                     setOpenPositionTaskMode(value);
                                     setOpenPositionError('');

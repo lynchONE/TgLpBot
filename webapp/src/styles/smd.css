@@ -539,7 +539,7 @@
 .smd-filter-btn { display: inline-flex; align-items: center; gap: 4px; }
 .smd-filter-btn .smd-proto-img { width: 13px; height: 13px; }
 .smd-badge.fee { background: rgba(18, 26, 40, 0.6); color: var(--text-muted); }
-.smd-badge.source-manual { background: var(--accent-soft); color: var(--accent-text); }
+.smd-badge.source-manual { background: var(--accent-soft); color: var(--accent-text); border: 1px solid rgba(183, 255, 26, 0.24); }
 .smd-badge.source-contract { background: rgba(18, 26, 40, 0.85); color: var(--text-muted); }
 .smd-badge.source-token-liquidity {
   background: rgba(56, 189, 248, 0.12);
@@ -705,6 +705,13 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.smd-wallet-source-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  padding-left: 28px;
 }
 .smd-wallet-btn {
   background: none;
