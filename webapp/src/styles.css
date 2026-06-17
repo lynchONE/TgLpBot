@@ -10,6 +10,7 @@
 @import './styles/am.css';
 @import './styles/panels-extra.css';
 @import './styles/admin.css';
+@import './styles/okx-theme.css';
 
 @tailwind components;
 @tailwind utilities;

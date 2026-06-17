@@ -69,9 +69,9 @@ export default function GuestHotPoolsLanding({
             <Flame size={14} />
             实时热门池子预览
           </div>
-          <h2>先看市场，再决定是否登录开仓。</h2>
+          <h2>先看市场，再决定开仓。</h2>
           <p>
-            未登录状态展示热门池子的部分榜单和核心交易指标。登录后可查看完整工作台、K 线、仓位和开仓操作。
+            未登录状态展示热门池子的部分榜单和核心交易指标。登录后可查看完整工作台、K 线、仓位管理和开仓弹框。
           </p>
           <div className="guest-actions">
             <button
