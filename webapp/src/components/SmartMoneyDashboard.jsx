@@ -1,8 +1,8 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import {
-    Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
+    Wallet, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
-    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Activity, Radar,
+    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
@@ -21,6 +21,12 @@ import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
 import flashIcon from '../img/flash.svg';
 import gmgnIcon from '../img/gmgn.svg';
+import useSmartMoneyPositionPreviewMap, {
+    buildRangeStatusSummary,
+    getPositionSelectionKey,
+    resolvePositionPreviewFeeUsd,
+} from './smart-money/useSmartMoneyPositionPreviewMap';
+import SmartMoneyShell from './smart-money/SmartMoneyShell';
 
 const LazySmartMoneyAssetsPanel = React.lazy(() => import('./SmartMoneyAssetsPanel'));
 
@@ -230,13 +236,6 @@ function parseMetricNumber(value) {
     return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-function resolvePositionPreviewFeeUsd(detail, position) {
-    const liveFee = parseMetricNumber(detail?.totals?.fee_usd);
-    if (Number.isFinite(liveFee)) return liveFee;
-    if (String(position?.fee_status || '').trim() === 'unavailable') return NaN;
-    return parseMetricNumber(position?.fee_usd);
-}
-
 function resolveSmartMoneyPoolMarketCapDisplay(pool) {
     const candidates = [
         pool?.fdv_usd,
@@ -328,14 +327,6 @@ function formatRangePercentPlain(value) {
     return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
-function formatRangeDrift(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num < 0) return '--';
-    if (num >= 100) return `${Math.round(num)}%`;
-    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
-    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
 function formatWatchActivityAction(value) {
     const eventType = String(value || '').trim();
     if (eventType === 'add') return '加 LP';
@@ -367,21 +358,6 @@ function normalizeWatchWalletItems(resp, fallbackWallets = []) {
     });
 
     return normalized;
-}
-
-function buildRangeStatusSummary(rangeState) {
-    if (!rangeState) return null;
-    if (rangeState.inRange) {
-        return { text: '区间内', tone: 'positive' };
-    }
-    if (rangeState.outOfRange?.direction) {
-        const direction = rangeState.outOfRange.direction === 'above' ? '高于区间' : '低于区间';
-        return { text: `${direction} ${formatRangeDrift(rangeState.outOfRange.pct)}`, tone: 'negative' };
-    }
-    if (rangeState.inRange === false) {
-        return { text: '已离开区间', tone: 'negative' };
-    }
-    return null;
 }
 
 function getDisplayedPriceRangeState(position, currentPrice) {
@@ -432,7 +408,6 @@ function getPositionAmountSummary(position, preview) {
 }
 
 const POOL_CARD_RANGE_LIMIT = 5;
-const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
@@ -448,84 +423,6 @@ const POOL_HEATMAP_SORTS = [
     { key: 'rate', label: '速率' },
     { key: 'fee', label: '手续费' },
 ];
-
-function getPositionSelectionKey(position) {
-    const positionRef = String(position?.position_ref || '').trim();
-    if (positionRef) return positionRef;
-    const id = String(position?.id || '').trim();
-    if (id) return id;
-    const wallet = String(position?.wallet_address || '').trim().toLowerCase();
-    const pool = String(position?.pool_address || '').trim().toLowerCase();
-    const nft = String(position?.nft_token_id || '').trim();
-    return [wallet, pool, nft].filter(Boolean).join(':');
-}
-
-function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
-    const [previewMap, setPreviewMap] = useState({});
-
-    useEffect(() => {
-        const rows = Array.isArray(positions) ? positions : [];
-        if (rows.length === 0) {
-            setPreviewMap({});
-            return undefined;
-        }
-
-        let cancelled = false;
-        setPreviewMap({});
-
-        const loadPreview = async (position) => {
-            const key = getPositionSelectionKey(position);
-            if (!key) return;
-            try {
-                const data = await fetchSMPositionDetail({
-                    apiBaseUrl,
-                    positionRef: position.position_ref,
-                    positionId: position.id,
-                });
-                if (cancelled) return;
-                setPreviewMap((prev) => ({
-                    ...prev,
-                    [key]: {
-                        fetchedAt: Date.now(),
-                        currentValueUsd: Number.isFinite(Number(data?.current_value_usd))
-                            ? Number(data.current_value_usd)
-                            : Number(data?.totals?.position_usd || 0) + Number(data?.totals?.fee_usd || 0),
-                        feeUsd: resolvePositionPreviewFeeUsd(data, position),
-                        netInvestedUsd: Number(data?.net_invested_usd ?? position?.position_amount_usd ?? 0),
-                        rangeStatus: buildRangeStatusSummary(
-                            computePriceRange(data) || (data?.in_range === undefined ? null : { inRange: Boolean(data.in_range) })
-                        ),
-                        runningSince: String(data?.running_since || position?.opened_at || '').trim(),
-                    },
-                }));
-            } catch (error) {
-                if (cancelled) return;
-                setPreviewMap((prev) => ({
-                    ...prev,
-                    [key]: {
-                        ...(prev[key] || {}),
-                        fetchedAt: Date.now(),
-                        feeUsd: resolvePositionPreviewFeeUsd(null, position),
-                        runningSince: String(prev[key]?.runningSince || position?.opened_at || '').trim(),
-                    },
-                }));
-            }
-        };
-
-        (async () => {
-            for (let index = 0; index < rows.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
-                const batch = rows.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
-                await Promise.all(batch.map((position) => loadPreview(position)));
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [apiBaseUrl, positions]);
-
-    return previewMap;
-}
 
 function getPoolCardRangeGroups(pool) {
     const groups = Array.isArray(pool?.range_groups)
@@ -781,15 +678,6 @@ function PairAvatar({ item, size = 'md' }) {
                 <span className="pool-avatar-fallback">{avatarLabel}</span>
             )}
         </span>
-    );
-}
-
-function StatCard({ label, value, color }) {
-    return (
-        <div className="smd-stat-card">
-            <div className="smd-stat-label">{label}</div>
-            <div className={`smd-stat-value${color === 'red' ? ' red' : ''}`}>{value ?? '--'}</div>
-        </div>
     );
 }
 
@@ -4065,101 +3953,14 @@ export default function SmartMoneyDashboard({
         setSelectedPool({ ...pool, chain: resolvePoolChain(pool) });
         setSelectedWallet(null);
     }, []);
-    const monitorSummary = useMemo(() => {
-        const activeWallets = stats?.monitored_wallet_count ?? 0;
-        const activeContracts = stats?.active_contract_count ?? 0;
-        const watcherEnabled = Boolean(stats?.watcher_enabled);
-        const contractMonitorEnabled = Boolean(stats?.crawler_enabled);
-        const monitorEnabled = Boolean(stats?.monitor_enabled);
-
-        if (!monitorEnabled) {
-            return {
-                enabled: false,
-                label: '监控未开启',
-                detail: '后端 Smart Money 服务未启动',
-            };
-        }
-
-        const channels = [];
-        if (watcherEnabled) channels.push(`LP 监听 ${activeWallets} 钱包`);
-        if (contractMonitorEnabled) channels.push(activeContracts > 0 ? `合约监控 ${activeContracts} 个` : '合约监控待配置');
-
-        return {
-            enabled: true,
-            label: '监控已开启',
-            detail: channels.length ? channels.join(' / ') : 'Smart Money 服务运行中',
-        };
-    }, [stats]);
-
     return (
-        <section className="panel-shell">
-            <header className="panel-header">
-                <div className="panel-title-wrap">
-                    <div className="panel-icon-wrap"><Brain size={16} /></div>
-                    <div className="panel-title-texts">
-                        <h2>聪明钱</h2>
-                        {!isDetail && <p>{isAdmin ? '监控、钱包、合约、通知、资产' : '监控、钱包、合约、通知'}</p>}
-                    </div>
-                </div>
-            </header>
-            <div className="panel-body">
-                {stats && !isDetail && (
-                    <div className={`smd-monitor-banner${monitorSummary.enabled ? '' : ' off'}`}>
-                        <div className="smd-monitor-pill">
-                            <span className="smd-monitor-dot" />
-                            {monitorSummary.label}
-                        </div>
-                        <div className="smd-monitor-detail">{monitorSummary.detail}</div>
-                    </div>
-                )}
-
-                {stats && !isDetail && (
-                    <div className="smd-stats-grid">
-                        <StatCard label="活跃池子" value={stats.active_pool_count} />
-                        <StatCard label="监控钱包" value={stats.monitored_wallet_count} />
-                        <StatCard label="持仓笔数" value={stats.open_position_count} />
-                        <StatCard label="今日关闭" value={stats.closed_today_count} color="red" />
-                    </div>
-                )}
-
-                {!isDetail && (
-                    <div className="smd-tabs">
-                        {[
-                            { key: 'pools', label: '池子视图', icon: Eye },
-                            { key: 'wallets', label: '钱包视图', icon: Wallet },
-                            { key: 'watch_activity', label: '特别关注', icon: Activity },
-                            { key: 'settings', label: '合约视图', icon: Settings },
-                        ].map(({ key, label, icon: Icon }) => (
-                            <button key={key} className={`smd-tab${view === key ? ' active' : ''}`} onClick={() => setView(key)}>
-                                <Icon size={16} /> {label}
-                            </button>
-                        ))}
-                        <button
-                            key="golden_dog"
-                            className={`smd-tab${view === 'golden_dog' ? ' active' : ''}`}
-                            onClick={() => setView('golden_dog')}
-                        >
-                            <Flame size={16} /> 监控通知
-                        </button>
-                        <button
-                            key="auto_follow"
-                            className={`smd-tab${view === 'auto_follow' ? ' active' : ''}`}
-                            onClick={() => setView('auto_follow')}
-                        >
-                            <Users size={16} /> 自动跟单
-                        </button>
-                        {isAdmin ? (
-                            <button
-                                key="assets"
-                                className={`smd-tab${view === 'assets' ? ' active' : ''}`}
-                                onClick={() => setView('assets')}
-                            >
-                                <Wallet size={16} /> 聪明钱资产
-                            </button>
-                        ) : null}
-                    </div>
-                )}
-
+        <SmartMoneyShell
+            stats={stats}
+            isDetail={Boolean(isDetail)}
+            isAdmin={isAdmin}
+            view={view}
+            onViewChange={setView}
+        >
                 {selectedPool ? (
                     <PoolDetail
                         apiBaseUrl={apiBaseUrl}
@@ -4252,8 +4053,7 @@ export default function SmartMoneyDashboard({
                         </div>
                     </div>
                 )}
-            </div>
-        </section>
+        </SmartMoneyShell>
     );
 }
 

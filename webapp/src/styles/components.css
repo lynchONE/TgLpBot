@@ -164,6 +164,15 @@
   color: var(--text);
 }
 
+.confirm-dialog {
+  --ds-dialog-width: 420px;
+  border-color: var(--border-strong);
+  border-radius: 18px;
+  background: rgba(12, 18, 28, 0.98);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.5);
+  padding: 22px;
+}
+
 .ui-dialog-icon {
   display: inline-flex;
   width: 36px;
@@ -197,13 +206,15 @@
   color: var(--text-muted);
 }
 
-.ui-dialog h3 {
+.ui-dialog h3,
+.confirm-dialog .ds-dialog-title {
   margin: 14px 36px 0 0;
   font-size: 18px;
   line-height: 1.25;
 }
 
-.ui-dialog p {
+.ui-dialog p,
+.confirm-dialog .ds-dialog-description {
   margin: 10px 0 0;
   color: var(--text-muted);
   font-size: 14px;
@@ -322,4 +333,3 @@
 .ui-select-option.active {
   background: rgba(var(--accent-rgb), 0.12);
 }
-

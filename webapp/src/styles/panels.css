@@ -1716,12 +1716,6 @@
     grid-template-columns: 66px minmax(0, 1fr);
   }
 
-  .login-popover {
-    left: 0;
-    right: auto;
-    width: min(340px, calc(100vw - 44px));
-  }
-
   .config-grid {
     grid-template-columns: 1fr;
   }
@@ -5447,5 +5441,4 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
 }
-
 

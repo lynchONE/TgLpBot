@@ -1,20 +1,9 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   BriefcaseBusiness,
   CandlestickChart,
-  Check,
-  Copy,
-  Flame,
-  Newspaper,
-  GripVertical,
-  LockKeyhole,
-  LogOut,
-  Maximize,
-  Minimize,
   MousePointer2,
   RefreshCw,
-  Search,
   Shield,
   Settings,
   Slash,
@@ -45,65 +34,57 @@ import {
   addLiquidity,
 } from './api';
 import { WEBAPP_CONFIG } from './config';
-import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
+import PanelShell, { EmptyState } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
 import CreatePoolPanel from './components/CreatePoolPanel';
 import SmartMoneyDashboard from './components/SmartMoneyDashboard';
 import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
-import TaskActionMenu from './components/TaskActionMenu';
 import AddLiquidityModal from './components/AddLiquidityModal';
 import ConfirmDialog from './components/ConfirmDialog';
-import NumberFlowValue from './components/NumberFlowValue';
 import GlobalConfigPanel from './components/GlobalConfigPanel';
 import WalletManagePanel from './components/WalletManagePanel';
 import SwapPanel from './components/SwapPanel';
 import TradeHistoryPanel from './components/TradeHistoryPanel';
+import GuestHotPoolsLanding from './components/GuestHotPoolsLanding';
+import { TopBar, WorkbenchConfigPanel, WorkModeBar } from './components/WorkbenchChrome';
+import { NewsShowcase, NewsTicker } from './components/NewsPanels';
+import WorkbenchLayout from './components/WorkbenchLayout';
+import PositionsPanel, { normalizePositionSmartMoneyGroups } from './components/PositionsPanel';
+import HotPoolsPanel from './components/HotPoolsPanel';
+import {
+  Button,
+  IconButton,
+  Input,
+  Slider,
+} from './components/ui';
 import {
   fetchSMPoolStats,
   fetchSMWatchWallets,
   saveSMWatchWallets,
   updateSMWallet,
 } from './smartMoneyApi';
-import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
-import bnbLogo from './img/bnb.svg';
-import baseLogo from './img/base.svg';
-import flashIcon from './img/flash.svg';
-import siteLogo from './img/logo.png';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
   buildGmgnUrl,
   canAccessWidget,
-  compactPrice,
-  formatNumber,
   formatPct,
-  formatPriceDisplay,
   formatUsd,
   formatUsdCompact,
-  formatUtc8DateTime,
-  formatUtc8Time,
   computeHotPoolActiveFeeRate,
   normalizePoolAddress,
   normalizeHexAddress,
   normalizeAccessInfo,
   normalizeWidgetSelection,
-  parseHotPoolBadges,
   pickNonStableTokenAddress,
-  resolveHotPoolFilterToken,
   resolveKlineTokenOptions,
   normalizeTokenRisk,
-  tokenRiskLabel,
-  tokenRiskSummary,
-  tokenRiskToneClass,
   shortAddress,
   inferPoolVersion,
-  computePriceRange,
-  formatDuration,
 } from './utils';
-import { TASK_MODE_OPTIONS, getTaskModeMeta, normalizeTaskMode } from './taskModes';
 
 const LazyAssetManagementPanel = lazy(() => import('./components/AssetManagementPanel'));
 const LazyAdminPanel = lazy(() => import('./components/AdminPanel'));
@@ -115,7 +96,6 @@ const KLINE_INTERVALS = [
   { key: '1H', label: '1H', bucketSec: 3600, limit: 240, timeframe: 'hour', aggregate: 1, poolLimit: 200 },
 ];
 const HOT_POOLS_DISPLAY_LIMIT = 20;
-const GUEST_HOT_POOLS_DISPLAY_LIMIT = 8;
 const DEFAULT_KLINE_CHART_HEIGHT = 520;
 const MIN_KLINE_CHART_HEIGHT = 360;
 const MAX_KLINE_CHART_HEIGHT = 1200;
@@ -139,39 +119,16 @@ const HOT_POOL_SORT_OPTIONS = [
   { key: 'fee_rate', label: 'Fee Rate', serverKey: 'fee_rate' },
   { key: 'active_fee_rate', label: 'Active', serverKey: 'fee_rate' },
 ];
-const POSITION_SM_RANGE_LIMIT = 4;
 const POSITION_SM_RANGE_STALE_MS = 60_000;
 const POSITION_SM_RANGE_BATCH_SIZE = 8;
-const FEE_TIER_BY_TICK_SPACING = {
-  1: 100,
-  10: 500,
-  50: 2500,
-  60: 3000,
-  100: 5000,
-  200: 10000,
-  2000: 20000,
-};
 const NEWS_TICKER_MIN_SPEED = 2;
 const NEWS_TICKER_MAX_SPEED = 80;
 const NEWS_TICKER_DEFAULT_SPEED = 8;
-const NEWS_TICKER_DEFAULT_DURATION_SEC = 360;
 
 function normalizeNewsTickerSpeed(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return NEWS_TICKER_DEFAULT_SPEED;
   return Math.min(NEWS_TICKER_MAX_SPEED, Math.max(NEWS_TICKER_MIN_SPEED, Math.round(n)));
-}
-
-function formatNewsDateTime(value) {
-  if (!value) return '';
-  const text = formatUtc8DateTime(value);
-  return text === '--' ? '' : text;
-}
-
-function formatNewsTickerTime(value) {
-  if (!value) return '';
-  const text = formatUtc8Time(value);
-  return text === '--' ? '' : text;
 }
 
 function normalizeNewsTextKey(value, maxLength) {
@@ -215,199 +172,6 @@ function dedupeNewsItems(items, limit) {
     out.push(item);
   });
   return Number.isFinite(limit) && limit > 0 ? out.slice(0, limit) : out;
-}
-
-function NewsShowcase({ items, loading, error, status, onOpen }) {
-  const rows = Array.isArray(items) ? items.slice(0, 4) : [];
-  if (rows.length === 0) return null;
-
-  const showStatus = loading || status !== 'ok';
-  return (
-    <section className="news-showcase" aria-label="热点推荐新闻">
-      <div className="news-showcase-head">
-        <div className="news-showcase-title">
-          <Newspaper size={15} />
-          <span>热点推荐</span>
-        </div>
-        {showStatus ? (
-          <span className={`news-showcase-status ${status === 'ok' ? 'ok' : ''}`}>
-            {loading ? '同步中' : '待同步'}
-          </span>
-        ) : null}
-      </div>
-      {rows.length > 0 ? (
-        <div className="news-showcase-list">
-          {rows.map((item, index) => (
-            <button
-              type="button"
-              key={`${item.external_id || item.id || index}`}
-              className="news-showcase-item"
-              onClick={() => onOpen(item.source_link)}
-              disabled={!item.source_link}
-              title={item.title}
-            >
-              <span className="news-showcase-rank">{index + 1}</span>
-              <span className="news-showcase-main">
-                <span className="news-showcase-item-title">{item.title}</span>
-                <span className="news-showcase-meta">
-                  {item.author ? <span>{item.author}</span> : null}
-                  {item.release_time ? <span>{formatNewsDateTime(item.release_time)}</span> : null}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="news-showcase-empty">
-          {loading ? '正在读取新闻...' : error || '暂无新闻'}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function NewsTicker({ items, loading, error, speedPxPerSec, onOpen }) {
-  const rows = Array.isArray(items) ? items.filter((item) => item?.title) : [];
-  const tickerRows = rows.length > 0 ? [...rows, ...rows] : [];
-  const tickerContentKey = rows.map((item) => `${item.external_id || item.id || ''}:${item.title}`).join('|');
-  const marqueeRef = useRef(null);
-  const [durationSec, setDurationSec] = useState(NEWS_TICKER_DEFAULT_DURATION_SEC);
-
-  useEffect(() => {
-    const marquee = marqueeRef.current;
-    if (!marquee || tickerRows.length === 0) {
-      setDurationSec(NEWS_TICKER_DEFAULT_DURATION_SEC);
-      return undefined;
-    }
-
-    const updateDuration = () => {
-      const distancePx = marquee.scrollWidth / 2;
-      if (!Number.isFinite(distancePx) || distancePx <= 0) return;
-      const nextDuration = Math.max(1, Math.round((distancePx / normalizeNewsTickerSpeed(speedPxPerSec)) * 10) / 10);
-      setDurationSec((prev) => (Math.abs(prev - nextDuration) < 0.1 ? prev : nextDuration));
-    };
-
-    const frameId = window.requestAnimationFrame(updateDuration);
-    let observer = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(updateDuration);
-      observer.observe(marquee);
-    }
-    window.addEventListener('resize', updateDuration);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      if (observer) observer.disconnect();
-      window.removeEventListener('resize', updateDuration);
-    };
-  }, [tickerContentKey, tickerRows.length, speedPxPerSec]);
-
-  if (rows.length === 0) return null;
-
-  return (
-    <div
-      className="news-ticker"
-      role="region"
-      aria-label="热点新闻滚动条"
-      style={{ '--news-ticker-duration': `${durationSec}s` }}
-    >
-      <div className="news-ticker-label">NEWS</div>
-      <div className="news-ticker-track">
-        {tickerRows.length > 0 ? (
-          <div className="news-ticker-marquee" ref={marqueeRef}>
-            {tickerRows.map((item, index) => (
-              <button
-                type="button"
-                key={`${item.external_id || item.id || index}:${index}`}
-                onClick={() => onOpen(item.source_link)}
-                disabled={!item.source_link}
-                title={item.title}
-              >
-                {item.release_time ? <time>{formatNewsTickerTime(item.release_time)}</time> : null}
-                <span>{item.title}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="news-ticker-empty">
-            {loading ? '新闻同步中...' : error || '暂无新闻滚动内容'}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function normalizePositionSmartMoneyGroups(groups) {
-  return Array.isArray(groups)
-    ? groups.filter((item) => Number(item?.range_percent) > 0)
-    : [];
-}
-
-function formatPositionSmartMoneyRangePercent(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num) || num <= 0) return '--';
-  if (num >= 100) return `${Math.round(num)}%`;
-  if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
-  return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
-function formatFixedFeePercent(value) {
-  const num = Number(value || 0);
-  if (!Number.isFinite(num) || num <= 0) return '';
-  return `${num.toFixed(4)}%`;
-}
-
-function formatFeeTierPercent(feeTier, tickSpacing) {
-  const bps = Number(feeTier || 0) || FEE_TIER_BY_TICK_SPACING[Number(tickSpacing)] || 0;
-  if (!Number.isFinite(bps) || bps <= 0) return '';
-  return formatFixedFeePercent(bps / 10000);
-}
-
-function buildPositionPairTitle(position, token0, token1) {
-  const left = String(token0?.symbol || '').trim();
-  const right = String(token1?.symbol || '').trim();
-  if (left && right) return `${left}-${right}`;
-  const rawTitle = String(position?.title || '').trim();
-  if (!rawTitle) return '--';
-  const parts = rawTitle.split('-').map((item) => String(item || '').trim()).filter(Boolean);
-  if (parts.length >= 3) return parts.slice(1, -1).join('-');
-  return rawTitle;
-}
-
-function PositionSmartMoneyRangeSummary({ groups }) {
-  const [expanded, setExpanded] = useState(false);
-  const validGroups = useMemo(() => normalizePositionSmartMoneyGroups(groups), [groups]);
-  const visibleGroups = expanded ? validGroups : validGroups.slice(0, POSITION_SM_RANGE_LIMIT);
-  const hiddenCount = Math.max(0, validGroups.length - visibleGroups.length);
-  if (!validGroups.length) return null;
-  return (
-    <div className="pos-sm-ranges">
-      <div className="pos-sm-ranges-head">
-        <span className="pos-sm-ranges-title">聪明钱金额区间</span>
-        <span className="pos-sm-ranges-count">{validGroups.length}档</span>
-      </div>
-      <div className="pos-sm-ranges-list">
-        {visibleGroups.map((group, index) => (
-          <div
-            key={`${Number(group?.range_percent || 0)}:${Number(group?.position_count || 0)}:${index}`}
-            className="pos-sm-range-chip"
-          >
-            <span className="pos-sm-range-chip-pct">{formatPositionSmartMoneyRangePercent(group?.range_percent)}</span>
-            {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
-              <span className="pos-sm-range-chip-badge">{Number(group.position_count)}个</span>
-            ) : null}
-            <span className="pos-sm-range-chip-amount">{formatUsdCompact(group?.total_amount_usd)}</span>
-          </div>
-        ))}
-      </div>
-      {hiddenCount > 0 ? (
-        <button type="button" className="pos-sm-ranges-toggle" onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? '收起区间' : `更多区间 +${hiddenCount}`}
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 function getKlineIntervalMeta(bar) {
@@ -788,27 +552,6 @@ function resolveHotPoolMarketCap(pool) {
   return parseMetricNumber(pool?.current_token_fdv_usd);
 }
 
-function resolveHotPoolMarketCapDisplay(pool) {
-  const candidates = [
-    pool?.fdv_usd,
-    pool?.current_token_fdv_usd,
-    pool?.market_cap_usd,
-  ];
-  for (const candidate of candidates) {
-    const value = parseMetricNumber(candidate);
-    if (Number.isFinite(value) && value > 0) return value;
-  }
-  return NaN;
-}
-
-function resolveHotPoolMarketCapLabel(pool) {
-  const fdv = parseMetricNumber(pool?.fdv_usd);
-  if (Number.isFinite(fdv) && fdv > 0) return 'FDV';
-  const legacyFDV = parseMetricNumber(pool?.current_token_fdv_usd);
-  if (Number.isFinite(legacyFDV) && legacyFDV > 0) return 'FDV';
-  return '市值';
-}
-
 function normalizeHotPoolsFilter(value) {
   const base = { ...defaultHotPoolsFilter };
   if (!value || typeof value !== 'object') return base;
@@ -968,224 +711,6 @@ function getDexIcon(factoryName) {
     return { src: pancakeLogo, label: m ? `V${m[1]}` : '', color: '#d1884f' };
   }
   return null;
-}
-
-function LoginCodePanel({ loginCode, onCancel, className = '' }) {
-  if (!loginCode) return null;
-  return (
-    <div className={`login-code-box ${className}`.trim()}>
-      <div className="login-code-top">
-        <div className="login-code-badge">验证码</div>
-        <div className="login-code-value">{loginCode}</div>
-      </div>
-      <div className="login-code-cmd-row">
-        <code className="login-code-cmd">/weblogin {loginCode}</code>
-        <button
-          type="button"
-          className="login-copy-btn"
-          onClick={(e) => {
-            navigator.clipboard.writeText(`/weblogin ${loginCode}`);
-            const btn = e.currentTarget;
-            btn.classList.add('copied');
-            setTimeout(() => btn.classList.remove('copied'), 1500);
-          }}
-          aria-label="复制登录指令"
-        >
-          <Copy size={12} className="copy-icon" />
-          <Check size={12} className="check-icon" />
-        </button>
-      </div>
-      <div className="login-code-hint">在 Telegram Bot 中发送上方指令完成登录</div>
-      {onCancel ? (
-        <button type="button" className="ghost-chip" onClick={onCancel}>
-          取消
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function GuestHotPoolsLanding({
-  chain,
-  hotPools,
-  hotPoolsLoading,
-  hotPoolsError,
-  hotPoolsUpdatedAt,
-  loginBusy,
-  loginCode,
-  loginError,
-  onStartLogin,
-  onCancelLogin,
-  onChainChange,
-}) {
-  const rows = Array.isArray(hotPools) ? hotPools.slice(0, GUEST_HOT_POOLS_DISPLAY_LIMIT) : [];
-  const totalFees = rows.reduce((sum, row) => {
-    const value = parseMetricNumber(row?.total_fees);
-    return Number.isFinite(value) ? sum + value : sum;
-  }, 0);
-  const totalVolume = rows.reduce((sum, row) => {
-    const value = parseMetricNumber(row?.total_volume);
-    return Number.isFinite(value) ? sum + value : sum;
-  }, 0);
-  const topFeeRate = rows.reduce((max, row) => {
-    const value = parseMetricNumber(row?.fee_rate);
-    return Number.isFinite(value) ? Math.max(max, value) : max;
-  }, 0);
-
-  return (
-    <main className="guest-shell">
-      <section className="guest-hero">
-        <div className="guest-copy">
-          <div className="guest-kicker">
-            <Flame size={14} />
-            实时热门池子预览
-          </div>
-          <h2>先看市场，再决定是否登录开仓。</h2>
-          <p>
-            未登录状态展示热门池子的部分榜单和核心交易指标。登录后可查看完整工作台、K 线、仓位和开仓操作。
-          </p>
-          <div className="guest-actions">
-            <button
-              type="button"
-              className="primary-btn guest-login-btn"
-              onClick={onStartLogin}
-              disabled={loginBusy}
-            >
-              {loginBusy ? <RefreshCw size={15} className="spin" /> : <img src={telegramLogo} alt="" />}
-              获取 Telegram 登录码
-            </button>
-            <div className="guest-chain-switch" aria-label="切换链">
-              <button
-                type="button"
-                className={`guest-chain-btn ${chain === 'bsc' ? 'active' : ''}`}
-                onClick={() => onChainChange('bsc')}
-              >
-                <img src={bnbLogo} alt="" />
-                BSC
-              </button>
-              <button
-                type="button"
-                className={`guest-chain-btn ${chain === 'base' ? 'active' : ''}`}
-                onClick={() => onChainChange('base')}
-              >
-                <img src={baseLogo} alt="" />
-                Base
-              </button>
-            </div>
-          </div>
-          {loginCode ? (
-            <LoginCodePanel
-              loginCode={loginCode}
-              onCancel={onCancelLogin}
-              className="guest-login-code"
-            />
-          ) : null}
-          {loginError ? <div className="error-text guest-error">{loginError}</div> : null}
-        </div>
-
-        <div className="guest-market-board">
-          <div className="guest-board-head">
-            <div>
-              <span className="guest-board-label">{chain === 'base' ? 'Base' : 'BSC'} 热门池子</span>
-              <strong>热门池子榜</strong>
-            </div>
-            <div className="guest-board-time">
-              {hotPoolsUpdatedAt ? formatUtc8Time(hotPoolsUpdatedAt, true) : '同步中'}
-            </div>
-          </div>
-
-          <div className="guest-metrics">
-            <div>
-              <span>预览池子</span>
-              <strong>{hotPoolsLoading && rows.length === 0 ? '--' : rows.length}</strong>
-            </div>
-            <div>
-              <span>Fees</span>
-              <strong>{rows.length ? formatUsdCompact(totalFees) : '--'}</strong>
-            </div>
-            <div>
-              <span>Volume</span>
-              <strong>{rows.length ? formatUsdCompact(totalVolume) : '--'}</strong>
-            </div>
-            <div>
-              <span>最高费率</span>
-              <strong>{topFeeRate > 0 ? `${topFeeRate.toFixed(3)}%` : '--'}</strong>
-            </div>
-          </div>
-
-          <div className="guest-pool-list">
-            <div className="guest-pool-list-head">
-              <span>Pool</span>
-              <span>5m Fees</span>
-              <span>Vol</span>
-              <span>Rate</span>
-            </div>
-            {hotPoolsLoading && rows.length === 0 ? (
-              Array.from({ length: 6 }).map((_, index) => (
-                <div className="guest-pool-row skeleton" key={`guest-skeleton-${index}`}>
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              ))
-            ) : rows.length > 0 ? (
-              rows.map((pool, index) => {
-                const pair = String(pool?.trading_pair || '--');
-                const factoryName = String(pool?.factory_name || pool?.dex || '');
-                const dex = getDexIcon(factoryName);
-                const protocolVersion = String(pool?.protocol_version || '').trim().toUpperCase();
-                const protocolTagText = protocolVersion || dex?.label || '';
-                const displayTokenLogoUrl = String(pool?.display_token_logo_url || '').trim();
-                const displayTokenSymbol = String(pool?.display_token_symbol || '').trim();
-                const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
-                const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
-                const fees = parseMetricNumber(pool?.total_fees);
-                const volume = parseMetricNumber(pool?.total_volume);
-                const feeRate = parseMetricNumber(pool?.fee_rate);
-                const txCount = parseMetricNumber(pool?.transaction_count);
-                const tokenRisk = normalizeTokenRisk(pool?.token_risk);
-                const hasLowLiquidityRisk = Boolean(tokenRisk?.has_low_liquidity);
-                return (
-                  <div
-                    className={`guest-pool-row ${hasLowLiquidityRisk ? 'low-liquidity' : ''}`}
-                    key={`${pool?.protocol_version || ''}:${pool?.pool_address || pool?.pool_id || index}`}
-                  >
-                    <div className="guest-pool-main">
-                      <span className="guest-rank">{index + 1}</span>
-                      <span className="guest-pool-avatar">
-                        {displayTokenLogoUrl ? <img src={displayTokenLogoUrl} alt="" /> : avatarLabel}
-                      </span>
-                      <span className="guest-pool-name">
-                        <strong>{pair}</strong>
-                        <small>
-                          {protocolTagText ? <span>{protocolTagText}</span> : null}
-                          {Number.isFinite(txCount) && txCount > 0 ? <span>{Math.round(txCount).toLocaleString()} tx</span> : null}
-                          {hasLowLiquidityRisk ? <span className="guest-risk">低流动性</span> : null}
-                        </small>
-                      </span>
-                    </div>
-                    <div className="guest-pool-value">{Number.isFinite(fees) ? formatUsdCompact(fees) : '--'}</div>
-                    <div className="guest-pool-value muted">{Number.isFinite(volume) ? formatUsdCompact(volume) : '--'}</div>
-                    <div className="guest-pool-value accent">{Number.isFinite(feeRate) ? `${feeRate.toFixed(3)}%` : '--'}</div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="guest-empty">
-                {hotPoolsError || '暂无可预览的热门池子数据'}
-              </div>
-            )}
-          </div>
-
-          <div className="guest-board-foot">
-            <LockKeyhole size={14} />
-            登录后开放完整榜单筛选、K 线、仓位和开仓。
-          </div>
-        </div>
-      </section>
-    </main>
-  );
 }
 
 export default function App() {
@@ -1943,7 +1468,8 @@ export default function App() {
     if (!showSettings) return;
     setRefreshIntervalDrafts(Object.fromEntries(Object.entries(refreshIntervals).map(([key, value]) => [key, String(value)])));
     const handler = (e) => {
-      if (!e.target.closest('.settings-wrap')) setShowSettings(false);
+      if (e.target.closest('.settings-wrap') || e.target.closest('.settings-popover')) return;
+      setShowSettings(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -2815,554 +2341,71 @@ export default function App() {
       />
     ),
     hot_pools: (
-      <PanelShell
-        title="热门池子"
-        subtitle={`支持搜索与排序 · 展示前 ${HOT_POOLS_DISPLAY_LIMIT} 条`}
-        icon={Flame}
-        actions={!workMode ? (
-          <div className="settings-wrap" ref={hotPoolsHeightControlRef}>
-            <button
-              type="button"
-              className={`icon-link ${hotPoolsHeightSettingsOpen || hotPoolsPanelHeightCustomized ? 'active' : ''}`}
-              onClick={() => setHotPoolsHeightSettingsOpen((prev) => !prev)}
-              title={`热门池子高度 ${hotPoolsPanelHeight}px`}
-              aria-label="热门池子高度"
-            >
-              <Settings size={14} />
-            </button>
-
-            {hotPoolsHeightSettingsOpen ? (
-              <div className="popover kline-settings-popover panel-height-popover">
-                <div className="kline-filter-popover-head">
-                  <div>
-                    <div className="kline-filter-popover-title">热门池子高度</div>
-                    <div className="kline-filter-popover-sub">仅保存在当前浏览器</div>
-                  </div>
-                  <button
-                    type="button"
-                    className="icon-link"
-                    onClick={() => setHotPoolsHeightSettingsOpen(false)}
-                    title="Close"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                <div className="kline-height-value">{hotPoolsPanelHeight}px</div>
-
-                <input
-                  className="kline-height-slider"
-                  type="range"
-                  min={MIN_HOT_POOLS_PANEL_HEIGHT}
-                  max={MAX_HOT_POOLS_PANEL_HEIGHT}
-                  step="20"
-                  value={hotPoolsPanelHeight}
-                  onChange={(e) => setHotPoolsPanelHeight(clampHotPoolsPanelHeight(e.target.value, hotPoolsDefaultHeightRef.current))}
-                />
-
-                <label className="kline-filter-field">
-                  <span>高度</span>
-                  <div className="kline-height-input-row">
-                    <input
-                      type="number"
-                      min={MIN_HOT_POOLS_PANEL_HEIGHT}
-                      max={MAX_HOT_POOLS_PANEL_HEIGHT}
-                      step="20"
-                      inputMode="numeric"
-                      value={hotPoolsPanelHeight}
-                      onChange={(e) => {
-                        const nextValue = Number(e.target.value);
-                        if (!Number.isFinite(nextValue)) return;
-                        setHotPoolsPanelHeight(clampHotPoolsPanelHeight(nextValue, hotPoolsDefaultHeightRef.current));
-                      }}
-                    />
-                    <span className="kline-height-unit">px</span>
-                  </div>
-                </label>
-
-                <div className="kline-filter-actions">
-                  <button type="button" className="ghost-chip" onClick={resetHotPoolsPanelHeight}>
-                    默认
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      >
-        <div className="hot-pools-toolbar-shell" ref={hotPoolsFilterRef}>
-          <div className="sort-tabs">
-            {[{ key: 'fees', label: 'Fees' }, { key: 'fee_rate', label: 'Fee Rate' }, { key: 'volume', label: 'Volume' }].map((item) => (
-              <button
-                type="button"
-                key={item.key}
-                className={`sort-tab ${hotSort === item.key ? 'active' : ''}`}
-                onClick={() => {
-                  setHotSort(item.key);
-                  setHotInlineSort('');
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`sort-tab icon-only search-toggle ${searchOpen ? 'active' : ''}`}
-              onClick={() => {
-                setHotPoolsFilterOpen(false);
-                setSearchOpen((v) => !v);
-              }}
-              title="搜索池子"
-              aria-label="搜索池子"
-            >
-              <Search size={12} />
-            </button>
-            <button
-              type="button"
-              className={`sort-tab icon-only filter-toggle ${hotPoolsFilterEnabled ? 'active' : ''}`}
-              onClick={() => {
-                if (hotPoolsFilterOpen) {
-                  setHotPoolsFilterOpen(false);
-                  return;
-                }
-                openHotPoolsFilter();
-              }}
-              title="筛选池子"
-              aria-label="筛选池子"
-            >
-              <SlidersHorizontal size={12} />
-              {hotPoolsFilterEnabled ? <span className="hot-filter-dot" /> : null}
-            </button>
-          </div>
-
-          {hotPoolsFilterOpen ? (
-            <div className="popover kline-filter-popover hot-pools-filter-popover">
-              <div className="kline-filter-popover-head">
-                <div>
-                  <div className="kline-filter-popover-title">热门池子筛选</div>
-                  <div className="kline-filter-popover-sub">仅筛选当前已加载的热门池子</div>
-                </div>
-                <button
-                  type="button"
-                  className="icon-link"
-                  onClick={() => setHotPoolsFilterOpen(false)}
-                  title="Close"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-
-              <div className="hot-pools-filter-toggle-row">
-                <div className="hot-pools-filter-toggle-copy">
-                  <span className="hot-pools-filter-toggle-label">筛选状态</span>
-                  <span className="hot-pools-filter-toggle-state">
-                    {hotPoolsFilterDraft.enabled ? '已启用，应用后按下方条件筛选' : '已关闭，条件会保留但不会生效'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className={`ghost-chip ${hotPoolsFilterDraft.enabled ? 'active' : ''}`}
-                  onClick={() => setHotPoolsFilterDraft((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                  aria-pressed={hotPoolsFilterDraft.enabled}
-                  title={hotPoolsFilterDraft.enabled ? '关闭筛选' : '启用筛选'}
-                >
-                  {hotPoolsFilterDraft.enabled ? '已启用' : '已关闭'}
-                </button>
-              </div>
-
-              <label className="kline-filter-field">
-                <span>搜索 (交易对 / 地址)</span>
-                <input
-                  value={hotPoolsFilterDraft.keyword}
-                  onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
-                  placeholder="例如 USDT"
-                />
-              </label>
-
-              <div className="hot-pools-filter-grid">
-                <label className="kline-filter-field">
-                  <span>手续费 ≥ (USD)</span>
-                  <input
-                    value={hotPoolsFilterDraft.minFees}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minFees)}
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>费用率 ≥ (%)</span>
-                  <input
-                    value={hotPoolsFilterDraft.minFeeRate}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minFeeRate)}
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>排除费率 &gt; (%)</span>
-                  <input
-                    value={hotPoolsFilterDraft.maxFeeRate}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, maxFeeRate: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder="可选"
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>活跃费率 ≥ (%)</span>
-                  <input
-                    value={hotPoolsFilterDraft.minActiveFeeRate}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minActiveFeeRate: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder="可选"
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>TVL ≥ (USD)</span>
-                  <input
-                    value={hotPoolsFilterDraft.minTvl}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minTvl)}
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>FDV ≥ (USD)</span>
-                  <input
-                    value={hotPoolsFilterDraft.minMarketCap}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minMarketCap: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder="可选"
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>交易量 ≥ (USD)</span>
-                  <input
-                    value={hotPoolsFilterDraft.minVolume}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minVolume)}
-                  />
-                </label>
-
-                <label className="kline-filter-field">
-                  <span>交易笔数 ≥</span>
-                  <input
-                    value={hotPoolsFilterDraft.minTxCount}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTxCount: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder="可选"
-                  />
-                </label>
-
-                <label className="kline-filter-field hot-pools-filter-field-wide">
-                  <span>OKX 低流动性</span>
-                  <select
-                    value={hotPoolsFilterDraft.riskFilter}
-                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, riskFilter: e.target.value }))}
-                  >
-                    {HOT_POOLS_RISK_FILTER_OPTIONS.map((item) => (
-                      <option key={item.key} value={item.key}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="kline-filter-actions">
-                <button type="button" className="ghost-chip active" onClick={applyHotPoolsFilter}>
-                  应用
-                </button>
-                <button type="button" className="ghost-chip" onClick={resetHotPoolsFilter}>
-                  默认
-                </button>
-                <button type="button" className="ghost-chip" onClick={clearHotPoolsFilter}>
-                  清空条件
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {searchOpen && (
-          <div className="search-row">
-            <Search size={14} />
-            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索交易对/地址" autoFocus />
-          </div>
-        )}
-
-        {hotPoolsError ? <div className="error-text">{hotPoolsError}</div> : null}
-        {hotTokenFilter?.address ? (
-          <div className="hot-token-filter-bar">
-            <span className="hot-token-filter-chip">
-              同币筛选: {hotTokenFilter.symbol || shortAddress(hotTokenFilter.address, 6, 4)}
-            </span>
-            <button type="button" className="mini-link accent" onClick={() => setHotTokenFilter(null)}>
-              清除
-            </button>
-          </div>
-        ) : null}
-        {hotPoolsFilterEnabled && !hotPoolsLoading && hotPools.length > 0 && filteredHotPools.length === 0 ? (
-          <div className="hot-filter-empty-note">
-            当前筛选条件下没有可展示的热门池子，调整筛选或清空条件后再试。
-          </div>
-        ) : null}
-
-        <div className="data-list">
-          {hotPoolsLoading && filteredHotPools.length === 0 ? (
-            <EmptyState text="正在加载热门池子..." />
-          ) : filteredHotPools.length === 0 ? (
-            <EmptyState text="暂无可展示的池子数据" />
-          ) : (
-            filteredHotPools.slice(0, HOT_POOLS_DISPLAY_LIMIT).map((pool, idx) => {
-              const addr = normalizePoolAddress(pool?.pool_address || '');
-              const selected = selectedPoolAddress && addr === selectedPoolAddress;
-              const feePct = Number(pool?.fee_percentage || 0);
-              const feeRate = Number(pool?.fee_rate || 0);
-              const volume = Number(pool?.total_volume || 0);
-              const totalFees = Number(pool?.total_fees || 0);
-              const tvl = Number(pool?.current_pool_value || 0);
-              const marketCap = resolveHotPoolMarketCapDisplay(pool);
-              const marketCapLabel = resolveHotPoolMarketCapLabel(pool);
-              const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
-              const activeLiquidityFeeRate = computeHotPoolActiveFeeRate(pool);
-              const txCount = Number(pool?.transaction_count || 0);
-              const priceDisplay = String(pool?.price_display || '');
-              const feeRateAvailable = Number.isFinite(tvl) && tvl > 0 && Number.isFinite(feeRate);
-              const feeRateText = feeRateAvailable ? `${feeRate.toFixed(3)}%` : '--';
-              const activeLiquidityFeeRateAvailable = Number.isFinite(activeLiquidityFeeRate);
-              const activeLiquidityFeeRateText = activeLiquidityFeeRateAvailable ? `${activeLiquidityFeeRate.toFixed(3)}%` : '--';
-              const factoryName = String(pool?.factory_name || pool?.dex || '');
-              const userPosUsd = Number(pool?.userPositionUsd || 0);
-              const pair = String(pool?.trading_pair || '--');
-              const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
-              const protocolVersion = String(pool?.protocol_version || '').trim().toUpperCase();
-              const displayTokenLogoUrl = String(pool?.display_token_logo_url || '').trim();
-              const displayTokenSymbol = String(pool?.display_token_symbol || '').trim();
-              const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
-              const dex = getDexIcon(factoryName);
-              const protocolTagText = protocolVersion || dex?.label || '';
-              const avatarSrc = displayTokenLogoUrl;
-              const filterToken = resolveHotPoolFilterToken(pool);
-              const avatarFilterActive = filterToken && hotTokenFilter?.address === filterToken.address;
-              const badges = parseHotPoolBadges(pool?.badges);
-              const tokenRisk = normalizeTokenRisk(pool?.token_risk);
-              const tokenRiskTone = tokenRiskToneClass(tokenRisk);
-              const hasLowLiquidityRisk = Boolean(tokenRisk?.has_low_liquidity);
-
-              const isHighFeeRate = feeRate >= 1;
-
-              return (
-                <div
-                  key={`${pool?.protocol_version || ''}:${addr || idx}`}
-                  className={`pool-row ${selected ? 'selected' : ''} ${isHighFeeRate ? 'high-fee' : ''} ${hasLowLiquidityRisk ? 'low-liquidity' : ''}`}
-                  onClick={() => selectPool({ ...pool, chain }, chain)}
-                >
-                  {/* Avatar */}
-                  <button
-                    type="button"
-                    className={`pool-avatar ${filterToken ? 'filterable' : ''} ${avatarFilterActive ? 'active' : ''}`}
-                    title={filterToken ? `筛选 ${filterToken.symbol} 的池子` : '该池子无法按单一非稳定币筛选'}
-                    onClick={(e) => {
-                      if (!filterToken) return;
-                      e.stopPropagation();
-                      setHotTokenFilter((prev) => (
-                        prev?.address === filterToken.address ? null : filterToken
-                      ));
-                    }}
-                  >
-                    {avatarSrc ? (
-                      <>
-                        <img
-                          src={avatarSrc}
-                          alt=""
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            const fallback = e.currentTarget.parentElement?.querySelector('.pool-avatar-fallback');
-                            if (fallback) fallback.style.display = 'flex';
-                          }}
-                        />
-                        <span className="pool-avatar-fallback" style={{ display: 'none' }}>{avatarLabel}</span>
-                      </>
-                    ) : <span>{avatarLabel}</span>}
-                  </button>
-
-                  {/* Info block */}
-                  <div className="pool-info">
-                    <div className="pool-name-line">
-                      <span className="pool-name">{pair}</span>
-                      <button type="button" className="copy-tiny" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }} title="复制地址">
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
-                      </button>
-                      {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => formatFixedFeePercent(v)} /></span>}
-                      {protocolTagText && (
-                        <span className="tag tag-dex tag-dex-inline">
-                          {dex?.src ? <img src={dex.src} alt="" /> : null}
-                          <span>{protocolTagText}</span>
-                        </span>
-                      )}
-                      {userPosUsd > 0 && (
-                        <span className="tag tag-purple">
-                          持仓 <NumberFlowValue value={userPosUsd} formatter={(v) => formatUsdCompact(v)} />
-                        </span>
-                      )}
-                      {tokenRisk ? (
-                        <span
-                          className={`tag pool-risk-chip is-${tokenRiskTone} ${hasLowLiquidityRisk ? 'is-low-liquidity' : ''}`}
-                          title={tokenRiskSummary(tokenRisk)}
-                        >
-                          {hasLowLiquidityRisk ? <AlertTriangle size={11} strokeWidth={2.4} aria-hidden="true" /> : null}
-                          {tokenRiskLabel(tokenRisk)}
-                        </span>
-                      ) : null}
-                    </div>
-                    {badges.length > 0 && (
-                      <div className="pool-badge-line">
-                        {badges.map((badge, badgeIdx) => (
-                          <span
-                            key={`${badge.text}:${badgeIdx}`}
-                            className={`tag tag-badge pool-badge-chip ${
-                              /(^|[\s·])(?:币安\s*alpha|binance\s*alpha|alpha)(?:$|[\s·])/i.test(String(badge.text || '')) ? 'pool-badge-chip-alpha' : ''
-                            }`}
-                            data-tip={badge.tip}
-                            aria-label={badge.tip}
-                            tabIndex={0}
-                          >
-                            <span>{badge.text}</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="pool-meta-line">
-                      <button
-                        type="button"
-                        className={`pool-meta-sort meta-cyan ${hotInlineSort === 'volume' ? 'active' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHotInlineSort((prev) => (prev === 'volume' ? '' : 'volume'));
-                        }}
-                        title="按 Vol 降序排序"
-                      >
-                        <span>Vol</span>
-                        <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b>
-                      </button>
-                      <span className="dot-sep" />
-                      <button
-                        type="button"
-                        className={`pool-meta-sort meta-cyan ${hotInlineSort === 'tvl' ? 'active' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHotInlineSort((prev) => (prev === 'tvl' ? '' : 'tvl'));
-                        }}
-                        title="按 TVL 降序排序"
-                      >
-                        <span>TVL</span>
-                        <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b>
-                      </button>
-                      {marketCapAvailable ? (
-                        <>
-                          <span className="dot-sep" />
-                          <span className="pool-meta-static meta-green">
-                            <span>{marketCapLabel}</span>
-                            <b><NumberFlowValue value={marketCap} formatter={(v) => formatUsdCompact(v)} /></b>
-                          </span>
-                        </>
-                      ) : null}
-                      <span className="dot-sep" />
-                      <button
-                        type="button"
-                        className={`pool-meta-sort meta-orange ${hotInlineSort === 'tx_count' ? 'active' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHotInlineSort((prev) => (prev === 'tx_count' ? '' : 'tx_count'));
-                        }}
-                        title="按笔数降序排序"
-                      >
-                        <b><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></b>
-                      </button>
-                      <span className="dot-sep" />
-                      <button
-                        type="button"
-                        className={`pool-meta-sort meta-accent ${hotInlineSort === 'fee_rate' ? 'active' : ''} ${feeRateAvailable ? '' : 'muted'}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHotInlineSort((prev) => (prev === 'fee_rate' ? '' : 'fee_rate'));
-                        }}
-                        title="按费率降序排序"
-                      >
-                        <span>费率</span>
-                        <b>
-                          {feeRateAvailable ? (
-                            <NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} />
-                          ) : '--'}
-                        </b>
-                      </button>
-                      <span className="dot-sep" />
-                      <button
-                        type="button"
-                        className={`pool-meta-sort meta-gold ${hotInlineSort === 'active_fee_rate' ? 'active' : ''} ${activeLiquidityFeeRateAvailable ? '' : 'muted'}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHotInlineSort((prev) => (prev === 'active_fee_rate' ? '' : 'active_fee_rate'));
-                        }}
-                        title="按活跃降序排序"
-                      >
-                        <span>活跃</span>
-                        <b>
-                          {activeLiquidityFeeRateAvailable ? (
-                            <NumberFlowValue value={activeLiquidityFeeRate} formatter={() => activeLiquidityFeeRateText} />
-                          ) : activeLiquidityFeeRateText}
-                        </b>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Values block */}
-                  <div className="pool-values">
-                    <div className="pool-main-val">
-                      <NumberFlowValue
-                        value={hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees}
-                        formatter={(v) => hotSort === 'fee_rate' ? (Number(v) > 0 ? `${Number(v).toFixed(3)}%` : '--') : formatUsdCompact(v)}
-                      />
-                    </div>
-                    {priceDisplay ? (
-                      <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`} title={priceDisplay}>
-                        <NumberFlowValue value={priceDisplay} formatter={() => formatPriceDisplay(priceDisplay)} />
-                      </div>
-                    ) : hotSort !== 'fee_rate' ? (
-                      <div className={`pool-sub-val purple ${feeRateAvailable ? '' : 'muted'}`}>
-                        {feeRateAvailable ? (
-                          <NumberFlowValue value={feeRate} formatter={() => feeRateText} />
-                        ) : feeRateText}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {/* Action */}
-                  <button
-                    type="button"
-                    className="pool-buy-btn"
-                    aria-label="开仓"
-                    onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}
-                  >
-                    <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                    <span className="open-buy-text">开仓</span>
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="panel-footnote">
-          更新时间: {hotPoolsUpdatedAt ? new Date(hotPoolsUpdatedAt).toLocaleTimeString() : '--'}
-        </div>
-        {renderOperationProgress('hot_pools')}
-      </PanelShell>
+      <HotPoolsPanel
+        workMode={workMode}
+        displayLimit={HOT_POOLS_DISPLAY_LIMIT}
+        minPanelHeight={MIN_HOT_POOLS_PANEL_HEIGHT}
+        maxPanelHeight={MAX_HOT_POOLS_PANEL_HEIGHT}
+        panelHeight={hotPoolsPanelHeight}
+        heightSettingsOpen={hotPoolsHeightSettingsOpen}
+        panelHeightCustomized={hotPoolsPanelHeightCustomized}
+        heightControlRef={hotPoolsHeightControlRef}
+        filterRef={hotPoolsFilterRef}
+        hotPools={hotPools}
+        filteredHotPools={filteredHotPools}
+        hotPoolsLoading={hotPoolsLoading}
+        hotPoolsError={hotPoolsError}
+        hotPoolsUpdatedAt={hotPoolsUpdatedAt}
+        hotSort={hotSort}
+        hotInlineSort={hotInlineSort}
+        hotPoolsFilterOpen={hotPoolsFilterOpen}
+        hotPoolsFilterEnabled={hotPoolsFilterEnabled}
+        hotPoolsFilterDraft={hotPoolsFilterDraft}
+        hotPoolsFilterDefaults={HOT_POOLS_FILTER_DEFAULTS}
+        hotPoolsRiskFilterOptions={HOT_POOLS_RISK_FILTER_OPTIONS}
+        hotTokenFilter={hotTokenFilter}
+        keyword={keyword}
+        searchOpen={searchOpen}
+        selectedPoolAddress={selectedPoolAddress}
+        chain={chain}
+        getDexIcon={getDexIcon}
+        onPanelHeightToggle={() => setHotPoolsHeightSettingsOpen((prev) => !prev)}
+        onPanelHeightClose={() => setHotPoolsHeightSettingsOpen(false)}
+        onPanelHeightChange={(value) => setHotPoolsPanelHeight(clampHotPoolsPanelHeight(value, hotPoolsDefaultHeightRef.current))}
+        onPanelHeightReset={resetHotPoolsPanelHeight}
+        onHotSortChange={(key) => {
+          setHotSort(key);
+          setHotInlineSort('');
+        }}
+        onHotInlineSortChange={setHotInlineSort}
+        onSearchToggle={() => {
+          setHotPoolsFilterOpen(false);
+          setSearchOpen((v) => !v);
+        }}
+        onKeywordChange={setKeyword}
+        onFilterToggle={() => {
+          if (hotPoolsFilterOpen) {
+            setHotPoolsFilterOpen(false);
+            return;
+          }
+          openHotPoolsFilter();
+        }}
+        onFilterClose={() => setHotPoolsFilterOpen(false)}
+        onFilterDraftChange={setHotPoolsFilterDraft}
+        onFilterApply={applyHotPoolsFilter}
+        onFilterReset={resetHotPoolsFilter}
+        onFilterClear={clearHotPoolsFilter}
+        onTokenFilterClear={() => setHotTokenFilter(null)}
+        onToggleTokenFilter={(filterToken) => {
+          setHotTokenFilter((prev) => (
+            prev?.address === filterToken.address ? null : filterToken
+          ));
+        }}
+        onCopyAddress={copyAddr}
+        onSelectPool={selectPool}
+        onOpenPosition={openPositionModal}
+        operationProgress={renderOperationProgress('hot_pools')}
+      />
     ),
 
     gmgn_kline: (
@@ -3381,14 +2424,17 @@ export default function App() {
               <div className="kline-toolbar-group">
                 {klineTokenOptions.length > 1 ? (
                   klineTokenOptions.map((item) => (
-                    <button
+                    <Button
                       key={item.key}
                       type="button"
+                      variant="ghost"
+                      size="sm"
+                      active={klineActiveTokenSide === item.key}
                       className={`ghost-chip ${klineActiveTokenSide === item.key ? 'active' : ''}`}
                       onClick={() => setKlineTokenSide(item.key)}
                     >
                       {item.symbol}
-                    </button>
+                    </Button>
                   ))
                 ) : (
                   <div className="kline-token-pill">
@@ -3399,27 +2445,32 @@ export default function App() {
 
               <div className="kline-toolbar-group">
                 {KLINE_INTERVALS.map((item) => (
-                  <button
+                  <Button
                     key={item.key}
                     type="button"
+                    variant="ghost"
+                    size="sm"
+                    active={klineInterval === item.key}
                     className={`ghost-chip ${klineInterval === item.key ? 'active' : ''}`}
                     onClick={() => setKlineInterval(item.key)}
                   >
                     {item.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
 
               <div className="kline-toolbar-group align-right">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   className="ghost-chip"
                   onClick={refreshKline}
                   disabled={klineLoading}
                 >
                   <RefreshCw size={12} />
                   刷新
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -3447,23 +2498,25 @@ export default function App() {
                 {KLINE_DRAW_TOOLS.map((tool) => {
                   const Icon = tool.icon;
                   return (
-                    <button
+                    <IconButton
                       key={tool.key}
                       type="button"
                       className={`kline-tool-btn ${klineDrawTool === tool.key ? 'active' : ''}`}
+                      active={klineDrawTool === tool.key}
                       onClick={() => setKlineDrawTool(tool.key)}
                       title={tool.title}
                       aria-label={tool.title}
                     >
                       <Icon size={16} />
-                    </button>
+                    </IconButton>
                   );
                 })}
 
                 <div className="kline-filter-shell">
-                  <button
+                  <IconButton
                     type="button"
                     className={`kline-tool-btn ${klineMarkerFilterOpen || klineFilterActive ? 'active' : ''}`}
+                    active={klineMarkerFilterOpen || klineFilterActive}
                     onClick={() => {
                       setKlineHeightSettingsOpen(false);
                       setKlineMarkerFilterOpen((prev) => !prev);
@@ -3472,7 +2525,7 @@ export default function App() {
                     aria-label="气泡筛选"
                   >
                     <SlidersHorizontal size={16} />
-                  </button>
+                  </IconButton>
 
                   {klineMarkerFilterOpen ? (
                     <div className="popover kline-filter-popover tool-dock">
@@ -3481,19 +2534,20 @@ export default function App() {
                           <div className="kline-filter-popover-title">气泡筛选</div>
                           <div className="kline-filter-popover-sub">仅筛选当前已加载的气泡</div>
                         </div>
-                        <button
+                        <IconButton
                           type="button"
                           className="icon-link"
                           onClick={() => setKlineMarkerFilterOpen(false)}
                           title="Close"
+                          aria-label="Close"
                         >
                           <X size={14} />
-                        </button>
+                        </IconButton>
                       </div>
 
                       <label className="kline-filter-field">
                         <span>最低金额</span>
-                        <input
+                        <Input
                           type="number"
                           min="0"
                           step="100"
@@ -3575,9 +2629,10 @@ export default function App() {
                   ) : null}
                 </div>
 
-                <button
+                <IconButton
                   type="button"
                   className={`kline-tool-btn ${klineHeightSettingsOpen || klineChartHeightCustomized ? 'active' : ''}`}
+                  active={klineHeightSettingsOpen || klineChartHeightCustomized}
                   onClick={() => {
                     setKlineMarkerFilterOpen(false);
                     setKlineHeightSettingsOpen((prev) => !prev);
@@ -3586,9 +2641,9 @@ export default function App() {
                   aria-label="图表高度"
                 >
                   <Settings size={16} />
-                </button>
+                </IconButton>
 
-                <button
+                <IconButton
                   type="button"
                   className="kline-tool-btn"
                   onClick={clearKlineDrawing}
@@ -3597,7 +2652,7 @@ export default function App() {
                   aria-label="Clear"
                 >
                   <X size={16} />
-                </button>
+                </IconButton>
 
                 {klineHeightSettingsOpen ? (
                   <div className="popover kline-settings-popover tool-dock">
@@ -3606,32 +2661,32 @@ export default function App() {
                         <div className="kline-filter-popover-title">图表高度</div>
                         <div className="kline-filter-popover-sub">仅保存在当前浏览器</div>
                       </div>
-                      <button
+                      <IconButton
                         type="button"
                         className="icon-link"
                         onClick={() => setKlineHeightSettingsOpen(false)}
                         title="Close"
+                        aria-label="Close"
                       >
                         <X size={14} />
-                      </button>
+                      </IconButton>
                     </div>
 
                     <div className="kline-height-value">{klineChartHeight}px</div>
 
-                    <input
+                    <Slider
                       className="kline-height-slider"
-                      type="range"
                       min={MIN_KLINE_CHART_HEIGHT}
                       max={MAX_KLINE_CHART_HEIGHT}
-                      step="20"
-                      value={klineChartHeight}
-                      onChange={(e) => setKlineChartHeight(clampKlineChartHeight(e.target.value))}
+                      step={20}
+                      value={[klineChartHeight]}
+                      onValueChange={([value]) => setKlineChartHeight(clampKlineChartHeight(value))}
                     />
 
                     <label className="kline-filter-field">
                       <span>高度</span>
                       <div className="kline-height-input-row">
-                        <input
+                        <Input
                           type="number"
                           min={MIN_KLINE_CHART_HEIGHT}
                           max={MAX_KLINE_CHART_HEIGHT}
@@ -3708,332 +2763,32 @@ export default function App() {
     ),
 
     positions: (
-      <PanelShell
-        title="仓位"
-        subtitle={
-          positions?.wallet?.address ? shortAddress(positions.wallet.address, 8, 6) : '钱包未连接'
-        }
-        icon={BriefcaseBusiness}
-      >
-        {positionsError ? <div className="error-text">{positionsError}</div> : null}
-
-        {(() => {
-          const multi = Array.isArray(walletBalances) && walletBalances.length > 1;
-          const allWalletsUsd = multi
-            ? walletBalances.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0)
-            : null;
-          const walletUsd = allWalletsUsd !== null ? allWalletsUsd : (summary?.wallet_usd ?? 0);
-          const totalUsd = walletUsd + Number(summary?.position_usd || 0) + Number(summary?.fee_usd || 0);
-          const walletMetricCards = multi
-            ? walletBalances.map((wb, idx) => ({
-                key: String(wb?.id || wb?.address || idx),
-                label: wb?.name || shortAddress(wb?.address || '', 6, 4) || `钱包 ${idx + 1}`,
-                value: wb?.stable_balance !== 'N/A' ? formatUsd(wb.stable_balance) : '$--',
-              }))
-            : [
-                {
-                  key: 'wallet-total',
-                  label: '钱包',
-                  value: formatUsd(walletUsd),
-                },
-              ];
-          const summaryMetricCount = walletMetricCards.length + 3;
-          return (
-              <div
-                className="summary-grid summary-grid-wallets"
-                style={{ '--summary-wallet-cols': summaryMetricCount }}
-              >
-                <MetricCard label="总资产" value={formatUsd(totalUsd)} tone="strong" />
-                {walletMetricCards.map((card) => (
-                  <MetricCard key={card.key} label={card.label} value={card.value} />
-                ))}
-                <MetricCard label="仓位" value={formatUsd(summary?.position_usd)} />
-                <MetricCard label="手续费" value={formatUsd(summary?.fee_usd)} />
-              </div>
-          );
-        })()}
-
-        {(() => {
-          const warnings = Array.from(
-            new Set(
-              (Array.isArray(positions?.warnings) ? positions.warnings : [])
-                .map((item) => String(item || '').trim())
-                .filter(Boolean),
-            ),
-          );
-          if (warnings.length === 0) return null;
-          return (
-            <div className="mt-3">
-              {warnings.map((warning, index) => (
-                <div key={`${warning}-${index}`} className="warning-box">
-                  <AlertTriangle size={14} />
-                  <span>{warning}</span>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-
-        <div className="data-list">
-          {positionsLoading && sortedPositions.length === 0 ? (
-            <EmptyState text="正在加载仓位..." />
-          ) : sortedPositions.length === 0 ? (
-            <EmptyState text="暂无仓位数据" />
-          ) : (
-            sortedPositions.slice(0, 50).map((p, idx) => {
-              const taskId = Number(p?.task_id || 0);
-              const statusLabel = String(p?.status_label || '运行中');
-              const pnl = Number(p?.absolute_pnl_usd || 0);
-              const hasPnl = Boolean(p?.has_pnl) || Number.isFinite(pnl) && pnl !== 0;
-              const totalVal = Number(p?.current_value_usd || p?.totals?.total_usd || 0);
-              const inRange = Boolean(p?.in_range);
-              const token0 = p?.token_rows?.[0];
-              const token1 = p?.token_rows?.[1];
-              const taskRangeLo = Number(p?.task_range_lower_pct);
-              const taskRangeUp = Number(p?.task_range_upper_pct);
-              const taskAmount = Number(p?.task_amount_usdt);
-              const hasTaskRange = Number.isFinite(taskRangeLo) && taskRangeLo > 0 && Number.isFinite(taskRangeUp) && taskRangeUp > 0;
-              const taskRangeSymmetric = hasTaskRange ? Math.abs(taskRangeLo - taskRangeUp) < 0.01 : false;
-              const taskRangeHalfWidth = hasTaskRange ? ((taskRangeLo + taskRangeUp) / 2) : null;
-              const taskRangeTotalWidth = hasTaskRange ? (taskRangeLo + taskRangeUp) : null;
-              const tickSpacing = Number(p?.tick_spacing);
-              const gridStepPct = Number.isFinite(tickSpacing) && tickSpacing > 0
-                ? ((Math.pow(1.0001, tickSpacing) - 1) * 100)
-                : null;
-              const taskRangeLabel = hasTaskRange
-                ? (taskRangeSymmetric
-                  ? `±${taskRangeHalfWidth.toFixed(2)}%`
-                  : `下 ${taskRangeLo.toFixed(2)}% / 上 ${taskRangeUp.toFixed(2)}%`)
-                : '';
-              const taskRangeSummary = hasTaskRange && Number.isFinite(taskRangeTotalWidth)
-                ? `${taskRangeLabel}（总宽 ${taskRangeTotalWidth.toFixed(2)}%）`
-                : '';
-              const priceRange = computePriceRange(p);
-              const poolAddress = normalizePoolAddress(p?.pool_id || p?.pool_address);
-              const smartMoneyRangeGroups = poolAddress
-                ? positionSmartMoneyRanges[poolAddress]?.groups
-                : [];
-              const positionWalletMeta = walletMetaByKey.get(`id:${Number(p?.wallet_id || 0)}`) ||
-                walletMetaByKey.get(`addr:${normalizeWalletAddress(p?.wallet_address)}`);
-              const positionWalletText = positionWalletMeta?.label ||
-                shortAddress(normalizeWalletAddress(p?.wallet_address) || '', 6, 4) ||
-                '默认钱包';
-              const pairTitle = buildPositionPairTitle(p, token0, token1);
-              const feeLabel = formatFeeTierPercent(p?.fee_tier, p?.tick_spacing);
-              const dex = getDexIcon(`${String(p?.exchange || '').trim()} ${String(p?.version || '').trim()}`);
-              const currentTaskMode = normalizeTaskMode(p?.task_mode, p?.task_paused);
-              const currentTaskModeMeta = getTaskModeMeta(currentTaskMode);
-
-              const statusClass = statusLabel.includes('错误') ? 'st-error' :
-                statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
-                statusLabel.includes('等待') ? 'st-wait' : 'st-ok';
-
-              return (
-                <div key={String(p?.position_id || idx)} className="pos-card">
-                  <div className="pos-card-header">
-                    <div className="pos-card-left"
-                      onClick={() => selectPool({
-                        pool_id: p?.pool_id,
-                        pool_address: p?.pool_id,
-                        trading_pair: pairTitle,
-                        protocol_version: p?.version,
-                        factory_name: p?.exchange,
-                        token0_address: token0?.address,
-                        token1_address: token1?.address,
-                        token0_symbol: token0?.symbol,
-                        token1_symbol: token1?.symbol,
-                        fee_tier: p?.fee_tier,
-                        fee_percentage: Number(p?.fee_tier || 0) > 0 ? Number(p.fee_tier) / 10000 : 0,
-                        chain: p?.chain || chain,
-                      }, p?.chain || chain)}>
-                      <div className="pos-pair-row">
-                        {dex?.src ? (
-                          <span className="badge badge-dex pos-dex-tag" style={dex.color ? { '--pos-dex-color': dex.color } : undefined}>
-                            <img src={dex.src} alt="" />
-                            {dex.label ? <span>{dex.label}</span> : null}
-                          </span>
-                        ) : null}
-                        <span className="pos-pair-name">{pairTitle || shortAddress(p?.pool_id || '')}</span>
-                        {feeLabel ? <span className="badge badge-fee">{feeLabel}</span> : null}
-                      </div>
-                      <div className="pos-status-row">
-                        <span className={`status-pill ${statusClass}`}>
-                          <span className="status-dot" />
-                          {statusLabel}
-                        </span>
-                        <span className="pos-wallet-chip">钱包 {positionWalletText}</span>
-                        {taskId > 0 && <span className="pos-task-id">#{taskId}</span>}
-                        {taskId > 0 && <span className="pos-wallet-chip">{currentTaskModeMeta.shortLabel}</span>}
-                        <span className={`range-pill ${inRange ? 'in' : 'out'}`}>
-                          {inRange ? 'In Range' : 'Out'}
-                          {priceRange?.outOfRange && (
-                            <span className="range-pill-oor"> {priceRange.outOfRange.direction === 'above' ? '↑' : '↓'}{priceRange.outOfRange.pct.toFixed(1)}%</span>
-                          )}
-                        </span>
-                        {p?.running_since && <span className="pos-running-dur">{formatDuration(p.running_since)}</span>}
-                      </div>
-                    </div>
-                    <div className="pos-card-right-block">
-                      <div className="pos-metrics">
-                        <div className="pos-total">{formatUsd(totalVal)}</div>
-                        {hasPnl && (
-                          <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                            {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
-                          </div>
-                        )}
-                      </div>
-                      {taskId > 0 && (
-                        <div className="pos-card-actions">
-                          {taskId > 0 && (
-                            <div className="pos-action-anchor">
-                              <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos((prev) => prev?.task_id === p?.task_id ? null : p); }} title="任务操作">
-                                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg>
-                              </button>
-                              {taskActionPos?.task_id === p?.task_id && (
-                                <TaskActionMenu
-                                  position={taskActionPos}
-                                  onPause={handleTaskPause}
-                                  onStop={handleTaskStop}
-                                  onPartialExit={handleTaskPartialExit}
-                                  onDelete={handleTaskDelete}
-                                  onEditRange={handleTaskEditRange}
-                                  onWithdrawLiquidity={handleWithdrawLiquidity}
-                                  onSwapDust={handleSwapDust}
-                                  onTriggerRebalance={handleTriggerRebalance}
-                                  onUpdateMode={handleUpdateTaskMode}
-                                  onAddLiquidity={openAddLiquidityModal}
-                                  onClose={() => setTaskActionPos(null)}
-                                />
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 操作按钮行 */}
-                  {taskId > 0 && (
-                    <div className="pos-action-bar">
-                      {TASK_MODE_OPTIONS.map((option) => (
-                        <button
-                          key={`${taskId}-${option.value}`}
-                          className={`pos-action-btn mode ${currentTaskMode === option.value ? 'active' : ''}`}
-                          title={option.description}
-                          onClick={() => handleUpdateTaskMode(taskId, option.value)}
-                          disabled={statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}
-                        >
-                          <span>{option.shortLabel}</span>
-                        </button>
-                      ))}
-                      <button className="pos-action-btn withdraw" title="取回流动性"
-                        onClick={() => handleWithdrawLiquidity(taskId)}
-                        disabled={!p?.has_liquidity || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
-                        </svg>
-                        <span>取回</span>
-                      </button>
-                      <button className="pos-action-btn dust" title="兑换残余"
-                        onClick={() => handleSwapDust(taskId)}
-                        disabled={statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                          <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" />
-                        </svg>
-                        <span>兑残</span>
-                      </button>
-                      <button className="pos-action-btn rebalance" title="立即触发再平衡"
-                        onClick={() => handleTriggerRebalance(taskId)}
-                        disabled={!p?.has_liquidity || statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                          <path d="M12 6V1.5l-4.5 4.5L12 10.5V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 9.74C4.46 10.97 4 12.43 4 14c0 4.42 3.58 8 8 8v4.5l4.5-4.5L12 17.5V20z" />
-                        </svg>
-                        <span>再平衡</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
-                    <PositionSmartMoneyRangeSummary groups={smartMoneyRangeGroups} />
-                  ) : null}
-
-                  {(token0 || token1) && (
-                    <div className="pos-token-table">
-                      <div className="pos-token-head">
-                        <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
-                      </div>
-                      {[token0, token1].filter(Boolean).map((tk) => (
-                        <div key={tk.address || tk.symbol} className="pos-token-row">
-                          <div className="pos-tk-name">
-                            <div>{tk.symbol}</div>
-                            <div className="pos-tk-price">${Number(tk.price_usd || 0).toFixed(4)}</div>
-                          </div>
-                          <div className="pos-tk-cell">
-                            <div>{tk.wallet_amount ?? '--'}</div>
-                            <div className="pos-tk-usd">{formatUsd(tk.wallet_usd)}</div>
-                          </div>
-                          <div className="pos-tk-cell">
-                            <div>{tk.position_amount ?? '--'}</div>
-                            <div className="pos-tk-usd">{formatUsd(tk.position_usd)}</div>
-                          </div>
-                          <div className="pos-tk-cell fee">
-                            <div>{tk.fee_amount ?? '--'}</div>
-                            <div className="pos-tk-usd">{formatUsd(tk.fee_usd)}</div>
-                          </div>
-                        </div>
-                      ))}
-                      <div className="pos-token-foot">
-                        <span>小计</span>
-                        <span>{formatUsd(p?.totals?.wallet_usd)}</span>
-                        <span>{formatUsd(p?.totals?.position_usd)}</span>
-                        <span className="fee">{formatUsd(p?.totals?.fee_usd)}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {priceRange && (
-                    <div className="pos-price-range">
-                      <div className="pos-price-range-header">
-                        <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` 共${priceRange.gridCount}格` : ''}{Number.isFinite(gridStepPct) ? ` · 约${gridStepPct.toFixed(2)}%/格` : ''})</span>
-                        {hasTaskRange && Number.isFinite(taskRangeTotalWidth) && (
-                          <span className="pos-price-range-dev">总宽 {taskRangeTotalWidth.toFixed(2)}%</span>
-                        )}
-                      </div>
-                      <div className="pos-price-range-bar-wrap">
-                        <div className="pos-price-range-bar">
-                          <div className="pos-price-range-limit lo" />
-                          <div className="pos-price-range-limit hi" />
-                          {priceRange.visibleGridLines?.map((pct, i) => (
-                            <div key={i} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
-                          ))}
-                          <div
-                            className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
-                            style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
-                          />
-                        </div>
-                      </div>
-                      <div className="pos-price-range-labels">
-                        <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
-                        <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
-                        <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {hasTaskRange && (
-                    <div className="pos-range-info">
-                      <span>任务区间: {taskRangeSummary}</span>
-                      {Number.isFinite(taskAmount) && taskAmount > 0 && <span> | ${taskAmount.toFixed(2)}</span>}
-                      {priceRange && <span className="pos-range-cur-price">当前价 {compactPrice(priceRange.currentPrice)}</span>}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-        {renderOperationProgress('positions')}
-      </PanelShell>
+      <PositionsPanel
+        positions={positions}
+        positionsLoading={positionsLoading}
+        positionsError={positionsError}
+        sortedPositions={sortedPositions}
+        walletBalances={walletBalances}
+        walletMetaByKey={walletMetaByKey}
+        positionSmartMoneyRanges={positionSmartMoneyRanges}
+        chain={chain}
+        taskActionPos={taskActionPos}
+        onTaskActionPosChange={setTaskActionPos}
+        onSelectPool={selectPool}
+        onTaskPause={handleTaskPause}
+        onTaskStop={handleTaskStop}
+        onTaskPartialExit={handleTaskPartialExit}
+        onTaskDelete={handleTaskDelete}
+        onTaskEditRange={handleTaskEditRange}
+        onWithdrawLiquidity={handleWithdrawLiquidity}
+        onSwapDust={handleSwapDust}
+        onTriggerRebalance={handleTriggerRebalance}
+        onUpdateTaskMode={handleUpdateTaskMode}
+        onAddLiquidity={openAddLiquidityModal}
+        onCloseTaskActionMenu={() => setTaskActionPos(null)}
+        getDexIcon={getDexIcon}
+        operationProgress={renderOperationProgress('positions')}
+      />
     ),
 
     assets: (
@@ -4134,23 +2889,20 @@ export default function App() {
       <div className="bg-grid" />
 
       {workMode && hasInitData ? (
-        <div className="work-mode-bar">
-          <button type="button" className="work-mode-exit-btn" onClick={() => setWorkMode(false)}>
-            <Minimize size={14} />
-            退出工作模式
-          </button>
-        </div>
+        <WorkModeBar onExit={() => setWorkMode(false)} />
       ) : (
         <>
-          <header className="top-bar">
-            <div className="title-block">
-              <div className="eyebrow">lynchL</div>
-              <h1>
-                <img src={siteLogo} alt="lynchL" className="title-logo" />
-              </h1>
-            </div>
-
-            {hasInitData ? (
+          <TopBar
+            hasInitData={hasInitData}
+            loginUser={loginUser}
+            loginCode={loginCode}
+            loginBusy={loginBusy}
+            showSettings={showSettings}
+            onSettingsOpenChange={setShowSettings}
+            onStartLogin={startCodeLogin}
+            onCancelLogin={() => { setLoginCode(''); setLoginError(''); }}
+            onLogout={logout}
+            newsShowcase={(
               <NewsShowcase
                 items={featuredNews}
                 loading={newsLoading}
@@ -4158,165 +2910,38 @@ export default function App() {
                 status={newsStatus}
                 onOpen={openExternal}
               />
-            ) : null}
-
-            <div className="top-actions">
-          {hasInitData && loginUser ? (
-            <div className="user-chip">
-              {loginUser?.photo_url ? (
-                <img src={loginUser.photo_url} alt="avatar" className="user-avatar" />
-              ) : (
-                <div className="user-avatar fallback">{String(loginUser?.first_name || '?').slice(0, 1)}</div>
-              )}
-              <div className="user-meta">
-                <div className="user-name">{loginUser?.first_name || 'Telegram User'}</div>
-                <div className="user-sub">@{loginUser?.username || 'unknown'}</div>
-              </div>
-              <div className="settings-wrap">
-                <button type="button" className="settings-btn" onClick={() => setShowSettings((v) => !v)}>
-                  <Settings size={15} />
-                </button>
-                {showSettings && (
-                  <div className="popover settings-popover">
-                    <div className="settings-row settings-row-stack">
-                      <span className="settings-label">接口刷新间隔</span>
-                      <div className="settings-refresh-list">
-                        {REFRESH_MODULE_CONFIG.map((item) => (
-                          <label key={item.key} className="settings-refresh-row">
-                            <span>{item.label}</span>
-                            <div className="settings-input-wrap">
-                              <input
-                                type="number"
-                                className="settings-input"
-                                min={item.minSec}
-                                max={MAX_REFRESH_INTERVAL_SEC}
-                                value={refreshIntervalDrafts[item.key] ?? String(refreshIntervals[item.key])}
-                                onChange={(e) => updateRefreshIntervalDraft(item.key, e.target.value)}
-                                onBlur={() => commitRefreshIntervalDraft(item.key)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    commitRefreshIntervalDraft(item.key);
-                                    e.currentTarget.blur();
-                                  }
-                                }}
-                              />
-                              <span className="settings-unit">秒</span>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                      <button type="button" className="settings-reset-btn" onClick={resetRefreshIntervals}>
-                        恢复默认刷新
-                      </button>
-                    </div>
-                    <div className="settings-row settings-row-stack">
-                      <span className="settings-label">主题色</span>
-                      <div className="settings-theme-group">
-                        {ACCENT_THEMES.map((theme) => (
-                          <button
-                            key={theme.key}
-                            type="button"
-                            className={`settings-theme-btn ${accentTheme === theme.key ? 'active' : ''}`}
-                            onClick={() => setAccentTheme(theme.key)}
-                          >
-                            <span className={`settings-theme-dot theme-dot-${theme.key}`} />
-                            {theme.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="settings-row settings-row-stack">
-                      <div className="settings-label-line">
-                        <span className="settings-label">底部新闻速度</span>
-                        <span className="settings-value">{newsTickerSpeed}px/s</span>
-                      </div>
-                      <input
-                        type="range"
-                        className="settings-range"
-                        min={NEWS_TICKER_MIN_SPEED}
-                        max={NEWS_TICKER_MAX_SPEED}
-                        step="1"
-                        value={newsTickerSpeed}
-                        onChange={(e) => updateNewsTickerSpeed(e.target.value)}
-                        aria-label="底部新闻滚动速度"
-                      />
-                      <div className="settings-range-scale">
-                        <span>很慢</span>
-                        <span>更快</span>
-                      </div>
-                    </div>
-                    <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
-                    <div className="settings-hint">各模块独立保存到当前浏览器；仓位会按当前是否有仓位自动切换，当前是{hasTrackedPositions ? '有仓位' : '无仓位'}档。</div>
-                    <div className="settings-hint">K 线会按当前展示代币是否命中仓位代币自动切换，当前是{klineHasTrackedPositionToken ? '有对应仓位' : '无对应仓位'}档。</div>
-                    <div className="settings-hint">我的资产最低 60 秒，K 线有仓位档最低 5 秒，无仓位档最低 10 秒。</div>
-                    <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
-                  </div>
-                )}
-              </div>
-              <button type="button" className="logout-btn" onClick={logout}>
-                <LogOut size={13} />
-                退出
-              </button>
-            </div>
-          ) : loginCode && hasInitData ? (
-            <LoginCodePanel
-              loginCode={loginCode}
-              onCancel={() => { setLoginCode(''); setLoginError(''); }}
-            />
-          ) : (
-            <button
-              type="button"
-              className="telegram-icon-btn"
-              onClick={startCodeLogin}
-              disabled={loginBusy}
-              title="获取登录验证码"
-              aria-label="获取登录验证码"
-            >
-              <img src={telegramLogo} alt="Telegram" />
-            </button>
-          )}
-        </div>
-      </header>
+            )}
+            settings={{
+              refreshModuleConfig: REFRESH_MODULE_CONFIG,
+              maxRefreshIntervalSec: MAX_REFRESH_INTERVAL_SEC,
+              refreshIntervalDrafts,
+              refreshIntervals,
+              onRefreshDraftChange: updateRefreshIntervalDraft,
+              onRefreshDraftCommit: commitRefreshIntervalDraft,
+              onResetRefreshIntervals: resetRefreshIntervals,
+              accentThemes: ACCENT_THEMES,
+              accentTheme,
+              onAccentThemeChange: setAccentTheme,
+              newsTickerSpeed,
+              newsTickerMinSpeed: NEWS_TICKER_MIN_SPEED,
+              newsTickerMaxSpeed: NEWS_TICKER_MAX_SPEED,
+              onNewsTickerSpeedChange: updateNewsTickerSpeed,
+              hasTrackedPositions,
+              klineHasTrackedPositionToken,
+            }}
+          />
 
       {loginError && hasInitData ? <div className="error-text top-error">{loginError}</div> : null}
 
-      {hasInitData ? (
-      <section className="config-panel">
-        <div className="config-head">
-          <SlidersHorizontal size={14} />
-          <span>布局与链设置</span>
-        </div>
-
-        <div className="chain-toggles">
-          <button type="button" className={`chain-btn ${chain === 'bsc' ? 'active' : ''}`} onClick={() => setChain('bsc')}>
-            <img src={bnbLogo} alt="BSC" className="chain-icon" />
-            <span>BSC</span>
-          </button>
-          <button type="button" className={`chain-btn ${chain === 'base' ? 'active' : ''}`} onClick={() => setChain('base')}>
-            <img src={baseLogo} alt="Base" className="chain-icon" />
-            <span>Base</span>
-          </button>
-        </div>
-
-        <div className="widget-toggles">
-          {availableWidgets.map((item) => (
-            <button
-              type="button"
-              key={item.key}
-              className={`toggle-chip ${widgets.includes(item.key) ? 'active' : ''}`}
-              onClick={() => toggleWidget(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
-          <button type="button" className="work-mode-btn" onClick={() => setWorkMode(true)}>
-            <Maximize size={13} />
-            工作模式
-          </button>
-        </div>
-      </section>
-      ) : null}
+      <WorkbenchConfigPanel
+        hasInitData={hasInitData}
+        chain={chain}
+        onChainChange={setChain}
+        availableWidgets={availableWidgets}
+        widgets={widgets}
+        onToggleWidget={toggleWidget}
+        onEnterWorkMode={() => setWorkMode(true)}
+      />
       </>
       )}
 
@@ -4335,55 +2960,39 @@ export default function App() {
           onChainChange={setChain}
         />
       ) : (
-      <main className={`workbench ${workLayoutClass}`}>
-        {activeWidgets.map((widget) => (
-          <div
-            key={widget.key}
-            className={`module-slot module-${widget.key} ${
-              draggingKey === widget.key ? 'dragging' : ''
-            } ${dragOverKey === widget.key ? 'drop-target' : ''}`}
-            style={widget.key === 'hot_pools' ? { '--hot-pools-panel-height': `${hotPoolsPanelHeight}px` } : undefined}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = 'move';
-              if (draggingKey && draggingKey !== widget.key) {
-                setDragOverKey(widget.key);
-              }
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const from = e.dataTransfer.getData('text/plain') || draggingKey;
-              if (from && from !== widget.key) {
-                setWidgets((prev) => reorderList(prev, from, widget.key));
-              }
-              setDraggingKey('');
-              setDragOverKey('');
-            }}
-            onDragEnd={() => {
-              setDraggingKey('');
-              setDragOverKey('');
-            }}
-          >
-            <div
-              className="drag-hint"
-              draggable
-              title="按住拖动调整模块顺序"
-              onDragStart={(e) => {
-                setDraggingKey(widget.key);
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', widget.key);
-              }}
-              onDragEnd={() => {
-                setDraggingKey('');
-                setDragOverKey('');
-              }}
-            >
-              <GripVertical size={12} />
-            </div>
-            {panelMap[widget.key]}
-          </div>
-        ))}
-      </main>
+      <WorkbenchLayout
+        className={`workbench ${workLayoutClass}`}
+        activeWidgets={activeWidgets}
+        panelMap={panelMap}
+        hotPoolsPanelHeight={hotPoolsPanelHeight}
+        draggingKey={draggingKey}
+        dragOverKey={dragOverKey}
+        onDragOverWidget={(e, widgetKey) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (draggingKey && draggingKey !== widgetKey) {
+            setDragOverKey(widgetKey);
+          }
+        }}
+        onDropWidget={(e, widgetKey) => {
+          e.preventDefault();
+          const from = e.dataTransfer.getData('text/plain') || draggingKey;
+          if (from && from !== widgetKey) {
+            setWidgets((prev) => reorderList(prev, from, widgetKey));
+          }
+          setDraggingKey('');
+          setDragOverKey('');
+        }}
+        onDragEnd={() => {
+          setDraggingKey('');
+          setDragOverKey('');
+        }}
+        onDragStartWidget={(e, widgetKey) => {
+          setDraggingKey(widgetKey);
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', widgetKey);
+        }}
+      />
       )}
 
       {hasInitData ? (
