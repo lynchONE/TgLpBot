@@ -2832,7 +2832,7 @@ export default function App() {
             </button>
 
             {hotPoolsHeightSettingsOpen ? (
-              <div className="kline-settings-popover panel-height-popover">
+              <div className="popover kline-settings-popover panel-height-popover">
                 <div className="kline-filter-popover-head">
                   <div>
                     <div className="kline-filter-popover-title">热门池子高度</div>
@@ -2936,7 +2936,7 @@ export default function App() {
           </div>
 
           {hotPoolsFilterOpen ? (
-            <div className="kline-filter-popover hot-pools-filter-popover">
+            <div className="popover kline-filter-popover hot-pools-filter-popover">
               <div className="kline-filter-popover-head">
                 <div>
                   <div className="kline-filter-popover-title">热门池子筛选</div>
@@ -3475,7 +3475,7 @@ export default function App() {
                   </button>
 
                   {klineMarkerFilterOpen ? (
-                    <div className="kline-filter-popover tool-dock">
+                    <div className="popover kline-filter-popover tool-dock">
                       <div className="kline-filter-popover-head">
                         <div>
                           <div className="kline-filter-popover-title">气泡筛选</div>
@@ -3600,7 +3600,7 @@ export default function App() {
                 </button>
 
                 {klineHeightSettingsOpen ? (
-                  <div className="kline-settings-popover tool-dock">
+                  <div className="popover kline-settings-popover tool-dock">
                     <div className="kline-filter-popover-head">
                       <div>
                         <div className="kline-filter-popover-title">图表高度</div>
@@ -4177,7 +4177,7 @@ export default function App() {
                   <Settings size={15} />
                 </button>
                 {showSettings && (
-                  <div className="settings-popover">
+                  <div className="popover settings-popover">
                     <div className="settings-row settings-row-stack">
                       <span className="settings-label">接口刷新间隔</span>
                       <div className="settings-refresh-list">

@@ -1,0 +1,167 @@
+/* Settings */
+.settings-wrap {
+  position: relative;
+}
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition-base), background var(--transition-base);
+}
+.settings-btn:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.1);
+}
+.settings-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-popover);
+  min-width: 280px;
+  padding: 14px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-label {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.settings-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+}
+.settings-input {
+  width: 50px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 0;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+.settings-input::-webkit-inner-spin-button,
+.settings-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.settings-input[type='number'] {
+  -moz-appearance: textfield;
+}
+.settings-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.settings-row-stack {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-theme-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.settings-theme-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+.settings-theme-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: rgba(148, 163, 184, 0.08);
+}
+.settings-theme-btn.active {
+  color: var(--accent-text);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: var(--accent-soft);
+}
+.settings-theme-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.theme-dot-green {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(7, 10, 12, 0.75);
+}
+.theme-dot-yellow {
+  background: #ffb11a;
+  box-shadow: 0 0 0 1px rgba(7, 10, 12, 0.75);
+}
+
+.login-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  border-radius: 12px;
+  border: 1px solid rgba(134, 153, 184, 0.32);
+  background: rgba(12, 18, 28, 0.98);
+  padding: 12px;
+  z-index: 30;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+}
+
+.login-popover-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-popover-sub,
+.login-hint {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.telegram-widget-host {
+  margin-top: 10px;
+}
+

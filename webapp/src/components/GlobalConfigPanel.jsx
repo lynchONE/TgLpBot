@@ -141,7 +141,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData = 
             <MetricCard label="风险偏好" value={riskTone} />
           </div>
 
-          <div className="am-card config-quick-card">
+          <div className="am-section config-quick-card">
             <div className="am-card-header">
               <div className="am-card-title">
                 <Settings2 size={14} />
@@ -230,7 +230,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData = 
 
 function ConfigSection({ icon: Icon, title, note, children }) {
   return (
-    <section className="am-card">
+    <section className="am-section">
       <div className="am-card-header">
         <div className="am-card-title">
           <Icon size={14} />

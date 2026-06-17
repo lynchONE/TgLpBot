@@ -53,20 +53,20 @@ function clampTick(tick, min, max) {
 const colors = {
     container: 'rgba(15, 21, 32, 0.6)',
     border: 'rgba(134, 153, 184, 0.2)',
-    barInside: 'linear-gradient(to top, rgba(34, 211, 138, 0.85), rgba(34, 211, 138, 0.35))',
+    barInside: 'linear-gradient(to top, rgba(34, 197, 94, 0.85), rgba(34, 197, 94, 0.35))',
     barOutside: 'linear-gradient(to top, rgba(154, 168, 196, 0.45), rgba(154, 168, 196, 0.12))',
     barActive: 'linear-gradient(to top, rgba(255, 196, 0, 0.95), rgba(255, 196, 0, 0.55))',
-    rangeBg: 'rgba(34, 211, 138, 0.1)',
-    handleLower: '#22d38a',
-    handleUpper: '#ff5e76',
+    rangeBg: 'rgba(34, 197, 94, 0.1)',
+    handleLower: '#22c55e',
+    handleUpper: '#f87171',
     currentLine: 'rgba(255, 196, 0, 0.85)',
     currentGlow: '0 0 10px rgba(255, 196, 0, 0.45)',
     priceTagBg: 'rgba(0, 0, 0, 0.45)',
-    priceTagText: '#ecf2ff',
+    priceTagText: '#e8edf7',
     currentTagBg: 'rgba(255, 196, 0, 0.18)',
     currentTagBorder: 'rgba(255, 196, 0, 0.45)',
     currentTagText: '#ffd166',
-    emptyText: '#9aa8c4',
+    emptyText: '#94a3b8',
 };
 
 function formatLiquidityCompact(value) {
@@ -528,11 +528,11 @@ export default function LiquidityDistributionChart({
                         padding: '8px 10px', borderRadius: 10,
                         background: 'rgba(10, 14, 22, 0.96)', border: '1px solid rgba(134, 153, 184, 0.35)',
                         boxShadow: '0 8px 20px rgba(0, 0, 0, 0.45)',
-                        fontSize: 11, lineHeight: 1.5, color: '#ecf2ff',
+                        fontSize: 11, lineHeight: 1.5, color: '#e8edf7',
                         pointerEvents: 'none', zIndex: 30,
                     }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span style={{ color: '#9aa8c4' }}>价格区间</span>
+                            <span style={{ color: '#94a3b8' }}>价格区间</span>
                             {bin.is_active ? <span style={{ fontSize: 9, fontWeight: 700, color: '#ffd166' }}>当前</span> : null}
                         </div>
                         <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 11 }}>
@@ -541,8 +541,8 @@ export default function LiquidityDistributionChart({
                                 : `${formatPriceCompact(lowerDisp)} → ${formatPriceCompact(upperDisp)}`}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                            <span style={{ color: '#9aa8c4' }}>流动性</span>
-                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', color: '#bcff2f', fontWeight: 700 }}>{usdText}</span>
+                            <span style={{ color: '#94a3b8' }}>流动性</span>
+                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', color: '#22c55e', fontWeight: 700 }}>{usdText}</span>
                         </div>
                     </div>
                 );

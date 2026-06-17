@@ -2197,7 +2197,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                             筛选
                         </button>
                         {filterOpen ? (
-                            <div className="kline-filter-popover smd-pool-filter-popover">
+                            <div className="popover kline-filter-popover smd-pool-filter-popover">
                                 <div className="kline-filter-popover-head">
                                     <div>
                                         <div className="kline-filter-popover-title">池子筛选</div>

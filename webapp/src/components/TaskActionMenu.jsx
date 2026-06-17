@@ -73,7 +73,7 @@ export default function TaskActionMenu({ position, onPause, onStop, onPartialExi
     const pct = Number(exitPercent);
     const canSubmit = Number.isFinite(pct) && pct > 0 && pct <= 100;
     return (
-      <div className="task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+      <div className="popover task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
         <div className="task-popover-header">
           <span>撤出仓位比例</span>
           <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
@@ -110,7 +110,7 @@ export default function TaskActionMenu({ position, onPause, onStop, onPartialExi
 
   if (editMode) {
     return (
-      <div className="task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+      <div className="popover task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
         <div className="task-popover-header">
           <span>修改再平衡参数</span>
           <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
@@ -142,7 +142,7 @@ export default function TaskActionMenu({ position, onPause, onStop, onPartialExi
   }
 
   return (
-    <div className="task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+    <div className="popover task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
       <div className="task-popover-header">
         <span>任务 #{taskId}</span>
         <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
