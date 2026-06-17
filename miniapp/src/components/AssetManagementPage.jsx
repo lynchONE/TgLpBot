@@ -1,5 +1,6 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, ChevronRight, Crown, Eraser, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { createChart, AreaSeries, ColorType } from 'lightweight-charts';
 import {
     fetchAssetHistory,
     fetchAssetLPStats,
@@ -359,108 +360,134 @@ function buildAreaChartData(rows) {
     return [{ time: previousDay, value: mapped[0].value }, mapped[0]];
 }
 
-function computeAreaChartPriceRange(points) {
-    if (!Array.isArray(points) || points.length === 0) return null;
-    let min = Infinity;
-    let max = -Infinity;
-    points.forEach((point) => {
-        if (!Number.isFinite(point.value)) return;
-        min = Math.min(min, point.value);
-        max = Math.max(max, point.value);
-    });
-    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-    const spread = max - min;
-    const padding = spread > 0 ? spread * 0.12 : Math.max(Math.abs(max) * 0.02, 1);
-    return {
-        minValue: min - padding,
-        maxValue: max + padding,
-    };
+function measureChartWidth(host) {
+    if (!host) return 0;
+    const rectWidth = host.getBoundingClientRect?.().width;
+    return Math.floor(rectWidth || host.clientWidth || 0);
 }
 
-/* ─── WebView-safe SVG Area Chart ─── */
+/* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
 function LWAreaChart({ data, color = '#10b981', loading = false }) {
+    const containerRef = useRef(null);
+    const chartRef = useRef(null);
+    const seriesRef = useRef(null);
+    const chartData = useMemo(() => buildAreaChartData(data), [data]);
+    const chartDataRef = useRef(chartData);
+    chartDataRef.current = chartData;
+
+    const reflowChart = useCallback(() => {
+        const host = containerRef.current;
+        const chart = chartRef.current;
+        if (!host || !chart) return;
+        const width = Math.max(1, measureChartWidth(host));
+        chart.applyOptions({ width, height: 200 });
+        if (chartDataRef.current.length > 0) {
+            chart.timeScale().fitContent();
+        }
+    }, []);
+
+    const scheduleReflow = useCallback(() => {
+        reflowChart();
+        window.requestAnimationFrame?.(() => reflowChart());
+        window.setTimeout(() => reflowChart(), 120);
+        window.setTimeout(() => reflowChart(), 360);
+    }, [reflowChart]);
+
+    const applyChartData = useCallback(() => {
+        if (!seriesRef.current) return;
+        seriesRef.current.setData(chartDataRef.current);
+        if (chartDataRef.current.length > 0) {
+            scheduleReflow();
+        }
+    }, [scheduleReflow]);
+
+    useEffect(() => {
+        if (loading || !containerRef.current) return undefined;
+        const host = containerRef.current;
+        const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
+        const chart = createChart(host, {
+            width: Math.max(1, measureChartWidth(host)),
+            height: 200,
+            layout: {
+                background: { type: ColorType.Solid, color: 'transparent' },
+                textColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
+                fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                fontSize: 10,
+            },
+            grid: {
+                vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
+                horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
+            },
+            rightPriceScale: {
+                borderVisible: false,
+                scaleMargins: { top: 0.1, bottom: 0.05 },
+            },
+            timeScale: {
+                borderVisible: false,
+                fixLeftEdge: true,
+                fixRightEdge: true,
+                timeVisible: false,
+            },
+            crosshair: {
+                horzLine: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)', style: 2 },
+                vertLine: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)', style: 2 },
+            },
+            handleScroll: false,
+            handleScale: false,
+        });
+        const series = chart.addSeries(AreaSeries, {
+            lineColor: color,
+            lineWidth: 2,
+            topColor: `${color}40`,
+            bottomColor: `${color}05`,
+            priceFormat: { type: 'custom', formatter: (v) => {
+                const abs = Math.abs(v);
+                if (abs >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
+                if (abs >= 1000) return `$${(v / 1000).toFixed(abs >= 10000 ? 0 : 1)}K`;
+                return `$${v.toFixed(0)}`;
+            }},
+            crosshairMarkerRadius: 4,
+            crosshairMarkerBorderColor: color,
+            crosshairMarkerBackgroundColor: isDark ? '#14171c' : '#ffffff',
+        });
+        chartRef.current = chart;
+        seriesRef.current = series;
+        applyChartData();
+
+        let ro = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            ro = new ResizeObserver(() => reflowChart());
+            ro.observe(host);
+        } else {
+            window.addEventListener('resize', reflowChart);
+        }
+        scheduleReflow();
+
+        return () => {
+            ro?.disconnect();
+            window.removeEventListener('resize', reflowChart);
+            chart.remove();
+            chartRef.current = null;
+            seriesRef.current = null;
+        };
+    }, [applyChartData, color, loading, reflowChart, scheduleReflow]);
+
+    useEffect(() => {
+        applyChartData();
+    }, [applyChartData, chartData]);
+
     if (loading) {
         return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 200 }} />;
     }
 
-    const points = buildAreaChartData(data);
-    const priceRange = computeAreaChartPriceRange(points);
-    const hasPoints = points.length >= 2 && priceRange;
-    const width = 320;
-    const height = 200;
-    const padX = 14;
-    const padTop = 12;
-    const padBottom = 18;
-    const plotWidth = width - padX * 2;
-    const plotHeight = height - padTop - padBottom;
-    const minValue = priceRange?.minValue;
-    const maxValue = priceRange?.maxValue;
-    const valueRange = maxValue - minValue;
-    const chartPoints = hasPoints
-        ? points.map((point, index) => {
-            const x = padX + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
-            const y = padTop + (1 - ((point.value - minValue) / valueRange)) * plotHeight;
-            return { x, y };
-        })
-        : [];
-    const linePath = chartPoints.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
-    const firstPoint = chartPoints[0];
-    const lastPoint = chartPoints[chartPoints.length - 1];
-    const areaPath = hasPoints
-        ? `${linePath} L${lastPoint.x.toFixed(2)} ${height - padBottom} L${firstPoint.x.toFixed(2)} ${height - padBottom} Z`
-        : '';
-    const guideYs = [0.2, 0.5, 0.8].map((ratio) => padTop + ratio * plotHeight);
-
     return (
         <div className="relative w-full overflow-hidden rounded-lg" style={{ height }}>
-            {hasPoints ? (
-                <svg
-                    viewBox={`0 0 ${width} ${height}`}
-                    preserveAspectRatio="none"
-                    className="h-full w-full"
-                    role="img"
-                    aria-label="asset trend"
-                >
-                    {guideYs.map((y) => (
-                        <line
-                            key={y}
-                            x1={padX}
-                            x2={width - padX}
-                            y1={y}
-                            y2={y}
-                            stroke="currentColor"
-                            strokeOpacity="0.08"
-                            strokeWidth="1"
-                            className="text-zinc-500 dark:text-white"
-                        />
-                    ))}
-                    <path d={areaPath} fill={color} opacity="0.18" />
-                    <path
-                        d={linePath}
-                        fill="none"
-                        stroke={color}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        vectorEffect="non-scaling-stroke"
-                    />
-                    {lastPoint ? (
-                        <circle
-                            cx={lastPoint.x}
-                            cy={lastPoint.y}
-                            r="3.5"
-                            fill="#0f1116"
-                            stroke={color}
-                            strokeWidth="2"
-                            vectorEffect="non-scaling-stroke"
-                        />
-                    ) : null}
-                </svg>
-            ) : (
-                <div className="flex h-full items-center justify-center text-[11px] text-zinc-400 dark:text-white/35">
+            <div ref={containerRef} className="h-full w-full" />
+            {chartData.length < 2 ? (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-zinc-400 dark:text-white/35">
                     暂无趋势数据
                 </div>
-            )}
+            ) : null}
         </div>
     );
 }

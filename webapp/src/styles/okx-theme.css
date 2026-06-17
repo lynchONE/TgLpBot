@@ -2299,17 +2299,25 @@ body {
 
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
-  grid-template-columns: 36px minmax(0, 1fr) 72px;
+  grid-template-columns: 36px minmax(0, 1fr) 76px;
   grid-template-areas:
     "avatar info values"
-    "meta meta action";
+    "meta meta meta"
+    "action action action";
+  min-height: 132px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
-  width: 72px;
-  min-width: 72px;
-  max-width: 72px;
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-buy-btn,
+.workbench.layout-work-4 .module-hot_pools .pool-buy-btn {
+  justify-self: end;
+  align-self: center;
 }
 
 .module-hot_pools .pool-meta-line {
@@ -2330,7 +2338,35 @@ body {
 .workbench.layout-work-3 .module-hot_pools .pool-meta-line,
 .workbench.layout-4 .module-hot_pools .pool-meta-line,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-line {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr) minmax(0, 1.12fr) !important;
+  gap: 4px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-sort,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-sort,
+.workbench.layout-4 .module-hot_pools .pool-meta-static,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-static {
+  padding: 3px 4px;
+  gap: 2px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-sort > span,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-sort > span,
+.workbench.layout-4 .module-hot_pools .pool-meta-static > span,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-static > span {
+  max-width: 24px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-meta-sort b,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-sort b,
+.workbench.layout-4 .module-hot_pools .pool-meta-static b,
+.workbench.layout-work-4 .module-hot_pools .pool-meta-static b {
+  max-width: calc(100% - 22px);
+}
+
+.workbench.layout-4 .module-hot_pools .pool-metric-delta,
+.workbench.layout-work-4 .module-hot_pools .pool-metric-delta {
+  max-width: 58px;
 }
 
 .module-hot_pools .pool-meta-sort,
