@@ -208,6 +208,8 @@ function formatUSDCompact(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '--';
     const abs = Math.abs(num);
+    if (abs >= 1000000000000) return `$${(num / 1000000000000).toFixed(abs >= 10000000000000 ? 0 : 1).replace(/\.0$/, '')}T`;
+    if (abs >= 1000000000) return `$${(num / 1000000000).toFixed(abs >= 10000000000 ? 0 : 1).replace(/\.0$/, '')}B`;
     if (abs >= 1000000) return `$${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
     if (abs >= 1000) return `$${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
     if (abs >= 100) return `$${num.toFixed(0)}`;

@@ -56,6 +56,17 @@ function formatFixedFeePercent(value) {
   return `${num.toFixed(4)}%`;
 }
 
+function formatCompactCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '--';
+  if (num <= 0) return '0笔';
+  const abs = Math.abs(num);
+  if (abs >= 1000000000) return `${(num / 1000000000).toFixed(abs >= 10000000000 ? 0 : 1).replace(/\.0$/, '')}B笔`;
+  if (abs >= 1000000) return `${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M笔`;
+  if (abs >= 1000) return `${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K笔`;
+  return `${Math.round(num)}笔`;
+}
+
 function HotPoolsHeightSettings({
   open,
   controlRef,
@@ -485,7 +496,7 @@ function HotPoolRow({
             aria-label="按交易笔数降序排序"
             aria-pressed={hotInlineSort === 'tx_count'}
           >
-            <b><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></b>
+            <b><NumberFlowValue value={txCount} formatter={formatCompactCount} /></b>
           </button>
           <span className="dot-sep" />
           <button

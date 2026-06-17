@@ -67,7 +67,7 @@ const usdCompactFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
   notation: 'compact',
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 1,
 });
 
 export function formatUsd(value) {
@@ -79,7 +79,9 @@ export function formatUsd(value) {
 export function formatUsdCompact(value) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return '$--';
-  return usdCompactFormatter.format(n);
+  const abs = Math.abs(n);
+  if (abs >= 1000000000000) return `${n < 0 ? '-' : ''}$${(abs / 1000000000000).toFixed(abs >= 10000000000000 ? 0 : 1).replace(/\.0$/, '')}T`;
+  return usdCompactFormatter.format(n).replace(/\.0([KMBT])$/, '$1');
 }
 
 export function formatPct(value, digits = 2) {

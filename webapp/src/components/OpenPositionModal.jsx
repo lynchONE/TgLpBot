@@ -1778,7 +1778,7 @@ export default function OpenPositionModal({
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>聪明钱区间加载中...</div>
                 ) : null}
 
-                <div style={{
+                <div className="opm-custom-percent-card" style={{
                   padding: 8,
                   borderRadius: 10,
                   border: rangeInputMode === 'percentage'
@@ -1832,7 +1832,7 @@ export default function OpenPositionModal({
                   </div>
                 </div>
 
-                <div style={{
+                <div className="opm-price-editor-card" style={{
                   padding: 12,
                   borderRadius: 16,
                   border: '1px solid rgba(148, 163, 184, 0.18)',
@@ -2450,9 +2450,9 @@ export default function OpenPositionModal({
               ) : null}
 
               <div className="opm-share-card">
-                <div style={{ display: 'grid', gap: 2 }}>
+                <div className="opm-share-card-copy" style={{ display: 'grid', gap: 2 }}>
                   <div className="opm-share-label">预计区间资金占比</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  <div className="opm-share-detail" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                     {shareEstimateInfo?.coverage === 'ok' && Number.isFinite(Number(shareEstimateInfo?.existingLiquidityUsd))
                       ? `按已选区间现有资金 ${formatUsdCompact(shareEstimateInfo.existingLiquidityUsd)} 估算`
                       : (shareEstimateInfo?.coverage === 'out_of_view'
