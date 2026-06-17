@@ -254,6 +254,37 @@ function parseHotPoolBadges(value, limit = 6) {
     return badges;
 }
 
+function isBinanceAlphaBadge(badge) {
+    const text = `${String(badge?.text || '')} ${String(badge?.tip || '')}`.toLowerCase();
+    return /binance\s*alpha|币安\s*alpha|币安alpha|\balpha\b/i.test(text);
+}
+
+function sortHotPoolBadges(badges) {
+    return [...badges].sort((left, right) => {
+        const leftAlpha = isBinanceAlphaBadge(left);
+        const rightAlpha = isBinanceAlphaBadge(right);
+        if (leftAlpha !== rightAlpha) return rightAlpha ? 1 : -1;
+        return String(left?.text || '').localeCompare(String(right?.text || ''), 'zh-CN');
+    });
+}
+
+function HotPoolFeatureBadge({ badge }) {
+    const alpha = isBinanceAlphaBadge(badge);
+    return (
+        <span
+            className={`mini-pool-badge ${alpha ? 'mini-pool-badge-alpha' : ''} group relative inline-flex max-w-[128px] items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold`}
+            title={badge.tip}
+            tabIndex={0}
+        >
+            <span className="truncate">{badge.text}</span>
+            <span className="pointer-events-none absolute left-1/2 top-0 z-20 h-2.5 w-2.5 -translate-x-1/2 -translate-y-[7px] rotate-45 border-r border-b border-cyan-400/20 bg-slate-950/95 opacity-0 invisible transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100" />
+            <span className="pointer-events-none absolute left-1/2 top-0 z-20 w-max max-w-[180px] -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-xl border border-cyan-400/20 bg-slate-950/95 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-slate-100 shadow-[0_14px_30px_rgba(2,8,23,0.35)] opacity-0 invisible transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                {badge.tip}
+            </span>
+        </span>
+    );
+}
+
 function normalizeDexName(dex) {
     const v = String(dex || '').trim().toLowerCase();
     if (!v) return '';
@@ -467,7 +498,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         () => computeActiveLiquidityFeeRate(pool),
         [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],
     );
-    const hotPoolBadges = useMemo(() => parseHotPoolBadges(pool?.badges), [pool?.badges]);
+    const hotPoolBadges = useMemo(() => sortHotPoolBadges(parseHotPoolBadges(pool?.badges)), [pool?.badges]);
     const visibleHotPoolBadges = useMemo(() => hotPoolBadges.slice(0, 2), [hotPoolBadges]);
     const hiddenHotPoolBadgeCount = Math.max(0, hotPoolBadges.length - visibleHotPoolBadges.length);
     const tokenRisk = useMemo(() => normalizeTokenRisk(pool?.token_risk), [pool?.token_risk]);
@@ -591,10 +622,28 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                 ) : '--'}
                             </span>
                         </div>
+                        {hotPoolBadges.length > 0 ? (
+                            <div className="mini-pool-feature-row" aria-label="池子标签">
+                                {visibleHotPoolBadges.map((badge, badgeIdx) => (
+                                    <HotPoolFeatureBadge
+                                        key={`${badge.text}:${badge.tip}:${badgeIdx}`}
+                                        badge={badge}
+                                    />
+                                ))}
+                                {hiddenHotPoolBadgeCount > 0 ? (
+                                    <span
+                                        className="mini-pool-badge mini-pool-badge-more inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+                                        title={hotPoolBadges.slice(visibleHotPoolBadges.length).map((badge) => `${badge.text}: ${badge.tip}`).join(' / ')}
+                                    >
+                                        +{hiddenHotPoolBadgeCount}
+                                    </span>
+                                ) : null}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
-                <div className="mini-pool-values text-right shrink-0 min-w-[110px]">
+                <div className="mini-pool-values text-right min-w-0">
                     <div className="flex items-baseline justify-end gap-1 flex-wrap">
                         <div className={`mini-pool-primary text-base font-extrabold tabular-nums flex items-center ${brand.textClass}`}>
                             {metric === 'volume' ? (
@@ -670,28 +719,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             <img src={gmgnIcon} alt="GMGN" className="h-3.5 w-3.5" />
                             <span>GMGN</span>
                         </button>
-                    ) : null}
-                    {visibleHotPoolBadges.map((badge, badgeIdx) => (
-                        <span
-                            key={`${badge.text}:${badgeIdx}`}
-                            className="mini-pool-badge group relative inline-flex max-w-[120px] items-center rounded-full border border-cyan-400/20 bg-slate-900/85 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_18px_rgba(8,15,30,0.14)] backdrop-blur-sm"
-                            title={badge.tip}
-                            tabIndex={0}
-                        >
-                            <span className="truncate">{badge.text}</span>
-                            <span className="pointer-events-none absolute left-1/2 top-0 z-20 h-2.5 w-2.5 -translate-x-1/2 -translate-y-[7px] rotate-45 border-r border-b border-cyan-400/20 bg-slate-950/95 opacity-0 invisible transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100" />
-                            <span className="pointer-events-none absolute left-1/2 top-0 z-20 w-max max-w-[180px] -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-xl border border-cyan-400/20 bg-slate-950/95 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-slate-100 shadow-[0_14px_30px_rgba(2,8,23,0.35)] opacity-0 invisible transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
-                                {badge.tip}
-                            </span>
-                        </span>
-                    ))}
-                    {hiddenHotPoolBadgeCount > 0 ? (
-                        <span
-                            className="mini-pool-badge inline-flex items-center rounded-full border border-white/10 bg-zinc-900/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-400"
-                            title={hotPoolBadges.slice(visibleHotPoolBadges.length).map((badge) => badge.text).join(' / ')}
-                        >
-                            +{hiddenHotPoolBadgeCount}
-                        </span>
                     ) : null}
                     <PositionBadge pool={pool} />
                 </div>

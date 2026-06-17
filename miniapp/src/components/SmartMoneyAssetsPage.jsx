@@ -242,16 +242,26 @@ export default function SmartMoneyAssetsPage({
         else if (!wallets.length && !smDrillWalletId) { setSelectedWalletId(''); setSelectedWalletMeta(null); setSmartMoneyWallet(null); }
     }, [selectSmartMoneyWallet, selectedWalletId, smDrillWalletId]);
 
-    const mergeSmartMoneyOverview = useCallback((patch) => {
+    const mergeSmartMoneyOverview = useCallback((patch, fields = null) => {
         if (!patch) return;
-        setSmartMoneyOverview(current => ({ ...(current || {}), ...patch }));
+        setSmartMoneyOverview(current => {
+            const next = { ...(current || {}) };
+            const allowed = Array.isArray(fields) ? new Set(fields) : null;
+            Object.entries(patch).forEach(([key, value]) => {
+                if (allowed && !allowed.has(key)) return;
+                next[key] = value;
+            });
+            return next;
+        });
     }, []);
 
     const loadSmartMoneySummary = useCallback(async ({ forceRefresh = false } = {}) => {
         if (!hasInitData || !isAdmin) return;
         try {
             const summary = await fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, section: 'summary', forceRefresh });
-            startTransition(() => { mergeSmartMoneyOverview(summary || {}); });
+            startTransition(() => {
+                mergeSmartMoneyOverview(summary || {}, ['summary', 'today', 'updated_at', 'timezone', 'warnings', 'snapshot_day']);
+            });
         } catch (err) { if (!isIgnorableSmartMoneyDataError(err)) setSmartMoneyError(errorText(err)); }
     }, [apiBaseUrl, hasInitData, initData, isAdmin, mergeSmartMoneyOverview, smartMoneyDays]);
 
@@ -260,7 +270,9 @@ export default function SmartMoneyAssetsPage({
         try {
             const overview = await fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, page: smWalletPage + 1, pageSize: SM_PAGE_SIZE, keyword: smWalletSearch, section: 'wallets', forceRefresh });
             const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
-            startTransition(() => { mergeSmartMoneyOverview(overview || {}); });
+            startTransition(() => {
+                mergeSmartMoneyOverview(overview || {}, ['wallets', 'wallet_page', 'wallet_size', 'wallet_total', 'wallet_total_pages', 'updated_at', 'timezone', 'warnings', 'snapshot_day']);
+            });
             applySmartMoneyWalletRows(wallets);
         } catch (err) { if (!isIgnorableSmartMoneyDataError(err)) setSmartMoneyError(errorText(err)); }
     }, [apiBaseUrl, applySmartMoneyWalletRows, hasInitData, initData, isAdmin, mergeSmartMoneyOverview, smWalletPage, smWalletSearch, smartMoneyDays]);

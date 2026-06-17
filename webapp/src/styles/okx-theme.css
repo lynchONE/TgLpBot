@@ -861,8 +861,8 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
   display: grid;
-  grid-template-columns: 36px minmax(118px, 0.86fr) minmax(246px, 1.35fr) 72px 56px;
-  grid-template-areas: "avatar info meta values action";
+  grid-template-columns: 36px minmax(0, 1fr) 72px 56px;
+  grid-template-areas: "avatar info values action";
   align-items: center;
   gap: 8px;
   min-height: 62px;
@@ -931,7 +931,6 @@ body {
 .module-hot_pools .pool-meta-line,
 .workbench.layout-4 .module-hot_pools .pool-meta-line,
 .workbench.layout-work-4 .module-hot_pools .pool-meta-line {
-  grid-area: meta;
   min-width: 0;
   width: 100%;
   display: grid;
@@ -1043,6 +1042,96 @@ body {
 .module-hot_pools .pool-buy-btn .open-buy-text {
   font-size: 11px;
   line-height: 1;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-row,
+.workbench.layout-work-2 .module-hot_pools .pool-row {
+  grid-template-columns: 38px minmax(0, 1fr) 78px 64px;
+  gap: 8px 10px;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-avatar,
+.workbench.layout-work-2 .module-hot_pools .pool-avatar {
+  width: 38px;
+  height: 38px;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-meta-line,
+.workbench.layout-work-2 .module-hot_pools .pool-meta-line {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workbench.layout-2 .module-hot_pools .pool-values,
+.workbench.layout-work-2 .module-hot_pools .pool-values {
+  width: 78px;
+  min-width: 78px;
+  max-width: 78px;
+}
+
+.workbench.layout-2 .module-hot_pools .pool-buy-btn,
+.workbench.layout-work-2 .module-hot_pools .pool-buy-btn {
+  width: 64px;
+  min-width: 64px;
+}
+
+.workbench.layout-3 .module-hot_pools .pool-row,
+.workbench.layout-work-3 .module-hot_pools .pool-row {
+  grid-template-columns: 36px minmax(0, 1fr) 70px 54px;
+  gap: 8px;
+}
+
+.workbench.layout-3 .module-hot_pools .pool-values,
+.workbench.layout-work-3 .module-hot_pools .pool-values {
+  width: 70px;
+  min-width: 70px;
+  max-width: 70px;
+}
+
+.workbench.layout-3 .module-hot_pools .pool-buy-btn,
+.workbench.layout-work-3 .module-hot_pools .pool-buy-btn {
+  width: 54px;
+  min-width: 54px;
+  padding: 0 6px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-row,
+.workbench.layout-work-4 .module-hot_pools .pool-row {
+  grid-template-columns: 36px minmax(0, 1fr) 64px;
+  grid-template-areas:
+    "avatar info values"
+    "avatar info action";
+  align-items: start;
+  gap: 6px 8px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-values,
+.workbench.layout-work-4 .module-hot_pools .pool-values {
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-main-val,
+.workbench.layout-work-4 .module-hot_pools .pool-main-val {
+  font-size: 12px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-sub-val,
+.workbench.layout-work-4 .module-hot_pools .pool-sub-val {
+  max-width: 64px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-buy-btn,
+.workbench.layout-work-4 .module-hot_pools .pool-buy-btn {
+  width: 52px;
+  min-width: 52px;
+  height: 26px;
+  padding: 0 6px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-name,
+.workbench.layout-work-4 .module-hot_pools .pool-name {
+  max-width: 100%;
 }
 
 /* Position list */
@@ -2115,4 +2204,32 @@ body {
   .modal-actions .accent-btn {
     width: 100%;
   }
+}
+
+/* Keep positions as one continuous panel; only hot pools owns an inner list scroller. */
+.module-slot.module-positions .panel-shell,
+.module-slot.module-positions .panel-body,
+.module-slot.module-positions .data-list {
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.module-slot.module-positions .data-list {
+  min-height: 0;
+}
+
+/* Let hot-pool controls escape the panel while keeping the pool rows scrollable. */
+.module-slot.module-hot_pools .panel-shell,
+.module-slot.module-hot_pools .panel-body {
+  overflow: visible;
+}
+
+.module-slot.module-hot_pools .hot-pools-toolbar-shell {
+  position: relative;
+  z-index: calc(var(--z-popover) + 1);
+}
+
+.module-slot.module-hot_pools .data-list:has(.pool-row) {
+  overflow: auto;
 }

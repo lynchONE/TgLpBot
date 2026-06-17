@@ -818,6 +818,7 @@
 
 .module-slot {
   position: relative;
+  min-width: 0;
   min-height: 0;
   animation: slide-up 320ms ease;
 }

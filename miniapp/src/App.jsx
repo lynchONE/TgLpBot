@@ -745,7 +745,6 @@ export default function App() {
         [isAdmin, me],
     );
     const hasKlineAccess = hasModuleAccess(me, 'gmgn_kline');
-    const hasCreatePoolAccess = hasModuleAccess(me, 'create_pool');
     const hasAssetsAccess = hasModuleAccess(me, 'assets');
     const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage && !isSwap;
     const activePollIntervalSec = showAdmin
@@ -2869,7 +2868,12 @@ export default function App() {
                             </>
                         )}
                     >
-                        <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <button
+                            type="button"
+                            onClick={() => setHotPoolsFilterOpen(true)}
+                            className="flex w-full flex-wrap items-center gap-1.5 text-left text-[10px]"
+                            aria-label="打开热门池筛选"
+                        >
                             {hotPoolsFilterSummaryItems.length > 0 ? (
                                 <>
                                     <span className={`inline-flex items-center rounded-full px-2 py-1 font-semibold ${brand.softButtonClass}`}>
@@ -2894,7 +2898,7 @@ export default function App() {
                                     筛选可排除低 FDV、高费率和低流动性池子
                                 </span>
                             )}
-                        </div>
+                        </button>
                     </ModuleHeader>
                 ) : showWalletSummaryCard ? (
                     <div className="mt-3 overflow-hidden rounded-[24px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
@@ -3091,7 +3095,7 @@ export default function App() {
                                 previousData={prevData}
                                 accentTheme={accentTheme}
                                 onOpenKline={hasKlineAccess ? setKlinePool : undefined}
-                                onOpenPosition={hasCreatePoolAccess ? openPositionModal : undefined}
+                                onOpenPosition={openPositionModal}
                                 apiBaseUrl={apiBaseUrl}
                                 chain={hotPoolsData?.chain || 'bsc'}
                             />
@@ -3262,7 +3266,7 @@ export default function App() {
                                                     accentTheme={accentTheme}
                                                     apiBaseUrl={apiBaseUrl}
                                                     onOpenKline={hasKlineAccess ? setKlinePool : undefined}
-                                                    onOpenPosition={hasCreatePoolAccess ? selectPoolFromSearch : undefined}
+                                                    onOpenPosition={selectPoolFromSearch}
                                                     chain={poolSearchChain}
                                                 />
                                             );

@@ -767,9 +767,13 @@ body::before {
 
 .miniapp-shell .mini-pool-row-main {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) 104px;
-    gap: 10px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 84px);
+    gap: 8px !important;
     align-items: start;
+}
+
+.miniapp-shell .mini-pool-info {
+    min-width: 0;
 }
 
 .miniapp-shell .mini-pool-title-line {
@@ -831,21 +835,37 @@ body::before {
     font-size: 10px !important;
 }
 
+.miniapp-shell .mini-pool-meta .mini-pool-feature-row {
+    display: flex !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px !important;
+    margin-top: 1px;
+    overflow: visible;
+    white-space: normal;
+}
+
 .miniapp-shell .mini-pool-meta > *:last-child:nth-child(odd) {
     grid-column: 1 / -1;
 }
 
 .miniapp-shell .mini-pool-values {
-    min-width: 104px !important;
-    max-width: 104px !important;
+    width: 84px !important;
+    min-width: 0 !important;
+    max-width: 84px !important;
     color: var(--okx-muted) !important;
+    overflow: hidden;
 }
 
 .miniapp-shell .mini-pool-primary {
+    max-width: 100%;
+    min-width: 0;
     justify-content: flex-end !important;
     color: var(--okx-accent-text) !important;
-    font-size: 16px !important;
+    font-size: 15px !important;
     line-height: 1.1 !important;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
 .miniapp-shell .mini-pool-values > div {
@@ -857,11 +877,17 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-values .flex {
+    min-width: 0;
     justify-content: flex-end !important;
     flex-wrap: nowrap !important;
 }
 
+.miniapp-shell .mini-pool-values .inline-flex {
+    min-width: 0;
+}
+
 .miniapp-shell .mini-pool-values span {
+    min-width: 0;
     white-space: nowrap;
 }
 
@@ -894,6 +920,28 @@ body::before {
     white-space: nowrap;
 }
 
+.miniapp-shell .mini-pool-feature-row .mini-pool-badge {
+    flex: 0 1 auto;
+    max-width: 118px !important;
+    min-width: 0;
+    border-color: rgba(var(--okx-info-rgb), 0.28) !important;
+    background: #101010 !important;
+    color: var(--okx-info) !important;
+    box-shadow: none !important;
+}
+
+.miniapp-shell .mini-pool-feature-row .mini-pool-badge-alpha {
+    border-color: rgba(var(--okx-accent-rgb), 0.42) !important;
+    background: rgba(var(--okx-accent-rgb), 0.12) !important;
+    color: var(--okx-accent-text) !important;
+}
+
+.miniapp-shell .mini-pool-feature-row .mini-pool-badge-more {
+    border-color: var(--okx-line) !important;
+    background: #0b0b0b !important;
+    color: var(--okx-muted) !important;
+}
+
 .miniapp-shell .mini-pool-open-btn {
     width: 58px !important;
     min-width: 58px !important;
@@ -904,8 +952,32 @@ body::before {
     overflow: hidden;
 }
 
+.miniapp-shell .mini-pool-open-btn:not(:disabled) {
+    border-color: rgba(var(--okx-accent-rgb), 0.52) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-pool-open-btn:not(:disabled) * {
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-pool-open-btn:not(:disabled):hover {
+    border-color: rgba(var(--okx-accent-rgb), 0.68) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-pool-open-btn:disabled {
+    border-color: var(--okx-line) !important;
+    background: #111 !important;
+    color: rgba(255, 255, 255, 0.34) !important;
+    opacity: 1 !important;
+}
+
 .miniapp-shell .mini-data-list--positions {
     gap: 8px !important;
+    overflow: visible;
 }
 
 .miniapp-shell .mini-position-card {
@@ -913,6 +985,7 @@ body::before {
     border-radius: 8px !important;
     background: #080808 !important;
     box-shadow: none !important;
+    overflow: visible !important;
 }
 
 .miniapp-shell .mini-position-card::before {
@@ -982,10 +1055,15 @@ body::before {
 }
 
 .miniapp-shell .mini-position-detail-card {
-    overflow: hidden;
+    overflow: visible;
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
     background: #050505 !important;
+}
+
+.miniapp-shell .collapsible-content.expanded {
+    max-height: none;
+    overflow: visible;
 }
 
 .miniapp-shell .mini-sm-page {
@@ -1339,7 +1417,16 @@ body::before {
     }
 
     .miniapp-shell .mini-pool-row-main {
-        grid-template-columns: minmax(0, 1fr) 86px;
+        grid-template-columns: minmax(0, 1fr) minmax(68px, 78px);
+    }
+
+    .miniapp-shell .mini-pool-values {
+        width: 78px !important;
+        max-width: 78px !important;
+    }
+
+    .miniapp-shell .mini-pool-primary {
+        font-size: 14px !important;
     }
 
     .miniapp-shell .mini-pool-meta {

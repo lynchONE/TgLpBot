@@ -1,6 +1,7 @@
 /* === 闈㈡澘绯荤粺 === */
 .panel-shell {
   position: relative;
+  min-width: 0;
   min-height: 0;
   border-radius: var(--radius-xl);
   border: 1px solid var(--glass-border);
@@ -320,4 +321,3 @@
 .metric-card.tone-negative .metric-value {
   color: var(--negative);
 }
-
