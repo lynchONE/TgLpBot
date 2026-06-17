@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	recognizedAssetBasis = "原生币 + 稳定币 + 近30天参与LP的代币余额 + 当前open LP估算持仓"
+	recognizedAssetBasis = "原生币 + 稳定币 + 近30天参与LP/普通转账记录代币余额 + 当前open LP估算持仓"
 	// Reuse one short-lived Redis entry for all smart-money wallet balance reads.
 	smartMoneyWalletLiveCacheTTL        = 5 * time.Minute
 	smartMoneyWalletLiveRefreshInterval = 5 * time.Minute
@@ -519,6 +519,14 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 		Timezone:         timeutil.LocationName(),
 	}
 
+	if forceRefresh {
+		if started := s.TriggerSmartMoneyWalletLiveStateRefresh(smartMoneyWalletLiveRefreshTimeout); started {
+			resp.Warnings = append(resp.Warnings, "smart money live balance refresh started; refresh again shortly for updated balances")
+		} else {
+			resp.Warnings = append(resp.Warnings, "smart money live balance refresh is already running")
+		}
+	}
+
 	if sectionSet[smartMoneyOverviewSectionHistory] {
 		start := dayStart(timeutil.Now()).AddDate(0, 0, -defaultHistoryDays)
 		end := dayStart(timeutil.Now())
@@ -530,9 +538,15 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 	}
 
 	if sectionSet[smartMoneyOverviewSectionSummary] {
-		summary, today, err := s.loadSmartMoneyOverviewSummary(ctx, snapshotDay)
+		summary, today, ok, err := s.loadSmartMoneyOverviewSummaryFromLiveState(ctx, snapshotDay)
 		if err != nil {
-			return nil, err
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("live smart-money summary unavailable: %v", err))
+		}
+		if !ok {
+			summary, today, err = s.loadSmartMoneyOverviewSummary(ctx, snapshotDay)
+			if err != nil {
+				return nil, err
+			}
 		}
 		resp.Summary = summary
 		resp.Today = today
@@ -691,6 +705,62 @@ func (s *Service) loadSmartMoneyOverviewSummary(ctx context.Context, snapshotDay
 		EstimatedRealizedPnLUSD: 0,
 	}
 	return summary, today, nil
+}
+
+func (s *Service) loadSmartMoneyOverviewSummaryFromLiveState(ctx context.Context, snapshotDay time.Time) (smartMoneyAssetBreakdown, SmartMoneyHistoryPoint, bool, error) {
+	type row struct {
+		NativeUSD         float64 `gorm:"column:native_usd"`
+		StableUSD         float64 `gorm:"column:stable_usd"`
+		TrackedTokenUSD   float64 `gorm:"column:tracked_token_usd"`
+		OpenLPUSD         float64 `gorm:"column:open_lp_usd"`
+		TotalUSD          float64 `gorm:"column:total_usd"`
+		TrackedTokenCount int     `gorm:"column:tracked_token_count"`
+		RowCount          int64   `gorm:"column:row_count"`
+	}
+
+	var result row
+	err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT
+				COALESCE(SUM(ls.native_usd), 0) AS native_usd,
+				COALESCE(SUM(ls.stable_usd), 0) AS stable_usd,
+				COALESCE(SUM(ls.tracked_token_usd), 0) AS tracked_token_usd,
+				COALESCE(SUM(ls.open_lp_usd), 0) AS open_lp_usd,
+				COALESCE(SUM(ls.total_usd), 0) AS total_usd,
+				COALESCE(SUM(ls.tracked_token_count), 0) AS tracked_token_count,
+				COUNT(ls.wallet_address) AS row_count
+			FROM sm_wallet_live_states ls
+			INNER JOIN monitored_wallets w
+				ON w.address = ls.wallet_address
+				AND w.chain_id = ls.chain_id
+				AND w.is_active = 1
+		`).
+		Scan(&result).Error
+	if err != nil {
+		return smartMoneyAssetBreakdown{}, SmartMoneyHistoryPoint{}, false, err
+	}
+	if result.RowCount == 0 {
+		return smartMoneyAssetBreakdown{}, SmartMoneyHistoryPoint{}, false, nil
+	}
+
+	summary := smartMoneyAssetBreakdown{
+		NativeUSD:         round2(result.NativeUSD),
+		StableUSD:         round2(result.StableUSD),
+		TrackedTokenUSD:   round2(result.TrackedTokenUSD),
+		OpenLPUSD:         round2(result.OpenLPUSD),
+		TotalUSD:          round2(result.TotalUSD),
+		TrackedTokenCount: result.TrackedTokenCount,
+	}
+	today := SmartMoneyHistoryPoint{
+		Day:                formatDay(snapshotDay),
+		NativeUSD:          summary.NativeUSD,
+		StableUSD:          summary.StableUSD,
+		TrackedTokenUSD:    summary.TrackedTokenUSD,
+		OpenLPUSD:          summary.OpenLPUSD,
+		TotalUSD:           summary.TotalUSD,
+		TransferTotalCount: 0,
+	}
+	return summary, today, true, nil
 }
 
 func (s *Service) loadSmartMoneyAggregateHistory(ctx context.Context, start time.Time, end time.Time) ([]SmartMoneyHistoryPoint, error) {
@@ -1151,6 +1221,46 @@ type smartMoneyLiveRefreshResult struct {
 	failed    int
 }
 
+func (s *Service) RefreshSmartMoneyWalletLiveStates(ctx context.Context) error {
+	if s == nil {
+		return fmt.Errorf("asset service not initialized")
+	}
+	result, err := s.refreshSmartMoneyWalletLiveStates(ctx)
+	if err != nil {
+		return fmt.Errorf("smart money live-state refresh incomplete refreshed=%d skipped=%d failed=%d: %w", result.refreshed, result.skipped, result.failed, err)
+	}
+	if result.failed > 0 {
+		return fmt.Errorf("smart money live-state refresh had %d failed wallets", result.failed)
+	}
+	return nil
+}
+
+func (s *Service) TriggerSmartMoneyWalletLiveStateRefresh(timeout time.Duration) bool {
+	if s == nil {
+		return false
+	}
+	if timeout <= 0 {
+		timeout = smartMoneyWalletLiveRefreshTimeout
+	}
+	if !s.smartMoneyLiveRefreshMu.TryLock() {
+		return false
+	}
+	go func() {
+		defer s.smartMoneyLiveRefreshMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		result, err := s.refreshSmartMoneyWalletLiveStates(ctx)
+		if err != nil {
+			log.Printf("[Assets] smart money live-state refresh incomplete refreshed=%d skipped=%d failed=%d err=%v", result.refreshed, result.skipped, result.failed, err)
+			return
+		}
+		if result.refreshed > 0 || result.failed > 0 {
+			log.Printf("[Assets] smart money live-state refresh completed refreshed=%d skipped=%d failed=%d", result.refreshed, result.skipped, result.failed)
+		}
+	}()
+	return true
+}
+
 func (s *Service) tryRefreshSmartMoneyLiveStates(lastCompleted *time.Time) {
 	if s == nil {
 		return
@@ -1402,8 +1512,9 @@ func (s *Service) loadPagedSmartMoneyWallets(ctx context.Context, snapshotDay ti
 	var wallets []models.MonitoredWallet
 	err := db.
 		Select("monitored_wallets.*").
+		Joins("LEFT JOIN sm_wallet_live_states sml ON sml.wallet_address = monitored_wallets.address AND sml.chain_id = monitored_wallets.chain_id").
 		Joins("LEFT JOIN sm_wallet_daily_snapshots smd ON smd.wallet_address = monitored_wallets.address AND smd.chain_id = monitored_wallets.chain_id AND smd.snapshot_day = ?", formatDay(snapshotDay)).
-		Order("COALESCE(smd.total_usd, 0) DESC").
+		Order("COALESCE(sml.total_usd, smd.total_usd, 0) DESC").
 		Order("monitored_wallets.chain_id ASC").
 		Order("monitored_wallets.address ASC").
 		Offset((page - 1) * size).
@@ -1806,8 +1917,12 @@ func (s *Service) loadSmartMoneyTrackedTokens(ctx context.Context, address strin
 				SELECT token1_address AS token_address
 				FROM sm_lp_positions
 				WHERE wallet_address = ? AND chain_id = ? AND status = 'open'
+				UNION
+				SELECT token_address
+				FROM sm_wallet_transfer_events
+				WHERE wallet_address = ? AND chain_id = ? AND tx_timestamp >= ? AND asset_type = 'token'
 			) tokens
-		`, address, chainID, cutoff, address, chainID, cutoff, address, chainID, address, chainID).
+		`, address, chainID, cutoff, address, chainID, cutoff, address, chainID, address, chainID, address, chainID, cutoff).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../taskModes';
 
-export default function TaskActionMenu({ position, onPause, onStop, onPartialExit, onDelete, onEditRange, onWithdrawLiquidity, onSwapDust, onTriggerRebalance, onUpdateMode, onAddLiquidity, onClose, anchorRef }) {
+export default function TaskActionMenu({ position, onPause, onStop, onPartialExit, onDelete, onEditRange, onWithdrawLiquidity, onSwapDust, onAddLiquidity, onClose, anchorRef }) {
   const [editMode, setEditMode] = useState(false);
   const [rangeLower, setRangeLower] = useState(String(position?.task_range_lower_pct || '2'));
   const [rangeUpper, setRangeUpper] = useState(String(position?.task_range_upper_pct || '2'));
@@ -14,7 +13,6 @@ export default function TaskActionMenu({ position, onPause, onStop, onPartialExi
 
   const taskId = Number(position?.task_id || 0);
   const taskPaused = Boolean(position?.task_paused);
-  const currentTaskMode = normalizeTaskMode(position?.task_mode, position?.task_paused);
   const hasLiquidity = Boolean(position?.has_liquidity);
   const statusLabel = String(position?.status_label || '');
   const isStopped = statusLabel.includes('已停止');
@@ -148,27 +146,6 @@ export default function TaskActionMenu({ position, onPause, onStop, onPartialExi
         <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
       </div>
       <div className="task-action-list">
-        {onUpdateMode && !isStopped && !isStopping && (
-          <div className="task-popover-form" style={{ paddingBottom: 0 }}>
-            <label className="task-popover-field">
-              <span>模式</span>
-            </label>
-            <div className="task-popover-row" style={{ flexWrap: 'wrap' }}>
-              {TASK_MODE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className="ghost-chip"
-                  style={currentTaskMode === option.value ? { borderColor: 'rgba(52, 211, 153, 0.36)', color: '#34d399' } : undefined}
-                  onClick={() => run('mode', () => onUpdateMode(taskId, option.value))}
-                  disabled={!!pending}
-                >
-                  {option.shortLabel}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
         {onPause && !isStopping && (
           <button type="button" className="task-action-item" onClick={() => run('pause', () => onPause(taskId, !taskPaused))} disabled={!!pending}>
             {pending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}

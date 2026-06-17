@@ -2680,11 +2680,13 @@
 /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?   Position Card
 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
 .pos-card {
-  border: 1px solid var(--line);
+  border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: var(--radius-md);
-  background: var(--bg-card);
+  background:
+    linear-gradient(180deg, rgba(18, 25, 38, 0.96), rgba(11, 16, 26, 0.98));
   padding: 12px;
-  transition: border-color 160ms;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transition: border-color 160ms, background 160ms;
 }
 .pos-card + .pos-card {
   margin-top: 8px;
@@ -2823,47 +2825,55 @@
 /* 鈹€鈹€ 鎿嶄綔鎸夐挳琛?鈹€鈹€ */
 .pos-action-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 6px 10px;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 5px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 9px;
+  background: rgba(8, 13, 22, 0.76);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .pos-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
+  justify-content: center;
+  gap: 3px;
+  min-height: 24px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(148, 163, 184, 0.07);
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 150ms ease;
   white-space: nowrap;
   line-height: 1;
+  flex: 0 0 auto;
 }
 .pos-action-btn svg {
   flex-shrink: 0;
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 .pos-action-btn:hover {
-  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(148, 163, 184, 0.12);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 .pos-action-btn:active { transform: scale(0.96); box-shadow: none; }
 .pos-action-btn:disabled { opacity: 0.30; cursor: not-allowed; transform: none; box-shadow: none; }
-.pos-action-btn.pause { border-color: rgba(251, 191, 36, 0.22); color: #fbbf24; background: rgba(251, 191, 36, 0.08); }
-.pos-action-btn.resume { border-color: rgba(52, 211, 153, 0.22); color: #34d399; background: rgba(52, 211, 153, 0.08); }
-.pos-action-btn.withdraw { border-color: rgba(56, 189, 248, 0.22); color: #38bdf8; background: rgba(56, 189, 248, 0.08); }
-.pos-action-btn.dust { border-color: rgba(167, 139, 250, 0.22); color: #a78bfa; background: rgba(167, 139, 250, 0.08); }
-.pos-action-btn.rebalance { border-color: rgba(96, 165, 250, 0.22); color: #60a5fa; background: rgba(96, 165, 250, 0.08); }
-.pos-action-btn.toggle.on { border-color: rgba(52, 211, 153, 0.22); color: #34d399; background: rgba(52, 211, 153, 0.08); }
-.pos-action-btn.toggle.off { border-color: rgba(161, 161, 170, 0.22); color: #a1a1aa; background: rgba(161, 161, 170, 0.06); }
-.pos-action-btn.mode { border-color: rgba(161, 161, 170, 0.22); color: #a1a1aa; background: rgba(161, 161, 170, 0.06); }
-.pos-action-btn.mode.active { border-color: rgba(52, 211, 153, 0.22); color: #34d399; background: rgba(52, 211, 153, 0.08); }
+.pos-action-btn.mode.active {
+  border-color: rgba(52, 211, 153, 0.34);
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.08);
+}
 
 /* 鈹€鈹€ 琛ュ厖娴佸姩鎬у脊绐?鈹€鈹€ */
 .add-liq-overlay {
@@ -3229,8 +3239,10 @@
   margin-top: 10px;
   padding: 8px 10px;
   border-radius: 10px;
-  border: 1px solid rgba(163, 230, 53, 0.16);
-  background: linear-gradient(135deg, rgba(132, 204, 22, 0.1), rgba(132, 204, 22, 0.03));
+  border: 1px solid rgba(163, 230, 53, 0.18);
+  background:
+    linear-gradient(135deg, rgba(132, 204, 22, 0.12), rgba(28, 36, 20, 0.74));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 .pos-sm-ranges-head {
   display: flex;
@@ -3300,10 +3312,11 @@
 /* Token table */
 .pos-token-table {
   margin-top: 10px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(96, 165, 250, 0.13);
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.02);
+  background:
+    linear-gradient(180deg, rgba(17, 24, 38, 0.92), rgba(10, 15, 25, 0.92));
 }
 .pos-token-head {
   display: grid;
@@ -3314,7 +3327,8 @@
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(96, 165, 250, 0.12);
+  background: rgba(96, 165, 250, 0.035);
 }
 .pos-token-head span:nth-child(n+2) { text-align: right; }
 .pos-token-head span:last-child { color: var(--positive); }
@@ -3323,7 +3337,7 @@
   grid-template-columns: 1.5fr 1fr 1fr 1fr;
   gap: 6px;
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(134, 153, 184, 0.1);
+  border-bottom: 1px solid rgba(134, 153, 184, 0.11);
   font-size: 12px;
 }
 .pos-token-row:last-child { border-bottom: none; }
@@ -3374,9 +3388,9 @@
   font-size: 11px;
   color: var(--text-muted);
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(148, 163, 184, 0.055);
   border-radius: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(148, 163, 184, 0.12);
   display: flex;
   align-items: center;
 }
@@ -3391,9 +3405,10 @@
 .pos-price-range {
   margin-top: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(251, 191, 36, 0.14);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background:
+    linear-gradient(180deg, rgba(32, 24, 12, 0.55), rgba(13, 16, 23, 0.94));
 }
 .pos-price-range-header {
   display: flex;
@@ -3421,7 +3436,8 @@
   position: relative;
   height: 16px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(2, 6, 23, 0.46);
+  border: 1px solid rgba(251, 191, 36, 0.08);
   overflow: hidden;
 }
 .pos-price-range-limit {

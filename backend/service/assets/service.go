@@ -64,6 +64,7 @@ func (s *Service) Start() {
 		return
 	}
 	go s.runScheduler()
+	s.TriggerSmartMoneyWalletLiveStateRefresh(smartMoneyWalletLiveRefreshTimeout)
 }
 
 func (s *Service) Stop() {

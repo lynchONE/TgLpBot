@@ -515,6 +515,10 @@ export default function SmartMoneyAssetsPanel({
   }, [walletDetail?.history]);
 
   const isBusy = loading || refreshing;
+  const warnings = useMemo(
+    () => (Array.isArray(overview?.warnings) ? overview.warnings.filter(Boolean) : []),
+    [overview?.warnings]
+  );
 
   if (!hasInitData) {
     return <EmptyState text="请先完成 Telegram 登录后查看聪明钱资产。" />;
@@ -554,6 +558,13 @@ export default function SmartMoneyAssetsPanel({
       </div>
 
       {error ? <div className="am-error">{error}</div> : null}
+      {warnings.length > 0 ? (
+        <div className="am-warning-list">
+          {warnings.slice(0, 3).map((warning, index) => (
+            <div key={`${warning}-${index}`} className="warning-box">{warning}</div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="am-metric-row">
         <MetricCard label="总资产" value={formatUsd(overview?.summary?.total_usd)} tone="strong" />

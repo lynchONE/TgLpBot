@@ -71,6 +71,9 @@ func main() {
 
 	webServer := web_server.NewServer()
 	webServer.Start("8080")
+	if webServer.Assets != nil {
+		defer webServer.Assets.Stop()
+	}
 	if webServer.SwapLimitOrders != nil {
 		defer webServer.SwapLimitOrders.Stop()
 	}
@@ -87,6 +90,9 @@ func main() {
 
 		log.Println("shutting down...")
 		poolSyncService.Stop()
+		if webServer.Assets != nil {
+			webServer.Assets.Stop()
+		}
 		if webServer.SwapLimitOrders != nil {
 			webServer.SwapLimitOrders.Stop()
 		}

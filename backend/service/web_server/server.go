@@ -36,6 +36,9 @@ func NewServer() *Server {
 
 func (s *Server) Start(port string) {
 	initSmartMoney()
+	if s.Assets != nil {
+		s.Assets.Start()
+	}
 	if s.SwapLimitOrders != nil {
 		s.SwapLimitOrders.Start()
 	}

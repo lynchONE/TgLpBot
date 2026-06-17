@@ -17,6 +17,12 @@
   margin-bottom: var(--space-2);
 }
 
+.am-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* === 鍗＄墖绯荤粺锛堟墎骞冲垎缁勶紝绂佹鍗＄墖宓屽鍗＄墖浜х敓鏂?elevation锛?=== */
 .am-card,
 .am-section {

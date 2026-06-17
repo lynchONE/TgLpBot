@@ -27,8 +27,7 @@ import useSmartMoneyPositionPreviewMap, {
     resolvePositionPreviewFeeUsd,
 } from './smart-money/useSmartMoneyPositionPreviewMap';
 import SmartMoneyShell from './smart-money/SmartMoneyShell';
-
-const LazySmartMoneyAssetsPanel = React.lazy(() => import('./SmartMoneyAssetsPanel'));
+import SmartMoneyAssetsPanel from './SmartMoneyAssetsPanel';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeLogo, color: '#d1884f' },
@@ -4042,15 +4041,13 @@ export default function SmartMoneyDashboard({
                         active={view === 'auto_follow'}
                     />
                 ) : view === 'assets' && isAdmin ? (
-                    <React.Suspense fallback={<div className="panel-loading">正在加载聪明钱资产...</div>}>
-                        <LazySmartMoneyAssetsPanel
-                            apiBaseUrl={apiBaseUrl}
-                            initData={initData}
-                            hasInitData={Boolean(String(initData || '').trim())}
-                            isAdmin={isAdmin}
-                            refreshInterval={refreshInterval}
-                        />
-                    </React.Suspense>
+                    <SmartMoneyAssetsPanel
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        hasInitData={Boolean(String(initData || '').trim())}
+                        isAdmin={isAdmin}
+                        refreshInterval={refreshInterval}
+                    />
                 ) : (
                     <SettingsPanel apiBaseUrl={apiBaseUrl} />
                 )}
