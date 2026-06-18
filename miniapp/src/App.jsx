@@ -3604,7 +3604,7 @@ export default function App() {
                         open={Boolean(openPositionPool)}
                         onClose={closeOpenPosition}
                         maxHeightClass="max-h-[92vh]"
-                        className="bg-white dark:bg-[#14171c] backdrop-blur-none"
+                        className="mini-open-position-sheet bg-white dark:bg-[#14171c] backdrop-blur-none"
                         headerClassName="px-4 pt-3 pb-2.5"
                         contentClassName="px-4 pb-5"
                         footerClassName="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.85rem)]"
@@ -3686,12 +3686,13 @@ export default function App() {
                             <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">区间配置</div>
-                                    <div className="flex rounded-lg bg-zinc-200/50 p-0.5 dark:bg-white/10">
+                                    <div className="op-range-mode-tabs flex rounded-lg bg-zinc-200/50 p-0.5 dark:bg-white/10">
                                         {OPEN_POSITION_RANGE_OPTIONS.map((option) => (
                                             <button
                                                 key={option.key}
                                                 type="button"
                                                 onClick={() => handleOpenPositionRangeInputModeChange(option.key)}
+                                                data-active={openPositionVisibleRangeMode === option.key}
                                                 className={`px-3 py-1 text-[11px] font-semibold rounded-md transition ${openPositionVisibleRangeMode === option.key
                                                     ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#2a2d36] dark:text-white'
                                                     : 'text-zinc-500 hover:text-zinc-700 dark:text-white/50 dark:hover:text-white/80'
@@ -3719,6 +3720,8 @@ export default function App() {
                                                         key={option.key}
                                                         type="button"
                                                         onClick={() => applyOpenPositionQuickRange(option)}
+                                                        data-active={isActive}
+                                                        data-smart={Boolean(option.smart)}
                                                         className={`shrink-0 rounded-full border px-3 py-1 text-[10px] font-semibold transition ${isActive
                                                             ? `${brand.selectionClass} text-zinc-900 dark:text-white`
                                                             : option.smart 

@@ -920,7 +920,7 @@ body::before {
 
 .miniapp-shell .mini-pool-footer {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) 46px;
+    grid-template-columns: minmax(0, 1fr) 44px;
     align-items: center !important;
     gap: 8px !important;
     margin-top: 10px !important;
@@ -971,20 +971,22 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-open-btn {
-    width: 46px !important;
-    min-width: 46px !important;
-    height: 28px !important;
-    padding: 0 4px !important;
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 26px !important;
+    padding: 0 5px !important;
     justify-content: center !important;
-    gap: 3px !important;
+    gap: 2px !important;
+    border-radius: 999px !important;
     font-size: 10px !important;
+    font-weight: 800 !important;
     line-height: 1 !important;
     overflow: hidden;
 }
 
 .miniapp-shell .mini-pool-open-btn svg {
-    width: 11px !important;
-    height: 11px !important;
+    width: 10px !important;
+    height: 10px !important;
 }
 
 .miniapp-shell .mini-pool-open-btn:not(:disabled) {
@@ -999,14 +1001,14 @@ body::before {
 
 .miniapp-shell .mini-pool-open-btn:not(:disabled):hover {
     border-color: rgba(var(--okx-accent-rgb), 0.68) !important;
-    background: var(--okx-accent) !important;
+    background: var(--okx-accent-text) !important;
     color: #050700 !important;
 }
 
 .miniapp-shell .mini-pool-open-btn:disabled {
     border-color: var(--okx-line) !important;
-    background: #111 !important;
-    color: rgba(255, 255, 255, 0.34) !important;
+    background: #151515 !important;
+    color: rgba(255, 255, 255, 0.42) !important;
     opacity: 1 !important;
 }
 
@@ -1148,11 +1150,106 @@ body::before {
 }
 
 .miniapp-shell .mini-sm-tabs > button {
-    flex: 0 0 84px;
-    min-height: 40px !important;
-    border-radius: 6px !important;
-    padding: 6px !important;
+    flex: 0 0 76px;
+    min-height: 34px !important;
+    border-radius: 999px !important;
+    padding: 5px 6px !important;
     font-size: 10px !important;
+    color: rgba(255, 255, 255, 0.62) !important;
+}
+
+.miniapp-shell .mini-sm-tabs > button[data-active='true'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.62) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-sm-tabs > button[data-active='true'] * {
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-sm-tabs > button[data-active='false'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.22) !important;
+    background: rgba(var(--okx-accent-rgb), 0.08) !important;
+    color: var(--okx-accent-text) !important;
+}
+
+.miniapp-shell .mini-sm-follow-page {
+    color: var(--okx-text);
+}
+
+.miniapp-shell .mini-sm-follow-tabs {
+    border-color: var(--okx-line) !important;
+    border-radius: 999px !important;
+    background: #080808 !important;
+    padding: 4px !important;
+}
+
+.miniapp-shell .mini-sm-follow-tabs > button {
+    min-height: 34px !important;
+    border-radius: 999px !important;
+    padding: 5px 6px !important;
+    font-size: 10px !important;
+    color: rgba(255, 255, 255, 0.58) !important;
+}
+
+.miniapp-shell .mini-sm-follow-tabs > button[data-active='true'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.62) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-sm-follow-tabs > button[data-active='true'] * {
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-sm-follow-page button[data-active='true'],
+.miniapp-shell .mini-sm-follow-submit:not(:disabled) {
+    border-color: rgba(var(--okx-accent-rgb), 0.66) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-sm-follow-page button[data-active='true'] *,
+.miniapp-shell .mini-sm-follow-submit:not(:disabled) * {
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-sm-follow-page button[data-active='false'],
+.miniapp-shell .mini-sm-follow-secondary {
+    border-color: rgba(var(--okx-accent-rgb), 0.28) !important;
+    background: rgba(var(--okx-accent-rgb), 0.09) !important;
+    color: var(--okx-accent-text) !important;
+}
+
+.miniapp-shell .mini-sm-follow-page button[data-active='false']:hover:not(:disabled),
+.miniapp-shell .mini-sm-follow-secondary:hover:not(:disabled) {
+    border-color: rgba(var(--okx-accent-rgb), 0.42) !important;
+    background: rgba(var(--okx-accent-rgb), 0.14) !important;
+    color: var(--okx-accent-text) !important;
+}
+
+.miniapp-shell .mini-sm-follow-page button[data-active='true'],
+.miniapp-shell .mini-sm-follow-page button[data-active='false'],
+.miniapp-shell .mini-sm-follow-secondary {
+    min-height: 34px !important;
+    border-radius: 999px !important;
+    padding-block: 7px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+}
+
+.miniapp-shell .mini-sm-follow-submit {
+    min-height: 42px;
+    border-radius: 999px !important;
+    font-weight: 800 !important;
+}
+
+.miniapp-shell .mini-sm-follow-submit:disabled {
+    border: 1px solid var(--okx-line) !important;
+    background: #151515 !important;
+    color: rgba(255, 255, 255, 0.44) !important;
+    opacity: 1 !important;
 }
 
 .miniapp-shell .mini-am-page {
@@ -1383,7 +1480,9 @@ body::before {
 }
 
 .miniapp-shell .op-step-button--visible {
-    color: var(--okx-accent-text) !important;
+    min-height: 30px;
+    padding: 4px 6px !important;
+    color: rgba(255, 255, 255, 0.54) !important;
     opacity: 1 !important;
 }
 
@@ -1391,10 +1490,20 @@ body::before {
     opacity: 1 !important;
 }
 
+.miniapp-shell .op-step-button--visible[data-state='active'] {
+    color: var(--okx-accent-text) !important;
+}
+
+.miniapp-shell .op-step-button--visible[data-state='done'] {
+    color: rgba(255, 255, 255, 0.74) !important;
+}
+
 .miniapp-shell .op-step-dot--visible {
-    border: 1px solid rgba(var(--okx-accent-rgb), 0.58) !important;
-    background: var(--okx-accent) !important;
-    color: #050700 !important;
+    width: 22px !important;
+    height: 22px !important;
+    border: 1px solid var(--okx-line-strong) !important;
+    background: #181818 !important;
+    color: rgba(255, 255, 255, 0.62) !important;
     box-shadow: 0 0 0 1px rgba(var(--okx-accent-rgb), 0.14) !important;
 }
 
@@ -1402,8 +1511,73 @@ body::before {
     color: #050700 !important;
 }
 
+.miniapp-shell .op-step-dot--visible[data-state='active'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.72) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .op-step-dot--visible[data-state='done'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.5) !important;
+    background: rgba(var(--okx-accent-rgb), 0.18) !important;
+    color: var(--okx-accent-text) !important;
+}
+
+.miniapp-shell .op-step-dot--visible[data-state='done'] svg {
+    color: var(--okx-accent-text) !important;
+}
+
 .miniapp-shell .op-step-connector--visible {
+    background: rgba(255, 255, 255, 0.16) !important;
+}
+
+.miniapp-shell .op-step-connector--visible[data-state='done'] {
     background: rgba(var(--okx-accent-rgb), 0.72) !important;
+}
+
+.miniapp-shell .op-step-connector--visible[data-state='active'] {
+    background: rgba(var(--okx-accent-rgb), 0.32) !important;
+}
+
+.miniapp-shell .mini-open-position-sheet .op-range-mode-tabs {
+    border: 1px solid var(--okx-line) !important;
+    border-radius: 999px !important;
+    background: #101010 !important;
+    padding: 3px !important;
+}
+
+.miniapp-shell .mini-open-position-sheet .op-range-mode-tabs button {
+    min-height: 30px;
+    border-radius: 999px !important;
+    color: rgba(255, 255, 255, 0.62) !important;
+}
+
+.miniapp-shell .mini-open-position-sheet .op-range-mode-tabs button[data-active='true'] {
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
+.miniapp-shell .mini-open-position-sheet button[data-smart],
+.miniapp-shell .mini-open-position-sheet button[data-active] {
+    border-radius: 999px !important;
+}
+
+.miniapp-shell .mini-open-position-sheet button[data-active='false']:not([data-smart='true']) {
+    border-color: rgba(var(--okx-accent-rgb), 0.22) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.miniapp-shell .mini-open-position-sheet button[data-smart='true']:not([data-active='true']) {
+    border-color: rgba(var(--okx-warning-rgb), 0.38) !important;
+    background: rgba(var(--okx-warning-rgb), 0.13) !important;
+    color: var(--okx-warning) !important;
+}
+
+.miniapp-shell .mini-open-position-sheet button[data-active='true'] {
+    border-color: rgba(var(--okx-accent-rgb), 0.66) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
 }
 
 .miniapp-shell .mini-open-position-task-active,
@@ -1463,7 +1637,7 @@ body::before {
 .miniapp-shell .op-footer-primary,
 .miniapp-shell .op-footer-secondary {
     min-height: 48px !important;
-    border-radius: 8px !important;
+    border-radius: 999px !important;
     font-size: 15px !important;
     font-weight: 800 !important;
 }
@@ -1476,15 +1650,15 @@ body::before {
 
 .miniapp-shell .op-footer-primary:disabled {
     border: 1px solid var(--okx-line) !important;
-    background: #111 !important;
-    color: rgba(255, 255, 255, 0.34) !important;
+    background: #151515 !important;
+    color: rgba(255, 255, 255, 0.44) !important;
     opacity: 1 !important;
 }
 
 .miniapp-shell .op-footer-secondary {
     border-color: var(--okx-line) !important;
-    background: #101010 !important;
-    color: var(--okx-text) !important;
+    background: rgba(var(--okx-accent-rgb), 0.1) !important;
+    color: var(--okx-accent-text) !important;
 }
 
 @media (max-width: 640px) {

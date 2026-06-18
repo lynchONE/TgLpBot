@@ -4953,7 +4953,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     };
 
     return (
-        <div className="space-y-4">
+        <div className="mini-sm-follow-page space-y-4">
             <section className="rounded-[30px] border border-white/[0.04] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_34%),linear-gradient(180deg,rgba(24,24,27,0.94),rgba(9,9,11,0.98))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
                 <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
@@ -4972,7 +4972,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         type="button"
                         onClick={load}
                         disabled={loading}
-                        className={`rounded-2xl px-3 py-2 text-sm disabled:opacity-50 ${getFilterButtonClass(false, brand)}`}
+                        className={`mini-sm-follow-secondary rounded-2xl px-3 py-2 text-sm disabled:opacity-50 ${getFilterButtonClass(false, brand)}`}
                     >
                         刷新
                     </button>
@@ -5000,7 +5000,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 </div>
             ) : null}
 
-            <div className="grid grid-cols-3 gap-1.5 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1.5">
+            <div className="mini-sm-follow-tabs grid grid-cols-3 gap-1.5 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1.5">
                 {[
                     { key: 'configure', label: draft.id ? '编辑任务' : '配置任务', icon: Settings },
                     { key: 'configs', label: '我的跟单', icon: Users, count: configs.length },
@@ -5010,6 +5010,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         key={key}
                         type="button"
                         onClick={() => setActiveTab(key)}
+                        data-active={activeTab === key}
                         className={`relative inline-flex min-h-[54px] flex-col items-center justify-center gap-1 rounded-[18px] px-1.5 py-2 text-[11px] font-semibold leading-tight transition active:scale-[0.98] ${
                             activeTab === key
                                 ? `${brand.softButtonClass}`
@@ -5083,7 +5084,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             <button
                                 type="button"
                                 onClick={addDraftWallet}
-                                className={`rounded-xl px-2.5 py-1.5 text-xs ${getFilterButtonClass(false, brand)}`}
+                                className={`mini-sm-follow-secondary rounded-xl px-2.5 py-1.5 text-xs ${getFilterButtonClass(false, brand)}`}
                             >
                                 <Plus size={12} className="mr-1 inline" /> 添加
                             </button>
@@ -5113,6 +5114,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         <div className="grid grid-cols-2 gap-2">
                             <button
                                 type="button"
+                                data-active={draft.trigger_mode !== 'threshold'}
                                 className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.trigger_mode !== 'threshold', brand)}`}
                                 onClick={() => setDraft((prev) => ({ ...prev, trigger_mode: 'any' }))}
                             >
@@ -5120,6 +5122,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             </button>
                             <button
                                 type="button"
+                                data-active={draft.trigger_mode === 'threshold'}
                                 className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.trigger_mode === 'threshold', brand)}`}
                                 onClick={() => setDraft((prev) => ({ ...prev, trigger_mode: 'threshold' }))}
                             >
@@ -5153,6 +5156,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     <div className="grid grid-cols-2 gap-2">
                         <button
                             type="button"
+                            data-active={draft.enabled}
                             className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.enabled, brand)}`}
                             onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
                         >
@@ -5160,6 +5164,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         </button>
                         <button
                             type="button"
+                            data-active={!draft.enabled}
                             className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(!draft.enabled, brand)}`}
                             onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
                         >
@@ -5170,6 +5175,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     <div className="grid grid-cols-2 gap-2">
                         <button
                             type="button"
+                            data-active={draft.amount_mode === 'fixed'}
                             className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.amount_mode === 'fixed', brand)}`}
                             onClick={() => setDraft((prev) => ({ ...prev, amount_mode: 'fixed' }))}
                         >
@@ -5177,6 +5183,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         </button>
                         <button
                             type="button"
+                            data-active={draft.amount_mode === 'ratio'}
                             className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.amount_mode === 'ratio', brand)}`}
                             onClick={() => setDraft((prev) => ({ ...prev, amount_mode: 'ratio' }))}
                         >
@@ -5209,6 +5216,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     <div className="grid grid-cols-2 gap-2">
                         <button
                             type="button"
+                            data-active={draft.delay_mode === 'immediate'}
                             className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.delay_mode === 'immediate', brand)}`}
                             onClick={() => setDraft((prev) => ({ ...prev, delay_mode: 'immediate', delay_seconds: '0' }))}
                         >
@@ -5216,6 +5224,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         </button>
                         <button
                             type="button"
+                            data-active={draft.delay_mode === 'fixed_delay'}
                             className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.delay_mode === 'fixed_delay', brand)}`}
                             onClick={() => setDraft((prev) => ({ ...prev, delay_mode: 'fixed_delay' }))}
                         >
@@ -5249,7 +5258,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         type="button"
                         onClick={saveDraft}
                         disabled={saving || !hasInitData || executionWallets.length === 0}
-                        className={`w-full rounded-[24px] px-4 py-3 text-sm font-semibold disabled:opacity-50 ${brand.solidButtonClass}`}
+                        className={`mini-sm-follow-submit w-full rounded-[24px] px-4 py-3 text-sm font-semibold disabled:opacity-50 ${brand.solidButtonClass}`}
                     >
                         {saving ? '保存中...' : '保存自动跟单配置'}
                     </button>
@@ -6227,6 +6236,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                             <button
                                 key={key}
                                 type="button"
+                                data-active={view === key}
                                 className={`inline-flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] leading-tight sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2.5 sm:text-sm ${getFilterButtonClass(view === key, brand)}`}
                                 onClick={() => setView(key)}
                             >
@@ -6236,6 +6246,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         ))}
                         <button
                             type="button"
+                            data-active={view === 'golden_dog'}
                             className={`inline-flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] leading-tight sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2.5 sm:text-sm ${getFilterButtonClass(view === 'golden_dog', brand)}`}
                             onClick={() => setView('golden_dog')}
                         >
@@ -6245,6 +6256,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         {isAdmin && (
                             <button
                                 type="button"
+                                data-active={view === 'assets'}
                                 className={`inline-flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] leading-tight sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2.5 sm:text-sm ${getFilterButtonClass(view === 'assets', brand)}`}
                                 onClick={() => setView('assets')}
                             >
