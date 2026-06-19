@@ -1740,6 +1740,11 @@ func (s *LiquidityService) calculateOptimalSwapLocal(client *ethclient.Client, p
 }
 
 func getSqrtRatioAtTick(tick int) *big.Int {
+	// Prefer the exact Uniswap bignum TickMath so the optimal-swap split is precise.
+	if v, err := pool.SqrtRatioAtTick(int32(tick)); err == nil && v != nil && v.Sign() > 0 {
+		return v
+	}
+	// Fallback: float64 approximation for ticks outside Uniswap's supported range.
 	val := math.Pow(1.0001, float64(tick))
 	sqrtVal := math.Sqrt(val)
 	// ratioX96 = sqrtVal * 2^96
@@ -1885,6 +1890,23 @@ func (s *LiquidityService) checkZapSafety(
 	return nil
 }
 
+// zapSwapMinOutKeepBps returns the fraction (in bps) of OKX's expected output to enforce as the
+// Zap's minOut: at most a 95% safety floor, loosened toward the user's slippage when that is larger,
+// so the Zap's own check never reverts a swap OKX itself would accept. Returns >= 0.
+func zapSwapMinOutKeepBps(slippageTolerance float64) int64 {
+	keepBps := int64(9500) // 95% floor
+	if slippageTolerance > 0 {
+		userKeepBps := 10000 - int64(math.Round(slippageTolerance*100))
+		if userKeepBps < keepBps {
+			keepBps = userKeepBps
+		}
+	}
+	if keepBps < 0 {
+		keepBps = 0
+	}
+	return keepBps
+}
+
 // prepareOKXSwapParams helps construct SwapParamsSimple for Zap contracts
 // Returns (swapParams, expectedOutputAmount, error).
 func (s *LiquidityService) prepareOKXSwapParams(
@@ -1946,11 +1968,12 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		}
 	}
 
-	// 95% protection (keep <= OKX calldata's internal minOut to avoid reverting after swap)
+	// minOut keeps at most a 95% safety floor, loosened toward the user's slippage when that is
+	// larger, so the Zap's own check never reverts a swap OKX itself would accept.
+	keepBps := zapSwapMinOutKeepBps(slippageTolerance)
 	minOut := big.NewInt(0)
 	if baseOut.Sign() > 0 {
-		minOut = new(big.Int).Mul(baseOut, big.NewInt(95))
-		minOut = minOut.Div(minOut, big.NewInt(100))
+		minOut = new(big.Int).Div(new(big.Int).Mul(baseOut, big.NewInt(keepBps)), big.NewInt(10000))
 	}
 
 	// OKX 有时会返回需要原生币（msg.value）的 swap 路由（如 WBNB 先解包成 BNB 再交换），

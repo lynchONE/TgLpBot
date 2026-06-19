@@ -380,3 +380,56 @@ func TestShouldRetryDustReadWhenSignalsDiverge(t *testing.T) {
 		t.Fatal("shouldRetryDustRead() = false, want true")
 	}
 }
+
+// #7: the optimal-swap split must use exact bignum tick math, i.e. getSqrtRatioAtTick must
+// match pool.SqrtRatioAtTick for every in-range tick (no float64 drift).
+func TestGetSqrtRatioAtTickMatchesExact(t *testing.T) {
+	t.Parallel()
+
+	ticks := []int{-887272, -600000, -60000, -600, -1, 0, 1, 600, 60000, 600000, 887272}
+	for _, tk := range ticks {
+		want, err := pool.SqrtRatioAtTick(int32(tk))
+		if err != nil {
+			t.Fatalf("pool.SqrtRatioAtTick(%d) error = %v", tk, err)
+		}
+		got := getSqrtRatioAtTick(tk)
+		if got == nil || got.Cmp(want) != 0 {
+			t.Errorf("getSqrtRatioAtTick(%d) = %v, want exact %v", tk, got, want)
+		}
+	}
+}
+
+// #8: Zap minOut keep-fraction is min(95%, 1-slippage), floored at 0.
+func TestZapSwapMinOutKeepBps(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		slippage float64
+		want     int64
+	}{
+		{-1, 9500},  // non-positive slippage -> 95% floor
+		{0, 9500},   // 95% floor
+		{0.5, 9500}, // 9950 -> capped to 95% floor
+		{5, 9500},   // exactly at floor boundary
+		{6, 9400},   // 100-6 = 94%
+		{10, 9000},  // 100-10 = 90%
+		{95, 500},   // 100-95 = 5%
+		{200, 0},    // absurd -> floored at 0 (never negative)
+	}
+	for _, tc := range cases {
+		if got := zapSwapMinOutKeepBps(tc.slippage); got != tc.want {
+			t.Errorf("zapSwapMinOutKeepBps(%v) = %d, want %d", tc.slippage, got, tc.want)
+		}
+	}
+
+	// Never stricter than the 95% floor, never below 0.
+	for _, s := range []float64{0, 0.1, 1, 4.9, 5, 5.1, 12, 50, 99, 100} {
+		got := zapSwapMinOutKeepBps(s)
+		if got > 9500 {
+			t.Fatalf("zapSwapMinOutKeepBps(%v)=%d exceeds 95%% floor", s, got)
+		}
+		if got < 0 {
+			t.Fatalf("zapSwapMinOutKeepBps(%v)=%d negative", s, got)
+		}
+	}
+}
