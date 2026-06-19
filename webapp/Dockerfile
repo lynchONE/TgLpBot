@@ -1,11 +1,12 @@
 FROM node:20-alpine AS builder
 
-WORKDIR /app
+WORKDIR /workspace/webapp
 
-COPY package*.json ./
+COPY webapp/package*.json ./
 RUN npm ci --no-audit --no-fund
 
-COPY . .
+COPY webapp/ ./
+COPY shared/ ../shared/
 
 ARG VITE_API_BASE_URL
 ARG VITE_WS_BASE_URL
@@ -24,7 +25,7 @@ FROM nginx:1.27-alpine
 
 ENV BACKEND_UPSTREAM=http://tglpbot:8080
 
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY webapp/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=builder /workspace/webapp/dist /usr/share/nginx/html
 
 EXPOSE 80

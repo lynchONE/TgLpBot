@@ -8,6 +8,7 @@ on:
       - "backend/**"
       - "webapp/**"
       - "miniapp/**"
+      - "shared/**"
       - ".github/workflows/docker-image.yml"
   workflow_dispatch:
 
@@ -72,6 +73,11 @@ jobs:
                 fi
 
                 if printf '%s\n' "$changed_files" | grep -Eq '^miniapp/'; then
+                  miniapp=true
+                fi
+
+                if printf '%s\n' "$changed_files" | grep -Eq '^shared/'; then
+                  webapp=true
                   miniapp=true
                 fi
 
@@ -159,7 +165,7 @@ jobs:
       - name: Build and push webapp image
         uses: docker/build-push-action@v7
         with:
-          context: ./webapp
+          context: .
           file: ./webapp/Dockerfile
           platforms: linux/amd64
           push: true
@@ -202,7 +208,7 @@ jobs:
       - name: Build and push miniapp image
         uses: docker/build-push-action@v7
         with:
-          context: ./miniapp
+          context: .
           file: ./miniapp/Dockerfile
           platforms: linux/amd64
           push: true
