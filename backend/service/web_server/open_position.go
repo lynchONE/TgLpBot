@@ -17,6 +17,7 @@ import (
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/strategy"
+	"TgLpBot/service/txexec"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
 
@@ -870,14 +871,81 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := strategy.CreateTaskRecord(ctx.task); err != nil {
-		http.Error(w, "创建任务失败", http.StatusInternalServerError)
+	// Serialize the on-chain open by wallet (same per-wallet lock used by exit/DCA/rebalance)
+	// so a manual open cannot collide on the nonce with a concurrent strategy-driven op.
+	// The task record is created and the result is finalized inside the lock so neither a
+	// "wallet busy" rejection nor a pending HTTP timeout leaves an orphan / unsaved position.
+	type enterOutcome struct {
+		res         *liquidity.EnterResult
+		err         error // enter/create error, drives the HTTP error mapping below
+		finalizeErr error // applyEnterResult failure after a successful enter
+	}
+	enterCh := make(chan enterOutcome, 1)
+	accepted, tryErr := txexec.Default().TryRunTask(ctx.task.UserID, ctx.task.WalletID, ctx.task.WalletAddress, func(_ string) {
+		defer func() {
+			if r := recover(); r != nil {
+				enterCh <- enterOutcome{err: fmt.Errorf("open position panic: %v", r)}
+			}
+		}()
+		if cErr := strategy.CreateTaskRecord(ctx.task); cErr != nil {
+			enterCh <- enterOutcome{err: fmt.Errorf("创建任务失败: %w", cErr)}
+			return
+		}
+		res, e := ctx.liquidityService.EnterTaskFromUSDTWithOptions(ctx.user.ID, ctx.task, liquidity.TxOptions{
+			EntrySwapSlippageOverride: ctx.req.EntrySwapSlippage,
+		})
+		if e != nil {
+			enterCh <- enterOutcome{err: e}
+			return
+		}
+		if fErr := applyEnterResult(ctx.task, res); fErr != nil {
+			enterCh <- enterOutcome{res: res, finalizeErr: fErr}
+			return
+		}
+		if ctx.task.DCAEnabled {
+			now := time.Now()
+			next := now.Add(time.Duration(ctx.task.DCAIntervalSeconds * float64(time.Second)))
+			_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
+				"dca_executed_count": 1,
+				"dca_next_batch_at":  &next,
+			}).Error
+			ctx.task.DCAExecutedCount = 1
+			ctx.task.DCANextBatchAt = &next
+		}
+		go func() {
+			_ = botSvc.SendTaskCardForUser(ctx.user.ID, ctx.task.ID)
+		}()
+		enterCh <- enterOutcome{res: res}
+	})
+	if tryErr != nil {
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
+			Code:    "open_position_failed",
+			Message: tryErr.Error(),
+		})
 		return
 	}
-	enterRes, err := ctx.liquidityService.EnterTaskFromUSDTWithOptions(ctx.user.ID, ctx.task, liquidity.TxOptions{
-		EntrySwapSlippageOverride: ctx.req.EntrySwapSlippage,
-	})
-	if err != nil {
+	if !accepted {
+		writeOpenPositionError(w, http.StatusConflict, openPositionError{
+			Code:    "wallet_busy",
+			Message: "钱包正在处理其他交易，请稍后再试",
+		})
+		return
+	}
+
+	var out enterOutcome
+	select {
+	case out = <-enterCh:
+	case <-time.After(3 * time.Minute):
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openPositionResponse{
+			TaskID: ctx.task.ID,
+			Status: "pending",
+		})
+		return
+	}
+
+	if out.err != nil {
+		err := out.err
 		var swapErr *liquidity.EntrySwapRequiredError
 		if errors.As(err, &swapErr) {
 			_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
@@ -907,26 +975,11 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	if err := applyEnterResult(ctx.task, enterRes); err != nil {
+	if out.finalizeErr != nil {
 		http.Error(w, "更新任务状态失败", http.StatusInternalServerError)
 		return
 	}
-
-	if ctx.task.DCAEnabled {
-		now := time.Now()
-		next := now.Add(time.Duration(ctx.task.DCAIntervalSeconds * float64(time.Second)))
-		_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
-			"dca_executed_count": 1,
-			"dca_next_batch_at":  &next,
-		}).Error
-		ctx.task.DCAExecutedCount = 1
-		ctx.task.DCANextBatchAt = &next
-	}
-
-	go func() {
-		_ = botSvc.SendTaskCardForUser(ctx.user.ID, ctx.task.ID)
-	}()
+	enterRes := out.res
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionResponse{

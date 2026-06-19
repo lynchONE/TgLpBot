@@ -126,7 +126,11 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 
 	b.sendMessage(query.Message.Chat.ID, "任务已创建，正在准备开仓...")
 
-	enterRes, err := b.liquidityService.EnterTaskFromUSDT(user.ID, task)
+	enterRes, err := b.enterTaskSerialized(user.ID, task)
+	if errors.Is(err, errWalletBusy) {
+		b.sendMessage(query.Message.Chat.ID, "⏳ 钱包正在处理其他交易，请稍后再试")
+		return
+	}
 	if err != nil {
 		var swapErr *liquidity.EntrySwapRequiredError
 		if errors.As(err, &swapErr) {

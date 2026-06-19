@@ -1100,21 +1100,22 @@ body::before {
 
 .miniapp-shell .mini-pool-open-btn {
     width: auto !important;
-    min-width: 78px !important;
-    min-height: 42px !important;
-    padding: 0 14px !important;
+    min-width: 56px !important;
+    min-height: 28px !important;
+    height: 28px !important;
+    padding: 0 10px !important;
     justify-content: center !important;
-    gap: 5px !important;
+    gap: 4px !important;
     border-radius: 999px !important;
-    font-size: 13px !important;
+    font-size: 10px !important;
     font-weight: 800 !important;
     line-height: 1 !important;
     overflow: hidden;
 }
 
 .miniapp-shell .mini-pool-open-btn svg {
-    width: 13px !important;
-    height: 13px !important;
+    width: 10px !important;
+    height: 10px !important;
 }
 
 .miniapp-shell .mini-pool-open-btn:not(:disabled) {

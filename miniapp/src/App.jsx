@@ -1337,26 +1337,22 @@ export default function App() {
         let inFlight = false;
 
         const run = async () => {
-            if (!hasInitData) {
-                setHotPoolsLoading(false);
-                setHotPoolsError('');
-                return;
-            }
             if (inFlight) return;
             inFlight = true;
             setHotPoolsLoading(true);
             setHotPoolsError('');
             try {
+                const usePrivateHotPoolData = hasInitData;
                 const resp = await fetchHotPools({
                     apiBaseUrl,
-                    initData,
+                    initData: usePrivateHotPoolData ? initData : '',
                     sort: hotPoolsSort,
                     chain: multiChainEnabled ? 'bsc' : userDefaultChain,
                     timeframeMinutes: 5,
                     limit: 20,
-                    includePools: positionsPoolAddresses,
-                    maxFeeRate: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.maxFeeRate) ? hotPoolsFilter.maxFeeRate : undefined,
-                    minMarketCapUsd: hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
+                    includePools: usePrivateHotPoolData ? positionsPoolAddresses : undefined,
+                    maxFeeRate: usePrivateHotPoolData && hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.maxFeeRate) ? hotPoolsFilter.maxFeeRate : undefined,
+                    minMarketCapUsd: usePrivateHotPoolData && hotPoolsFilterEnabled && Number.isFinite(hotPoolsFilter.minMarketCap) ? hotPoolsFilter.minMarketCap : undefined,
                     signal: controller.signal,
                 });
                 if (aborted) return;
@@ -2995,7 +2991,7 @@ export default function App() {
                                 previousData={prevData}
                                 accentTheme={accentTheme}
                                 onOpenKline={hasKlineAccess ? setKlinePool : undefined}
-                                onOpenPosition={openPositionModal}
+                                onOpenPosition={hasInitData ? openPositionModal : undefined}
                                 chain={hotPoolsData?.chain || 'bsc'}
                             />
                         );

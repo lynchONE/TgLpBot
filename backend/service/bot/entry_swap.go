@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/liquidity"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -129,7 +130,11 @@ func (b *Bot) handleEntrySwapAllow(query *tgbotapi.CallbackQuery, user *models.U
 	task.AllowEntrySwap = true
 	task.Status = models.StrategyStatusWaiting
 
-	enterRes, err := b.liquidityService.EnterTaskFromUSDT(user.ID, task)
+	enterRes, err := b.enterTaskSerialized(user.ID, task)
+	if errors.Is(err, errWalletBusy) {
+		b.sendMessage(query.Message.Chat.ID, "⏳ 钱包正在处理其他交易，请稍后再试")
+		return
+	}
 	if err != nil {
 		_ = database.DB.Model(task).Updates(map[string]interface{}{
 			"status":        models.StrategyStatusError,

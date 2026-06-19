@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
+	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/trade"
 	"context"
@@ -147,6 +148,45 @@ func effectiveExitSlippagePercent(task *models.StrategyTask) float64 {
 		expanded = base
 	}
 	return expanded
+}
+
+// exitMinAmounts returns amount0Min/amount1Min for removing `removeLiq` of liquidity at the
+// current pool price, allowing `slippagePercent` of downside. It mirrors the Uniswap UI
+// approach (quote at the freshly-read price, then apply a slippage floor): a price moved
+// between our read and on-chain execution makes decreaseLiquidity revert instead of draining
+// the position at a manipulated ratio. Returns (0,0) whenever price/ticks are unavailable, so
+// a transient RPC failure never blocks an exit (the exit-retry loop widens slippage on revert).
+func exitMinAmounts(sqrtPriceX96 *big.Int, tickLower, tickUpper int, removeLiq *big.Int, slippagePercent float64) (*big.Int, *big.Int) {
+	if sqrtPriceX96 == nil || sqrtPriceX96.Sign() <= 0 || removeLiq == nil || removeLiq.Sign() <= 0 || tickLower >= tickUpper {
+		return big.NewInt(0), big.NewInt(0)
+	}
+	sqrtA, err := pool.SqrtRatioAtTick(int32(tickLower))
+	if err != nil {
+		return big.NewInt(0), big.NewInt(0)
+	}
+	sqrtB, err := pool.SqrtRatioAtTick(int32(tickUpper))
+	if err != nil {
+		return big.NewInt(0), big.NewInt(0)
+	}
+	exp0, exp1 := pool.AmountsForLiquidity(sqrtPriceX96, sqrtA, sqrtB, removeLiq)
+	if exp0 == nil {
+		exp0 = big.NewInt(0)
+	}
+	if exp1 == nil {
+		exp1 = big.NewInt(0)
+	}
+
+	bps := int64(math.Round(slippagePercent * 100))
+	if bps < 0 {
+		bps = 0
+	}
+	if bps > 10000 {
+		bps = 10000
+	}
+	keep := big.NewInt(10000 - bps)
+	min0 := new(big.Int).Div(new(big.Int).Mul(exp0, keep), big.NewInt(10000))
+	min1 := new(big.Int).Div(new(big.Int).Mul(exp1, keep), big.NewInt(10000))
+	return min0, min1
 }
 
 func (s *LiquidityService) quoteTokenValueInUSDT(exec chainexec.EVMExecutor, tokenAddr common.Address, amount *big.Int, walletAddr common.Address) (float64, bool) {
@@ -1190,9 +1230,18 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		}
 	}
 
-	// V3 撤仓不做滑点校验：amount0Min/amount1Min 置 0，避免因价格波动导致撤仓交易 revert。
+	// 撤仓滑点保护：按当前池价估算应得的 token0/token1，给 amount0Min/amount1Min 设一个
+	// (1 - 滑点) 下限，防止有人在撤仓前操纵价格把仓位按畸形比例抽走。读取价格失败时回退为 0，
+	// 避免因临时 RPC 问题卡住撤仓（撤仓重试会随重试次数放大滑点）。
 	amount0Min := big.NewInt(0)
 	amount1Min := big.NewInt(0)
+	if removeLiq.Sign() > 0 && common.IsHexAddress(task.PoolId) {
+		if sqrtPriceX96, _, slot0Err := blockchain.GetV3PoolSlot0WithClient(client, common.HexToAddress(task.PoolId)); slot0Err != nil {
+			log.Printf("[Liquidity] V3 exit: read slot0 for min-amount failed, using amount*Min=0: %v", slot0Err)
+		} else {
+			amount0Min, amount1Min = exitMinAmounts(sqrtPriceX96, posInfo.TickLower, posInfo.TickUpper, removeLiq, effectiveExitSlippagePercent(task))
+		}
+	}
 	deadline := big.NewInt(time.Now().Add(20 * time.Minute).Unix())
 
 	maxUint128 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
@@ -1592,6 +1641,24 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		return nil, err
 	}
 
+	// 撤仓滑点保护：按当前池价估算应得数量给 amount0Min/amount1Min 设下限（同 V3 逻辑）。
+	// 读取失败时回退为 0，避免卡住撤仓。
+	amount0Min := big.NewInt(0)
+	amount1Min := big.NewInt(0)
+	if removeLiq.Sign() > 0 && common.IsHexAddress(cc.UniswapV4StateViewAddress) && common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+		exitTickLower, exitTickUpper := task.TickLower, task.TickUpper
+		if pos != nil && pos.TickLower < pos.TickUpper {
+			exitTickLower, exitTickUpper = pos.TickLower, pos.TickUpper
+		}
+		stateViewAddr := common.HexToAddress(cc.UniswapV4StateViewAddress)
+		poolManagerAddr := common.HexToAddress(cc.UniswapV4PoolManagerAddress)
+		if sqrtPriceX96, _, slot0Err := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateViewAddr, poolManagerAddr, task.PoolId); slot0Err != nil {
+			log.Printf("[Liquidity] V4 exit: read slot0 for min-amount failed, using amount*Min=0: %v", slot0Err)
+		} else {
+			amount0Min, amount1Min = exitMinAmounts(sqrtPriceX96, exitTickLower, exitTickUpper, removeLiq, effectiveExitSlippagePercent(task))
+		}
+	}
+
 	// Build `unlockData` = abi.encode(actions, params) to call PositionManager.modifyLiquidities.
 	// actions = [DECREASE_LIQUIDITY (0x01), TAKE_PAIR (0x11)].
 	actions := []byte{0x01, 0x11}
@@ -1609,7 +1676,7 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		{Type: uint128Ty}, // amount1Min
 		{Type: bytesTy},   // hookData
 	}
-	decreaseParams, err := decreaseArgs.Pack(tokenId, removeLiq, big.NewInt(0), big.NewInt(0), []byte{})
+	decreaseParams, err := decreaseArgs.Pack(tokenId, removeLiq, amount0Min, amount1Min, []byte{})
 	if err != nil {
 		return nil, fmt.Errorf("encode v4 decrease params failed: %w", err)
 	}
@@ -1633,8 +1700,8 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		return nil, fmt.Errorf("encode v4 unlockData failed: %w", err)
 	}
 
-	log.Printf("[Liquidity] Removing V4 liquidity via PositionManager=%s tokenId=%s poolId=%s liq=%s currentLiquidity=%s exitPercent=%.6f",
-		v4pmAddr.Hex(), tokenId.String(), task.PoolId, removeLiq.String(), liq.String(), exitPercent)
+	log.Printf("[Liquidity] Removing V4 liquidity via PositionManager=%s tokenId=%s poolId=%s liq=%s currentLiquidity=%s exitPercent=%.6f amount0Min=%s amount1Min=%s",
+		v4pmAddr.Hex(), tokenId.String(), task.PoolId, removeLiq.String(), liq.String(), exitPercent, amount0Min.String(), amount1Min.String())
 	nonce, err := blockchain.GetNonce(walletAddr)
 	if err != nil {
 		return nil, err
