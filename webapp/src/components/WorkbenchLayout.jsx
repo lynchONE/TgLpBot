@@ -12,6 +12,19 @@ export default function WorkbenchLayout({
   onDragEnd,
   onDragStartWidget,
 }) {
+  if (!activeWidgets.length) {
+    return (
+      <main className={className}>
+        <div className="workbench-empty-state">
+          <div className="workbench-empty-title">暂无可用模块</div>
+          <div className="workbench-empty-text">
+            当前登录态没有可展示的工作台模块。请重新登录，或在后台检查 WebApp 模块权限。
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className={className}>
       {activeWidgets.map((widget) => (

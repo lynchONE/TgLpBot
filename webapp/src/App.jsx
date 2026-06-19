@@ -743,6 +743,15 @@ export default function App() {
   const assetsRefreshInterval = refreshIntervals.assets;
   const smartMoneyRefreshInterval = refreshIntervals.smart_money;
   const adminRefreshInterval = refreshIntervals.admin_panel;
+  const clearLoginState = useCallback(() => {
+    setInitData('');
+    setLoginUser(null);
+    setAccessInfo(null);
+    setWorkMode(false);
+    storageRemove(STORAGE.initData);
+    storageRemove(STORAGE.loginUser);
+    storageRemove(STORAGE.loginAccess);
+  }, []);
   const updateRefreshInterval = useCallback((key, value) => {
     const config = getRefreshModuleConfig(key);
     const nextValue = clampRefreshInterval(value, config);
@@ -1301,11 +1310,12 @@ export default function App() {
         }));
       } catch (err) {
         if (controller.signal.aborted) return;
+        clearLoginState();
         setLoginError(String(err?.message || err || '刷新权限失败'));
       }
     })();
     return () => controller.abort();
-  }, [apiBaseUrl, hasInitData, initData]);
+  }, [apiBaseUrl, clearLoginState, hasInitData, initData]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -1742,10 +1752,7 @@ export default function App() {
   }, [apiBaseUrl, handleLoginFromResp, hasInitData, loginCode, loginCodeExpiry]);
 
   const logout = useCallback(() => {
-    setInitData('');
-    setLoginUser(null);
-    setAccessInfo(null);
-    setWorkMode(false);
+    clearLoginState();
     setHotTokenFilter(null);
     setHotPools([]);
     hotPoolsRef.current = [];
@@ -1753,15 +1760,12 @@ export default function App() {
     setPreviousHotPoolsMap({});
     setHotPoolsUpdatedAt('');
     setHotPoolsError('');
-    storageRemove(STORAGE.initData);
-    storageRemove(STORAGE.loginUser);
-    storageRemove(STORAGE.loginAccess);
     setPositions(null);
     setKlineMarkers([]);
     setKlineMarkersError('');
     setKlineActiveMarkerId('');
     setKlineFocusedWalletAddress('');
-  }, []);
+  }, [clearLoginState]);
 
   const refreshAll = useCallback(async () => {
     if (!hasInitData) return;
