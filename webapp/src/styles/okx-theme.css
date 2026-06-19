@@ -1752,7 +1752,6 @@ body {
 .sm-position-card,
 .sm-wallet-detail-panel,
 .am-card,
-.am-drawer,
 .admin-drawer,
 .admin-panel,
 .admin-card {
@@ -1768,6 +1767,12 @@ body {
 .admin-card:hover {
   border-color: rgba(var(--accent-rgb), 0.24) !important;
   background: #0d0d0d !important;
+}
+
+.am-drawer-panel {
+  border-color: var(--line) !important;
+  background: #080808 !important;
+  box-shadow: none !important;
 }
 
 /* Smart money compact density */
