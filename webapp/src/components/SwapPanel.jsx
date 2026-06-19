@@ -95,23 +95,15 @@ function dedupeTokens(tokens) {
   return list;
 }
 function loadRecentTokens() {
-  try {
-    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    return parsed;
-  } catch {
-    return {};
-  }
+  const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+  if (!raw) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object') return {};
+  return parsed;
 }
 
 function saveRecentTokens(next) {
-  try {
-    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // ignore storage failures
-  }
+  window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next));
 }
 
 
@@ -815,6 +807,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       .catch((error) => {
         if (controller.signal.aborted) return;
         console.error('fetchGlobalConfig failed', error);
+        throw error;
       });
     return () => controller.abort();
   }, [apiBaseUrl, hasInitData, initData, slippageDirty]);
@@ -869,6 +862,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       .catch((error) => {
         if (controller.signal.aborted) return;
         console.error('fetchWalletSwapTokenMetadata failed', error);
+        throw error;
       });
 
     return () => controller.abort();
@@ -888,6 +882,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       });
     } catch (error) {
       console.error('fetchWallets failed', error);
+      throw error;
     } finally {
       setWalletLoading(false);
     }
@@ -941,6 +936,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setWalletTokens([]);
       setWalletTokensKey(requestKey);
       setWalletTokensError(String(error?.message || error || '\u52a0\u8f7d\u94b1\u5305\u4f59\u989d\u5931\u8d25'));
+      throw error;
     } finally {
       if (walletTokensAbortRef.current === controller) {
         walletTokensAbortRef.current = null;
@@ -978,6 +974,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       console.error('loadSwapHistory failed', error);
       setSwapHistory([]);
       setSwapHistoryError(String(error?.message || error || '加载兑换历史失败'));
+      throw error;
     } finally {
       if (swapHistoryAbortRef.current === controller) {
         swapHistoryAbortRef.current = null;
@@ -1015,6 +1012,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       console.error('loadLimitOrders failed', error);
       setLimitOrders([]);
       setLimitOrdersError(String(error?.message || error || '加载限价单失败'));
+      throw error;
     } finally {
       if (limitOrdersAbortRef.current === controller) {
         limitOrdersAbortRef.current = null;
@@ -1153,6 +1151,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         setQuoteInfo(null);
       }
       setQuoteError(String(error?.message || error));
+      throw error;
     } finally {
       if (quoteSeqRef.current === seq) {
         setQuoting(false);
@@ -1292,10 +1291,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setLastQuoteAt(0);
       lastRequestedQuoteKeyRef.current = '';
       // 交易完成后刷新钱包、余额和历史记录。
-      await Promise.allSettled([loadWallets(), loadWalletTokens(), loadSwapHistory()]);
+      await Promise.all([loadWallets(), loadWalletTokens(), loadSwapHistory()]);
     } catch (error) {
       setExecError(String(error?.message || error));
       setShowConfirm(false);
+      throw error;
     } finally {
       setExecuting(false);
     }
@@ -1330,6 +1330,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       await loadLimitOrders();
     } catch (error) {
       setExecError(String(error?.message || error));
+      throw error;
     } finally {
       setExecuting(false);
     }
@@ -1349,6 +1350,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       await loadLimitOrders();
     } catch (error) {
       setLimitOrdersError(String(error?.message || error || '取消限价单失败'));
+      throw error;
     } finally {
       setLimitOrderBusyId('');
     }

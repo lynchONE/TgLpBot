@@ -112,12 +112,8 @@ function extractOpenPositionErrorChecks(error, fallbackKey = 'preview_safety') {
 function parseDCAPercentagesAny(raw) {
   if (Array.isArray(raw)) return raw.map((v) => Number(v) || 0);
   if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return arr.map((v) => Number(v) || 0);
-    } catch {
-      // ignore
-    }
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return arr.map((v) => Number(v) || 0);
   }
   return [50, 50];
 }
@@ -492,19 +488,11 @@ export default function OpenPositionModal({
   const [liqProfileLoading, setLiqProfileLoading] = useState(false);
   const [liqProfileError, setLiqProfileError] = useState('');
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem('tglp_open_position_hide_wallet_balances');
-      setWalletBalancesHidden(saved === '1');
-    } catch {
-      // ignore
-    }
+    const saved = window.localStorage.getItem('tglp_open_position_hide_wallet_balances');
+    setWalletBalancesHidden(saved === '1');
   }, []);
   useEffect(() => {
-    try {
-      window.localStorage.setItem('tglp_open_position_hide_wallet_balances', walletBalancesHidden ? '1' : '0');
-    } catch {
-      // ignore
-    }
+    window.localStorage.setItem('tglp_open_position_hide_wallet_balances', walletBalancesHidden ? '1' : '0');
   }, [walletBalancesHidden]);
 
   const pair = pool?.trading_pair || '--';
@@ -866,11 +854,12 @@ export default function OpenPositionModal({
         setPreparePrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
         setPrepareTokenRisk(resp?.token_risk && typeof resp.token_risk === 'object' ? resp.token_risk : null);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!active || controller.signal.aborted) return;
         setPrepareRangeEditor(null);
         setPreparePrivateZapInfo(null);
         setPrepareTokenRisk(null);
+        throw err;
       });
     return () => {
       active = false;
@@ -940,6 +929,7 @@ export default function OpenPositionModal({
         setPreviewRangeEditor(payload?.range_editor && typeof payload.range_editor === 'object' ? payload.range_editor : null);
         setPreviewTokenRisk(payload?.token_risk && typeof payload.token_risk === 'object' ? payload.token_risk : null);
         setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
+        throw e;
       } finally {
         if (active) {
           setEntrySwapPreviewLoading(false);
@@ -1138,8 +1128,9 @@ export default function OpenPositionModal({
         if (Number.isFinite(interval) && interval >= 0) setDcaInterval(interval);
         setDcaDefaultsLoaded(true);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) setDcaDefaultsLoaded(true);
+        if (!cancelled) throw err;
       });
     return () => {
       cancelled = true;
@@ -1210,6 +1201,7 @@ export default function OpenPositionModal({
           setLiqProfileError(msg.slice(0, 80));
         }
         // 刷新失败时保留旧数据，避免画布闪烁清空
+        throw err;
       })
       .finally(() => {
         setLiqProfileLoading(false);
@@ -1250,6 +1242,7 @@ export default function OpenPositionModal({
           setLiqProfileError(msg.slice(0, 80));
         }
         setLiqProfile(null);
+        throw err;
       })
       .finally(() => {
         if (!ctrl.signal.aborted) setLiqProfileLoading(false);
@@ -1277,6 +1270,7 @@ export default function OpenPositionModal({
         } else {
           setLiqProfileError(msg.slice(0, 80));
         }
+        throw err;
       })
       .finally(() => { liqInFlightRef.current = false; });
   }, [apiBaseUrl, initData, addr, protocolKind, chain]);

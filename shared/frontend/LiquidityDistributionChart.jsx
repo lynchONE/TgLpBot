@@ -4,28 +4,20 @@ const DEFAULT_HEIGHT = 240;
 const DEFAULT_HANDLE_HIT_PX = 20;
 
 function safeBigInt(value) {
-    try {
-        if (value === null || value === undefined) return 0n;
-        const trimmed = String(value).trim();
-        if (!trimmed) return 0n;
-        return BigInt(trimmed);
-    } catch {
-        return 0n;
-    }
+    if (value === null || value === undefined) return 0n;
+    const trimmed = String(value).trim();
+    if (!trimmed) return 0n;
+    return BigInt(trimmed);
 }
 
 function bigIntToNumber(value) {
-    try {
-        if (typeof value === 'bigint') {
-            if (value === 0n) return 0;
-            const max = BigInt(Number.MAX_SAFE_INTEGER);
-            if (value <= max) return Number(value);
-            return Number(value / max) * Number.MAX_SAFE_INTEGER;
-        }
-        return Number(value) || 0;
-    } catch {
-        return 0;
+    if (typeof value === 'bigint') {
+        if (value === 0n) return 0;
+        const max = BigInt(Number.MAX_SAFE_INTEGER);
+        if (value <= max) return Number(value);
+        return Number(value / max) * Number.MAX_SAFE_INTEGER;
     }
+    return Number(value) || 0;
 }
 
 function tickToPriceRatio(tick, t0Decimals = 18, t1Decimals = 18) {
@@ -174,11 +166,7 @@ export default function LiquidityDistributionChart({
         if (activePointerId !== null && eventPointerId !== null && eventPointerId !== activePointerId) return;
         const target = dragStateRef.current.target;
         if (target && activePointerId !== null && typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(activePointerId)) {
-            try {
-                target.releasePointerCapture(activePointerId);
-            } catch {
-                // ignore
-            }
+            target.releasePointerCapture(activePointerId);
         }
         onRangeDragEnd?.(dragStateRef.current.handle || null);
         dragStateRef.current.pointerId = null;
@@ -421,11 +409,7 @@ export default function LiquidityDistributionChart({
                     interactive={typeof onRangeChange === 'function'}
                     onDown={(event) => {
                         if (typeof event.currentTarget?.setPointerCapture === 'function') {
-                            try {
-                                event.currentTarget.setPointerCapture(event.pointerId);
-                            } catch {
-                                // ignore
-                            }
+                            event.currentTarget.setPointerCapture(event.pointerId);
                         }
                         dragStateRef.current.pointerId = event.pointerId;
                         dragStateRef.current.target = event.currentTarget;
@@ -452,11 +436,7 @@ export default function LiquidityDistributionChart({
                     interactive={typeof onRangeChange === 'function'}
                     onDown={(event) => {
                         if (typeof event.currentTarget?.setPointerCapture === 'function') {
-                            try {
-                                event.currentTarget.setPointerCapture(event.pointerId);
-                            } catch {
-                                // ignore
-                            }
+                            event.currentTarget.setPointerCapture(event.pointerId);
                         }
                         dragStateRef.current.pointerId = event.pointerId;
                         dragStateRef.current.target = event.currentTarget;

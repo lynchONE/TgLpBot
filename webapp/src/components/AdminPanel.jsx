@@ -244,8 +244,8 @@ function endpointDisplayName(endpoint) {
   if (!url) return '--';
   try {
     return new URL(url).host || url;
-  } catch {
-    return url;
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -297,8 +297,8 @@ function okxConfigDisplayName(config) {
   if (!url) return config?.id ? `#${config.id}` : '--';
   try {
     return new URL(url).host || url;
-  } catch {
-    return url;
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -317,8 +317,8 @@ function poolSourceDisplayName(source) {
   if (!url) return '--';
   try {
     return new URL(url).host || url;
-  } catch {
-    return url;
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -965,6 +965,7 @@ export default function AdminPanel({
       setOnlineUsers(Array.isArray(response?.users) ? response.users : []);
     } catch (err) {
       setOnlineError(errorText(err));
+      throw err;
     } finally {
       setOnlineLoading(false);
     }
@@ -979,6 +980,7 @@ export default function AdminPanel({
       setActiveTasks(Array.isArray(response?.tasks) ? response.tasks : []);
     } catch (err) {
       setTaskError(errorText(err));
+      throw err;
     } finally {
       setTaskLoading(false);
     }
@@ -993,6 +995,7 @@ export default function AdminPanel({
       setUserPositions(response || null);
     } catch (err) {
       setPositionsError(errorText(err));
+      throw err;
     } finally {
       setPositionsLoading(false);
     }
@@ -1017,6 +1020,7 @@ export default function AdminPanel({
       });
     } catch (err) {
       setSystemError(errorText(err));
+      throw err;
     } finally {
       setSystemLoading(false);
     }
@@ -1031,6 +1035,7 @@ export default function AdminPanel({
       setRpcData(response || null);
     } catch (err) {
       setRpcError(errorText(err));
+      throw err;
     } finally {
       setRpcLoading(false);
     }
@@ -1045,6 +1050,7 @@ export default function AdminPanel({
       setPoolSourceData(response || null);
     } catch (err) {
       setPoolSourceError(errorText(err));
+      throw err;
     } finally {
       setPoolSourceLoading(false);
     }
@@ -1059,6 +1065,7 @@ export default function AdminPanel({
       setOKXData(response || null);
     } catch (err) {
       setOKXError(errorText(err));
+      throw err;
     } finally {
       setOKXLoading(false);
     }
@@ -1073,6 +1080,7 @@ export default function AdminPanel({
       setPrivateZapData(response || null);
     } catch (err) {
       setPrivateZapError(errorText(err));
+      throw err;
     } finally {
       setPrivateZapLoading(false);
     }
@@ -1159,6 +1167,7 @@ export default function AdminPanel({
       showNotice('系统配置已保存');
     } catch (err) {
       setSystemError(errorText(err));
+      throw err;
     } finally {
       setSystemSaving(false);
     }
@@ -1171,6 +1180,7 @@ export default function AdminPanel({
       if (successMessage) showNotice(successMessage);
     } catch (err) {
       setRpcError(errorText(err));
+      throw err;
     }
   }, [loadRPCPool, showNotice]);
 
@@ -1198,6 +1208,7 @@ export default function AdminPanel({
       showNotice('RPC 节点已添加');
     } catch (err) {
       setRpcError(errorText(err));
+      throw err;
     } finally {
       setRpcAdding(false);
     }
@@ -1214,6 +1225,7 @@ export default function AdminPanel({
       if (successMessage) showNotice(successMessage);
     } catch (err) {
       setPoolSourceError(errorText(err));
+      throw err;
     }
   }, [loadPoolDataSources, showNotice]);
 
@@ -1246,6 +1258,7 @@ export default function AdminPanel({
       showNotice('池子数据源已添加');
     } catch (err) {
       setPoolSourceError(errorText(err));
+      throw err;
     } finally {
       setPoolSourceAdding(false);
     }
@@ -1285,6 +1298,7 @@ export default function AdminPanel({
       showNotice('池子数据源已保存');
     } catch (err) {
       setPoolSourceError(errorText(err));
+      throw err;
     } finally {
       setPoolSourceUpdatingId(0);
     }
@@ -1297,6 +1311,7 @@ export default function AdminPanel({
       if (successMessage) showNotice(successMessage);
     } catch (err) {
       setOKXError(errorText(err));
+      throw err;
     }
   }, [loadOKXPool, showNotice]);
 
@@ -1335,6 +1350,7 @@ export default function AdminPanel({
       showNotice('OKX 配置已添加');
     } catch (err) {
       setOKXError(errorText(err));
+      throw err;
     } finally {
       setOKXAdding(false);
     }
@@ -1357,6 +1373,7 @@ export default function AdminPanel({
           showNotice(`${formatChain(chain)} ${formatPrivateZapKind(kind)} 已失效化`);
         } catch (err) {
           setPrivateZapError(errorText(err));
+          throw err;
         } finally {
           setInvalidatingKey('');
         }

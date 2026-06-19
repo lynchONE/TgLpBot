@@ -105,6 +105,7 @@ export default function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
             runningSince: String(prev[key]?.runningSince || position?.opened_at || '').trim(),
           },
         }));
+        throw error;
       }
     };
 

@@ -241,27 +241,15 @@ const REFRESH_MODULE_CONFIG = [
 ];
 
 function storageGet(key) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  return window.localStorage.getItem(key);
 }
 
 function storageSet(key, value) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
+  window.localStorage.setItem(key, value);
 }
 
 function storageRemove(key) {
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
+  window.localStorage.removeItem(key);
 }
 
 function getRefreshModuleConfig(key) {
@@ -292,11 +280,7 @@ function buildDefaultRefreshIntervals() {
 function normalizeRefreshIntervals(raw, legacyValue) {
   let parsed = null;
   if (raw) {
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = null;
-    }
+    parsed = JSON.parse(raw);
   }
   const legacy = Number(legacyValue);
   const hasLegacy = Number.isFinite(legacy) && legacy >= MIN_REFRESH_INTERVAL_SEC;
@@ -377,15 +361,11 @@ function normalizeWalletAddress(value) {
 
 function parseStoredWatchWallets(raw) {
   if (!raw) return [];
-  try {
-    const values = JSON.parse(raw);
-    if (!Array.isArray(values)) return [];
-    return Array.from(
-      new Set(values.map((item) => normalizeWalletAddress(item)).filter(Boolean))
-    ).sort();
-  } catch {
-    return [];
-  }
+  const values = JSON.parse(raw);
+  if (!Array.isArray(values)) return [];
+  return Array.from(
+    new Set(values.map((item) => normalizeWalletAddress(item)).filter(Boolean))
+  ).sort();
 }
 
 function parseKlineMarkerFilterUsd(raw) {
@@ -562,21 +542,13 @@ function markerWalletSourceContractLabel(value) {
 
 function parseLoginUser(raw) {
   if (!raw) return null;
-  try {
-    const user = JSON.parse(raw);
-    return user && typeof user === 'object' ? user : null;
-  } catch {
-    return null;
-  }
+  const user = JSON.parse(raw);
+  return user && typeof user === 'object' ? user : null;
 }
 
 function parseAccessInfo(raw) {
   if (!raw) return null;
-  try {
-    return normalizeAccessInfo(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+  return normalizeAccessInfo(JSON.parse(raw));
 }
 
 function openExternal(url) {
@@ -610,11 +582,7 @@ export default function App() {
   const [widgets, setWidgets] = useState(() => {
     const raw = storageGet(STORAGE.widgets);
     if (!raw) return [...DEFAULT_WIDGETS];
-    try {
-      return normalizeWidgetSelection(JSON.parse(raw));
-    } catch {
-      return [...DEFAULT_WIDGETS];
-    }
+    return normalizeWidgetSelection(JSON.parse(raw));
   });
   const [hotSort, setHotSort] = useState(() => {
     return normalizeHotPoolSort(storageGet(STORAGE.sort));
@@ -635,11 +603,7 @@ export default function App() {
   const [hotPoolsFilter, setHotPoolsFilter] = useState(() => {
     const saved = storageGet(STORAGE.hotPoolsFilter);
     if (!saved) return defaultHotPoolsFilter;
-    try {
-      return normalizeHotPoolsFilter(JSON.parse(saved));
-    } catch {
-      return defaultHotPoolsFilter;
-    }
+    return normalizeHotPoolsFilter(JSON.parse(saved));
   });
   const [hotPoolsFilterDraft, setHotPoolsFilterDraft] = useState(() =>
     buildHotPoolsFilterDraft(defaultHotPoolsFilter)
@@ -1020,7 +984,7 @@ export default function App() {
             groups: normalizePositionSmartMoneyGroups(resp?.range_groups),
           },
         }));
-      } catch {
+      } catch (error) {
         if (cancelled || controller.signal.aborted) return;
         setPositionSmartMoneyRanges((prev) => ({
           ...prev,
@@ -1030,6 +994,7 @@ export default function App() {
             groups: [],
           },
         }));
+        throw error;
       }
     };
 
@@ -1311,7 +1276,7 @@ export default function App() {
       } catch (err) {
         if (controller.signal.aborted) return;
         clearLoginState();
-        setLoginError(String(err?.message || err || '刷新权限失败'));
+        throw err;
       }
     })();
     return () => controller.abort();
@@ -1336,8 +1301,9 @@ export default function App() {
           return;
         }
         applyKlineWatchWalletResponse(resp);
-      } catch {
-        // Keep local fallback when backend sync is unavailable.
+      } catch (error) {
+        if (cancelled) return;
+        throw error;
       }
     })();
     return () => {
@@ -1409,6 +1375,7 @@ export default function App() {
         setHotPoolsUpdatedAt(resp?.updated_at || new Date().toISOString());
       } catch (e) {
         if (e?.name !== 'AbortError') setHotPoolsError(String(e?.message || e));
+        throw e;
       } finally {
         setHotPoolsLoading(false);
       }
@@ -1429,6 +1396,7 @@ export default function App() {
         setPositions(await fetchRealtimePositions({ apiBaseUrl, initData, signal }));
       } catch (e) {
         if (e?.name !== 'AbortError') setPositionsError(String(e?.message || e));
+        throw e;
       } finally {
         setPositionsLoading(false);
       }
@@ -1445,6 +1413,7 @@ export default function App() {
         setWalletBalancesChain(resp?.chain || chain);
       } catch (e) {
         if (e?.name !== 'AbortError') setWalletBalances(null);
+        throw e;
       }
     },
     [apiBaseUrl, chain, hasInitData, initData]
@@ -1485,6 +1454,7 @@ export default function App() {
           setKlineSource('');
           setKlineError(String(e?.message || e));
         }
+        throw e;
       } finally {
         setKlineLoading(false);
       }
@@ -1571,11 +1541,14 @@ export default function App() {
         if (signal?.aborted || klineMarkerRequestSeqRef.current !== seq) return;
         setKlineMarkers(nextMarkers);
         setKlineMarkersError(nextError);
+        const rejected = [smartResp, myResp].find((result) => result.status === 'rejected' && result.reason?.name !== 'AbortError');
+        if (rejected) throw rejected.reason;
       } catch (e) {
         if (e?.name !== 'AbortError' && klineMarkerRequestSeqRef.current === seq) {
           setKlineMarkers([]);
           setKlineMarkersError(String(e?.message || e));
         }
+        throw e;
       } finally {
         if (klineMarkerRequestSeqRef.current === seq) {
           setKlineMarkersLoading(false);
@@ -1711,6 +1684,7 @@ export default function App() {
       setLoginCodeExpiry(Date.now() + (resp.expires_in || 300) * 1000);
     } catch (e) {
       setLoginError(String(e?.message || e));
+      throw e;
     } finally {
       setLoginBusy(false);
     }
@@ -1740,8 +1714,8 @@ export default function App() {
           setLoginError('验证码已过期，请重新获取');
           if (pollRef.current) clearInterval(pollRef.current);
         }
-      } catch {
-        // ignore poll errors
+      } catch (error) {
+        throw error;
       }
     };
 
@@ -1770,9 +1744,12 @@ export default function App() {
   const refreshAll = useCallback(async () => {
     if (!hasInitData) return;
     setRefreshing(true);
-    await Promise.allSettled([loadHotPools(), loadPositions()]);
-    setKlineRefreshNonce((v) => v + 1);
-    setRefreshing(false);
+    try {
+      await Promise.all([loadHotPools(), loadPositions()]);
+      setKlineRefreshNonce((v) => v + 1);
+    } finally {
+      setRefreshing(false);
+    }
   }, [hasInitData, loadHotPools, loadPositions]);
 
   const refreshKline = useCallback(() => {
@@ -1821,8 +1798,8 @@ export default function App() {
       .then((resp) => {
         applyKlineWatchWalletResponse(resp);
       })
-      .catch(() => {
-        // Ignore and keep previous state if remote persistence fails.
+      .catch((error) => {
+        throw error;
       })
       .finally(clearBusy);
   }, [apiBaseUrl, applyKlineWatchWalletResponse, chain, hasInitData, initData, klineWatchedWalletSet]);
@@ -1890,8 +1867,9 @@ export default function App() {
     try {
       const resp = await fetchWallets({ apiBaseUrl, initData, chain: posChain || chain });
       setOpenPosWallets(resp?.wallets || []);
-    } catch {
+    } catch (error) {
       setOpenPosWallets(null);
+      throw error;
     } finally {
       setOpenPosWalletsLoading(false);
     }
@@ -1910,8 +1888,9 @@ export default function App() {
       const resp = await fetchSMPoolStats({ apiBaseUrl, poolAddress: normalizedPoolAddress });
       const nextGroups = Array.isArray(resp?.range_groups) ? resp.range_groups : [];
       setOpenPosSmartRanges((prev) => (nextGroups.length > 0 ? nextGroups : prev));
-    } catch {
+    } catch (error) {
       setOpenPosSmartRanges((prev) => prev);
+      throw error;
     } finally {
       setOpenPosSmartRangesLoading(false);
     }
@@ -2003,6 +1982,7 @@ export default function App() {
       setOperationProgress((prev) => (prev?.operation === 'open_position' ? null : prev));
       setOpenPosRisk(risk);
       setOpenPosSubmitError(risk ? '' : msg);
+      throw e;
     } finally {
       setOpenPosBusy(false);
     }
@@ -2010,7 +1990,7 @@ export default function App() {
 
   const handleTaskPause = useCallback(async (taskId, paused) => {
     await setTaskPaused({ apiBaseUrl, initData, taskId, paused });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleTaskStop = useCallback(async (taskId) => {
@@ -2036,11 +2016,12 @@ export default function App() {
           return { ...prev, currentStep: 1, status: 'active' };
         });
       }
-      loadPositions();
+      await loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);
       setOperationProgress(prev => prev?.operation === 'close_position'
         ? { ...prev, status: 'error', error: msg } : prev);
+      throw e;
     }
   }, [apiBaseUrl, initData, loadPositions]);
 
@@ -2065,7 +2046,7 @@ export default function App() {
     if (resp?.message) {
       setPositionsError('');
     }
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, handleTaskStop, loadPositions, requestConfirm]);
 
   // Polling fallback: detect close completion from positions data
@@ -2089,12 +2070,12 @@ export default function App() {
 
   const handleTaskDelete = useCallback(async (taskId) => {
     await deleteTask({ apiBaseUrl, initData, taskId });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleTaskEditRange = useCallback(async (taskId, rl, ru, amt) => {
     await updateTaskRange({ apiBaseUrl, initData, taskId, rangeLowerPct: rl, rangeUpperPct: ru, amountUSDT: amt });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleWithdrawLiquidity = useCallback(async (taskId) => {
@@ -2106,22 +2087,22 @@ export default function App() {
     });
     if (!ok) return;
     await withdrawLiquidity({ apiBaseUrl, initData, taskId });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions, requestConfirm]);
 
   const handleSwapDust = useCallback(async (taskId) => {
     await swapDust({ apiBaseUrl, initData, taskId });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleTriggerRebalance = useCallback(async (taskId) => {
     await triggerRebalance({ apiBaseUrl, initData, taskId });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleUpdateTaskMode = useCallback(async (taskId, taskMode) => {
     await updateTaskMode({ apiBaseUrl, initData, taskId, taskMode });
-    loadPositions();
+    await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleAddLiquidity = useCallback(async (taskId, position) => {
@@ -2144,11 +2125,13 @@ export default function App() {
     const amount = typeof payload === 'object' && payload !== null ? payload.amount : payload;
     const slippageTolerance = typeof payload === 'object' && payload !== null ? payload.slippageTolerance : undefined;
     await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount, slippageTolerance });
-    loadPositions().catch(() => {});
+    await loadPositions();
   }, [addLiqPosition, apiBaseUrl, initData, loadPositions]);
 
   const copyAddr = useCallback((addr) => {
-    navigator.clipboard?.writeText(addr).catch(() => {});
+    navigator.clipboard?.writeText(addr).catch((error) => {
+      throw error;
+    });
   }, []);
 
   const renderOperationProgress = (panelKey) => {

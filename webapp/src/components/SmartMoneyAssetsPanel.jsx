@@ -366,6 +366,7 @@ export default function SmartMoneyAssetsPanel({
       });
     } catch (err) {
       if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
+      throw err;
     }
   }, [apiBaseUrl, days, hasInitData, initData, isAdmin, mergeOverview]);
 
@@ -388,6 +389,7 @@ export default function SmartMoneyAssetsPanel({
       applyWalletRows(Array.isArray(wallets?.wallets) ? wallets.wallets : []);
     } catch (err) {
       if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
+      throw err;
     }
   }, [apiBaseUrl, applyWalletRows, days, hasInitData, initData, isAdmin, mergeOverview, walletKeyword, walletPage]);
 
@@ -409,6 +411,7 @@ export default function SmartMoneyAssetsPanel({
       });
     } catch (err) {
       if (!isIgnorableSmartMoneyDataError(err)) setError(errorText(err));
+      throw err;
     }
   }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardKeyword, leaderboardMetric, leaderboardPage]);
 
@@ -418,7 +421,7 @@ export default function SmartMoneyAssetsPanel({
     else setLoading(true);
     setError('');
     try {
-      await Promise.allSettled([
+      await Promise.all([
         loadSmartMoneySummary({ forceRefresh }),
         loadSmartMoneyWallets({ forceRefresh }),
         loadSmartMoneyLeaderboard({ forceRefresh }),
@@ -461,6 +464,7 @@ export default function SmartMoneyAssetsPanel({
       if (!isIgnorableSmartMoneyDataError(err)) {
         setError(errorText(err));
       }
+      throw err;
     } finally {
       setDetailLoading(false);
     }

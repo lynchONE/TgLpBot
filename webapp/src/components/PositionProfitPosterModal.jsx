@@ -366,6 +366,7 @@ export default function PositionProfitPosterModal({
       .catch((err) => {
         if (!alive) return;
         setRenderError(String(err?.message || err));
+        throw err;
       })
       .finally(() => {
         if (alive) setRendering(false);

@@ -244,8 +244,8 @@ export function parseHotPoolBadges(value, limit = 6) {
     if (!raw) return [];
     try {
       source = JSON.parse(raw);
-    } catch {
-      source = [raw];
+    } catch (err) {
+      throw err;
     }
   }
 

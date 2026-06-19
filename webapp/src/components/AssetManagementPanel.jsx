@@ -695,7 +695,9 @@ export default function AssetManagementPanel({
             setAssetState((prev) => ({ ...prev, overview: overview || null }));
           });
         })
-        .catch(() => {});
+        .catch((err) => {
+          throw err;
+        });
 
       const [overviewResult, historyResult, lpResult] = await Promise.allSettled([
         overviewPromise,
@@ -726,8 +728,11 @@ export default function AssetManagementPanel({
         setAssetState((prev) => ({ ...prev, ...nextState }));
       });
       setAssetError(errors.find(Boolean) || '');
+      const rejected = [overviewResult, historyResult, lpResult].find((result) => result.status === 'rejected');
+      if (rejected) throw rejected.reason;
     } catch (err) {
       setAssetError(String(err?.message || err));
+      throw err;
     } finally {
       setAssetLoading(false);
       setAssetRefreshing(false);
@@ -813,6 +818,7 @@ export default function AssetManagementPanel({
       setSelectedPnLDay(day);
     } catch (err) {
       setPnlAdjustmentError(errorText(err) || '保存失败');
+      throw err;
     } finally {
       setPnlAdjustmentSaving(false);
     }
@@ -831,6 +837,7 @@ export default function AssetManagementPanel({
       setSelectedPnLDay(day);
     } catch (err) {
       setPnlAdjustmentError(errorText(err) || '清除失败');
+      throw err;
     } finally {
       setPnlAdjustmentSaving(false);
     }
@@ -852,6 +859,7 @@ export default function AssetManagementPanel({
       setShowProfitBaselineEditor(false);
     } catch (err) {
       setProfitBaselineError(errorText(err) || '保存失败');
+      throw err;
     } finally {
       setProfitBaselineSaving(false);
     }
@@ -870,6 +878,7 @@ export default function AssetManagementPanel({
       setShowProfitBaselineEditor(false);
     } catch (err) {
       setProfitBaselineError(errorText(err) || '清除失败');
+      throw err;
     } finally {
       setProfitBaselineSaving(false);
     }

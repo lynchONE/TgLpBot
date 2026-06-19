@@ -27,8 +27,8 @@ function safeImageSrc(value) {
   try {
     const parsed = new URL(raw);
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? raw : '';
-  } catch {
-    return '';
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -677,7 +677,9 @@ export default function KlineChart({
   const copyWalletAddress = useCallback((walletAddress) => {
     const address = normalizeWalletAddress(walletAddress);
     if (!address) return;
-    navigator.clipboard?.writeText(address).catch(() => {});
+    navigator.clipboard?.writeText(address).catch((err) => {
+      throw err;
+    });
   }, []);
 
   const resolveDrawingAnchor = useCallback((event) => {
@@ -1088,6 +1090,7 @@ export default function KlineChart({
       setLabelEditing(false);
     } catch (err) {
       setLabelError(String(err?.message || err || '保存失败'));
+      throw err;
     } finally {
       setLabelSaving(false);
     }

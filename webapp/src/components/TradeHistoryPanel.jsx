@@ -98,6 +98,7 @@ export default function TradeHistoryPanel({ apiBaseUrl, initData, hasInitData = 
       setOffset(newOffset);
     } catch (e) {
       setError(String(e?.message || e));
+      throw e;
     } finally {
       setLoading(false);
     }

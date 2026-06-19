@@ -52,6 +52,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData = 
       setDraft(buildDraft(cfg));
     } catch (e) {
       setError(String(e?.message || e));
+      throw e;
     } finally {
       setLoading(false);
     }
@@ -75,6 +76,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData = 
       setTimeout(() => setSuccess(''), 3000);
     } catch (e) {
       setError(String(e?.message || e));
+      throw e;
     } finally {
       setSaving(false);
     }

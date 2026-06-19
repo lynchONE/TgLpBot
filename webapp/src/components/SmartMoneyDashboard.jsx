@@ -291,32 +291,24 @@ function readStoredSmartMoneyPoolFilter() {
     if (typeof window === 'undefined' || !window.localStorage) {
         return { ...EMPTY_SMART_MONEY_POOL_FILTER };
     }
-    try {
-        const raw = window.localStorage.getItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
-        if (!raw) return { ...EMPTY_SMART_MONEY_POOL_FILTER };
-        return normalizeStoredSmartMoneyPoolFilter(JSON.parse(raw));
-    } catch {
-        return { ...EMPTY_SMART_MONEY_POOL_FILTER };
-    }
+    const raw = window.localStorage.getItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
+    if (!raw) return { ...EMPTY_SMART_MONEY_POOL_FILTER };
+    return normalizeStoredSmartMoneyPoolFilter(JSON.parse(raw));
 }
 
 function writeStoredSmartMoneyPoolFilter(value) {
     if (typeof window === 'undefined' || !window.localStorage) {
         return;
     }
-    try {
-        const normalized = normalizeStoredSmartMoneyPoolFilter(value);
-        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd)
-            && !Number.isFinite(normalized.maxFeeRate)
-            && !Number.isFinite(normalized.minMarketCapUsd);
-        if (isEmpty) {
-            window.localStorage.removeItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
-            return;
-        }
-        window.localStorage.setItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY, JSON.stringify(normalized));
-    } catch {
-        // ignore storage failures
+    const normalized = normalizeStoredSmartMoneyPoolFilter(value);
+    const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd)
+        && !Number.isFinite(normalized.maxFeeRate)
+        && !Number.isFinite(normalized.minMarketCapUsd);
+    if (isEmpty) {
+        window.localStorage.removeItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
+        return;
     }
+    window.localStorage.setItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY, JSON.stringify(normalized));
 }
 
 function formatRangePercent(value) {
@@ -1103,12 +1095,14 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
                     setError(fallbackMessage);
                     setScanStep('扫描失败');
                     appendScanLog(`普通扫描失败：${fallbackMessage}`, 'error');
+                    throw fallbackErr;
                 }
                 return;
             }
             setError(message);
             setScanStep('扫描失败');
             appendScanLog(`扫描失败：${message}`, 'error');
+            throw err;
         } finally {
             if (scanAbortRef.current === controller) scanAbortRef.current = null;
             setScanElapsedMs(Date.now() - startedAt);
@@ -1150,6 +1144,7 @@ function TokenLiquidityImportModal({ open, apiBaseUrl, onClose, onImported }) {
             setError(message);
             setScanStep('导入失败');
             appendScanLog(`导入失败：${message}`, 'error');
+            throw err;
         } finally {
             setScanElapsedMs(Date.now() - startedAt);
             setSaving(false);
@@ -1601,6 +1596,7 @@ function WatchActivityPanel({
                 setActivities([]);
                 setTotal(0);
                 setError(String(err?.message || err || '加载特别关注动态失败'));
+                throw err;
             })
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) {
@@ -1748,6 +1744,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                 timerId = window.setTimeout(() => {
                     load(true);
                 }, 3000);
+                throw err;
             } finally {
                 if (!cancelled) {
                     setLoading(false);
@@ -1963,6 +1960,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                 setPools([]);
                 setPoolsTotal(0);
                 setError(String(err?.message || err || '加载池子失败'));
+                throw err;
             })
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) setLoading(false);
@@ -2329,6 +2327,7 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
                 setRows([]);
                 setTotal(0);
                 setError(String(err?.message || err || '加载收益火焰图失败'));
+                throw err;
             })
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) setLoading(false);
@@ -2541,7 +2540,9 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     const loadStats = useCallback(() => (
-        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => { })
+        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch((err) => {
+            throw err;
+        })
     ), [apiBaseUrl, pool.pool_address]);
 
     const loadPositions = useCallback((silent = false) => {
@@ -2558,7 +2559,9 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                 setPositions(d?.list || []);
                 setPositionsTotal(Number(d?.total || 0));
             })
-            .catch(() => { })
+            .catch((err) => {
+                throw err;
+            })
             .finally(() => {
                 if (!silent) setLoading(false);
             });
@@ -2776,7 +2779,10 @@ function WalletList({
                 setWallets(list);
                 setWalletsTotal(total);
             })
-            .catch(() => { })
+            .catch((err) => {
+                if (seq !== loadSeqRef.current) return;
+                throw err;
+            })
             .finally(() => {
                 if (!silent && seq === loadSeqRef.current) setLoading(false);
             });
@@ -2797,6 +2803,7 @@ function WalletList({
             await load();
         } catch (err) {
             setActionError(String(err?.message || err || '鎿嶄綔澶辫触'));
+            throw err;
         } finally {
             setBusyKey('');
         }
@@ -2814,6 +2821,7 @@ function WalletList({
         } catch (err) {
             setConfirmState(null);
             setActionError(String(err?.message || err || '鎿嶄綔澶辫触'));
+            throw err;
         } finally {
             setBusyKey('');
         }
@@ -2834,6 +2842,7 @@ function WalletList({
             setZombieOpen(true);
         } catch (err) {
             setActionError(String(err?.message || err || '查找僵尸钱包失败'));
+            throw err;
         } finally {
             setBusyKey('');
         }
@@ -2866,6 +2875,7 @@ function WalletList({
             await load();
         } catch (err) {
             setActionError(String(err?.message || err || '删除僵尸钱包失败'));
+            throw err;
         } finally {
             setBusyKey('');
         }
@@ -3068,7 +3078,9 @@ function WalletDetail({
     );
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
     const loadInfo = useCallback(() => (
-        fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => { })
+        fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch((err) => {
+            throw err;
+        })
     ), [apiBaseUrl, addr]);
 
     const loadPositions = useCallback((silent = false) => {
@@ -3085,7 +3097,9 @@ function WalletDetail({
                 setPositions(d?.list || []);
                 setPositionsTotal(Number(d?.total || 0));
             })
-            .catch(() => { })
+            .catch((err) => {
+                throw err;
+            })
             .finally(() => {
                 if (!silent) setLoading(false);
             });
@@ -3286,7 +3300,10 @@ function SettingsPanel({ apiBaseUrl }) {
     useEffect(() => {
         setLoading(true);
         loadContracts()
-            .catch((err) => setActionError(String(err?.message || err || '加载失败')))
+            .catch((err) => {
+                setActionError(String(err?.message || err || '加载失败'));
+                throw err;
+            })
             .finally(() => setLoading(false));
     }, [loadContracts]);
 
@@ -3298,6 +3315,7 @@ function SettingsPanel({ apiBaseUrl }) {
             await refresh();
         } catch (err) {
             setActionError(String(err?.message || err || '操作失败'));
+            throw err;
         } finally {
             setBusyKey('');
         }
@@ -3328,6 +3346,7 @@ function SettingsPanel({ apiBaseUrl }) {
         } catch (err) {
             setConfirmState(null);
             setActionError(String(err?.message || err || '操作失败'));
+            throw err;
         } finally {
             setBusyKey('');
         }
@@ -3526,6 +3545,7 @@ function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved }) {
             await onSaved?.();
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
+            throw err;
         } finally {
             setSaving(false);
         }
@@ -3620,6 +3640,7 @@ function EditContractModal({ open, apiBaseUrl, contract, onClose, onSaved }) {
             await onSaved?.();
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
+            throw err;
         } finally {
             setSaving(false);
         }
@@ -3685,7 +3706,9 @@ export default function SmartMoneyDashboard({
     );
 
     const loadStats = useCallback(() => (
-        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => { })
+        fetchSMStats({ apiBaseUrl }).then(setStats).catch((err) => {
+            throw err;
+        })
     ), [apiBaseUrl]);
 
     useEffect(() => {
@@ -3833,11 +3856,25 @@ function AddWalletForm({ apiBaseUrl, onDone }) {
             {error ? <div className="smd-inline-error">{error}</div> : null}
             <div className="smd-modal-actions">
                 <button onClick={onDone} className="smd-modal-cancel">取消</button>
-                <button disabled={!addr || saving} className="smd-modal-submit" onClick={async () => {
-                    setSaving(true);
-                    setError('');
-                    try { await addSMWallet({ apiBaseUrl, address: addr, label }); onDone(); } catch (e) { setError(String(e?.message || e)); } finally { setSaving(false); }
-                }}>{saving ? '添加中...' : '添加'}</button>
+                <button
+                    disabled={!addr || saving}
+                    className="smd-modal-submit"
+                    onClick={async () => {
+                        setSaving(true);
+                        setError('');
+                        try {
+                            await addSMWallet({ apiBaseUrl, address: addr, label });
+                            onDone();
+                        } catch (e) {
+                            setError(String(e?.message || e));
+                            throw e;
+                        } finally {
+                            setSaving(false);
+                        }
+                    }}
+                >
+                    {saving ? '添加中...' : '添加'}
+                </button>
             </div>
         </div>
     );
@@ -3901,11 +3938,7 @@ function formatGoldenDogDraftValue(value, { emptyWhenZero = false, multiplier = 
 function mapGoldenDogAmountTiers(value) {
     let rows = value;
     if (typeof rows === 'string' && rows.trim()) {
-        try {
-            rows = JSON.parse(rows);
-        } catch {
-            rows = null;
-        }
+        rows = JSON.parse(rows);
     }
     if (!Array.isArray(rows) || rows.length === 0) {
         return cloneGoldenDogDefaultAmountTiers();
@@ -4046,11 +4079,7 @@ async function playSmartMoneyBeep() {
 
     const ctx = smartMoneyBeepAudioContext;
     if (ctx.state === 'suspended') {
-        try {
-            await ctx.resume();
-        } catch {
-            return false;
-        }
+        await ctx.resume();
     }
 
     // 创建一个更悦耳的三音符上升旋律
@@ -4223,6 +4252,7 @@ function GoldenDogPanelContent({
             applyWatchAlertResponse(watchAlertResp);
         } catch (err) {
             setError(String(err?.message || err || '加载失败'));
+            throw err;
         } finally {
             setLoading(false);
         }
@@ -4242,11 +4272,7 @@ function GoldenDogPanelContent({
 
         let cancelled = false;
         let socket;
-        try {
-            socket = new WebSocket(wsUrl);
-        } catch {
-            return undefined;
-        }
+        socket = new WebSocket(wsUrl);
 
         socket.onmessage = async (messageEvent) => {
             if (cancelled) return;
@@ -4271,16 +4297,13 @@ function GoldenDogPanelContent({
                 console.log('[SmartMoney] 音效播放结果:', played ? '成功' : '失败');
             } catch (err) {
                 console.error('[SmartMoney] WebSocket消息处理错误:', err);
+                throw err;
             }
         };
 
         return () => {
             cancelled = true;
-            try {
-                socket?.close();
-            } catch {
-                // ignore
-            }
+            socket?.close();
         };
     }, [apiBaseUrl, hasInitData, watchAlertDraft.enabled, watchAlertDraft.sound_enabled, watchedWalletList, watchedWalletSet]);
 
@@ -4443,6 +4466,7 @@ function GoldenDogPanelContent({
             }
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
+            throw err;
         } finally {
             setSaving(false);
         }
@@ -4472,6 +4496,7 @@ function GoldenDogPanelContent({
             }
         } catch (err) {
             setError(String(err?.message || err || '测试失败'));
+            throw err;
         } finally {
             setTestingMode('');
         }
@@ -5551,6 +5576,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         } catch (err) {
             if (err?.name === 'AbortError') return;
             setError(String(err?.message || err || '加载失败'));
+            throw err;
         } finally {
             setLoading(false);
         }
@@ -5603,6 +5629,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             await load();
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
+            throw err;
         } finally {
             setSaving(false);
         }
@@ -5641,6 +5668,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             await load();
         } catch (err) {
             setError(String(err?.message || err || '更新失败'));
+            throw err;
         } finally {
             setSaving(false);
         }
@@ -5661,6 +5689,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             await load();
         } catch (err) {
             setError(String(err?.message || err || '删除失败'));
+            throw err;
         } finally {
             setSaving(false);
         }

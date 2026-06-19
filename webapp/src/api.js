@@ -7,11 +7,7 @@ const assetResponseCache = new Map();
 
 function cloneCachedPayload(payload) {
   if (payload === null || payload === undefined) return payload;
-  try {
-    return JSON.parse(JSON.stringify(payload));
-  } catch {
-    return payload;
-  }
+  return JSON.parse(JSON.stringify(payload));
 }
 
 function readAssetCache(cacheKey, ttlMs) {
@@ -44,11 +40,12 @@ async function resolveAssetCachedPayload({ cacheKey, ttlMs = ASSET_CACHE_TTL_MS,
 }
 
 async function readErrorDetails(resp) {
-  const text = await resp.text().catch(() => '');
+  const text = await resp.text();
   if (!text) {
     return { message: `HTTP ${resp.status}`, payload: null };
   }
-  try {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === 'object') {
       return {
@@ -56,8 +53,6 @@ async function readErrorDetails(resp) {
         payload: parsed,
       };
     }
-  } catch {
-    // ignore JSON parse errors
   }
   return { message: text, payload: null };
 }

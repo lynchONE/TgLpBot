@@ -163,6 +163,7 @@ export default function AddLiquidityModal({ position, onConfirm, onClose }) {
     } catch (submitError) {
       setError(String(submitError?.message || submitError || '补充流动性失败'));
       setSubmitting(false);
+      throw submitError;
     }
   }, [isValid, onClose, onConfirm, parsedAmount, parsedSlippage, submitting]);
 

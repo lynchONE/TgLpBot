@@ -411,6 +411,7 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
         if (err?.name !== 'AbortError') {
           setWallets([]);
           setWalletsError(String(err?.message || err));
+          throw err;
         }
       })
       .finally(() => setWalletsLoading(false));
@@ -439,6 +440,7 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
       .catch((err) => {
         if (err?.name !== 'AbortError') {
           setSourcesError(String(err?.message || err));
+          throw err;
         }
       })
       .finally(() => setSourcesLoading(false));
@@ -497,6 +499,7 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
     } catch (err) {
       setPreview(null);
       setError(String(err?.message || err));
+      throw err;
     } finally {
       setPreviewLoading(false);
     }
@@ -516,6 +519,7 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
       setPreview(null);
     } catch (err) {
       setError(String(err?.message || err));
+      throw err;
     } finally {
       setExecuteLoading(false);
     }

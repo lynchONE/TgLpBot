@@ -1,12 +1,8 @@
 export function parseDCAPercentages(raw) {
     if (Array.isArray(raw)) return raw.map((value) => Number(value) || 0);
     if (typeof raw === 'string' && raw.trim()) {
-        try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) return parsed.map((value) => Number(value) || 0);
-        } catch {
-            // Keep the default batch split for legacy non-JSON config values.
-        }
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map((value) => Number(value) || 0);
     }
     return [50, 50];
 }

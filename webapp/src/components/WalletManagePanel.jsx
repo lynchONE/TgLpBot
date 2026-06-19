@@ -43,6 +43,7 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData = 
     } catch (e) {
       setError(String(e?.message || e));
       setWallets([]);
+      throw e;
     } finally {
       setLoading(false);
     }
@@ -67,13 +68,9 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData = 
   const defaultWallet = useMemo(() => wallets.find((wallet) => wallet.is_default), [wallets]);
 
   const copyAddress = async (addr) => {
-    try {
-      await navigator.clipboard.writeText(addr);
-      setCopiedAddr(addr);
-      setTimeout(() => setCopiedAddr(''), 2000);
-    } catch {
-      // Clipboard access can be unavailable in some embedded browsers.
-    }
+    await navigator.clipboard.writeText(addr);
+    setCopiedAddr(addr);
+    setTimeout(() => setCopiedAddr(''), 2000);
   };
 
   const handleCrudSubmit = async (e) => {
@@ -94,6 +91,7 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData = 
       await load();
     } catch (err) {
       setError(String(err?.message || err));
+      throw err;
     } finally {
       setCrudLoading(false);
     }
@@ -113,6 +111,7 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData = 
       } catch (err) {
         setError(String(err?.message || err));
         setLoading(false);
+        throw err;
       }
       return;
     }
@@ -134,6 +133,7 @@ export default function WalletManagePanel({ apiBaseUrl, initData, hasInitData = 
     } catch (err) {
       setError(String(err?.message || err));
       setLoading(false);
+      throw err;
     }
   };
 

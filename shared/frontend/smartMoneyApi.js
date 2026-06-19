@@ -10,12 +10,7 @@ function shouldProxyAvatarAsset(rawUrl) {
     const value = String(rawUrl || '').trim();
     if (!value || typeof window === 'undefined') return false;
 
-    let parsed;
-    try {
-        parsed = new URL(value, window.location.origin);
-    } catch {
-        return false;
-    }
+    const parsed = new URL(value, window.location.origin);
 
     return window.location.protocol === 'https:' && parsed.protocol === 'http:';
 }
@@ -78,20 +73,19 @@ function sanitizeErrorMessage(value, status, useStatusFallback = false) {
 }
 
 async function readErrorMessage(resp) {
-    const text = await resp.text().catch(() => '');
+    const text = await resp.text();
     if (!text) return `HTTP ${resp.status}`;
-    try {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         const json = JSON.parse(text);
         if (json?.message) return sanitizeErrorMessage(json.message, resp.status);
         if (json?.error) return sanitizeErrorMessage(json.error, resp.status);
-    } catch {
-        // ignore JSON parse errors and fall back to a sanitized text message
     }
     return sanitizeErrorMessage(text, resp.status, true);
 }
 
 async function readResponseJson(resp) {
-    const text = await resp.text().catch(() => '');
+    const text = await resp.text();
     if (!text) throw new Error(`HTTP ${resp.status}: empty response`);
     try {
         return JSON.parse(text);
@@ -580,7 +574,7 @@ export function buildSMEventsWsUrl(apiBaseUrl) {
         url.search = '';
         url.hash = '';
         return url.toString();
-    } catch {
-        return '';
+    } catch (err) {
+        throw err;
     }
 }

@@ -410,6 +410,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       }
     } catch (err) {
       setUsersError(errorText(err));
+      throw err;
     } finally {
       setUsersLoading(false);
     }
@@ -431,6 +432,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       setCodesTotal(Number(data?.total || items.length));
     } catch (err) {
       setCodesError(errorText(err));
+      throw err;
     } finally {
       setCodesLoading(false);
     }
@@ -445,6 +447,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       setAnnouncements(Array.isArray(data?.items) ? data.items : []);
     } catch (err) {
       setAnnError(errorText(err));
+      throw err;
     } finally {
       setAnnLoading(false);
     }
@@ -508,6 +511,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       await loadUsers();
     } catch (err) {
       setUsersError(errorText(err));
+      throw err;
     } finally {
       setAccessSaving(false);
     }
@@ -545,6 +549,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       await loadCodes();
     } catch (err) {
       setCodesError(errorText(err));
+      throw err;
     } finally {
       setCodesLoading(false);
     }
@@ -582,6 +587,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
       await loadAnnouncements();
     } catch (err) {
       setAnnError(errorText(err));
+      throw err;
     } finally {
       setPublishing(false);
     }
