@@ -1,16 +1,21 @@
 /* OKX-inspired Mini App skin. Loaded after Tailwind and component CSS. */
 :root {
-    --okx-bg: #000;
-    --okx-bg-elevated: #080808;
-    --okx-bg-card: #0b0b0b;
-    --okx-bg-input: #0f0f0f;
-    --okx-bg-surface: #111;
-    --okx-line: rgba(255, 255, 255, 0.085);
-    --okx-line-soft: rgba(255, 255, 255, 0.055);
-    --okx-line-strong: rgba(255, 255, 255, 0.18);
-    --okx-text: #f4f4f5;
-    --okx-muted: #8b8f98;
-    --okx-subtle: #5f646d;
+    --okx-bg: #101216;
+    --okx-bg-elevated: #171a20;
+    --okx-bg-card: #1c2027;
+    --okx-bg-card-strong: #242a32;
+    --okx-bg-input: #131820;
+    --okx-bg-surface: #252b34;
+    --okx-bg-surface-hover: #303844;
+    --okx-disabled-bg: #232830;
+    --okx-disabled-text: #828b98;
+    --okx-line: rgba(226, 232, 240, 0.16);
+    --okx-line-soft: rgba(226, 232, 240, 0.1);
+    --okx-line-strong: rgba(226, 232, 240, 0.28);
+    --okx-focus: rgba(183, 255, 26, 0.26);
+    --okx-text: #f8fafc;
+    --okx-muted: #b8c0cc;
+    --okx-subtle: #8a94a3;
     --okx-accent: #b7ff1a;
     --okx-accent-rgb: 183, 255, 26;
     --okx-accent-text: #d9ff63;
@@ -34,14 +39,16 @@ html,
 body,
 #root {
     min-height: 100%;
-    background: #000 !important;
+    background: var(--okx-bg) !important;
     max-width: 100%;
     overflow-x: hidden;
 }
 
 body {
     color: var(--okx-text);
-    background: #000 !important;
+    background:
+        radial-gradient(circle at 12% -12%, rgba(var(--okx-accent-rgb), 0.11), transparent 30%),
+        linear-gradient(180deg, #141820 0%, var(--okx-bg) 46%, #0f1217 100%) !important;
 }
 
 body::before {
@@ -50,10 +57,10 @@ body::before {
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+        linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
     background-size: 44px 44px;
-    opacity: 0.18;
+    opacity: 0.14;
     mask-image: linear-gradient(to bottom, black 0 38%, transparent 78%);
     -webkit-mask-image: linear-gradient(to bottom, black 0 38%, transparent 78%);
 }
@@ -91,8 +98,8 @@ body::before {
     inset: 0;
     pointer-events: none;
     background:
-        radial-gradient(circle at 50% -18%, rgba(var(--okx-accent-rgb), 0.08), transparent 34%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 210px);
+        radial-gradient(circle at 50% -18%, rgba(var(--okx-accent-rgb), 0.12), transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 240px);
 }
 
 .miniapp-shell :is(.tracking-tight, .tracking-\[-0\.04em\]) {
@@ -138,9 +145,10 @@ body::before {
     z-index: 30;
     margin-inline: -0.5rem;
     padding: 8px;
-    border: 1px solid var(--okx-line);
+    border: 1px solid var(--okx-line-strong);
     border-radius: 8px;
-    background: rgba(0, 0, 0, 0.94);
+    background: rgba(23, 26, 32, 0.96);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28) !important;
 }
 
 .miniapp-shell header > .flex:first-child {
@@ -220,6 +228,74 @@ body::before {
     [class*='bg-\[linear-gradient']
 ) {
     background-image: none !important;
+}
+
+.miniapp-shell :is(
+    .bg-\[\#080808\],
+    .bg-\[\#0b0b0b\],
+    .bg-\[\#101010\],
+    .bg-\[\#111\],
+    .bg-black\/10,
+    .bg-black\/15,
+    .bg-black\/20,
+    .bg-black\/30,
+    .dark\:bg-black\/20,
+    .dark\:bg-black\/30,
+    .dark\:bg-black\/50,
+    .bg-zinc-950\/45,
+    .bg-zinc-950\/50,
+    .bg-zinc-900\/45,
+    .bg-zinc-900\/55,
+    .bg-zinc-900\/60,
+    .bg-zinc-900\/65,
+    .bg-zinc-900\/70,
+    .bg-zinc-800\/80
+) {
+    background: var(--okx-bg-surface) !important;
+}
+
+.miniapp-shell :is(
+    button.bg-\[\#111\],
+    button.bg-black\/20,
+    button.bg-black\/30,
+    button.bg-zinc-900\/60,
+    button.bg-zinc-900\/65,
+    button.bg-zinc-900\/70,
+    button.dark\:bg-white\/5,
+    button.dark\:bg-white\/10,
+    button.dark\:bg-black\/20,
+    button.dark\:bg-black\/30
+) {
+    border-color: var(--okx-line-strong) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
+}
+
+.miniapp-shell :is(
+    button.bg-\[\#111\],
+    button.bg-black\/20,
+    button.bg-black\/30,
+    button.bg-zinc-900\/60,
+    button.bg-zinc-900\/65,
+    button.bg-zinc-900\/70,
+    button.dark\:bg-white\/5,
+    button.dark\:bg-white\/10,
+    button.dark\:bg-black\/20,
+    button.dark\:bg-black\/30
+):hover:not(:disabled) {
+    border-color: rgba(var(--okx-accent-rgb), 0.42) !important;
+    background: var(--okx-bg-surface-hover) !important;
+    color: #fff !important;
+}
+
+.miniapp-shell :is(
+    button.h-8.w-8,
+    button.h-9.w-9,
+    button[class*='h-8'][class*='w-8'],
+    button[class*='h-9'][class*='w-9']
+) {
+    min-width: 44px !important;
+    min-height: 44px !important;
 }
 
 .miniapp-shell :is(
@@ -390,18 +466,40 @@ body::before {
 }
 
 .miniapp-shell :is(input, textarea, select)::placeholder {
-    color: rgba(255, 255, 255, 0.28) !important;
+    color: rgba(248, 250, 252, 0.46) !important;
 }
 
 .miniapp-shell :is(input, textarea, select):focus {
     border-color: rgba(var(--okx-accent-rgb), 0.5) !important;
     outline: none !important;
-    box-shadow: 0 0 0 2px rgba(var(--okx-accent-rgb), 0.14) !important;
+    box-shadow: 0 0 0 2px var(--okx-focus) !important;
 }
 
 .miniapp-shell button {
     box-shadow: none !important;
     letter-spacing: 0 !important;
+    transition:
+        background-color 160ms ease,
+        border-color 160ms ease,
+        color 160ms ease,
+        opacity 160ms ease !important;
+}
+
+.miniapp-shell button:not(:disabled) {
+    cursor: pointer;
+}
+
+.miniapp-shell button:disabled {
+    cursor: not-allowed;
+}
+
+.miniapp-shell button:focus-visible,
+.miniapp-shell a:focus-visible,
+.miniapp-shell [role='button']:focus-visible,
+.miniapp-shell [role='tab']:focus-visible,
+.miniapp-shell [role='switch']:focus-visible {
+    outline: 2px solid var(--okx-focus) !important;
+    outline-offset: 2px !important;
 }
 
 .miniapp-shell :is(
@@ -412,9 +510,9 @@ body::before {
     .spm-btn,
     .task-action-item
 ) {
-    border-color: var(--okx-line) !important;
+    border-color: var(--okx-line-strong) !important;
     background: var(--okx-bg-surface) !important;
-    color: var(--okx-muted) !important;
+    color: var(--okx-text) !important;
 }
 
 .miniapp-shell :is(
@@ -423,8 +521,8 @@ body::before {
     .cp-btn:hover,
     .spm-btn:hover
 ):not(:disabled) {
-    border-color: var(--okx-line-strong) !important;
-    background: #191919 !important;
+    border-color: rgba(var(--okx-accent-rgb), 0.42) !important;
+    background: var(--okx-bg-surface-hover) !important;
     color: #fff !important;
     transform: none !important;
 }
@@ -515,11 +613,11 @@ body::before {
 
 .miniapp-shell nav {
     max-width: min(430px, calc(100vw - 24px)) !important;
-    border: 1px solid var(--okx-line) !important;
+    border: 1px solid var(--okx-line-strong) !important;
     border-radius: 8px !important;
-    background: rgba(8, 8, 8, 0.98) !important;
+    background: rgba(28, 32, 39, 0.98) !important;
     padding: 6px !important;
-    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.42) !important;
+    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.38) !important;
 }
 
 .miniapp-shell nav.rounded-full {
@@ -527,7 +625,7 @@ body::before {
 }
 
 .miniapp-shell nav button {
-    min-height: 42px !important;
+    min-height: 44px !important;
     border-radius: 7px !important;
     color: var(--okx-muted) !important;
 }
@@ -558,7 +656,7 @@ body::before {
 ) {
     border-color: var(--okx-line) !important;
     border-radius: 10px 10px 0 0 !important;
-    background: #080808 !important;
+    background: var(--okx-bg-elevated) !important;
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.72) !important;
 }
 
@@ -600,13 +698,13 @@ body::before {
 .miniapp-shell .grid > .rounded-2xl,
 .miniapp-shell .rounded-2xl.border {
     border-color: var(--okx-line) !important;
-    background: #080808 !important;
+    background: var(--okx-bg-card) !important;
 }
 
 .miniapp-shell .rounded-2xl.border:active,
 .miniapp-shell .rounded-2xl.border:hover {
-    border-color: rgba(var(--okx-accent-rgb), 0.22) !important;
-    background: #0d0d0d !important;
+    border-color: rgba(var(--okx-accent-rgb), 0.36) !important;
+    background: var(--okx-bg-card-strong) !important;
 }
 
 .miniapp-shell .rounded-2xl.border .text-base.font-extrabold,
@@ -628,7 +726,7 @@ body::before {
 .miniapp-shell .task-popover {
     border: 1px solid var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #080808 !important;
+    background: var(--okx-bg-elevated) !important;
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.72) !important;
 }
 
@@ -638,7 +736,7 @@ body::before {
 }
 
 .miniapp-shell .task-action-item:hover {
-    background: #111 !important;
+    background: var(--okx-bg-surface) !important;
 }
 
 /* Smart money and admin dark surfaces */
@@ -656,7 +754,7 @@ body::before {
 
 .miniapp-shell section[class*='rounded'] {
     border-color: var(--okx-line) !important;
-    background: #050505 !important;
+    background: var(--okx-bg-card) !important;
 }
 
 .miniapp-shell :is(.inline-flex.min-h-\[60px\], button[class*='min-h-\[60px\]']) {
@@ -668,7 +766,7 @@ body::before {
 .miniapp-shell .space-y-3 > .relative.rounded-3xl {
     border: 1px solid var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-elevated) !important;
     padding: 4px !important;
 }
 
@@ -676,7 +774,7 @@ body::before {
 .miniapp-shell .space-y-3 > .relative.rounded-3xl > .mt-1.rounded-\[20px\] {
     border: 1px solid var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #0b0b0b !important;
+    background: var(--okx-bg-card) !important;
 }
 
 .miniapp-shell .space-y-3 > .relative.rounded-3xl input {
@@ -687,17 +785,17 @@ body::before {
     border: 1px solid var(--okx-line) !important;
     background: var(--okx-accent) !important;
     color: #050700 !important;
-    box-shadow: 0 0 0 4px #050505 !important;
+    box-shadow: 0 0 0 4px var(--okx-bg-elevated) !important;
 }
 
 /* Charts */
 .miniapp-shell :is(.kline-native-wrap, .dex-embed-wrap) {
     border-color: var(--okx-line) !important;
-    background: #030303 !important;
+    background: #111722 !important;
 }
 
 .miniapp-shell :is(.kline-native-wrap, .dex-embed-wrap) canvas {
-    background: #030303 !important;
+    background: #111722 !important;
 }
 
 .miniapp-shell .mini-am-lw-chart,
@@ -708,11 +806,11 @@ body::before {
 
 /* Mobile OKX alignment: mirror webapp panel/list schemes with single-column ergonomics. */
 .miniapp-shell .mini-module-header {
-    border: 1px solid var(--okx-line) !important;
+    border: 1px solid var(--okx-line-strong) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-elevated) !important;
     padding: 10px !important;
-    box-shadow: none !important;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22) !important;
 }
 
 .miniapp-shell .mini-module-header-main {
@@ -764,7 +862,7 @@ body::before {
     border-width: 1px !important;
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-card) !important;
     padding: 10px !important;
     box-shadow: none !important;
     backdrop-filter: none !important;
@@ -778,7 +876,7 @@ body::before {
 
 .miniapp-shell .mini-pool-row:active,
 .miniapp-shell .mini-pool-row:hover {
-    background: #0b0b0b !important;
+    background: var(--okx-bg-card-strong) !important;
 }
 
 .miniapp-shell .mini-pool-row-main {
@@ -828,12 +926,12 @@ body::before {
 }
 
 .miniapp-shell .mini-pool-icon-btn {
-    flex: 0 0 24px;
-    width: 24px !important;
-    height: 24px !important;
-    border-color: var(--okx-line) !important;
-    background: #101010 !important;
-    color: var(--okx-muted) !important;
+    flex: 0 0 32px;
+    width: 32px !important;
+    height: 32px !important;
+    border-color: var(--okx-line-strong) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
     box-shadow: none !important;
 }
 
@@ -952,7 +1050,7 @@ body::before {
     max-width: 118px !important;
     min-width: 0;
     border-color: rgba(var(--okx-info-rgb), 0.28) !important;
-    background: #101010 !important;
+    background: rgba(var(--okx-info-rgb), 0.12) !important;
     color: var(--okx-info) !important;
     box-shadow: none !important;
 }
@@ -965,7 +1063,7 @@ body::before {
 
 .miniapp-shell .mini-pool-feature-row .mini-pool-badge-more {
     border-color: var(--okx-line) !important;
-    background: #0b0b0b !important;
+    background: var(--okx-bg-surface) !important;
     color: var(--okx-muted) !important;
     cursor: pointer;
 }
@@ -973,7 +1071,7 @@ body::before {
 .miniapp-shell .mini-pool-open-btn {
     width: 44px !important;
     min-width: 44px !important;
-    height: 26px !important;
+    min-height: 36px !important;
     padding: 0 5px !important;
     justify-content: center !important;
     gap: 2px !important;
@@ -1007,8 +1105,8 @@ body::before {
 
 .miniapp-shell .mini-pool-open-btn:disabled {
     border-color: var(--okx-line) !important;
-    background: #151515 !important;
-    color: rgba(255, 255, 255, 0.42) !important;
+    background: var(--okx-disabled-bg) !important;
+    color: var(--okx-disabled-text) !important;
     opacity: 1 !important;
 }
 
@@ -1020,7 +1118,7 @@ body::before {
 .miniapp-shell .mini-position-card {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #080808 !important;
+    background: var(--okx-bg-card) !important;
     box-shadow: none !important;
     overflow: visible !important;
 }
@@ -1080,7 +1178,7 @@ body::before {
 
 .miniapp-shell .mini-position-action-bar button {
     flex: 0 0 auto;
-    height: 28px !important;
+    min-height: 36px !important;
     border-radius: 6px !important;
     box-shadow: none !important;
 }
@@ -1088,14 +1186,14 @@ body::before {
 .miniapp-shell .mini-position-exit-panel {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-elevated) !important;
 }
 
 .miniapp-shell .mini-position-detail-card {
     overflow: visible;
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-elevated) !important;
 }
 
 .miniapp-shell .collapsible-content.expanded {
@@ -1108,9 +1206,9 @@ body::before {
 }
 
 .miniapp-shell .mini-sm-shell {
-    border-color: var(--okx-line) !important;
+    border-color: var(--okx-line-strong) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-elevated) !important;
     padding: 10px !important;
     box-shadow: none !important;
 }
@@ -1118,7 +1216,7 @@ body::before {
 .miniapp-shell .mini-sm-monitor {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #080808 !important;
+    background: var(--okx-bg-card) !important;
     padding: 10px !important;
 }
 
@@ -1141,7 +1239,7 @@ body::before {
     padding: 4px;
     border: 1px solid var(--okx-line);
     border-radius: 8px;
-    background: #080808;
+    background: var(--okx-bg-card);
     scrollbar-width: none;
 }
 
@@ -1151,11 +1249,11 @@ body::before {
 
 .miniapp-shell .mini-sm-tabs > button {
     flex: 0 0 76px;
-    min-height: 34px !important;
+    min-height: 40px !important;
     border-radius: 999px !important;
     padding: 5px 6px !important;
     font-size: 10px !important;
-    color: rgba(255, 255, 255, 0.62) !important;
+    color: var(--okx-muted) !important;
 }
 
 .miniapp-shell .mini-sm-tabs > button[data-active='true'] {
@@ -1169,9 +1267,9 @@ body::before {
 }
 
 .miniapp-shell .mini-sm-tabs > button[data-active='false'] {
-    border-color: rgba(var(--okx-accent-rgb), 0.22) !important;
-    background: rgba(var(--okx-accent-rgb), 0.08) !important;
-    color: var(--okx-accent-text) !important;
+    border-color: var(--okx-line-strong) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
 }
 
 .miniapp-shell .mini-sm-follow-page {
@@ -1181,16 +1279,16 @@ body::before {
 .miniapp-shell .mini-sm-follow-tabs {
     border-color: var(--okx-line) !important;
     border-radius: 999px !important;
-    background: #080808 !important;
+    background: var(--okx-bg-card) !important;
     padding: 4px !important;
 }
 
 .miniapp-shell .mini-sm-follow-tabs > button {
-    min-height: 34px !important;
+    min-height: 40px !important;
     border-radius: 999px !important;
     padding: 5px 6px !important;
     font-size: 10px !important;
-    color: rgba(255, 255, 255, 0.58) !important;
+    color: var(--okx-muted) !important;
 }
 
 .miniapp-shell .mini-sm-follow-tabs > button[data-active='true'] {
@@ -1217,22 +1315,22 @@ body::before {
 
 .miniapp-shell .mini-sm-follow-page button[data-active='false'],
 .miniapp-shell .mini-sm-follow-secondary {
-    border-color: rgba(var(--okx-accent-rgb), 0.28) !important;
-    background: rgba(var(--okx-accent-rgb), 0.09) !important;
-    color: var(--okx-accent-text) !important;
+    border-color: var(--okx-line-strong) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
 }
 
 .miniapp-shell .mini-sm-follow-page button[data-active='false']:hover:not(:disabled),
 .miniapp-shell .mini-sm-follow-secondary:hover:not(:disabled) {
     border-color: rgba(var(--okx-accent-rgb), 0.42) !important;
-    background: rgba(var(--okx-accent-rgb), 0.14) !important;
-    color: var(--okx-accent-text) !important;
+    background: var(--okx-bg-surface-hover) !important;
+    color: #fff !important;
 }
 
 .miniapp-shell .mini-sm-follow-page button[data-active='true'],
 .miniapp-shell .mini-sm-follow-page button[data-active='false'],
 .miniapp-shell .mini-sm-follow-secondary {
-    min-height: 34px !important;
+    min-height: 40px !important;
     border-radius: 999px !important;
     padding-block: 7px !important;
     font-size: 12px !important;
@@ -1247,8 +1345,8 @@ body::before {
 
 .miniapp-shell .mini-sm-follow-submit:disabled {
     border: 1px solid var(--okx-line) !important;
-    background: #151515 !important;
-    color: rgba(255, 255, 255, 0.44) !important;
+    background: var(--okx-disabled-bg) !important;
+    color: var(--okx-disabled-text) !important;
     opacity: 1 !important;
 }
 
@@ -1259,7 +1357,7 @@ body::before {
 .miniapp-shell .mini-am-card {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #080808 !important;
+    background: var(--okx-bg-card) !important;
     box-shadow: none !important;
 }
 
@@ -1292,7 +1390,7 @@ body::before {
 .miniapp-shell .mini-am-stat {
     border: 1px solid var(--okx-line-soft) !important;
     border-radius: 7px !important;
-    background: #0b0b0b !important;
+    background: var(--okx-bg-surface) !important;
     padding: 8px !important;
     box-shadow: none !important;
     --tw-ring-color: transparent !important;
@@ -1308,7 +1406,7 @@ body::before {
 .miniapp-shell .mini-swap-limit-card {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #080808 !important;
+    background: var(--okx-bg-card) !important;
     box-shadow: none !important;
 }
 
@@ -1334,7 +1432,7 @@ body::before {
 .miniapp-shell .mini-swap-card {
     border: 1px solid var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #050505 !important;
+    background: var(--okx-bg-elevated) !important;
     padding: 4px !important;
 }
 
@@ -1346,7 +1444,7 @@ body::before {
 .miniapp-shell .mini-swap-panel {
     border: 1px solid var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #0b0b0b !important;
+    background: var(--okx-bg-card) !important;
     padding: 12px !important;
 }
 
@@ -1357,13 +1455,13 @@ body::before {
 }
 
 .miniapp-shell .mini-swap-reverse button {
-    width: 34px !important;
-    height: 34px !important;
+    width: 44px !important;
+    height: 44px !important;
     border-radius: 7px !important;
     border: 1px solid var(--okx-line) !important;
     background: var(--okx-accent) !important;
     color: #050700 !important;
-    box-shadow: 0 0 0 4px #050505 !important;
+    box-shadow: 0 0 0 4px var(--okx-bg-elevated) !important;
 }
 
 .miniapp-shell .mini-swap-submit button {
@@ -1372,9 +1470,9 @@ body::before {
 }
 
 .miniapp-shell .mini-bottom-sheet {
-    border-color: var(--okx-line) !important;
+    border-color: var(--okx-line-strong) !important;
     border-radius: 10px 10px 0 0 !important;
-    background: #080808 !important;
+    background: var(--okx-bg-elevated) !important;
     box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.72) !important;
     backdrop-filter: none !important;
 }
@@ -1382,7 +1480,7 @@ body::before {
 .miniapp-shell .mini-bottom-sheet-header,
 .miniapp-shell .mini-bottom-sheet-footer {
     border-color: var(--okx-line) !important;
-    background: #080808 !important;
+    background: var(--okx-bg-elevated) !important;
 }
 
 .miniapp-shell .mini-bottom-sheet-title {
@@ -1391,13 +1489,13 @@ body::before {
 }
 
 .miniapp-shell .mini-bottom-sheet-content {
-    background: #080808 !important;
+    background: var(--okx-bg-elevated) !important;
 }
 
 .miniapp-shell .op-funding-card {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #0b0b0b !important;
+    background: var(--okx-bg-card) !important;
     padding: 12px !important;
 }
 
@@ -1413,8 +1511,8 @@ body::before {
     gap: 5px;
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
-    background: #101010 !important;
-    color: var(--okx-muted) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
     padding: 9px 10px !important;
 }
 
@@ -1476,13 +1574,13 @@ body::before {
 
 .miniapp-shell .op-risk-token {
     text-align: right;
-    color: rgba(255, 255, 255, 0.42) !important;
+    color: rgba(248, 250, 252, 0.62) !important;
 }
 
 .miniapp-shell .op-step-button--visible {
-    min-height: 30px;
-    padding: 4px 6px !important;
-    color: rgba(255, 255, 255, 0.54) !important;
+    min-height: 36px;
+    padding: 5px 7px !important;
+    color: var(--okx-muted) !important;
     opacity: 1 !important;
 }
 
@@ -1495,15 +1593,15 @@ body::before {
 }
 
 .miniapp-shell .op-step-button--visible[data-state='done'] {
-    color: rgba(255, 255, 255, 0.74) !important;
+    color: var(--okx-text) !important;
 }
 
 .miniapp-shell .op-step-dot--visible {
     width: 22px !important;
     height: 22px !important;
     border: 1px solid var(--okx-line-strong) !important;
-    background: #181818 !important;
-    color: rgba(255, 255, 255, 0.62) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
     box-shadow: 0 0 0 1px rgba(var(--okx-accent-rgb), 0.14) !important;
 }
 
@@ -1542,14 +1640,14 @@ body::before {
 .miniapp-shell .mini-open-position-sheet .op-range-mode-tabs {
     border: 1px solid var(--okx-line) !important;
     border-radius: 999px !important;
-    background: #101010 !important;
+    background: var(--okx-bg-surface) !important;
     padding: 3px !important;
 }
 
 .miniapp-shell .mini-open-position-sheet .op-range-mode-tabs button {
-    min-height: 30px;
+    min-height: 40px;
     border-radius: 999px !important;
-    color: rgba(255, 255, 255, 0.62) !important;
+    color: var(--okx-muted) !important;
 }
 
 .miniapp-shell .mini-open-position-sheet .op-range-mode-tabs button[data-active='true'] {
@@ -1563,9 +1661,9 @@ body::before {
 }
 
 .miniapp-shell .mini-open-position-sheet button[data-active='false']:not([data-smart='true']) {
-    border-color: rgba(var(--okx-accent-rgb), 0.22) !important;
-    background: rgba(255, 255, 255, 0.07) !important;
-    color: rgba(255, 255, 255, 0.72) !important;
+    border-color: var(--okx-line-strong) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
 }
 
 .miniapp-shell .mini-open-position-sheet button[data-smart='true']:not([data-active='true']) {
@@ -1614,7 +1712,7 @@ body::before {
 .miniapp-shell .op-slippage-hint {
     max-width: 62%;
     overflow: hidden;
-    color: var(--okx-subtle) !important;
+    color: var(--okx-muted) !important;
     text-align: right;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1650,15 +1748,21 @@ body::before {
 
 .miniapp-shell .op-footer-primary:disabled {
     border: 1px solid var(--okx-line) !important;
-    background: #151515 !important;
-    color: rgba(255, 255, 255, 0.44) !important;
+    background: var(--okx-disabled-bg) !important;
+    color: var(--okx-disabled-text) !important;
     opacity: 1 !important;
 }
 
 .miniapp-shell .op-footer-secondary {
-    border-color: var(--okx-line) !important;
-    background: rgba(var(--okx-accent-rgb), 0.1) !important;
-    color: var(--okx-accent-text) !important;
+    border-color: var(--okx-line-strong) !important;
+    background: var(--okx-bg-surface) !important;
+    color: var(--okx-text) !important;
+}
+
+.miniapp-shell .op-footer-secondary:hover:not(:disabled) {
+    border-color: rgba(var(--okx-accent-rgb), 0.42) !important;
+    background: var(--okx-bg-surface-hover) !important;
+    color: #fff !important;
 }
 
 @media (max-width: 640px) {
@@ -1669,6 +1773,34 @@ body::before {
 
     .miniapp-shell header {
         margin-inline: -2px;
+    }
+
+    .miniapp-shell header > .flex:first-child {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px !important;
+        align-items: center;
+    }
+
+    .miniapp-shell header > .flex:first-child > div:first-child {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .miniapp-shell header > .flex:first-child > div:first-child > div:last-child {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .miniapp-shell header > .flex:first-child > div:last-child {
+        gap: 6px !important;
+        justify-self: end;
+        max-width: 90px;
+    }
+
+    .miniapp-shell header > .flex:first-child > div:last-child button {
+        min-width: 42px !important;
+        min-height: 42px !important;
     }
 
     .miniapp-shell nav {

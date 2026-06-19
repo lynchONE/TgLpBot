@@ -50,8 +50,8 @@ export function useGlobalSettings() {
 
         const tg = getTelegramWebApp();
         try {
-            tg?.setHeaderColor?.(isDark ? '#0b0f14' : '#fafafa');
-            tg?.setBackgroundColor?.(isDark ? '#0b0f14' : '#fafafa');
+            tg?.setHeaderColor?.(isDark ? '#171a20' : '#fafafa');
+            tg?.setBackgroundColor?.(isDark ? '#101216' : '#fafafa');
         } catch {
             // ignore
         }

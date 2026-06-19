@@ -9,29 +9,29 @@ export function normalizeAccentTheme(value) {
 
 const SHARED_TOKENS = {
     cardClass:
-        'rounded-lg border border-white/[0.08] bg-[#080808] shadow-none',
+        'rounded-lg border border-white/[0.14] bg-[#1c2027] shadow-none',
     cardElevatedClass:
-        'rounded-lg border border-white/[0.08] bg-[#080808] shadow-none',
+        'rounded-lg border border-white/[0.18] bg-[#171a20] shadow-none',
     cardCompactClass:
-        'rounded-lg border border-white/[0.08] bg-[#0b0b0b]',
+        'rounded-lg border border-white/[0.14] bg-[#1c2027]',
     cardInsetClass:
-        'rounded-lg border border-white/[0.06] bg-[#101010]',
+        'rounded-lg border border-white/[0.16] bg-[#252b34]',
     inputClass:
-        'min-h-[40px] rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-sm text-white outline-none transition placeholder:text-white/25 disabled:cursor-not-allowed disabled:opacity-60 focus:border-[#b7ff1a]/50 focus:ring-2 focus:ring-[#b7ff1a]/15',
+        'min-h-[44px] rounded-lg border border-white/[0.16] bg-[#131820] px-3 text-sm text-white outline-none transition placeholder:text-white/45 disabled:cursor-not-allowed disabled:bg-[#232830] disabled:text-white/45 focus:border-[#b7ff1a]/50 focus:ring-2 focus:ring-[#b7ff1a]/25',
     buttonSecondaryClass:
-        'inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.09] bg-[#111] px-3 py-2 text-sm font-semibold text-white/70 shadow-none transition hover:border-white/20 hover:bg-[#191919] hover:text-white disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-md border border-white/[0.18] bg-[#252b34] px-3 py-2 text-sm font-semibold text-white shadow-none transition hover:border-[#b7ff1a]/45 hover:bg-[#303844] hover:text-white disabled:cursor-not-allowed disabled:bg-[#232830] disabled:text-white/45',
     buttonGhostClass:
-        'inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-white/60 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-50',
-    mutedTextClass: 'text-white/50',
-    subtleTextClass: 'text-white/35',
-    dividerClass: 'border-white/[0.08]',
-    skeletonClass: 'bg-white/[0.06]',
+        'inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-white/75 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:text-white/40',
+    mutedTextClass: 'text-white/70',
+    subtleTextClass: 'text-white/55',
+    dividerClass: 'border-white/[0.14]',
+    skeletonClass: 'bg-white/[0.09]',
     pnlPosClass: 'text-[#9cff00]',
     pnlNegClass: 'text-[#ff4fb3]',
     errorBoxClass:
         'rounded-lg border border-[#ff4fb3]/30 bg-[#ff4fb3]/10 px-3 py-2 text-sm text-[#ffb8df]',
     emptyStateClass:
-        'flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.09] bg-[#080808] px-6 py-10 text-center text-sm text-white/45',
+        'flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.18] bg-[#1c2027] px-6 py-10 text-center text-sm text-white/65',
 };
 
 const BRAND_THEMES = {
