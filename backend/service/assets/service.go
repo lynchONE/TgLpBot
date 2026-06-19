@@ -90,9 +90,9 @@ func (s *Service) InvalidateSmartMoneyWalletCaches(wallets []sm.WalletRef) {
 		_ = database.DeleteCache(smartMoneyWalletLiveCacheKey(wallet.ChainID, wallet.Address))
 	}
 	today := dayStart(timeutil.Now())
-	s.deleteCachedSmartMoneyLiveLeaderboards(today.AddDate(0, 0, -1))
+	s.deleteCachedSmartMoneyLiveLeaderboards(today)
 	for i := 0; i < 3; i++ {
-		s.deleteCachedSmartMoneyLeaderboards(today.AddDate(0, 0, -1-i))
+		s.deleteCachedSmartMoneyLeaderboards(today.AddDate(0, 0, -i))
 	}
 }
 
@@ -116,7 +116,7 @@ func (s *Service) RunDailyAggregation(day time.Time) error {
 	if err := s.captureSmartMoneyLPDailyStats(ctx, day); err != nil {
 		return fmt.Errorf("capture smart money lp daily stats: %w", err)
 	}
-	if err := s.refreshSmartMoneyLeaderboardCaches(ctx, day); err != nil {
+	if err := s.refreshSmartMoneyLeaderboardCaches(ctx, day.AddDate(0, 0, 1)); err != nil {
 		return fmt.Errorf("refresh smart money leaderboard caches: %w", err)
 	}
 	return nil
@@ -126,10 +126,12 @@ func (s *Service) runScheduler() {
 	// Wait for blockchain clients to be ready before first aggregation
 	time.Sleep(90 * time.Second)
 	lastSnapshotDay := ""
+	lastSmartMoneyMidnightDay := ""
 	lastCompleted := ""
 	lastSmartMoneyLiveRefresh := time.Time{}
 	for {
 		s.tryCapturePreviousDayUserAssetSnapshots(&lastSnapshotDay)
+		s.tryCaptureSmartMoneyMidnightSnapshots(&lastSmartMoneyMidnightDay)
 		s.tryAggregatePreviousDay(&lastCompleted)
 		s.tryRefreshSmartMoneyLiveStates(&lastSmartMoneyLiveRefresh)
 		select {
@@ -162,6 +164,39 @@ func (s *Service) tryCapturePreviousDayUserAssetSnapshots(lastCompleted *string)
 		*lastCompleted = targetKey
 	}
 	log.Printf("[Assets] user asset snapshots captured day=%s", targetKey)
+}
+
+func (s *Service) tryCaptureSmartMoneyMidnightSnapshots(lastCompleted *string) {
+	now := timeutil.Now()
+	day := dayStart(now)
+	if now.Before(day.Add(userAssetSnapshotCaptureDelay)) {
+		return
+	}
+	dayKey := formatDay(day)
+	if lastCompleted != nil && *lastCompleted == dayKey {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := s.captureSmartMoneyMidnightSnapshots(ctx, day); err != nil {
+		log.Printf("[Assets] smart money midnight snapshot capture failed day=%s err=%v", dayKey, err)
+		return
+	}
+	s.deleteCachedSmartMoneyLiveLeaderboards(day)
+	if err := s.refreshSmartMoneyLiveLeaderboardCaches(ctx, day); err != nil {
+		log.Printf("[Assets] smart money live leaderboard cache refresh failed day=%s err=%v", dayKey, err)
+	}
+	if err := s.refreshSmartMoneyLeaderboardCaches(ctx, day); err != nil {
+		log.Printf("[Assets] smart money leaderboard cache refresh failed day=%s err=%v", dayKey, err)
+	}
+	if err := s.pruneSmartMoneyMidnightSnapshots(ctx, day.AddDate(0, 0, -(smartMoneyMidnightSnapshotKeepDays-1))); err != nil {
+		log.Printf("[Assets] smart money midnight snapshot prune failed keep_from=%s err=%v", formatDay(day.AddDate(0, 0, -(smartMoneyMidnightSnapshotKeepDays-1))), err)
+	}
+	if lastCompleted != nil {
+		*lastCompleted = dayKey
+	}
+	log.Printf("[Assets] smart money midnight snapshots captured day=%s", dayKey)
 }
 
 func (s *Service) tryAggregatePreviousDay(lastCompleted *string) {

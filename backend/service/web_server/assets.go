@@ -421,7 +421,7 @@ func (s *Server) handleAdminSmartMoneyOverview(w http.ResponseWriter, r *http.Re
 	key := assetResponseCacheKey(
 		"admin",
 		fmt.Sprintf("%d", adminUserID),
-		"v2",
+		"v3",
 		"smart-money-overview",
 		assetOverviewSectionsCachePart(req.Section, req.Sections),
 		fmt.Sprintf("%d", req.Days),
@@ -454,7 +454,7 @@ func (s *Server) handleAdminSmartMoneyWallet(w http.ResponseWriter, r *http.Requ
 		http.Error(w, msg, status)
 		return
 	}
-	key := assetResponseCacheKey("admin", fmt.Sprintf("%d", adminUserID), "v2", "smart-money-wallet", req.Address, fmt.Sprintf("%d", req.ChainID), fmt.Sprintf("%d", req.Days))
+	key := assetResponseCacheKey("admin", fmt.Sprintf("%d", adminUserID), "v3", "smart-money-wallet", req.Address, fmt.Sprintf("%d", req.ChainID), fmt.Sprintf("%d", req.Days))
 	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
 		return s.Assets.GetSmartMoneyWallet(r.Context(), req.Address, req.ChainID, req.Days, req.ForceRefresh)
 	}); err != nil {
@@ -483,7 +483,7 @@ func (s *Server) handleAdminSmartMoneyLeaderboard(w http.ResponseWriter, r *http
 	key := assetResponseCacheKey(
 		"admin",
 		fmt.Sprintf("%d", adminUserID),
-		"v2",
+		"v3",
 		"smart-money-leaderboard",
 		req.Metric,
 		fmt.Sprintf("%d", req.Days),

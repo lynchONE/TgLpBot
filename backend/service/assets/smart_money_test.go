@@ -323,7 +323,7 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesRawAssetDeltaForLiveInputs(t *te
 	timeutil.Init()
 
 	now := time.Date(2026, time.March, 23, 13, 30, 0, 0, timeutil.Location())
-	baseDay := dayStart(now).AddDate(0, 0, -1)
+	baseDay := dayStart(now)
 
 	resp := buildSmartMoneySnapshotLeaderboard("pnl", now, baseDay, 1, 20, []smartMoneyLeaderboardSnapshotInput{
 		{
@@ -366,7 +366,7 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesRawAssetDeltaForLiveInputs(t *te
 	}
 }
 
-func TestBuildSmartMoneySnapshotLeaderboard_UsesWindowDailyStatPnL(t *testing.T) {
+func TestBuildSmartMoneySnapshotLeaderboard_UsesMidnightAssetDeltaForWindowPnL(t *testing.T) {
 	timeutil.Init()
 
 	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
@@ -393,6 +393,8 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesWindowDailyStatPnL(t *testing.T)
 				RemoveCount:             1,
 				ActivePoolCount:         3,
 			},
+			UseRawAssetDelta:   true,
+			IgnoreDailyStatPnL: true,
 		},
 	})
 
@@ -406,10 +408,10 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesWindowDailyStatPnL(t *testing.T)
 		t.Fatalf("leaderboard size = %d, want %d", got, want)
 	}
 	entry := resp.List[0]
-	if got, want := entry.EstimatedRealizedPnLUSD, 42.5; got != want {
+	if got, want := entry.EstimatedRealizedPnLUSD, 200.0; got != want {
 		t.Fatalf("pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := entry.YieldRate, 0.17; got != want {
+	if got, want := entry.YieldRate, 0.2; got != want {
 		t.Fatalf("yield = %.4f, want %.4f", got, want)
 	}
 	if got, want := entry.ParticipationCount, 3; got != want {
@@ -457,7 +459,7 @@ func TestPaginateSmartMoneyLeaderboardResponse_FiltersAndSlicesFromBackend(t *te
 	}
 }
 
-func TestBuildSmartMoneyHistoryPoints_FallsBackToTransferAdjustedBalanceDelta(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_UsesConsecutiveMidnightSnapshotDelta(t *testing.T) {
 	rows := []smartMoneyHistoryDayRow{
 		{Day: "2026-03-25", TotalUSD: 100, NativeUSD: 10},
 		{Day: "2026-03-26", TotalUSD: 140, NativeUSD: 11},
@@ -474,7 +476,7 @@ func TestBuildSmartMoneyHistoryPoints_FallsBackToTransferAdjustedBalanceDelta(t 
 	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
 		t.Fatalf("second day pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := points[2].EstimatedRealizedPnLUSD, 0.0; got != want {
+	if got, want := points[2].EstimatedRealizedPnLUSD, -50.0; got != want {
 		t.Fatalf("third day pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := points[2].TransferNetUSD, -50.0; got != want {
@@ -482,7 +484,7 @@ func TestBuildSmartMoneyHistoryPoints_FallsBackToTransferAdjustedBalanceDelta(t 
 	}
 }
 
-func TestBuildSmartMoneyHistoryPoints_UsesDailyStatPnLWhenAvailable(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_IgnoresDailyStatPnL(t *testing.T) {
 	rows := []smartMoneyHistoryDayRow{
 		{
 			Day:                     "2026-03-25",
@@ -505,15 +507,15 @@ func TestBuildSmartMoneyHistoryPoints_UsesDailyStatPnLWhenAvailable(t *testing.T
 	if got, want := len(points), 2; got != want {
 		t.Fatalf("history points = %d, want %d", got, want)
 	}
-	if got, want := points[0].EstimatedRealizedPnLUSD, 7.25; got != want {
+	if got, want := points[0].EstimatedRealizedPnLUSD, 0.0; got != want {
 		t.Fatalf("first day pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := points[1].EstimatedRealizedPnLUSD, -3.5; got != want {
+	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
 		t.Fatalf("second day pnl = %.2f, want %.2f", got, want)
 	}
 }
 
-func TestBuildSmartMoneyHistoryPoints_FallsBackWhenDailyStatsArePartial(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_DoesNotAdjustForTransfers(t *testing.T) {
 	rows := []smartMoneyHistoryDayRow{
 		{Day: "2026-03-25", TotalUSD: 100, SnapshotCount: 2, DailyStatCount: 2, EstimatedRealizedPnLUSD: 4},
 		{Day: "2026-03-26", TotalUSD: 150, SnapshotCount: 2, DailyStatCount: 1, EstimatedRealizedPnLUSD: 999, TransferInUSD: 10},
@@ -523,8 +525,8 @@ func TestBuildSmartMoneyHistoryPoints_FallsBackWhenDailyStatsArePartial(t *testi
 	if got, want := len(points), 2; got != want {
 		t.Fatalf("history points = %d, want %d", got, want)
 	}
-	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
-		t.Fatalf("partial stat pnl = %.2f, want fallback %.2f", got, want)
+	if got, want := points[1].EstimatedRealizedPnLUSD, 50.0; got != want {
+		t.Fatalf("midnight snapshot pnl = %.2f, want %.2f", got, want)
 	}
 }
 

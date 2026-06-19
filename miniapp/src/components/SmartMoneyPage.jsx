@@ -3095,7 +3095,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                                     {typeof onOpenPosition === 'function' ? (
                                         <button
                                             type="button"
-                                            className={`mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
+                                            className={`mini-follow-open-btn mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
                                             onClick={(event) => {
                                                 event.stopPropagation();
                                                 onOpenPosition(pool);
@@ -3412,7 +3412,7 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
                         {typeof onOpenPosition === 'function' ? (
                             <button
                                 type="button"
-                                className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
+                                className={`mini-follow-open-btn inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
                                 onClick={(event) => {
                                     event.stopPropagation();
                                     onOpenPosition(row);

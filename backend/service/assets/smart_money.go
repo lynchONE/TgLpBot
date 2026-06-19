@@ -29,6 +29,8 @@ const (
 	smartMoneyWalletLiveRefreshTimeout  = 20 * time.Minute
 	smartMoneyWalletLiveRefreshWorkers  = 3
 	smartMoneyWalletMaxHistoryDays      = 365
+	smartMoneyMidnightSnapshotKeepDays  = 31
+	smartMoneyMidnightSnapshotWindow    = 30 * time.Minute
 	smartMoneyLeaderboardCacheTTL       = 72 * time.Hour
 	smartMoneyDefaultPageSize           = 10
 	smartMoneyMaxPageSize               = 50
@@ -176,11 +178,11 @@ func smartMoneyWalletLiveCacheKey(chainID int, address string) string {
 }
 
 func smartMoneyLeaderboardDailyCacheKey(snapshotDay time.Time, metric string, days int) string {
-	return fmt.Sprintf("assets:smart-money:leaderboard:v4:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
+	return fmt.Sprintf("assets:smart-money:leaderboard:v5:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
 }
 
 func smartMoneyLeaderboardLiveCacheKey(snapshotDay time.Time, metric string, days int) string {
-	return fmt.Sprintf("assets:smart-money:leaderboard-live:v2:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
+	return fmt.Sprintf("assets:smart-money:leaderboard-live:v3:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
 }
 
 func transferNetUSD(transferInUSD float64, transferOutUSD float64) float64 {
@@ -215,10 +217,8 @@ func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow) []SmartMoneyHi
 	hasPreviousTotal := false
 	for _, row := range rows {
 		estimatedPnL := 0.0
-		if row.SnapshotCount > 0 && row.DailyStatCount == row.SnapshotCount {
-			estimatedPnL = round2(row.EstimatedRealizedPnLUSD)
-		} else if hasPreviousTotal && isNextSnapshotDay(previousDay, row.Day) {
-			estimatedPnL = adjustedPnL(row.TotalUSD-previousTotalUSD, row.TransferInUSD, row.TransferOutUSD)
+		if hasPreviousTotal && isNextSnapshotDay(previousDay, row.Day) {
+			estimatedPnL = round2(row.TotalUSD - previousTotalUSD)
 		}
 
 		points = append(points, SmartMoneyHistoryPoint{
@@ -538,7 +538,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 	size = clampSmartMoneyPageSize(size)
 	keyword = strings.TrimSpace(keyword)
 
-	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	snapshotDay := dayStart(timeutil.Now())
 	sectionSet := normalizeSmartMoneyOverviewSections(sections)
 
 	resp := &SmartMoneyOverview{
@@ -562,7 +562,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 
 	if sectionSet[smartMoneyOverviewSectionHistory] {
 		start := dayStart(timeutil.Now()).AddDate(0, 0, -defaultHistoryDays)
-		end := dayStart(timeutil.Now())
+		end := dayStart(timeutil.Now()).AddDate(0, 0, 1)
 		history, err := s.loadSmartMoneyAggregateHistory(ctx, start, end)
 		if err != nil {
 			return nil, err
@@ -596,7 +596,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 			resp.WalletTotalPages = int((total + int64(size) - 1) / int64(size))
 		}
 
-		snapshotMap, err := s.loadSmartMoneySnapshotRows(ctx, pageWallets, snapshotDay)
+		snapshotMap, err := s.loadSmartMoneyMidnightSnapshotRows(ctx, pageWallets, snapshotDay)
 		if err != nil {
 			return nil, err
 		}
@@ -611,7 +611,7 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 				resp.Warnings = append(resp.Warnings, fmt.Sprintf("钱包 %s 本地实时资产暂不可用：%v", walletRow.Address, err))
 			}
 			key := formatDay(snapshotDay) + "|" + smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
-			baselineSnapshot := snapshotMap[key]
+			baselineSnapshot := smartMoneyDailySnapshotFromMidnight(snapshotMap[key])
 			if ok {
 				resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromLive(walletRow, live, baselineSnapshot))
 				resp.Warnings = append(resp.Warnings, live.warnings...)
@@ -680,34 +680,29 @@ func (s *Service) loadSmartMoneyOverviewSummary(ctx context.Context, snapshotDay
 		TransferOutUSD    float64 `gorm:"column:transfer_out_usd"`
 	}
 
-	openLPSelect := "COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd"
-	if database.DB != nil && !database.DB.Migrator().HasColumn(&models.SmartMoneyWalletDailySnapshot{}, "OpenLPUSD") {
-		openLPSelect = "0 AS open_lp_usd"
-	}
-
 	var result row
 	err := database.DB.WithContext(ctx).
-		Raw(fmt.Sprintf(`
+		Raw(`
 			SELECT
 				COALESCE(SUM(s.native_usd), 0) AS native_usd,
 				COALESCE(SUM(s.stable_usd), 0) AS stable_usd,
 				COALESCE(SUM(s.tracked_token_usd), 0) AS tracked_token_usd,
-				%s,
+				COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd,
 				COALESCE(SUM(s.total_usd), 0) AS total_usd,
 				COALESCE(SUM(s.tracked_token_count), 0) AS tracked_token_count,
-				MAX(CASE WHEN s.has_transfer_in THEN 1 ELSE 0 END) AS has_transfer_in,
-				MAX(CASE WHEN s.has_transfer_out THEN 1 ELSE 0 END) AS has_transfer_out,
-				COALESCE(SUM(s.transfer_in_count), 0) AS transfer_in_count,
-				COALESCE(SUM(s.transfer_out_count), 0) AS transfer_out_count,
-				COALESCE(SUM(s.transfer_in_usd), 0) AS transfer_in_usd,
-				COALESCE(SUM(s.transfer_out_usd), 0) AS transfer_out_usd
-			FROM sm_wallet_daily_snapshots s
+				0 AS has_transfer_in,
+				0 AS has_transfer_out,
+				0 AS transfer_in_count,
+				0 AS transfer_out_count,
+				0 AS transfer_in_usd,
+				0 AS transfer_out_usd
+			FROM sm_wallet_midnight_snapshots s
 			INNER JOIN monitored_wallets w
 				ON w.address = s.wallet_address
 				AND w.chain_id = s.chain_id
 				AND w.is_active = 1
 			WHERE s.snapshot_day = ?
-		`, openLPSelect), formatDay(snapshotDay)).
+		`, formatDay(snapshotDay)).
 		Scan(&result).Error
 	if err != nil {
 		return smartMoneyAssetBreakdown{}, SmartMoneyHistoryPoint{}, err
@@ -803,42 +798,53 @@ func (s *Service) loadSmartMoneyAggregateHistory(ctx context.Context, start time
 	}
 
 	var rows []smartMoneyHistoryDayRow
-	openLPSelect := "COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd"
-	if database.DB != nil && !database.DB.Migrator().HasColumn(&models.SmartMoneyWalletDailySnapshot{}, "OpenLPUSD") {
-		openLPSelect = "0 AS open_lp_usd"
-	}
 	err := database.DB.WithContext(ctx).
-		Raw(fmt.Sprintf(`
+		Raw(`
 			SELECT
 				s.snapshot_day AS day,
 				COALESCE(SUM(s.native_usd), 0) AS native_usd,
 				COALESCE(SUM(s.stable_usd), 0) AS stable_usd,
 				COALESCE(SUM(s.tracked_token_usd), 0) AS tracked_token_usd,
-				%s,
+				COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd,
 				COALESCE(SUM(s.total_usd), 0) AS total_usd,
-				MAX(CASE WHEN s.has_transfer_in THEN 1 ELSE 0 END) AS has_transfer_in,
-				MAX(CASE WHEN s.has_transfer_out THEN 1 ELSE 0 END) AS has_transfer_out,
-				COALESCE(SUM(s.transfer_in_count), 0) AS transfer_in_count,
-				COALESCE(SUM(s.transfer_out_count), 0) AS transfer_out_count,
-				COALESCE(SUM(s.transfer_in_usd), 0) AS transfer_in_usd,
-				COALESCE(SUM(s.transfer_out_usd), 0) AS transfer_out_usd,
+				COALESCE(MAX(tx.has_transfer_in), 0) AS has_transfer_in,
+				COALESCE(MAX(tx.has_transfer_out), 0) AS has_transfer_out,
+				COALESCE(SUM(tx.transfer_in_count), 0) AS transfer_in_count,
+				COALESCE(SUM(tx.transfer_out_count), 0) AS transfer_out_count,
+				COALESCE(SUM(tx.transfer_in_usd), 0) AS transfer_in_usd,
+				COALESCE(SUM(tx.transfer_out_usd), 0) AS transfer_out_usd,
 				COUNT(s.wallet_address) AS snapshot_count,
-				COUNT(st.stat_day) AS daily_stat_count,
-				COALESCE(SUM(st.estimated_realized_pnl_usd), 0) AS estimated_realized_pnl_usd
-			FROM sm_wallet_daily_snapshots s
+				0 AS daily_stat_count,
+				0 AS estimated_realized_pnl_usd
+			FROM sm_wallet_midnight_snapshots s
 			INNER JOIN monitored_wallets w
 				ON w.address = s.wallet_address
 				AND w.chain_id = s.chain_id
 				AND w.is_active = 1
-			LEFT JOIN sm_lp_daily_stats st
-				ON st.wallet_address = s.wallet_address
-				AND st.chain_id = s.chain_id
-				AND st.stat_day = s.snapshot_day
+			LEFT JOIN (
+				SELECT
+					wallet_address,
+					chain_id,
+					DATE_FORMAT(tx_timestamp, '%Y-%m-%d') AS event_day,
+					MAX(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) AS has_transfer_in,
+					MAX(CASE WHEN direction = 'out' THEN 1 ELSE 0 END) AS has_transfer_out,
+					COALESCE(SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END), 0) AS transfer_in_count,
+					COALESCE(SUM(CASE WHEN direction = 'out' THEN 1 ELSE 0 END), 0) AS transfer_out_count,
+					COALESCE(SUM(CASE WHEN direction = 'in' THEN amount_usd ELSE 0 END), 0) AS transfer_in_usd,
+					COALESCE(SUM(CASE WHEN direction = 'out' THEN amount_usd ELSE 0 END), 0) AS transfer_out_usd
+				FROM sm_wallet_transfer_events
+				WHERE tx_timestamp >= ?
+				  AND tx_timestamp < ?
+				GROUP BY wallet_address, chain_id, DATE_FORMAT(tx_timestamp, '%Y-%m-%d')
+			) tx
+				ON tx.wallet_address = s.wallet_address
+				AND tx.chain_id = s.chain_id
+				AND tx.event_day = s.snapshot_day
 			WHERE s.snapshot_day >= ?
 			  AND s.snapshot_day < ?
 			GROUP BY s.snapshot_day
 			ORDER BY s.snapshot_day ASC
-		`, openLPSelect), formatDay(start), formatDay(end)).
+		`, start, end, formatDay(start), formatDay(end)).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -921,17 +927,17 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	if err != nil {
 		return nil, err
 	}
-	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
-	baselineMap, err := s.loadSmartMoneySnapshotRows(ctx, []models.MonitoredWallet{*walletRow}, snapshotDay)
+	snapshotDay := dayStart(timeutil.Now())
+	baselineMap, err := s.loadSmartMoneyMidnightSnapshotRows(ctx, []models.MonitoredWallet{*walletRow}, snapshotDay)
 	if err != nil {
 		return nil, err
 	}
-	baseline := baselineMap[formatDay(snapshotDay)+"|"+smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]
+	baseline := smartMoneyDailySnapshotFromMidnight(baselineMap[formatDay(snapshotDay)+"|"+smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)])
 	summary := smartMoneyWalletSummaryFromLive(*walletRow, live, baseline)
 
 	startOfToday := dayStart(timeutil.Now())
 	start := startOfToday.AddDate(0, 0, -days)
-	end := startOfToday
+	end := startOfToday.AddDate(0, 0, 1)
 	history, err := s.loadSmartMoneyHistory(ctx, []models.MonitoredWallet{*walletRow}, start, end)
 	if err != nil {
 		return nil, err
@@ -945,13 +951,8 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 		windows    []SmartMoneyWindowStats
 		todayStats smartMoneyEventStats
 	}
-	type transferResult struct {
-		items map[string]smartMoneyTransferActivity
-	}
 	statsCh := make(chan statsResult, 1)
 	statsErrCh := make(chan error, 1)
-	transferCh := make(chan transferResult, 1)
-	transferErrCh := make(chan error, 1)
 
 	go func() {
 		windows := make([]SmartMoneyWindowStats, 0, len(windowDays))
@@ -972,43 +973,15 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 		statsCh <- statsResult{windows: windows, todayStats: todayStats}
 	}()
 
-	go func() {
-		items, err := s.loadSmartMoneyTransferActivity(ctx, []models.MonitoredWallet{*walletRow}, dayStart(now), now)
-		if err != nil {
-			transferErrCh <- err
-			return
-		}
-		transferCh <- transferResult{items: items}
-	}()
-
 	var stats statsResult
-	var todayTransferByWallet map[string]smartMoneyTransferActivity
-	for i := 0; i < 2; i++ {
-		select {
-		case stats = <-statsCh:
-		case err := <-statsErrCh:
-			return nil, err
-		case transfer := <-transferCh:
-			todayTransferByWallet = transfer.items
-		case err := <-transferErrCh:
-			return nil, err
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+	select {
+	case stats = <-statsCh:
+	case err := <-statsErrCh:
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 	todayStats := stats.todayStats
-	previousTotalUSD := 0.0
-	previousDay := ""
-	hasPreviousTotal := false
-	if len(history) > 0 {
-		last := history[len(history)-1]
-		previousDay = last.Day
-		previousTotalUSD = last.TotalUSD
-		hasPreviousTotal = true
-	}
-	todayPoint := buildSmartMoneyTodayHistoryPoint(now, summary.Assets, previousDay, previousTotalUSD, hasPreviousTotal, todayTransferByWallet[walletKey])
-	todayPoint.EstimatedRealizedPnLUSD = round2(todayStats.EstimatedRealizedPnLUSD)
-	history = mergeSmartMoneyHistoryPoint(history, todayPoint)
 
 	return &SmartMoneyWalletResponse{
 		Wallet:  summary,
@@ -1041,7 +1014,7 @@ func clampSmartMoneyWalletHistoryDays(days int) int {
 func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, days int, page int, pageSize int, keyword string, forceRefresh bool) (*SmartMoneyLeaderboardResponse, error) {
 	metric = normalizeLeaderboardMetric(metric)
 	days = clampLPDays(days)
-	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	snapshotDay := dayStart(timeutil.Now())
 	if days == 1 {
 		if !forceRefresh {
 			if cached, ok := readCachedSmartMoneyLiveLeaderboard(snapshotDay, metric, days); ok {
@@ -1060,11 +1033,13 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 		fullResp.StartDay = formatDay(snapshotDay)
 		fullResp.EndDay = formatDay(timeutil.Now())
 		fullResp.Description = liveLeaderboardDescription(metric)
-		writeCachedSmartMoneyLiveLeaderboard(snapshotDay, metric, days, fullResp)
+		if len(fullResp.List) > 0 {
+			writeCachedSmartMoneyLiveLeaderboard(snapshotDay, metric, days, fullResp)
+		}
 		return paginateSmartMoneyLeaderboardResponse(fullResp, page, pageSize, keyword), nil
 	}
-	startDay := snapshotDay.AddDate(0, 0, -(days - 1))
-	comparedDay := startDay.AddDate(0, 0, -1)
+	comparedDay := snapshotDay.AddDate(0, 0, -days)
+	startDay := comparedDay.AddDate(0, 0, 1)
 
 	if !forceRefresh {
 		if cached, ok := readCachedSmartMoneyLeaderboard(snapshotDay, metric, days); ok {
@@ -1080,7 +1055,9 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 
 	fullResp := buildSmartMoneySnapshotLeaderboard(metric, snapshotDay, comparedDay, days, 0, inputs)
 	fullResp.Timezone = timeutil.LocationName()
-	writeCachedSmartMoneyLeaderboard(snapshotDay, metric, days, fullResp)
+	if len(fullResp.List) > 0 {
+		writeCachedSmartMoneyLeaderboard(snapshotDay, metric, days, fullResp)
+	}
 	return paginateSmartMoneyLeaderboardResponse(fullResp, page, pageSize, keyword), nil
 }
 
@@ -1159,11 +1136,11 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 				COALESCE(stat.estimated_realized_pnl_usd, 0) AS estimated_realized_pnl_usd,
 				COALESCE(stat.matched_cost_usd, 0) AS matched_cost_usd
 			FROM monitored_wallets w
-			INNER JOIN sm_wallet_daily_snapshots cur
+			INNER JOIN sm_wallet_midnight_snapshots cur
 				ON cur.wallet_address = w.address
 				AND cur.chain_id = w.chain_id
 				AND cur.snapshot_day = ?
-			LEFT JOIN sm_wallet_daily_snapshots prev
+			LEFT JOIN sm_wallet_midnight_snapshots prev
 				ON prev.wallet_address = w.address
 				AND prev.chain_id = w.chain_id
 				AND prev.snapshot_day = ?
@@ -1171,15 +1148,15 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 				SELECT
 					wallet_address,
 					chain_id,
-					MAX(CASE WHEN has_transfer_in THEN 1 ELSE 0 END) AS has_transfer_in,
-					MAX(CASE WHEN has_transfer_out THEN 1 ELSE 0 END) AS has_transfer_out,
-					COALESCE(SUM(transfer_in_count), 0) AS transfer_in_count,
-					COALESCE(SUM(transfer_out_count), 0) AS transfer_out_count,
-					COALESCE(SUM(transfer_in_usd), 0) AS transfer_in_usd,
-					COALESCE(SUM(transfer_out_usd), 0) AS transfer_out_usd
-				FROM sm_wallet_daily_snapshots
-				WHERE snapshot_day >= ?
-				  AND snapshot_day <= ?
+					MAX(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) AS has_transfer_in,
+					MAX(CASE WHEN direction = 'out' THEN 1 ELSE 0 END) AS has_transfer_out,
+					COALESCE(SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END), 0) AS transfer_in_count,
+					COALESCE(SUM(CASE WHEN direction = 'out' THEN 1 ELSE 0 END), 0) AS transfer_out_count,
+					COALESCE(SUM(CASE WHEN direction = 'in' THEN amount_usd ELSE 0 END), 0) AS transfer_in_usd,
+					COALESCE(SUM(CASE WHEN direction = 'out' THEN amount_usd ELSE 0 END), 0) AS transfer_out_usd
+				FROM sm_wallet_transfer_events
+				WHERE tx_timestamp >= ?
+				  AND tx_timestamp < ?
 				GROUP BY wallet_address, chain_id
 			) tx
 				ON tx.wallet_address = w.address
@@ -1203,7 +1180,7 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 				ON stat.wallet_address = w.address
 				AND stat.chain_id = w.chain_id
 			WHERE w.is_active = 1
-		`, formatDay(snapshotDay), formatDay(comparedDay), formatDay(startDay), formatDay(snapshotDay), formatDay(startDay), formatDay(snapshotDay)).
+		`, formatDay(snapshotDay), formatDay(comparedDay), dayStart(comparedDay), dayStart(snapshotDay), formatDay(startDay), formatDay(snapshotDay)).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -1255,10 +1232,12 @@ func (s *Service) buildSmartMoneyLeaderboardSnapshotInputs(ctx context.Context, 
 			}
 		}
 		inputs = append(inputs, smartMoneyLeaderboardSnapshotInput{
-			Wallet:    walletRow,
-			Current:   current,
-			Previous:  previous,
-			DailyStat: dailyStat,
+			Wallet:             walletRow,
+			Current:            current,
+			Previous:           previous,
+			DailyStat:          dailyStat,
+			UseRawAssetDelta:   true,
+			IgnoreDailyStatPnL: true,
 		})
 	}
 	return inputs, nil
@@ -1304,7 +1283,7 @@ func (s *Service) buildSmartMoneyLeaderboardLiveInputs(ctx context.Context, base
 			INNER JOIN sm_wallet_live_states live
 				ON live.wallet_address = w.address
 				AND live.chain_id = w.chain_id
-			INNER JOIN sm_wallet_daily_snapshots base
+			INNER JOIN sm_wallet_midnight_snapshots base
 				ON base.wallet_address = w.address
 				AND base.chain_id = w.chain_id
 				AND base.snapshot_day = ?
@@ -1376,8 +1355,8 @@ func (s *Service) refreshSmartMoneyLeaderboardCaches(ctx context.Context, snapsh
 		return nil
 	}
 	for _, days := range []int{1, 7, 30} {
-		startDay := snapshotDay.AddDate(0, 0, -(days - 1))
-		comparedDay := startDay.AddDate(0, 0, -1)
+		comparedDay := snapshotDay.AddDate(0, 0, -days)
+		startDay := comparedDay.AddDate(0, 0, 1)
 		inputs, err := s.buildSmartMoneyLeaderboardSnapshotInputs(ctx, snapshotDay, comparedDay, startDay)
 		if err != nil {
 			return err
@@ -1385,7 +1364,9 @@ func (s *Service) refreshSmartMoneyLeaderboardCaches(ctx context.Context, snapsh
 		for _, metric := range smartMoneyLeaderboardMetrics {
 			resp := buildSmartMoneySnapshotLeaderboard(metric, snapshotDay, comparedDay, days, 0, inputs)
 			resp.Timezone = timeutil.LocationName()
-			writeCachedSmartMoneyLeaderboard(snapshotDay, metric, days, resp)
+			if len(resp.List) > 0 {
+				writeCachedSmartMoneyLeaderboard(snapshotDay, metric, days, resp)
+			}
 		}
 	}
 	s.deleteCachedSmartMoneyLeaderboards(snapshotDay.AddDate(0, 0, -1))
@@ -1409,7 +1390,9 @@ func (s *Service) refreshSmartMoneyLiveLeaderboardCaches(ctx context.Context, ba
 		resp.StartDay = formatDay(baseDay)
 		resp.EndDay = formatDay(now)
 		resp.Description = liveLeaderboardDescription(metric)
-		writeCachedSmartMoneyLiveLeaderboard(baseDay, metric, 1, resp)
+		if len(resp.List) > 0 {
+			writeCachedSmartMoneyLiveLeaderboard(baseDay, metric, 1, resp)
+		}
 	}
 	return nil
 }
@@ -1453,7 +1436,7 @@ func (s *Service) TriggerSmartMoneyWalletLiveStateRefresh(timeout time.Duration)
 			log.Printf("[Assets] smart money live-state refresh incomplete refreshed=%d skipped=%d failed=%d err=%v", result.refreshed, result.skipped, result.failed, err)
 			return
 		}
-		snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+		snapshotDay := dayStart(timeutil.Now())
 		s.deleteCachedSmartMoneyLiveLeaderboards(snapshotDay)
 		if cacheErr := s.refreshSmartMoneyLiveLeaderboardCaches(ctx, snapshotDay); cacheErr != nil {
 			log.Printf("[Assets] smart money live leaderboard cache refresh failed day=%s err=%v", formatDay(snapshotDay), cacheErr)
@@ -1488,7 +1471,7 @@ func (s *Service) tryRefreshSmartMoneyLiveStates(lastCompleted *time.Time) {
 	if lastCompleted != nil {
 		*lastCompleted = timeutil.Now()
 	}
-	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	snapshotDay := dayStart(timeutil.Now())
 	s.deleteCachedSmartMoneyLiveLeaderboards(snapshotDay)
 	if cacheErr := s.refreshSmartMoneyLiveLeaderboardCaches(ctx, snapshotDay); cacheErr != nil {
 		log.Printf("[Assets] smart money live leaderboard cache refresh failed day=%s err=%v", formatDay(snapshotDay), cacheErr)
@@ -2272,6 +2255,83 @@ func (s *Service) loadSmartMoneySnapshotRows(ctx context.Context, wallets []mode
 	return rowsByKey, nil
 }
 
+func (s *Service) loadSmartMoneyMidnightSnapshotRows(ctx context.Context, wallets []models.MonitoredWallet, days ...time.Time) (map[string]*models.SmartMoneyWalletMidnightSnapshot, error) {
+	rowsByKey := make(map[string]*models.SmartMoneyWalletMidnightSnapshot)
+	if len(wallets) == 0 || len(days) == 0 {
+		return rowsByKey, nil
+	}
+
+	chainIDs := make([]int, 0, len(wallets))
+	addresses := make([]string, 0, len(wallets))
+	chainSeen := make(map[int]struct{}, len(wallets))
+	addrSeen := make(map[string]struct{}, len(wallets))
+	for _, wallet := range wallets {
+		if _, ok := chainSeen[wallet.ChainID]; !ok {
+			chainSeen[wallet.ChainID] = struct{}{}
+			chainIDs = append(chainIDs, wallet.ChainID)
+		}
+		addr := normalizeAddress(wallet.Address)
+		if addr == "" {
+			continue
+		}
+		if _, ok := addrSeen[addr]; ok {
+			continue
+		}
+		addrSeen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+	if len(chainIDs) == 0 || len(addresses) == 0 {
+		return rowsByKey, nil
+	}
+
+	dayKeys := make([]string, 0, len(days))
+	daySeen := make(map[string]struct{}, len(days))
+	for _, day := range days {
+		dayKey := formatDay(day)
+		if _, ok := daySeen[dayKey]; ok {
+			continue
+		}
+		daySeen[dayKey] = struct{}{}
+		dayKeys = append(dayKeys, dayKey)
+	}
+	if len(dayKeys) == 0 {
+		return rowsByKey, nil
+	}
+
+	var rows []models.SmartMoneyWalletMidnightSnapshot
+	if err := database.DB.WithContext(ctx).
+		Where("chain_id IN ? AND wallet_address IN ? AND snapshot_day IN ?", chainIDs, addresses, dayKeys).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		row := rows[i]
+		key := row.SnapshotDay + "|" + smartMoneyWalletKey(row.ChainID, row.WalletAddress)
+		rowCopy := row
+		rowsByKey[key] = &rowCopy
+	}
+	return rowsByKey, nil
+}
+
+func smartMoneyDailySnapshotFromMidnight(row *models.SmartMoneyWalletMidnightSnapshot) *models.SmartMoneyWalletDailySnapshot {
+	if row == nil {
+		return nil
+	}
+	return &models.SmartMoneyWalletDailySnapshot{
+		WalletAddress:     row.WalletAddress,
+		ChainID:           row.ChainID,
+		SnapshotDay:       row.SnapshotDay,
+		NativeUSD:         row.NativeUSD,
+		StableUSD:         row.StableUSD,
+		TrackedTokenUSD:   row.TrackedTokenUSD,
+		OpenLPUSD:         row.OpenLPUSD,
+		TotalUSD:          row.TotalUSD,
+		TrackedTokenCount: row.TrackedTokenCount,
+		CapturedAt:        row.CapturedAt,
+	}
+}
+
 func (s *Service) loadSmartMoneyDailyStatRows(ctx context.Context, wallets []models.MonitoredWallet, day time.Time) (map[string]*models.SmartMoneyLPDailyStat, error) {
 	rowsByKey := make(map[string]*models.SmartMoneyLPDailyStat)
 	if len(wallets) == 0 {
@@ -2335,40 +2395,51 @@ func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.Mo
 	}
 
 	var rows []smartMoneyHistoryDayRow
-	openLPSelect := "COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd"
-	if database.DB != nil && !database.DB.Migrator().HasColumn(&models.SmartMoneyWalletDailySnapshot{}, "OpenLPUSD") {
-		openLPSelect = "0 AS open_lp_usd"
-	}
 	err := database.DB.WithContext(ctx).
-		Raw(fmt.Sprintf(`
+		Raw(`
 			SELECT
 				s.snapshot_day AS day,
 				COALESCE(SUM(s.native_usd), 0) AS native_usd,
 				COALESCE(SUM(s.stable_usd), 0) AS stable_usd,
 				COALESCE(SUM(s.tracked_token_usd), 0) AS tracked_token_usd,
-				%s,
+				COALESCE(SUM(s.open_lp_usd), 0) AS open_lp_usd,
 				COALESCE(SUM(s.total_usd), 0) AS total_usd,
-				MAX(CASE WHEN s.has_transfer_in THEN 1 ELSE 0 END) AS has_transfer_in,
-				MAX(CASE WHEN s.has_transfer_out THEN 1 ELSE 0 END) AS has_transfer_out,
-				COALESCE(SUM(s.transfer_in_count), 0) AS transfer_in_count,
-				COALESCE(SUM(s.transfer_out_count), 0) AS transfer_out_count,
-				COALESCE(SUM(s.transfer_in_usd), 0) AS transfer_in_usd,
-				COALESCE(SUM(s.transfer_out_usd), 0) AS transfer_out_usd,
+				COALESCE(MAX(tx.has_transfer_in), 0) AS has_transfer_in,
+				COALESCE(MAX(tx.has_transfer_out), 0) AS has_transfer_out,
+				COALESCE(SUM(tx.transfer_in_count), 0) AS transfer_in_count,
+				COALESCE(SUM(tx.transfer_out_count), 0) AS transfer_out_count,
+				COALESCE(SUM(tx.transfer_in_usd), 0) AS transfer_in_usd,
+				COALESCE(SUM(tx.transfer_out_usd), 0) AS transfer_out_usd,
 				COUNT(s.wallet_address) AS snapshot_count,
-				COUNT(st.stat_day) AS daily_stat_count,
-				COALESCE(SUM(st.estimated_realized_pnl_usd), 0) AS estimated_realized_pnl_usd
-			FROM sm_wallet_daily_snapshots s
-			LEFT JOIN sm_lp_daily_stats st
-				ON st.wallet_address = s.wallet_address
-				AND st.chain_id = s.chain_id
-				AND st.stat_day = s.snapshot_day
+				0 AS daily_stat_count,
+				0 AS estimated_realized_pnl_usd
+			FROM sm_wallet_midnight_snapshots s
+			LEFT JOIN (
+				SELECT
+					wallet_address,
+					chain_id,
+					DATE_FORMAT(tx_timestamp, '%Y-%m-%d') AS event_day,
+					MAX(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) AS has_transfer_in,
+					MAX(CASE WHEN direction = 'out' THEN 1 ELSE 0 END) AS has_transfer_out,
+					COALESCE(SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END), 0) AS transfer_in_count,
+					COALESCE(SUM(CASE WHEN direction = 'out' THEN 1 ELSE 0 END), 0) AS transfer_out_count,
+					COALESCE(SUM(CASE WHEN direction = 'in' THEN amount_usd ELSE 0 END), 0) AS transfer_in_usd,
+					COALESCE(SUM(CASE WHEN direction = 'out' THEN amount_usd ELSE 0 END), 0) AS transfer_out_usd
+				FROM sm_wallet_transfer_events
+				WHERE tx_timestamp >= ?
+				  AND tx_timestamp < ?
+				GROUP BY wallet_address, chain_id, DATE_FORMAT(tx_timestamp, '%Y-%m-%d')
+			) tx
+				ON tx.wallet_address = s.wallet_address
+				AND tx.chain_id = s.chain_id
+				AND tx.event_day = s.snapshot_day
 			WHERE s.chain_id IN ?
 			  AND s.wallet_address IN ?
 			  AND s.snapshot_day >= ?
 			  AND s.snapshot_day < ?
 			GROUP BY s.snapshot_day
 			ORDER BY s.snapshot_day ASC
-		`, openLPSelect), chainIDs, addresses, formatDay(start), formatDay(end)).
+		`, start, end, chainIDs, addresses, formatDay(start), formatDay(end)).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -2571,18 +2642,22 @@ func (s *Service) loadSmartMoneyTransferActivity(ctx context.Context, wallets []
 }
 
 func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time.Time) error {
+	dayKey := formatDay(day)
+	hasExisting, err := s.hasSmartMoneyWalletSnapshotRows(ctx, dayKey)
+	if err != nil {
+		return err
+	}
+	if hasExisting {
+		log.Printf("[Assets] smart money wallet snapshots already exist day=%s, skip recapture", dayKey)
+		return nil
+	}
+
 	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
 	if err != nil {
 		return err
 	}
-	dayKey := formatDay(day)
 	transferActivity, err := s.loadSmartMoneyTransferActivity(ctx, wallets, dayStart(day), dayEnd(day))
 	if err != nil {
-		return err
-	}
-	if err := database.DB.WithContext(ctx).
-		Where("snapshot_day = ?", dayKey).
-		Delete(&models.SmartMoneyWalletDailySnapshot{}).Error; err != nil {
 		return err
 	}
 	for _, walletRow := range wallets {
@@ -2636,6 +2711,165 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 		}
 	}
 	return nil
+}
+
+func (s *Service) hasSmartMoneyWalletSnapshotRows(ctx context.Context, dayKey string) (bool, error) {
+	if database.DB == nil {
+		return false, fmt.Errorf("database not initialized")
+	}
+	var count int64
+	if err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyWalletDailySnapshot{}).
+		Where("snapshot_day = ?", dayKey).
+		Limit(1).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *Service) captureSmartMoneyMidnightSnapshots(ctx context.Context, day time.Time) error {
+	day = dayStart(day)
+	dayKey := formatDay(day)
+	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
+	if err != nil {
+		return err
+	}
+	if len(wallets) == 0 {
+		return nil
+	}
+
+	existing, err := s.loadSmartMoneyMidnightSnapshotRows(ctx, wallets, day)
+	if err != nil {
+		return err
+	}
+	if smartMoneyMidnightSnapshotsComplete(wallets, existing, dayKey) {
+		log.Printf("[Assets] smart money midnight snapshots already exist day=%s, skip recapture", dayKey)
+		return nil
+	}
+
+	if migrated, err := s.migrateSmartMoneyMidnightSnapshotsFromLegacy(ctx, day); err != nil {
+		return err
+	} else if migrated > 0 {
+		log.Printf("[Assets] smart money midnight snapshots migrated from legacy day=%s rows=%d", dayKey, migrated)
+		existing, err = s.loadSmartMoneyMidnightSnapshotRows(ctx, wallets, day)
+		if err != nil {
+			return err
+		}
+		if smartMoneyMidnightSnapshotsComplete(wallets, existing, dayKey) {
+			return nil
+		}
+	}
+
+	now := timeutil.Now()
+	if now.After(day.Add(smartMoneyMidnightSnapshotWindow)) {
+		log.Printf("[Assets] smart money midnight snapshot missing day=%s missing=%d but now=%s is outside capture window; skip current-balance backfill", dayKey, countMissingSmartMoneyMidnightSnapshots(wallets, existing, dayKey), now.Format(time.RFC3339))
+		return nil
+	}
+
+	for _, walletRow := range wallets {
+		key := dayKey + "|" + smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
+		if _, ok := existing[key]; ok {
+			continue
+		}
+		live, err := s.loadSmartMoneyWalletLiveStateLive(ctx, walletRow)
+		if err != nil {
+			log.Printf("[Assets] skip smart money midnight snapshot wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
+			continue
+		}
+		if err := s.persistSmartMoneyWalletLiveState(ctx, walletRow, live, now); err != nil {
+			log.Printf("[Assets] persist smart money live state from midnight snapshot failed wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
+		}
+		if err := s.insertSmartMoneyMidnightSnapshot(ctx, walletRow, live, dayKey, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func smartMoneyMidnightSnapshotsComplete(wallets []models.MonitoredWallet, existing map[string]*models.SmartMoneyWalletMidnightSnapshot, dayKey string) bool {
+	return countMissingSmartMoneyMidnightSnapshots(wallets, existing, dayKey) == 0
+}
+
+func countMissingSmartMoneyMidnightSnapshots(wallets []models.MonitoredWallet, existing map[string]*models.SmartMoneyWalletMidnightSnapshot, dayKey string) int {
+	if len(wallets) == 0 {
+		return 0
+	}
+	seen := make(map[string]struct{}, len(wallets))
+	missing := 0
+	for _, wallet := range wallets {
+		key := dayKey + "|" + smartMoneyWalletKey(wallet.ChainID, wallet.Address)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if _, ok := existing[key]; !ok {
+			missing++
+		}
+	}
+	return missing
+}
+
+func (s *Service) migrateSmartMoneyMidnightSnapshotsFromLegacy(ctx context.Context, day time.Time) (int, error) {
+	day = dayStart(day)
+	legacyDayKey := formatDay(day.AddDate(0, 0, -1))
+	capturedFrom := day
+	capturedTo := day.Add(smartMoneyMidnightSnapshotWindow)
+	var rows []models.SmartMoneyWalletDailySnapshot
+	if err := database.DB.WithContext(ctx).
+		Where("snapshot_day = ? AND captured_at >= ? AND captured_at <= ?", legacyDayKey, capturedFrom, capturedTo).
+		Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	inserted := 0
+	dayKey := formatDay(day)
+	for _, legacy := range rows {
+		state := smartMoneyWalletLiveState{
+			assets: smartMoneyAssetBreakdown{
+				NativeUSD:         legacy.NativeUSD,
+				StableUSD:         legacy.StableUSD,
+				TrackedTokenUSD:   legacy.TrackedTokenUSD,
+				OpenLPUSD:         legacy.OpenLPUSD,
+				TotalUSD:          legacy.TotalUSD,
+				TrackedTokenCount: legacy.TrackedTokenCount,
+			},
+		}
+		walletRow := models.MonitoredWallet{
+			Address: legacy.WalletAddress,
+			ChainID: legacy.ChainID,
+		}
+		if err := s.insertSmartMoneyMidnightSnapshot(ctx, walletRow, state, dayKey, legacy.CapturedAt); err != nil {
+			return inserted, err
+		}
+		inserted++
+	}
+	return inserted, nil
+}
+
+func (s *Service) insertSmartMoneyMidnightSnapshot(ctx context.Context, walletRow models.MonitoredWallet, live smartMoneyWalletLiveState, dayKey string, capturedAt time.Time) error {
+	row := &models.SmartMoneyWalletMidnightSnapshot{
+		WalletAddress:     normalizeAddress(walletRow.Address),
+		ChainID:           walletRow.ChainID,
+		SnapshotDay:       dayKey,
+		NativeUSD:         live.assets.NativeUSD,
+		StableUSD:         live.assets.StableUSD,
+		TrackedTokenUSD:   live.assets.TrackedTokenUSD,
+		OpenLPUSD:         live.assets.OpenLPUSD,
+		TotalUSD:          live.assets.TotalUSD,
+		TrackedTokenCount: live.assets.TrackedTokenCount,
+		ActivePoolCount:   live.activePoolCount,
+		CapturedAt:        capturedAt,
+	}
+	return insertIgnoreByColumns(ctx, row, []string{"wallet_address", "chain_id", "snapshot_day"})
+}
+
+func (s *Service) pruneSmartMoneyMidnightSnapshots(ctx context.Context, keepFrom time.Time) error {
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return database.DB.WithContext(ctx).
+		Where("snapshot_day < ?", formatDay(keepFrom)).
+		Delete(&models.SmartMoneyWalletMidnightSnapshot{}).Error
 }
 
 func (s *Service) captureSmartMoneyLPDailyStats(ctx context.Context, day time.Time) error {

@@ -95,6 +95,7 @@ func autoMigrate() error {
 		&models.SmartMoneyActivePosition{},
 		&models.SmartMoneyWalletTransferEvent{},
 		&models.SmartMoneyWalletDailySnapshot{},
+		&models.SmartMoneyWalletMidnightSnapshot{},
 		&models.SmartMoneyWalletLiveState{},
 		&models.SmartMoneyLPDailyStat{},
 		&models.SmartMoneyGoldenDogConfig{},
@@ -371,6 +372,9 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_total", "`snapshot_day`, `total_usd`")
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_wallet", "`snapshot_day`, `wallet_address`, `chain_id`")
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_chain_wallet_day", "`chain_id`, `wallet_address`, `snapshot_day`")
+	ensureIndex("sm_wallet_midnight_snapshots", "idx_sm_wallet_midnight_day_total", "`snapshot_day`, `total_usd`")
+	ensureIndex("sm_wallet_midnight_snapshots", "idx_sm_wallet_midnight_day_wallet", "`snapshot_day`, `wallet_address`, `chain_id`")
+	ensureIndex("sm_wallet_midnight_snapshots", "idx_sm_wallet_midnight_chain_wallet_day", "`chain_id`, `wallet_address`, `snapshot_day`")
 
 	ensureIndex("sm_lp_daily_stats", "idx_sm_lp_stat_day_wallet", "`stat_day`, `wallet_address`, `chain_id`")
 	ensureIndex("sm_lp_daily_stats", "idx_sm_lp_stat_day_pnl", "`stat_day`, `estimated_realized_pnl_usd`")

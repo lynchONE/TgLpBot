@@ -13,6 +13,7 @@ export default function BottomSheet({
     headerRight = null,
     footer = null,
     footerClassName = 'px-5 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]',
+    accentTheme,
 }) {
     const [isVisible, setIsVisible] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -54,6 +55,7 @@ export default function BottomSheet({
             {/* Sheet wrapper */}
             <div
                 className={`mini-bottom-sheet relative w-full sm:max-w-md flex flex-col overflow-hidden bg-white/80 dark:bg-[#14171c]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
+                data-accent-theme={accentTheme}
             >
                 {/* 顶部抓手 (移动端暗示可下拉) */}
                 <div

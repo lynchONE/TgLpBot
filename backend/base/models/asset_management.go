@@ -184,6 +184,31 @@ func (SmartMoneyWalletDailySnapshot) TableName() string {
 	return "sm_wallet_daily_snapshots"
 }
 
+// SmartMoneyWalletMidnightSnapshot stores the immutable midnight asset baseline for a smart money wallet.
+type SmartMoneyWalletMidnightSnapshot struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	WalletAddress string `gorm:"size:42;not null;uniqueIndex:idx_sm_wallet_midnight_day" json:"wallet_address"`
+	ChainID       int    `gorm:"not null;default:56;uniqueIndex:idx_sm_wallet_midnight_day" json:"chain_id"`
+	SnapshotDay   string `gorm:"size:10;not null;uniqueIndex:idx_sm_wallet_midnight_day;index" json:"snapshot_day"`
+
+	NativeUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"native_usd"`
+	StableUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"stable_usd"`
+	TrackedTokenUSD   float64   `gorm:"type:decimal(20,4);not null;default:0" json:"tracked_token_usd"`
+	OpenLPUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"open_lp_usd"`
+	TotalUSD          float64   `gorm:"type:decimal(20,4);not null;default:0" json:"total_usd"`
+	TrackedTokenCount int       `gorm:"not null;default:0" json:"tracked_token_count"`
+	ActivePoolCount   int       `gorm:"not null;default:0" json:"active_pool_count"`
+	CapturedAt        time.Time `gorm:"not null;index" json:"captured_at"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (SmartMoneyWalletMidnightSnapshot) TableName() string {
+	return "sm_wallet_midnight_snapshots"
+}
+
 // SmartMoneyWalletLiveState stores the latest local recognized-asset state for a smart money wallet.
 type SmartMoneyWalletLiveState struct {
 	ID uint `gorm:"primaryKey" json:"id"`

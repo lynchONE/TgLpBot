@@ -3500,6 +3500,7 @@ export default function App() {
                         onClose={closeOpenPosition}
                         maxHeightClass="max-h-[92vh]"
                         className="mini-open-position-sheet bg-white dark:bg-[#14171c] backdrop-blur-none"
+                        accentTheme={accentTheme}
                         headerClassName="px-4 pt-3 pb-2.5"
                         contentClassName="px-4 pb-5"
                         footerClassName="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.85rem)]"

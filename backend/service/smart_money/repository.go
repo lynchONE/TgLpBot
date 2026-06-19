@@ -2516,7 +2516,7 @@ func (r *Repository) ListZombieWalletCandidates(ctx context.Context, inactiveDay
 		Group("wallet_address, chain_id")
 
 	snapshotSubQuery := database.DB.WithContext(ctx).
-		Table("sm_wallet_daily_snapshots").
+		Table("sm_wallet_midnight_snapshots").
 		Select("wallet_address, chain_id, COUNT(*) AS snapshot_count").
 		Group("wallet_address, chain_id")
 
@@ -2684,6 +2684,7 @@ func deleteMonitoredWalletHistory(tx *gorm.DB, wallet WalletRef) (int64, error) 
 		{model: &models.SmartMoneyLPDailyStat{}},
 		{model: &models.SmartMoneyWalletLiveState{}},
 		{model: &models.SmartMoneyWalletDailySnapshot{}},
+		{model: &models.SmartMoneyWalletMidnightSnapshot{}},
 		{model: &models.SmartMoneyWalletTransferEvent{}},
 		{model: &models.SmartMoneyActivePosition{}},
 		{model: &models.SmartMoneyLPPosition{}},
