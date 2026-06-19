@@ -58,6 +58,54 @@ body {
   background-attachment: fixed;
 }
 
+.runtime-error-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #f8fafc;
+  background: #05070d;
+}
+
+.runtime-error-panel {
+  width: min(860px, 100%);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 8px;
+  background: rgba(20, 24, 34, 0.96);
+  padding: 22px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.runtime-error-eyebrow {
+  color: #f87171;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.runtime-error-panel h1 {
+  margin: 8px 0;
+  font-size: 22px;
+}
+
+.runtime-error-panel p {
+  margin: 0 0 14px;
+  color: #cbd5e1;
+}
+
+.runtime-error-panel pre {
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  margin: 0;
+  border-radius: 6px;
+  background: #090d16;
+  color: #fecaca;
+  padding: 14px;
+  font: 12px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .app-shell {
   position: relative;
   min-height: 100vh;

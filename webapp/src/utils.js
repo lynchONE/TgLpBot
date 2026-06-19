@@ -242,10 +242,11 @@ export function parseHotPoolBadges(value, limit = 6) {
   if (typeof source === 'string') {
     const raw = source.trim();
     if (!raw) return [];
-    try {
-      source = JSON.parse(raw);
-    } catch (err) {
-      throw err;
+    if (raw.startsWith('[') || raw.startsWith('{')) {
+      const parsed = JSON.parse(raw);
+      source = Array.isArray(parsed) ? parsed : [parsed];
+    } else {
+      source = [raw];
     }
   }
 
