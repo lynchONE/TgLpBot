@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
   Check,
+  ChevronDown,
   Copy,
   KeyRound,
   Megaphone,
@@ -128,6 +129,17 @@ function moduleSummary(keys, modules) {
   return rest > 0 ? `${labels.join('、')} +${rest}` : labels.join('、');
 }
 
+function groupModuleSummary(items, selected) {
+  const selectedLabels = items
+    .filter((item) => selected.has(String(item.key || '').trim()))
+    .slice(0, 3)
+    .map((item) => item.label || item.key);
+  if (!selectedLabels.length) return '本组未选择';
+  const selectedCount = items.filter((item) => selected.has(String(item.key || '').trim())).length;
+  const rest = selectedCount - selectedLabels.length;
+  return rest > 0 ? `${selectedLabels.join('、')} +${rest}` : selectedLabels.join('、');
+}
+
 function applyModulePayload(data, setModuleCatalog, setGrantableModules) {
   if (Array.isArray(data?.module_catalog)) {
     setModuleCatalog(data.module_catalog);
@@ -185,6 +197,7 @@ function SectionTabs({ section, onChange }) {
 }
 
 function ModulePermissionEditor({ modules, value, onChange, dense = false }) {
+  const [openGroups, setOpenGroups] = useState(() => new Set());
   const selected = useMemo(() => new Set(normalizeModuleKeys(value)), [value]);
   const moduleKeys = useMemo(() => modules.map((item) => String(item.key || '').trim()).filter(Boolean), [modules]);
   const groups = useMemo(() => {
@@ -196,6 +209,14 @@ function ModulePermissionEditor({ modules, value, onChange, dense = false }) {
     });
     return Array.from(map.entries()).map(([group, items]) => ({ group, items }));
   }, [modules]);
+
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const validGroups = new Set(groups.map((item) => item.group));
+      const next = new Set(Array.from(prev).filter((group) => validGroups.has(group)));
+      return next;
+    });
+  }, [groups]);
 
   const emit = useCallback((keys) => {
     onChange(normalizeModuleKeys(keys).filter((key) => moduleKeys.includes(key)));
@@ -219,6 +240,23 @@ function ModulePermissionEditor({ modules, value, onChange, dense = false }) {
     emit(Array.from(next));
   }, [emit, selected]);
 
+  const toggleOpen = useCallback((group) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }, []);
+
+  const expandAll = useCallback(() => {
+    setOpenGroups(new Set(groups.map((item) => item.group)));
+  }, [groups]);
+
+  const collapseAll = useCallback(() => {
+    setOpenGroups(new Set());
+  }, []);
+
   if (!modules.length) {
     return <div className="aaw-empty-line">模块目录为空</div>;
   }
@@ -233,36 +271,46 @@ function ModulePermissionEditor({ modules, value, onChange, dense = false }) {
         <div className="aaw-inline-actions">
           <button type="button" className="aaw-mini-btn" onClick={() => emit(moduleKeys)}>全部授权</button>
           <button type="button" className="aaw-mini-btn ghost" onClick={() => emit([])}>清空</button>
+          <button type="button" className="aaw-mini-btn ghost" onClick={expandAll}>展开全部</button>
+          <button type="button" className="aaw-mini-btn ghost" onClick={collapseAll}>收起</button>
         </div>
       </div>
       <div className="aaw-module-groups">
         {groups.map(({ group, items }) => {
           const groupKeys = items.map((item) => String(item.key || '').trim()).filter(Boolean);
           const groupSelected = groupKeys.filter((key) => selected.has(key)).length;
+          const open = openGroups.has(group);
           return (
-            <section key={group} className="aaw-module-group">
+            <section key={group} className={`aaw-module-group ${open ? 'open' : ''}`}>
               <div className="aaw-module-group-head">
-                <span>{group}</span>
-                <button type="button" onClick={() => toggleGroup(items)}>
+                <button type="button" className="aaw-module-group-toggle" onClick={() => toggleOpen(group)}>
+                  <ChevronDown size={14} />
+                  <span>{group}</span>
+                  <em>{groupSelected}/{groupKeys.length}</em>
+                </button>
+                <span className="aaw-module-group-summary">{groupModuleSummary(items, selected)}</span>
+                <button type="button" className="aaw-module-group-action" onClick={() => toggleGroup(items)}>
                   {groupSelected === groupKeys.length ? '取消本组' : '选择本组'}
                 </button>
               </div>
-              <div className="aaw-module-grid">
-                {items.map((item) => {
-                  const key = String(item.key || '').trim();
-                  const checked = selected.has(key);
-                  return (
-                    <label key={key} className={`aaw-module-check ${checked ? 'checked' : ''}`}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleKey(key)} />
-                      <span className="aaw-checkmark">{checked ? <Check size={14} /> : null}</span>
-                      <span className="aaw-module-copy">
-                        <strong>{item.label || key}</strong>
-                        <small>{key}</small>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+              {open ? (
+                <div className="aaw-module-grid">
+                  {items.map((item) => {
+                    const key = String(item.key || '').trim();
+                    const checked = selected.has(key);
+                    return (
+                      <label key={key} className={`aaw-module-check ${checked ? 'checked' : ''}`}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleKey(key)} />
+                        <span className="aaw-checkmark">{checked ? <Check size={14} /> : null}</span>
+                        <span className="aaw-module-copy">
+                          <strong>{item.label || key}</strong>
+                          <small>{key}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : null}
             </section>
           );
         })}

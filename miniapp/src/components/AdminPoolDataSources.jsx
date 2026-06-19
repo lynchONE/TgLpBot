@@ -51,6 +51,20 @@ function coverageText(source) {
     return parts.join(' / ');
 }
 
+function FoldableError({ children }) {
+    if (children === null || typeof children === 'undefined') return null;
+    const text = String(children).trim();
+    if (!text) return null;
+    return (
+        <details className="col-span-2 rounded-lg border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-200">
+            <summary className="cursor-pointer list-none px-2.5 py-1.5 text-[11px] font-semibold">最近错误</summary>
+            <div className="max-h-32 overflow-auto border-t border-red-500/10 px-2.5 py-2 text-[10px] leading-relaxed break-words">
+                {text}
+            </div>
+        </details>
+    );
+}
+
 function sourceToDraft(source) {
     return {
         name: String(source?.name || ''),
@@ -254,7 +268,7 @@ function EditableSourceRow({ source, onSwitch, onEnable, onDisable, onDelete, on
                 <div>最近成功 {formatTime(source?.last_success_at)}</div>
                 <div>延迟 {Number(source?.last_latency_ms || 0) || '--'}ms</div>
                 <div>{coverageText(source)}</div>
-                {source?.last_error && <div className="col-span-2 break-all text-red-600 dark:text-red-300">{source.last_error}</div>}
+                <FoldableError>{source?.last_error}</FoldableError>
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
                 <button type="button" onClick={() => setEditing((v) => !v)} className="rounded-lg border border-zinc-200 px-3 py-1.5 text-[11px] dark:border-white/10">

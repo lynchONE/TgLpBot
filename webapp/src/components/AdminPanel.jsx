@@ -336,6 +336,18 @@ function splitCSV(raw) {
     .filter(Boolean);
 }
 
+function LongDetail({ label = '详情', children, danger = false }) {
+  if (children === null || typeof children === 'undefined') return null;
+  const text = String(children).trim();
+  if (!text) return null;
+  return (
+    <details className={`am-long-detail ${danger ? 'danger' : ''}`}>
+      <summary>{label}</summary>
+      <div>{text}</div>
+    </details>
+  );
+}
+
 function poolSourceToDraft(source) {
   return {
     sourceType: String(source?.source_type || 'market_pools'),
@@ -405,6 +417,7 @@ function RPCEndpointRow({
 }) {
   const [renameValue, setRenameValue] = useState(String(endpoint?.name || '').trim());
   const available = !isUnavailable(endpoint);
+  const endpointUrl = formatEndpointUrl(endpoint);
 
   useEffect(() => {
     setRenameValue(String(endpoint?.name || '').trim());
@@ -414,8 +427,8 @@ function RPCEndpointRow({
     <div className="am-list-item am-list-item-wrap">
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="am-item-title">{endpointDisplayName(endpoint)}</div>
-        <div className="am-item-sub">
-          {formatEndpointUrl(endpoint)} / 延迟 {Number(endpoint?.last_latency_ms || 0) > 0 ? `${Number(endpoint.last_latency_ms)}ms` : '--'}
+        <div className="am-item-sub am-clip-line" title={endpointUrl}>
+          {endpointUrl} / 延迟 {Number(endpoint?.last_latency_ms || 0) > 0 ? `${Number(endpoint.last_latency_ms)}ms` : '--'}
         </div>
         <div className="am-actions" style={{ justifyContent: 'flex-start' }}>
           <span className={available ? 'am-badge am-badge-ok' : 'am-badge am-badge-warn'}>
@@ -472,6 +485,7 @@ function EditablePoolDataSourceRow({
   const enabled = Boolean(source?.is_enabled);
   const current = Boolean(source?.is_current);
   const coverage = formatCoverage(source);
+  const sourceUrl = formatPoolSourceUrl(source);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(() => poolSourceToDraft(source));
 
@@ -496,8 +510,8 @@ function EditablePoolDataSourceRow({
     <div className="am-list-item am-list-item-wrap">
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="am-item-title">{poolSourceDisplayName(source)}</div>
-        <div className="am-item-sub">
-          {formatPoolSourceUrl(source)} / {formatPoolDataSourceType(source?.source_type)} / {Number(source?.timeframe_minutes || 5)}m / limit {Number(source?.limit || 100)}
+        <div className="am-item-sub am-clip-line" title={sourceUrl}>
+          {sourceUrl} / {formatPoolDataSourceType(source?.source_type)} / {Number(source?.timeframe_minutes || 5)}m / limit {Number(source?.limit || 100)}
         </div>
         <div className="am-actions" style={{ justifyContent: 'flex-start' }}>
           <span className={enabled ? 'am-badge am-badge-ok' : 'am-badge am-badge-warn'}>
@@ -513,7 +527,7 @@ function EditablePoolDataSourceRow({
           检测 {formatDateTime(source?.last_checked_at)} / 成功 {formatDateTime(source?.last_success_at)}
           {coverage ? ` / ${coverage}` : ''}
         </div>
-        {source?.last_error ? <div className="am-error">{source.last_error}</div> : null}
+        <LongDetail label="最近错误" danger>{source?.last_error}</LongDetail>
       </div>
 
       <div className="am-btn-group">
@@ -665,6 +679,7 @@ function OKXConfigRow({
   const [secretKey, setSecretKey] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const unavailable = isOKXUnavailable(config);
+  const configUrl = formatOKXConfigUrl(config);
 
   useEffect(() => {
     setRenameValue(okxConfigDisplayName(config));
@@ -678,8 +693,8 @@ function OKXConfigRow({
     <div className="am-list-item am-list-item-wrap">
       <div style={{ minWidth: 0, flex: 1 }}>
         <div className="am-item-title">{okxConfigDisplayName(config)}</div>
-        <div className="am-item-sub">
-          {formatOKXConfigUrl(config)} / {config?.api_key_masked || 'no key'} / 延迟 {Number(config?.last_latency_ms || 0) > 0 ? `${Number(config.last_latency_ms)}ms` : '--'}
+        <div className="am-item-sub am-clip-line" title={`${configUrl} / ${config?.api_key_masked || 'no key'}`}>
+          {configUrl} / {config?.api_key_masked || 'no key'} / 延迟 {Number(config?.last_latency_ms || 0) > 0 ? `${Number(config.last_latency_ms)}ms` : '--'}
         </div>
         <div className="am-actions" style={{ justifyContent: 'flex-start' }}>
           <span className={unavailable ? 'am-badge am-badge-warn' : 'am-badge am-badge-ok'}>
@@ -697,7 +712,7 @@ function OKXConfigRow({
         <div className="am-item-sub">
           检测 {formatDateTime(config?.last_checked_at)} / 成功 {formatDateTime(config?.last_success_at)} / 连续失败 {Number(config?.consecutive_failures || 0)}
         </div>
-        {config?.last_error ? <div className="am-error">{config.last_error}</div> : null}
+        <LongDetail label="最近错误" danger>{config?.last_error}</LongDetail>
         <div className="am-rename">
           <span>名称</span>
           <input

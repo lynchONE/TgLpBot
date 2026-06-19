@@ -240,9 +240,12 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                                 </div>
                             )}
                             {ep?.last_error && (
-                                <div className="col-span-2 text-red-600/80 dark:text-red-300/80 break-all">
-                                    {String(ep.last_error)}
-                                </div>
+                                <details className="col-span-2 rounded-lg border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-200">
+                                    <summary className="cursor-pointer list-none px-2.5 py-1.5 text-[11px] font-semibold">最近错误</summary>
+                                    <div className="max-h-32 overflow-auto border-t border-red-500/10 px-2.5 py-2 text-[10px] leading-relaxed break-words">
+                                        {String(ep.last_error)}
+                                    </div>
+                                </details>
                             )}
                         </div>
 

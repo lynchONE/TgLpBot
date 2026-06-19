@@ -1909,6 +1909,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
     const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '', minMarketCapUsd: '' });
     const loadSeqRef = useRef(0);
+    const loadInFlightRef = useRef(false);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const sourceFilter = SMART_MONEY_POOL_SOURCE_BY_KEY[sourceScope];
     const normalizedActivePoolAddress = useMemo(
@@ -1921,7 +1922,9 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
     );
 
     const loadPools = useCallback((silent = false) => {
+        if (silent && loadInFlightRef.current) return Promise.resolve();
         const seq = ++loadSeqRef.current;
+        loadInFlightRef.current = true;
         if (!silent) {
             setLoading(true);
             setError('');
@@ -1957,13 +1960,17 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             })
             .catch((err) => {
                 if (seq !== loadSeqRef.current) return;
-                setPools([]);
-                setPoolsTotal(0);
-                setError(String(err?.message || err || '加载池子失败'));
-                throw err;
+                if (!silent) {
+                    setPools([]);
+                    setPoolsTotal(0);
+                    setError(String(err?.message || err || '加载池子失败'));
+                }
             })
             .finally(() => {
-                if (!silent && seq === loadSeqRef.current) setLoading(false);
+                if (seq === loadSeqRef.current) {
+                    loadInFlightRef.current = false;
+                    if (!silent) setLoading(false);
+                }
             });
     }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd, proto, searchKeyword, sourceFilter]);
 
@@ -2282,6 +2289,7 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
     const [sort, setSort] = useState('rate');
     const [windowKey, setWindowKey] = useState('1m');
     const loadSeqRef = useRef(0);
+    const loadInFlightRef = useRef(false);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
@@ -2289,7 +2297,9 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
     );
 
     const loadHeatmap = useCallback((silent = false) => {
+        if (silent && loadInFlightRef.current) return Promise.resolve();
         const seq = ++loadSeqRef.current;
+        loadInFlightRef.current = true;
         if (!silent) {
             setLoading(true);
             setError('');
@@ -2322,13 +2332,17 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
             })
             .catch((err) => {
                 if (seq !== loadSeqRef.current) return;
-                setRows([]);
-                setTotal(0);
-                setError(String(err?.message || err || '加载收益火焰图失败'));
-                throw err;
+                if (!silent) {
+                    setRows([]);
+                    setTotal(0);
+                    setError(String(err?.message || err || '加载收益火焰图失败'));
+                }
             })
             .finally(() => {
-                if (!silent && seq === loadSeqRef.current) setLoading(false);
+                if (seq === loadSeqRef.current) {
+                    loadInFlightRef.current = false;
+                    if (!silent) setLoading(false);
+                }
             });
     }, [apiBaseUrl, page, proto, searchKeyword, sort, windowKey]);
 

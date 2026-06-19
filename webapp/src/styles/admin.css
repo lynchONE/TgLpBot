@@ -449,24 +449,79 @@
 .aaw-module-groups {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   margin-top: 12px;
 }
 
 .aaw-module-group {
   min-width: 0;
+  border: 1px solid rgba(139, 160, 196, 0.14);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.24);
+  padding: 9px;
 }
 
 .aaw-module-group-head {
-  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  margin-bottom: 0;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 800;
 }
 
-.aaw-module-group-head button {
+.aaw-module-group.open .aaw-module-group-head {
+  margin-bottom: 8px;
+}
+
+.aaw-module-group-toggle,
+.aaw-module-group-action {
   border: 0;
   background: transparent;
+  font: inherit;
+}
+
+.aaw-module-group-toggle {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  color: var(--text);
+  text-align: left;
+}
+
+.aaw-module-group-toggle svg {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.aaw-module-group.open .aaw-module-group-toggle svg {
+  transform: rotate(180deg);
+}
+
+.aaw-module-group-toggle span,
+.aaw-module-group-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaw-module-group-toggle em {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.aaw-module-group-summary {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.aaw-module-group-action {
   color: var(--accent);
   font-size: 11px;
   font-weight: 800;
@@ -723,6 +778,15 @@
   .aaw-panel,
   .aaw-hero {
     padding: 13px;
+  }
+
+  .aaw-module-group-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .aaw-module-group-summary {
+    grid-column: 1 / -1;
+    order: 3;
   }
 }
 
@@ -1132,6 +1196,61 @@
   word-break: break-all;
 }
 .am-drawer-meta-row-2 { grid-column: span 2; }
+
+.module-admin_panel .am-clip-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.module-admin_panel .am-long-detail {
+  margin-top: 8px;
+  border: 1px solid rgba(139, 160, 196, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 11, 17, 0.3);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.module-admin_panel .am-long-detail.danger {
+  border-color: rgba(var(--negative-rgb), 0.18);
+  background: rgba(var(--negative-rgb), 0.08);
+  color: #fecdd3;
+}
+
+.module-admin_panel .am-long-detail summary {
+  cursor: pointer;
+  padding: 6px 8px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.module-admin_panel .am-long-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.module-admin_panel .am-long-detail summary::after {
+  content: '展开';
+  float: right;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.module-admin_panel .am-long-detail[open] summary::after {
+  content: '收起';
+}
+
+.module-admin_panel .am-long-detail > div {
+  max-height: 180px;
+  overflow: auto;
+  border-top: 1px solid rgba(139, 160, 196, 0.1);
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 
 /* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?   Admin Module 鈥?narrow-slot compact mode (2/3/4 column layouts)

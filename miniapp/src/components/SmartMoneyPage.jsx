@@ -2782,16 +2782,19 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
     const [poolFilter, setPoolFilter] = useState(readStoredSmartMoneyPoolFilter);
     const [poolFilterDraft, setPoolFilterDraft] = useState({ minSmartMoneyUsd: '', maxFeeRate: '', minMarketCapUsd: '' });
     const loadSeqRef = useRef(0);
+    const loadInFlightRef = useRef(false);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const sourceFilter = SMART_MONEY_POOL_SOURCE_BY_KEY[sourceScope];
 
     const load = useCallback((silent = false) => {
+        if (silent && loadInFlightRef.current) return Promise.resolve();
         const seq = ++loadSeqRef.current;
+        loadInFlightRef.current = true;
         if (!silent) {
             setLoading(true);
             setError('');
         }
-        fetchSMPools({
+        return fetchSMPools({
             apiBaseUrl,
             page,
             size: POOL_LIST_PAGE_SIZE,
@@ -2822,13 +2825,18 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
             })
             .catch((err) => {
                 if (seq !== loadSeqRef.current) return;
-                setPools([]);
-                setPoolsTotal(0);
-                setError(String(err?.message || err || '加载池子失败'));
+                if (!silent) {
+                    setPools([]);
+                    setPoolsTotal(0);
+                    setError(String(err?.message || err || '加载池子失败'));
+                }
             })
             .finally(() => {
-                if (!silent && seq === loadSeqRef.current) {
-                    setLoading(false);
+                if (seq === loadSeqRef.current) {
+                    loadInFlightRef.current = false;
+                    if (!silent) {
+                        setLoading(false);
+                    }
                 }
             });
     }, [apiBaseUrl, page, poolFilter.maxFeeRate, poolFilter.minMarketCapUsd, poolFilter.minSmartMoneyUsd, protocolFilter, searchKeyword, sourceFilter]);
@@ -3162,15 +3170,18 @@ function PoolFeeHeatmapPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, p
     const [protocolFilter, setProtocolFilter] = useState('all');
     const [search, setSearch] = useState('');
     const loadSeqRef = useRef(0);
+    const loadInFlightRef = useRef(false);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
     const load = useCallback((silent = false) => {
+        if (silent && loadInFlightRef.current) return Promise.resolve();
         const seq = ++loadSeqRef.current;
+        loadInFlightRef.current = true;
         if (!silent) {
             setLoading(true);
             setError('');
         }
-        fetchSMPoolFeeHeatmap({
+        return fetchSMPoolFeeHeatmap({
             apiBaseUrl,
             window: windowKey,
             sort,
@@ -3196,12 +3207,17 @@ function PoolFeeHeatmapPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, p
             })
             .catch((err) => {
                 if (seq !== loadSeqRef.current) return;
-                setRows([]);
-                setTotal(0);
-                setError(String(err?.message || err || '加载收益火焰图失败'));
+                if (!silent) {
+                    setRows([]);
+                    setTotal(0);
+                    setError(String(err?.message || err || '加载收益火焰图失败'));
+                }
             })
             .finally(() => {
-                if (!silent && seq === loadSeqRef.current) setLoading(false);
+                if (seq === loadSeqRef.current) {
+                    loadInFlightRef.current = false;
+                    if (!silent) setLoading(false);
+                }
             });
     }, [apiBaseUrl, page, protocolFilter, searchKeyword, sort, windowKey]);
 

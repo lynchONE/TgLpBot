@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import {
     createAdminAuthCode,
     disableAdminAuthCode,
@@ -104,6 +105,14 @@ function moduleSummary(keys, modules) {
     return rest > 0 ? `${labels.join('、')} +${rest}` : labels.join('、');
 }
 
+function groupModuleSummary(items, selected) {
+    const selectedItems = items.filter((item) => selected.has(String(item.key || '').trim()));
+    if (!selectedItems.length) return '未选择';
+    const labels = selectedItems.slice(0, 2).map((item) => item.label || item.key);
+    const rest = selectedItems.length - labels.length;
+    return rest > 0 ? `${labels.join('、')} +${rest}` : labels.join('、');
+}
+
 function applyModulePayload(data, setModuleCatalog, setGrantableModules) {
     if (Array.isArray(data?.module_catalog)) setModuleCatalog(data.module_catalog);
     if (Array.isArray(data?.grantable_modules)) setGrantableModules(data.grantable_modules);
@@ -189,6 +198,7 @@ function LimitFields({ draft, onChange, includeRedemptions = false }) {
 }
 
 function ModulePicker({ modules, value, onChange, compact = false }) {
+    const [openGroups, setOpenGroups] = useState(() => new Set());
     const selected = useMemo(() => new Set(normalizeModuleKeys(value)), [value]);
     const moduleKeys = useMemo(() => modules.map((item) => String(item.key || '').trim()).filter(Boolean), [modules]);
     const groups = useMemo(() => {
@@ -201,9 +211,36 @@ function ModulePicker({ modules, value, onChange, compact = false }) {
         return Array.from(map.entries()).map(([group, items]) => ({ group, items }));
     }, [modules]);
 
+    useEffect(() => {
+        setOpenGroups((prev) => {
+            const valid = new Set(groups.map((item) => item.group));
+            return new Set(Array.from(prev).filter((group) => valid.has(group)));
+        });
+    }, [groups]);
+
     const emit = useCallback((keys) => {
         onChange(normalizeModuleKeys(keys).filter((key) => moduleKeys.includes(key)));
     }, [moduleKeys, onChange]);
+
+    const toggleGroupOpen = (group) => {
+        setOpenGroups((prev) => {
+            const next = new Set(prev);
+            if (next.has(group)) next.delete(group);
+            else next.add(group);
+            return next;
+        });
+    };
+
+    const toggleGroupSelection = (items) => {
+        const keys = items.map((item) => String(item.key || '').trim()).filter(Boolean);
+        const allSelected = keys.every((key) => selected.has(key));
+        const next = new Set(selected);
+        keys.forEach((key) => {
+            if (allSelected) next.delete(key);
+            else next.add(key);
+        });
+        emit(Array.from(next));
+    };
 
     const toggleKey = (key) => {
         const next = new Set(selected);
@@ -226,31 +263,55 @@ function ModulePicker({ modules, value, onChange, compact = false }) {
                 <div className="flex gap-1.5">
                     <button type="button" className={buttonClass} onClick={() => emit(moduleKeys)}>全选</button>
                     <button type="button" className={buttonClass} onClick={() => emit([])}>清空</button>
+                    <button type="button" className={buttonClass} onClick={() => setOpenGroups(new Set(groups.map((item) => item.group)))}>展开</button>
+                    <button type="button" className={buttonClass} onClick={() => setOpenGroups(new Set())}>收起</button>
                 </div>
             </div>
             {groups.map(({ group, items }) => (
-                <div key={group} className="space-y-1.5">
-                    <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/45">{group}</div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                        {items.map((item) => {
-                            const key = String(item.key || '').trim();
-                            const checked = selected.has(key);
-                            return (
-                                <button
-                                    key={key}
-                                    type="button"
-                                    onClick={() => toggleKey(key)}
-                                    className={`min-w-0 rounded-xl border px-2.5 py-2 text-left transition ${checked
-                                        ? 'border-lime-400 bg-lime-300/15 text-zinc-950 dark:text-lime-100'
-                                        : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/65'
-                                    }`}
-                                >
-                                    <div className="truncate text-[11px] font-bold">{item.label || key}</div>
-                                    {!compact ? <div className="mt-0.5 truncate text-[9px] opacity-60">{key}</div> : null}
-                                </button>
-                            );
-                        })}
+                <div key={group} className="rounded-xl border border-zinc-200 bg-white/60 p-2 dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => toggleGroupOpen(group)}
+                            className="flex min-w-0 items-center gap-1.5 text-left"
+                        >
+                            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-zinc-400 transition ${openGroups.has(group) ? 'rotate-180' : ''}`} />
+                            <span className="truncate text-[11px] font-semibold text-zinc-700 dark:text-white/75">{group}</span>
+                            <span className="shrink-0 text-[10px] text-zinc-400">
+                                {items.filter((item) => selected.has(String(item.key || '').trim())).length}/{items.length}
+                            </span>
+                        </button>
+                        <button type="button" className="text-[10px] font-semibold text-lime-700 dark:text-lime-300" onClick={() => toggleGroupSelection(items)}>
+                            {items.every((item) => selected.has(String(item.key || '').trim())) ? '取消' : '本组'}
+                        </button>
+                        {!openGroups.has(group) ? (
+                            <div className="col-span-2 truncate text-[10px] text-zinc-400 dark:text-white/35">
+                                {groupModuleSummary(items, selected)}
+                            </div>
+                        ) : null}
                     </div>
+                    {openGroups.has(group) ? (
+                        <div className="mt-2 grid grid-cols-2 gap-1.5">
+                            {items.map((item) => {
+                                const key = String(item.key || '').trim();
+                                const checked = selected.has(key);
+                                return (
+                                    <button
+                                        key={key}
+                                        type="button"
+                                        onClick={() => toggleKey(key)}
+                                        className={`min-w-0 rounded-xl border px-2.5 py-2 text-left transition ${checked
+                                            ? 'border-lime-400 bg-lime-300/15 text-zinc-950 dark:text-lime-100'
+                                            : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/65'
+                                        }`}
+                                    >
+                                        <div className="truncate text-[11px] font-bold">{item.label || key}</div>
+                                        {!compact ? <div className="mt-0.5 truncate text-[9px] opacity-60">{key}</div> : null}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : null}
                 </div>
             ))}
         </div>
@@ -288,6 +349,7 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     const [publishing, setPublishing] = useState(false);
 
     const codeModulesInitializedRef = useRef(false);
+    const editorRef = useRef(null);
     const moduleKeys = useMemo(() => grantableModules.map((item) => String(item.key || '').trim()).filter(Boolean), [grantableModules]);
 
     useEffect(() => {
@@ -377,6 +439,13 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
     const patchCodeDraft = (patch) => setCodeDraft((prev) => ({ ...prev, ...patch }));
     const updateCodeRow = (codeId, patch) => {
         setCodes((prev) => prev.map((item) => Number(item.id) === Number(codeId) ? { ...item, ...patch } : item));
+    };
+    const selectAccessUser = (user) => {
+        setSelectedUser(user);
+        setAccessDraft(makeAccessDraft(user));
+        window.setTimeout(() => {
+            editorRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }, 0);
     };
 
     const saveSelectedAccess = useCallback(async () => {
@@ -500,22 +569,55 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
 
             {section === 'users' ? (
                 <div className="space-y-3">
+                    <div ref={editorRef} className="rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">编辑授权</div>
+                                <div className="mt-1 truncate text-[11px] text-zinc-500 dark:text-white/45">
+                                    {selectedUser ? formatUserLabel(selectedUser) : '请选择一个用户'}
+                                </div>
+                            </div>
+                            {selectedUser ? <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${statusClass(selectedUser.status)}`}>{statusLabel(selectedUser.status)}</span> : null}
+                        </div>
+                        {selectedUser ? (
+                            <div className="mt-3 space-y-3">
+                                <LimitFields draft={accessDraft} onChange={patchAccessDraft} />
+                                <Field label="备注">
+                                    <input className={inputClass} value={accessDraft.note} onChange={(event) => patchAccessDraft({ note: event.target.value })} />
+                                </Field>
+                                <ModulePicker modules={grantableModules} value={accessDraft.enabledModules} onChange={(enabledModules) => patchAccessDraft({ enabledModules })} />
+                                <div className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-white/45">
+                                    钱包 {Number(selectedUser.wallet_count || 0)} / {positiveInt(accessDraft.maxWallets, 0)} · 任务 {Number(selectedUser.active_task_count || 0)} / {positiveInt(accessDraft.maxActiveTasks, 0)}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button type="button" className={primaryButtonClass} disabled={accessSaving} onClick={saveSelectedAccess}>{accessSaving ? '保存中...' : '保存授权'}</button>
+                                    {selectedUser.status === 'revoked' ? (
+                                        <button type="button" className={buttonClass} onClick={async () => { await restoreAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id }); showNotice('授权已恢复'); await loadUsers(); }}>恢复授权</button>
+                                    ) : (
+                                        <button type="button" className={dangerButtonClass} onClick={async () => { if (!window.confirm('确认停用该用户授权？')) return; await revokeAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id }); showNotice('授权已停用'); await loadUsers(); }}>停用授权</button>
+                                    )}
+                                </div>
+                            </div>
+                        ) : <div className="mt-3 text-xs text-zinc-500">从下方用户列表选择一个用户。</div>}
+                    </div>
+
                     <div className="rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">用户列表</div>
+                            <div className="text-[11px] text-zinc-500 dark:text-white/45">{usersTotal || users.length} 条</div>
+                        </div>
                         <div className="flex gap-2">
                             <input className={`${inputClass} flex-1`} value={usersQuery} onChange={(event) => setUsersQuery(event.target.value)} placeholder="@username / Telegram ID" />
                             <button type="button" className={buttonClass} disabled={usersLoading} onClick={loadUsers}>查询</button>
                         </div>
                         {usersError ? <div className="mt-2 rounded-xl border border-red-400/40 bg-red-400/10 p-2 text-xs text-red-700 dark:text-red-200">{usersError}</div> : null}
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
                             {users.length > 0 ? users.map((user) => (
                                 <button
                                     type="button"
                                     key={user.user_id}
                                     className={`w-full rounded-2xl border p-3 text-left transition ${Number(user.user_id) === Number(selectedUser?.user_id) ? 'border-lime-400 bg-lime-300/10' : 'border-zinc-200 bg-white/70 dark:border-white/10 dark:bg-white/5'}`}
-                                    onClick={() => {
-                                        setSelectedUser(user);
-                                        setAccessDraft(makeAccessDraft(user));
-                                    }}
+                                    onClick={() => selectAccessUser(user)}
                                 >
                                     <div className="flex items-start justify-between gap-2">
                                         <div className="min-w-0">
@@ -528,27 +630,6 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
                                 </button>
                             )) : <div className="p-3 text-center text-xs text-zinc-500">{usersLoading ? '正在加载用户...' : '暂无用户'}</div>}
                         </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">编辑授权</div>
-                        {selectedUser ? (
-                            <div className="mt-3 space-y-3">
-                                <LimitFields draft={accessDraft} onChange={patchAccessDraft} />
-                                <Field label="备注">
-                                    <input className={inputClass} value={accessDraft.note} onChange={(event) => patchAccessDraft({ note: event.target.value })} />
-                                </Field>
-                                <ModulePicker modules={grantableModules} value={accessDraft.enabledModules} onChange={(enabledModules) => patchAccessDraft({ enabledModules })} />
-                                <div className="flex flex-wrap gap-2">
-                                    <button type="button" className={primaryButtonClass} disabled={accessSaving} onClick={saveSelectedAccess}>{accessSaving ? '保存中...' : '保存授权'}</button>
-                                    {selectedUser.status === 'revoked' ? (
-                                        <button type="button" className={buttonClass} onClick={async () => { await restoreAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id }); showNotice('授权已恢复'); await loadUsers(); }}>恢复授权</button>
-                                    ) : (
-                                        <button type="button" className={dangerButtonClass} onClick={async () => { if (!window.confirm('确认停用该用户授权？')) return; await revokeAdminUserAccess({ apiBaseUrl, initData, userId: selectedUser.user_id }); showNotice('授权已停用'); await loadUsers(); }}>停用授权</button>
-                                    )}
-                                </div>
-                            </div>
-                        ) : <div className="mt-3 text-xs text-zinc-500">请选择一个用户</div>}
                     </div>
                 </div>
             ) : null}
@@ -621,7 +702,12 @@ export default function AdminAccessWorkbench({ apiBaseUrl, initData, hasInitData
                                         </div>
                                     ) : null}
                                     <div className="mt-3 flex flex-wrap gap-2">
-                                        {editing ? <button type="button" className={primaryButtonClass} onClick={() => saveCode(code)}>保存</button> : <button type="button" className={buttonClass} onClick={() => setEditingCodeId(code.id)}>编辑</button>}
+                                        {editing ? (
+                                            <>
+                                                <button type="button" className={primaryButtonClass} onClick={() => saveCode(code)}>保存</button>
+                                                <button type="button" className={buttonClass} onClick={async () => { setEditingCodeId(null); await loadCodes(); }}>取消</button>
+                                            </>
+                                        ) : <button type="button" className={buttonClass} onClick={() => setEditingCodeId(code.id)}>编辑</button>}
                                         {code.status === 'disabled' ? (
                                             <button type="button" className={buttonClass} onClick={async () => { await enableAdminAuthCode({ apiBaseUrl, initData, codeId: code.id }); showNotice('授权码已启用'); await loadCodes(); }}>启用</button>
                                         ) : (
