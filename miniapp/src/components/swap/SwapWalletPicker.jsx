@@ -1,4 +1,3 @@
-import React from 'react';
 import { Check, Wallet } from 'lucide-react';
 import BottomSheet from '../BottomSheet.jsx';
 import { formatTokenAmount, shortAddress } from '../../lib/swapMeta';

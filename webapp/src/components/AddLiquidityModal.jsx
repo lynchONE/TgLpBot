@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Droplets, Sparkles, X } from 'lucide-react';
 import { formatUsdCompact } from '../utils';
 

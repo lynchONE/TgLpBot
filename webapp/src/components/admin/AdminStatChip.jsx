@@ -1,4 +1,3 @@
-import React from 'react';
 import NumberFlowValue from '../NumberFlowValue';
 import AdminStatusDot from './AdminStatusDot';
 

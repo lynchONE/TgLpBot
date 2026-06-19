@@ -1,5 +1,5 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, ChevronRight, Crown, Eraser, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, ChevronLeft, ChevronRight, Eraser, History, RefreshCw, Settings2, Wallet } from 'lucide-react';
 import { createChart, AreaSeries, ColorType } from 'lightweight-charts';
 import {
     fetchAssetHistory,
@@ -12,29 +12,16 @@ import {
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
 import GlobalConfigPage from './GlobalConfigPage.jsx';
-import MiniChart from './MiniChart.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
 import TradeHistoryPage from './TradeHistoryPage.jsx';
 import WalletManagePage from './WalletManagePage.jsx';
-
-const AVATAR_URLS = Object.entries(
-    import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
-).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
 
 const HISTORY_WINDOWS = [7, 30, 90];
 const PNL_CALENDAR_WINDOWS = [
     { key: 'month', label: '本月' },
     { key: '30d', label: '30天' },
 ];
-const SMART_MONEY_WINDOWS = [1, 7, 30];
 const CHINA_TIME_ZONE = 'Asia/Shanghai';
-const LEADERBOARD_METRICS = [
-    { key: 'pnl', label: '收益额' },
-    { key: 'yield_rate', label: '收益率' },
-    { key: 'participation', label: '参与次数' },
-];
-
-const SM_PAGE_SIZE = 10;
 const usdFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 function formatUsd(value) {
     const num = Number(value || 0);
@@ -158,28 +145,8 @@ function summarizePnLCalendarRows(rows) {
     return summary;
 }
 
-function formatChain(chainId) {
-    return Number(chainId) === 8453 ? 'Base' : 'BSC';
-}
-
-function walletKey(wallet) {
-    return `${Number(wallet?.chain_id || 0)}:${String(wallet?.address || '').toLowerCase()}`;
-}
-
-function walletLabel(wallet) {
-    const label = String(wallet?.label || '').trim();
-    if (label) return label;
-    const address = String(wallet?.address || '').trim();
-    return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '--';
-}
-
 function errorText(err) {
     return String(err?.message || err || '').trim();
-}
-
-function isIgnorableSmartMoneyDataError(err) {
-    const message = errorText(err).toLowerCase();
-    return message.includes("unknown column 'open_lp_usd'") || message.includes("unknown column `open_lp_usd`");
 }
 
 function seriesRows(history, metric) {
@@ -206,33 +173,7 @@ function Pill({ active, brand, onClick, children }) {
 }
 
 /* ─── Search input for smart money ─── */
-function SmSearchInput({ value, onChange, placeholder }) {
-    return (
-        <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 dark:text-white/30" />
-            <input
-                type="text"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                placeholder={placeholder}
-                className="w-full rounded-xl border border-zinc-200 bg-zinc-50/80 py-2 pl-8 pr-3 text-[11px] text-zinc-700 placeholder-zinc-400 outline-none ring-0 transition focus:border-zinc-300 focus:ring-1 focus:ring-zinc-300 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-white/80 dark:placeholder-white/25 dark:focus:border-white/10 dark:focus:ring-white/10"
-            />
-        </div>
-    );
-}
-
 /* ─── Pagination for smart money ─── */
-function SmPagination({ page, totalPages, onPageChange }) {
-    if (totalPages <= 1) return null;
-    return (
-        <div className="flex items-center justify-center gap-3 pt-2">
-            <button type="button" disabled={page <= 0} onClick={() => onPageChange(page - 1)} className="inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-medium text-zinc-500 ring-1 ring-zinc-200 transition enabled:hover:bg-zinc-100 enabled:active:scale-95 disabled:opacity-30 dark:text-white/50 dark:ring-white/[0.06] dark:enabled:hover:bg-white/[0.06]">上一页</button>
-            <span className="text-[10px] tabular-nums text-zinc-400 dark:text-white/35">{page + 1} / {totalPages}</span>
-            <button type="button" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)} className="inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-medium text-zinc-500 ring-1 ring-zinc-200 transition enabled:hover:bg-zinc-100 enabled:active:scale-95 disabled:opacity-30 dark:text-white/50 dark:ring-white/[0.06] dark:enabled:hover:bg-white/[0.06]">下一页</button>
-        </div>
-    );
-}
-
 /* ─── Card wrapper ─── */
 function Card({ children, className = '' }) {
     return (
@@ -275,71 +216,7 @@ function Empty({ text }) {
 }
 
 /* ─── Wallet Avatar (address-based icon image) ─── */
-function walletAvatarUrl(address) {
-    if (!AVATAR_URLS.length) return '';
-    const hex = String(address || '').toLowerCase();
-    let hash = 0;
-    for (let i = 0; i < hex.length; i++) hash = ((hash << 5) - hash + hex.charCodeAt(i)) | 0;
-    return AVATAR_URLS[Math.abs(hash) % AVATAR_URLS.length] || AVATAR_URLS[0] || '';
-}
-
-function WalletAvatar({ address, size = 28, className = '', avatarUrl }) {
-    const fallbackSrc = useMemo(() => walletAvatarUrl(address), [address]);
-    const preferredSrc = resolveSMAvatarAssetUrl(avatarUrl) || fallbackSrc;
-    const [src, setSrc] = useState(preferredSrc);
-
-    useEffect(() => {
-        setSrc(preferredSrc);
-    }, [preferredSrc]);
-
-    if (!src) return null;
-    return (
-        <img
-            src={src}
-            alt=""
-            width={size}
-            height={size}
-            className={`shrink-0 rounded-lg object-cover ${className}`.trim()}
-            style={{ width: size, height: size }}
-            onError={() => {
-                if (src !== fallbackSrc) {
-                    setSrc(fallbackSrc);
-                }
-            }}
-        />
-    );
-}
-
 /* ─── Rank badge for leaderboard ─── */
-function RankBadge({ rank }) {
-    if (rank === 1) {
-        return (
-            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 shadow-sm shadow-amber-500/30">
-                <Trophy className="h-3.5 w-3.5 text-white" />
-            </span>
-        );
-    }
-    if (rank === 2) {
-        return (
-            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-300 to-slate-400 shadow-sm shadow-slate-400/30">
-                <Medal className="h-3.5 w-3.5 text-white" />
-            </span>
-        );
-    }
-    if (rank === 3) {
-        return (
-            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-600 to-amber-700 shadow-sm shadow-amber-700/30">
-                <Medal className="h-3.5 w-3.5 text-white" />
-            </span>
-        );
-    }
-    return (
-        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[11px] font-bold tabular-nums text-zinc-500 dark:bg-white/[0.06] dark:text-white/50">
-            {rank}
-        </span>
-    );
-}
-
 /* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
 const AREA_CHART_HEIGHT = 200;
 

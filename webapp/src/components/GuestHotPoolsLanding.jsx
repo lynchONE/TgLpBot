@@ -1,4 +1,3 @@
-import React from 'react';
 import { Flame, LockKeyhole, RefreshCw } from 'lucide-react';
 import LoginCodePanel from './LoginCodePanel';
 import { formatUsdCompact, formatUtc8Time, normalizeTokenRisk } from '../utils';

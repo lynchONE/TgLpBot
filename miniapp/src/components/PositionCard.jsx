@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { openLink } from '../lib/telegram';
 import { useDurationFrom, useRelativeTime } from '../lib/time';
 import PriceRangeVisualizer from './PriceRangeVisualizer';
@@ -6,15 +6,7 @@ import NumberFlowValue from './NumberFlowValue.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../lib/taskModes';
-import {
-    formatUsd,
-    formatUsdCompact,
-    formatFeeUsd,
-    formatBotAmount,
-    formatPrice,
-    formatRangePercentPlain,
-} from '../lib/format';
-
+import { formatUsd, formatUsdCompact, formatFeeUsd, formatBotAmount, formatRangePercentPlain } from '../lib/format';
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
         <path d={path} />
@@ -65,47 +57,6 @@ function normalizeSmartMoneyRangeGroups(groups) {
         : [];
 }
 
-function SmartMoneyRangeSummary({ groups }) {
-    const [expanded, setExpanded] = useState(false);
-    const validGroups = useMemo(() => normalizeSmartMoneyRangeGroups(groups), [groups]);
-    const visibleGroups = expanded ? validGroups : validGroups.slice(0, SMART_MONEY_RANGE_LIMIT);
-    const hiddenCount = Math.max(0, validGroups.length - visibleGroups.length);
-    if (!validGroups.length) return null;
-    return (
-        <div className="rounded-lg border border-lime-500/20 bg-lime-500/[0.08] px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">聪明钱区间</div>
-                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length} 组</div>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-                {visibleGroups.map((group, index) => (
-                    <div
-                        key={`${Number(group?.range_percent || 0)}:${Number(group?.position_count || 0)}:${index}`}
-                        className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-lime-500/15 bg-black/10 px-2 py-1 text-[10px] text-zinc-600 dark:text-zinc-200"
-                    >
-                        <span className="shrink-0 font-semibold text-zinc-900 dark:text-white/95">{formatRangePercentPlain(group?.range_percent)}</span>
-                        {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
-                            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                                {Number(group.position_count)} 笔
-                            </span>
-                        ) : null}
-                        <span className="truncate text-zinc-500 dark:text-white/55">{formatUsdCompact(group?.total_amount_usd)}</span>
-                    </div>
-                ))}
-            </div>
-            {hiddenCount > 0 ? (
-                <button
-                    type="button"
-                    onClick={() => setExpanded((prev) => !prev)}
-                    className="mt-2 text-[10px] font-semibold text-lime-700 transition hover:text-lime-800 dark:text-lime-300 dark:hover:text-lime-200"
-                >
-                    {expanded ? '收起' : `展开更多 +${hiddenCount}`}
-                </button>
-            ) : null}
-        </div>
-    );
-}
-
 const QUOTE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI', 'FRAX', 'USDD', 'FDUSD', 'WBNB', 'WETH', 'WSOL', 'BNB', 'ETH', 'SOL']);
 const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
 const isQuoteLikeSymbol = (symbol) => QUOTE_SYMBOLS.has(normalizeSymbol(symbol));
@@ -128,16 +79,6 @@ const safeInvert = (value) => {
     if (!Number.isFinite(value) || value === 0) return null;
     const v = 1 / value;
     return Number.isFinite(v) ? v : null;
-};
-
-const getStatusTheme = (label) => {
-    if (label?.includes('停止'))
-        return { pill: 'bg-red-500/15 text-red-600 ring-red-500/25 dark:text-red-300 dark:ring-red-400/30', dot: 'bg-red-500', bar: 'bg-gradient-to-b from-red-500 to-red-600' };
-    if (label?.includes('暂停') || label?.includes('停止中') || label?.includes('撤仓中') || label?.includes('处理中'))
-        return { pill: 'bg-amber-500/15 text-amber-700 ring-amber-500/25 dark:text-amber-300 dark:ring-amber-400/30', dot: 'bg-amber-500', bar: 'bg-gradient-to-b from-amber-400 to-amber-500' };
-    if (label?.includes('等待') || label?.includes('排队'))
-        return { pill: 'bg-sky-500/15 text-sky-700 ring-sky-500/25 dark:text-sky-300 dark:ring-sky-400/30', dot: 'bg-sky-500', bar: 'bg-gradient-to-b from-sky-400 to-sky-500' };
-    return { pill: 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300 dark:ring-emerald-400/30', dot: 'bg-emerald-500', bar: 'bg-gradient-to-b from-emerald-400 to-emerald-500' };
 };
 
 const normalizeHexPrefixed = (v) => {

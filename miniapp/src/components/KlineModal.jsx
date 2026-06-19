@@ -1,16 +1,6 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import BottomSheet from './BottomSheet.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
-
-const Icon = ({ path, className = '' }) => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-        <path d={path} />
-    </svg>
-);
-
-const icons = {
-    close: 'M6 18L18 6M6 6l12 12',
-};
 
 function normalizeHexPrefixed(v) {
     const raw = String(v || '').trim();

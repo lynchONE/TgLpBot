@@ -1,4 +1,3 @@
-import React from 'react';
 import BottomSheet from '../BottomSheet.jsx';
 import { formatQuoteGasCostSummary, formatTokenAmount } from '../../lib/swapMeta';
 

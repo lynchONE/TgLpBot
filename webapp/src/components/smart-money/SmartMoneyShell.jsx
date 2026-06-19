@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Activity, Brain, Eye, Flame, Settings, Users, Wallet } from 'lucide-react';
 
 function StatCard({ label, value, color }) {

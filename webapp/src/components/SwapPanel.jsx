@@ -373,31 +373,6 @@ function DetailRow({ label, value, emphasis = false }) {
   );
 }
 
-function FeeDetailRow({ item }) {
-  if (!item) return null;
-  const amount = item.amount_float
-    ? `${item.amount_float}${item.token_symbol ? ` ${item.token_symbol}` : ''}`
-    : (item.rate || item.description || '--');
-  return (
-    <div className="swap-provider-detail-row">
-      <span>{item.label || 'Fee'}</span>
-      <strong>{amount}</strong>
-    </div>
-  );
-}
-
-function RouteHopRow({ hop }) {
-  if (!hop) return null;
-  const source = hop.source || hop.tool || 'Route';
-  const pair = [hop.from_symbol || hop.from_token, hop.to_symbol || hop.to_token].filter(Boolean).join(' -> ');
-  return (
-    <div className="swap-provider-detail-row">
-      <span>{source}</span>
-      <strong>{pair || '--'}</strong>
-    </div>
-  );
-}
-
 const DEX_ICON_MAP = [
   { match: ['pancake', 'pcs'], src: pancakeLogo, label: 'PancakeSwap', color: '#d1884f' },
   { match: ['uniswap', 'uni v'], src: uniswapLogo, label: 'Uniswap', color: '#ff007a' },

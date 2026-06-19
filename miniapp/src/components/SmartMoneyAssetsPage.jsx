@@ -3,7 +3,7 @@
  * 从原 AssetManagementPage 的 smart_money_assets tab 抽取，
  * 现作为 SmartMoneyPage "聪明钱资产" 视图的内容。
  */
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Medal, RefreshCw, Search, Trophy } from 'lucide-react';
 import {
     fetchAdminSmartMoneyLeaderboard,

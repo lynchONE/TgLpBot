@@ -1,4 +1,3 @@
-import React from 'react';
 import { EmptyState as UiEmptyState, MetricTile, Panel, PanelBody, PanelHeader } from './ui';
 
 export function EmptyState({ text }) {

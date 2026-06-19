@@ -1,20 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ArrowRightLeft,
-  CheckCircle2,
-  ChevronDown,
-  CircleDot,
-  Coins,
-  Factory,
-  Flame,
-  Layers,
-  RefreshCw,
-  Rocket,
-  Search,
-  SlidersHorizontal,
-  Wallet,
-  Zap,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowRightLeft, CheckCircle2, CircleDot, Coins, Factory, Flame, Layers, RefreshCw, Rocket, Search, SlidersHorizontal, Wallet, Zap } from 'lucide-react';
 import {
   executeCreatePool,
   fetchHotPools,

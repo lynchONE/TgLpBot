@@ -1,4 +1,3 @@
-import React from 'react';
 
 /**
  * 统一空状态组件。

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Check, Copy } from 'lucide-react';
 
 export default function LoginCodePanel({ loginCode, onCancel, className = '' }) {

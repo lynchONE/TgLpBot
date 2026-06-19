@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Download, Edit2, KeyRound, Plus, RefreshCw, ShieldCheck, Star, Trash2, WalletCards } from 'lucide-react';
 import { fetchWallets, walletCRUD } from '../api';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';

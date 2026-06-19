@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Clock3, ExternalLink, Target, TrendingDown, TrendingUp } from 'lucide-react';
 import { fetchTradeHistory } from '../api';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ChevronDown, History, RefreshCw, Settings2, Wallet } from 'lucide-react';
 import ModuleHeader from './ModuleHeader.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -16,30 +16,7 @@ import {
     walletSwapSingleQuote,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
-import {
-    AMOUNT_PRESETS,
-    AUTO_QUOTE_REFRESH_MS,
-    CHAIN_META,
-    MIN_WALLET_TOKEN_VALUE_USD,
-    SLIPPAGE_PRESETS,
-    applyAmountPreset,
-    applyTokenMetadata,
-    formatQuoteGasCostSummary,
-    formatQuoteRelativeTime,
-    formatTokenAmount,
-    formatUSDCompact,
-    getChainConfig,
-    getNativePresetToken,
-    getPresetTokens,
-    isNativeAddress,
-    makeCustomToken,
-    normalizeHex,
-    pushRecentToken,
-    resolveTokenMeta,
-    shortAddress,
-    shouldFetchTokenMetadata,
-} from '../lib/swapMeta';
-
+import { AMOUNT_PRESETS, AUTO_QUOTE_REFRESH_MS, CHAIN_META, MIN_WALLET_TOKEN_VALUE_USD, SLIPPAGE_PRESETS, applyAmountPreset, applyTokenMetadata, formatQuoteGasCostSummary, formatQuoteRelativeTime, formatTokenAmount, formatUSDCompact, getChainConfig, getNativePresetToken, getPresetTokens, normalizeHex, pushRecentToken, shortAddress, shouldFetchTokenMetadata } from '../lib/swapMeta';
 const CHAIN_OPTIONS = Object.values(CHAIN_META).map((c) => ({
     key: c.key,
     label: c.label,

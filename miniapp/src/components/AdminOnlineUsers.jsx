@@ -1,4 +1,3 @@
-import React from 'react';
 import { formatRelativeTime } from '../lib/time';
 import NumberFlowValue from './NumberFlowValue.jsx';
 import StatusDot from './admin/StatusDot.jsx';

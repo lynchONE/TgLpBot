@@ -31,6 +31,49 @@ function writeAssetCache(cacheKey, payload, ttlMs) {
     });
 }
 
+async function readDataPayload(resp) {
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+async function throwDetailedResponseError(resp) {
+    const detail = await readErrorDetails(resp);
+    const err = new Error(detail.message);
+    err.status = resp.status;
+    if (detail.payload && typeof detail.payload === 'object') {
+        err.payload = detail.payload;
+        Object.assign(err, detail.payload);
+    }
+    throw err;
+}
+
+async function postData(url, body, signal) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return readDataPayload(resp);
+}
+
+async function postDetailedData(url, body, signal) {
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+    });
+    if (!resp.ok) {
+        await throwDetailedResponseError(resp);
+    }
+    return readDataPayload(resp);
+}
+
 async function resolveAssetCachedPayload({ cacheKey, ttlMs = ASSET_CACHE_TTL_MS, forceRefresh = false, load }) {
     if (!forceRefresh) {
         const cached = readAssetCache(cacheKey, ttlMs);
@@ -133,18 +176,7 @@ export async function fetchAdminSmartMoneyLeaderboard({
         cacheKey,
         forceRefresh,
         load: async () => {
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData, days, metric, page, page_size: pageSize, keyword, force_refresh: forceRefresh }),
-                signal,
-            });
-            if (!resp.ok) {
-                const text = await resp.text().catch(() => '');
-                throw new Error(text || `HTTP ${resp.status}`);
-            }
-            const payload = await resp.json();
-            return payload?.data ?? payload;
+            return postData(url, { initData, days, metric, page, page_size: pageSize, keyword, force_refresh: forceRefresh }, signal);
         },
     });
 }
@@ -157,18 +189,7 @@ export async function fetchAssetOverview({ apiBaseUrl, initData, forceRefresh = 
         cacheKey,
         forceRefresh,
         load: async () => {
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData, force_refresh: forceRefresh }),
-                signal,
-            });
-            if (!resp.ok) {
-                const text = await resp.text().catch(() => '');
-                throw new Error(text || `HTTP ${resp.status}`);
-            }
-            const payload = await resp.json();
-            return payload?.data ?? payload;
+            return postData(url, { initData, force_refresh: forceRefresh }, signal);
         },
     });
 }
@@ -181,18 +202,7 @@ export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, force
         cacheKey,
         forceRefresh,
         load: async () => {
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData, days, force_refresh: forceRefresh }),
-                signal,
-            });
-            if (!resp.ok) {
-                const text = await resp.text().catch(() => '');
-                throw new Error(text || `HTTP ${resp.status}`);
-            }
-            const payload = await resp.json();
-            return payload?.data ?? payload;
+            return postData(url, { initData, days, force_refresh: forceRefresh }, signal);
         },
     });
 }
@@ -205,18 +215,7 @@ export async function fetchAssetLPStats({ apiBaseUrl, initData, forceRefresh = f
         cacheKey,
         forceRefresh,
         load: async () => {
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData, force_refresh: forceRefresh }),
-                signal,
-            });
-            if (!resp.ok) {
-                const text = await resp.text().catch(() => '');
-                throw new Error(text || `HTTP ${resp.status}`);
-            }
-            const payload = await resp.json();
-            return payload?.data ?? payload;
+            return postData(url, { initData, force_refresh: forceRefresh }, signal);
         },
     });
 }
@@ -224,115 +223,51 @@ export async function fetchAssetLPStats({ apiBaseUrl, initData, forceRefresh = f
 export async function saveAssetLPPnLAdjustment({ apiBaseUrl, initData, day, manualAdjustmentUsd, note = '', signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/positions?endpoint=assets_lp_pnl_adjustment`;
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            initData,
-            day,
-            manual_adjustment_usd: manualAdjustmentUsd,
-            note,
-        }),
-        signal,
-    });
-    if (!resp.ok) {
-        const detail = await readErrorDetails(resp);
-        const err = new Error(detail.message);
-        err.status = resp.status;
-        if (detail.payload && typeof detail.payload === 'object') {
-            err.payload = detail.payload;
-            Object.assign(err, detail.payload);
-        }
-        throw err;
-    }
+    const payload = await postDetailedData(url, {
+        initData,
+        day,
+        manual_adjustment_usd: manualAdjustmentUsd,
+        note,
+    }, signal);
     assetResponseCache.delete(`asset-lp:${base}:${initData}`);
-    const payload = await resp.json();
-    return payload?.data ?? payload;
+    return payload;
 }
 
 export async function clearAssetLPPnLAdjustment({ apiBaseUrl, initData, day, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/positions?endpoint=assets_lp_pnl_adjustment`;
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            initData,
-            day,
-            clear: true,
-            action: 'clear',
-        }),
-        signal,
-    });
-    if (!resp.ok) {
-        const detail = await readErrorDetails(resp);
-        const err = new Error(detail.message);
-        err.status = resp.status;
-        if (detail.payload && typeof detail.payload === 'object') {
-            err.payload = detail.payload;
-            Object.assign(err, detail.payload);
-        }
-        throw err;
-    }
+    const payload = await postDetailedData(url, {
+        initData,
+        day,
+        clear: true,
+        action: 'clear',
+    }, signal);
     assetResponseCache.delete(`asset-lp:${base}:${initData}`);
-    const payload = await resp.json();
-    return payload?.data ?? payload;
+    return payload;
 }
 
 export async function saveAssetLPPnLBaseline({ apiBaseUrl, initData, day, basePnlUsd, note = '', signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/positions?endpoint=assets_lp_pnl_baseline`;
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            initData,
-            day,
-            base_pnl_usd: basePnlUsd,
-            note,
-        }),
-        signal,
-    });
-    if (!resp.ok) {
-        const detail = await readErrorDetails(resp);
-        const err = new Error(detail.message);
-        err.status = resp.status;
-        if (detail.payload && typeof detail.payload === 'object') {
-            err.payload = detail.payload;
-            Object.assign(err, detail.payload);
-        }
-        throw err;
-    }
+    const payload = await postDetailedData(url, {
+        initData,
+        day,
+        base_pnl_usd: basePnlUsd,
+        note,
+    }, signal);
     assetResponseCache.delete(`asset-lp:${base}:${initData}`);
-    const payload = await resp.json();
-    return payload?.data ?? payload;
+    return payload;
 }
 
 export async function clearAssetLPPnLBaseline({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/positions?endpoint=assets_lp_pnl_baseline`;
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            initData,
-            clear: true,
-            action: 'clear',
-        }),
-        signal,
-    });
-    if (!resp.ok) {
-        const detail = await readErrorDetails(resp);
-        const err = new Error(detail.message);
-        err.status = resp.status;
-        if (detail.payload && typeof detail.payload === 'object') {
-            err.payload = detail.payload;
-            Object.assign(err, detail.payload);
-        }
-        throw err;
-    }
+    const payload = await postDetailedData(url, {
+        initData,
+        clear: true,
+        action: 'clear',
+    }, signal);
     assetResponseCache.delete(`asset-lp:${base}:${initData}`);
-    const payload = await resp.json();
-    return payload?.data ?? payload;
+    return payload;
 }
 

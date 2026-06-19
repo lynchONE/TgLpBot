@@ -1,4 +1,3 @@
-import React from 'react';
 import NumberFlowValue from '../NumberFlowValue.jsx';
 import StatusDot from './StatusDot.jsx';
 

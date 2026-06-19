@@ -1,4 +1,3 @@
-import React from 'react';
 
 function classifySign(value) {
     if (value === null || value === undefined || value === '') return 'flat';

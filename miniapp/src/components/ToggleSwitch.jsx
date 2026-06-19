@@ -1,4 +1,3 @@
-import React from 'react';
 import { Check, Power, X } from 'lucide-react';
 
 export default function ToggleSwitch({

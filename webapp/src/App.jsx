@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BriefcaseBusiness,
   CandlestickChart,
@@ -64,26 +64,7 @@ import {
 } from './smartMoneyApi';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
-import {
-  DEFAULT_WIDGETS,
-  WIDGETS,
-  buildGmgnUrl,
-  canAccessWidget,
-  formatPct,
-  formatUsd,
-  formatUsdCompact,
-  computeHotPoolActiveFeeRate,
-  normalizePoolAddress,
-  normalizeHexAddress,
-  normalizeAccessInfo,
-  normalizeWidgetSelection,
-  pickNonStableTokenAddress,
-  resolveKlineTokenOptions,
-  normalizeTokenRisk,
-  shortAddress,
-  inferPoolVersion,
-} from './utils';
-
+import { DEFAULT_WIDGETS, WIDGETS, buildGmgnUrl, canAccessWidget, formatUsdCompact, computeHotPoolActiveFeeRate, normalizePoolAddress, normalizeHexAddress, normalizeAccessInfo, normalizeWidgetSelection, resolveKlineTokenOptions, normalizeTokenRisk, shortAddress, inferPoolVersion } from './utils';
 const LazyAssetManagementPanel = lazy(() => import('./components/AssetManagementPanel'));
 const LazyAdminPanel = lazy(() => import('./components/AdminPanel'));
 
@@ -201,17 +182,6 @@ function comparePositionsByCreatedAt(a, b) {
   return aKey.localeCompare(bKey, undefined, { numeric: true });
 }
 
-function normalizeKlineRange(range) {
-  const from = Number(range?.from || 0);
-  const to = Number(range?.to || 0);
-  if (!from || !to) return null;
-  return from <= to ? { from, to } : { from: to, to: from };
-}
-
-function klineRangesEqual(a, b) {
-  return Number(a?.from || 0) === Number(b?.from || 0) && Number(a?.to || 0) === Number(b?.to || 0);
-}
-
 function clampKlineChartHeight(value) {
   const numeric = Math.round(Number(value));
   if (!Number.isFinite(numeric)) return DEFAULT_KLINE_CHART_HEIGHT;
@@ -232,33 +202,6 @@ function clampHotPoolsPanelHeight(value, fallback = getDefaultHotPoolsPanelHeigh
   const numeric = Math.round(Number(value));
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(MAX_HOT_POOLS_PANEL_HEIGHT, Math.max(MIN_HOT_POOLS_PANEL_HEIGHT, numeric));
-}
-
-function findNearestCandleClose(rows, targetTs) {
-  const target = Number(targetTs || 0);
-  if (!target || !Array.isArray(rows) || !rows.length) return 0;
-
-  let low = 0;
-  let high = rows.length - 1;
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    const midTime = Number(rows[mid]?.t || 0);
-    if (midTime === target) return Number(rows[mid]?.c || 0);
-    if (midTime < target) low = mid + 1;
-    else high = mid - 1;
-  }
-
-  const prev = high >= 0 ? rows[high] : null;
-  const next = low < rows.length ? rows[low] : null;
-  const prevTime = Number(prev?.t || 0);
-  const nextTime = Number(next?.t || 0);
-
-  if (!prev && !next) return 0;
-  if (!prev) return Number(next?.c || 0);
-  if (!next) return Number(prev?.c || 0);
-  return Math.abs(target - prevTime) <= Math.abs(nextTime - target)
-    ? Number(prev?.c || 0)
-    : Number(next?.c || 0);
 }
 
 const STORAGE = {
@@ -639,20 +582,6 @@ function parseAccessInfo(raw) {
 function openExternal(url) {
   if (!url) return;
   window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-function buildDexScreenerEmbedUrl(pool, chainName) {
-  if (!pool) return '';
-  const c = String(pool?.chain || chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
-  const factory = String(pool?.factory_name || '').toLowerCase();
-  const version = String(pool?.pool_version || pool?.protocol_version || '').toLowerCase();
-  const isV4 = factory.includes('v4') || version.includes('v4');
-  // V4 pools: DEXScreener doesn't recognise pool ID, use non-stable token address instead
-  const addr = isV4
-    ? pickNonStableTokenAddress(pool)
-    : normalizePoolAddress(pool?.pool_address || pool?.pool_id);
-  if (!addr) return '';
-  return `https://dexscreener.com/${c}/${addr}?embed=1&theme=dark&trades=1&info=0&interval=1&chartType=price`;
 }
 
 function getDexIcon(factoryName) {

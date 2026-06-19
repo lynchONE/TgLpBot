@@ -1,4 +1,3 @@
-import React from 'react';
 import { cn } from './utils';
 
 export function Badge({ tone = 'default', className = '', children, ...props }) {

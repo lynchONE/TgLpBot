@@ -1,4 +1,3 @@
-import React from 'react';
 
 // 骨架屏基础样式
 const baseClass = 'animate-shimmer rounded';

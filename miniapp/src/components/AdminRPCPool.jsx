@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     addAdminRPCEndpoint,
     checkAdminRPCEndpoint,
@@ -147,15 +147,6 @@ function ConfirmDialog({ open, title, message, onConfirm, onCancel, danger, bran
 }
 
 /* ── icon buttons ── */
-
-function IconBtn({ onClick, disabled, title, className, children }) {
-    return (
-        <button type="button" onClick={onClick} disabled={disabled} title={title}
-            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition ${disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-zinc-100 dark:hover:bg-white/10 active:scale-95'} ${className || ''}`}>
-            {children}
-        </button>
-    );
-}
 
 /* ── endpoint row ── */
 

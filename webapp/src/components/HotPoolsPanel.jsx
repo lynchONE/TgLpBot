@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertTriangle, Flame, Search, Settings, SlidersHorizontal, X } from 'lucide-react';
 import PanelShell, { EmptyState } from './PanelShell';
 import NumberFlowValue from './NumberFlowValue';

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckCircle, Eye, EyeOff, X, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Check, Eye, EyeOff, X } from 'lucide-react';
 import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition, previewOpenPosition } from '../api';
 import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
 import { TASK_MODE_OPTIONS, getOutOfRangeActionSummary as getTaskModeActionSummary } from '../taskModes';

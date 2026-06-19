@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, RefreshCw, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { ArrowDown, RefreshCw } from 'lucide-react';
 import BottomSheet from '../BottomSheet.jsx';
 import ConfirmDialog from '../ConfirmDialog.jsx';
 import {

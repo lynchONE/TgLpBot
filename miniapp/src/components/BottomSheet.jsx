@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // 通用底部抽屉组件 (Bottom Sheet)
 export default function BottomSheet({

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     addAdminPoolDataSource,
     checkAdminPoolDataSource,
@@ -88,6 +88,79 @@ function updateSourceDraft(prev, key, value) {
     return next;
 }
 
+function SourceDraftFields({
+    draft,
+    update,
+    inputClassName,
+    sourceTypeLabel = '来源类型',
+    spacingClassName = '',
+}) {
+    const baseBlockClassName = 'block space-y-1';
+    const spacedBlockClassName = spacingClassName ? spacingClassName + ' ' + baseBlockClassName : baseBlockClassName;
+    const spacedGridClassName = spacingClassName ? spacingClassName + ' grid grid-cols-2 gap-2' : 'grid grid-cols-2 gap-2';
+
+    return (
+        <>
+            <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1">
+                    <div className="text-[11px] text-zinc-500 dark:text-white/50">{sourceTypeLabel}</div>
+                    <CustomSelect value={draft.sourceType} onChange={(value) => update('sourceType', value)} options={SOURCE_TYPE_OPTIONS} />
+                </label>
+                <label className="space-y-1">
+                    <div className="text-[11px] text-zinc-500 dark:text-white/50">链</div>
+                    <CustomSelect value={draft.chain} onChange={(value) => update('chain', value)} options={CHAIN_OPTIONS} />
+                </label>
+            </div>
+            <label className={spacedBlockClassName}>
+                <div className="text-[11px] text-zinc-500 dark:text-white/50">Base URL</div>
+                <input value={draft.baseUrl} onChange={(e) => update('baseUrl', e.target.value)}
+                    className={inputClassName}
+                />
+            </label>
+            <label className={spacedBlockClassName}>
+                <div className="text-[11px] text-zinc-500 dark:text-white/50">Path</div>
+                <input value={draft.pathTemplate} onChange={(e) => update('pathTemplate', e.target.value)}
+                    placeholder="/api/market/pools"
+                    className={inputClassName}
+                />
+            </label>
+            <div className={spacedGridClassName}>
+                <label className="space-y-1">
+                    <div className="text-[11px] text-zinc-500 dark:text-white/50">Limit</div>
+                    <input type="number" min="1" value={draft.limit} onChange={(e) => update('limit', e.target.value)}
+                        className={inputClassName}
+                    />
+                </label>
+                <label className="space-y-1">
+                    <div className="text-[11px] text-zinc-500 dark:text-white/50">窗口(分钟)</div>
+                    <input type="number" min="1" value={draft.timeframeMinutes} onChange={(e) => update('timeframeMinutes', e.target.value)}
+                        className={inputClassName}
+                    />
+                </label>
+            </div>
+            <label className={spacedBlockClassName}>
+                <div className="text-[11px] text-zinc-500 dark:text-white/50">Protocol</div>
+                <input value={draft.protocols} onChange={(e) => update('protocols', e.target.value)}
+                    className={inputClassName}
+                />
+            </label>
+            <label className={spacedBlockClassName}>
+                <div className="text-[11px] text-zinc-500 dark:text-white/50">DEX</div>
+                <input value={draft.dexes} onChange={(e) => update('dexes', e.target.value)}
+                    className={inputClassName}
+                />
+            </label>
+            <label className={spacedBlockClassName}>
+                <div className="text-[11px] text-zinc-500 dark:text-white/50">名称</div>
+                <input value={draft.name} onChange={(e) => update('name', e.target.value)}
+                    placeholder="留空使用域名"
+                    className={inputClassName}
+                />
+            </label>
+        </>
+    );
+}
+
 function AddSourceForm({ onAdd, adding, error, brand }) {
     const [open, setOpen] = useState(false);
     const [draft, setDraft] = useState({
@@ -123,62 +196,11 @@ function AddSourceForm({ onAdd, adding, error, brand }) {
             </button>
             {open && (
                 <div className="border-t border-zinc-100 dark:border-white/5 px-4 py-3 space-y-3">
-                    <div className="grid grid-cols-2 gap-2">
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">来源类型</div>
-                            <CustomSelect value={draft.sourceType} onChange={(value) => update('sourceType', value)} options={SOURCE_TYPE_OPTIONS} />
-                        </label>
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">链</div>
-                            <CustomSelect value={draft.chain} onChange={(value) => update('chain', value)} options={CHAIN_OPTIONS} />
-                        </label>
-                    </div>
-                    <label className="block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">Base URL</div>
-                        <input value={draft.baseUrl} onChange={(e) => update('baseUrl', e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <label className="block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">Path</div>
-                        <input value={draft.pathTemplate} onChange={(e) => update('pathTemplate', e.target.value)}
-                            placeholder="/api/market/pools"
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">Limit</div>
-                            <input type="number" min="1" value={draft.limit} onChange={(e) => update('limit', e.target.value)}
-                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            />
-                        </label>
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">窗口(分钟)</div>
-                            <input type="number" min="1" value={draft.timeframeMinutes} onChange={(e) => update('timeframeMinutes', e.target.value)}
-                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            />
-                        </label>
-                    </div>
-                    <label className="block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">Protocol</div>
-                        <input value={draft.protocols} onChange={(e) => update('protocols', e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <label className="block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">DEX</div>
-                        <input value={draft.dexes} onChange={(e) => update('dexes', e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <label className="block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">名称</div>
-                        <input value={draft.name} onChange={(e) => update('name', e.target.value)}
-                            placeholder="留空使用域名"
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
+                    <SourceDraftFields
+                        draft={draft}
+                        update={update}
+                        inputClassName="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
+                    />
                     <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-white/60">
                         <input type="checkbox" checked={Boolean(draft.setCurrent)} onChange={(e) => update('setCurrent', e.target.checked)} />
                         添加后设为当前来源
@@ -190,82 +212,6 @@ function AddSourceForm({ onAdd, adding, error, brand }) {
                     </button>
                 </div>
             )}
-        </div>
-    );
-}
-
-function SourceRow({ source, onSwitch, onEnable, onDisable, onDelete, onCheck, onUpdate, updating, updateError, brand }) {
-    const enabled = Boolean(source?.is_enabled);
-    const current = Boolean(source?.is_current);
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState(() => sourceToDraft(source));
-
-    useEffect(() => {
-        setDraft(sourceToDraft(source));
-        setEditing(false);
-    }, [source?.id, source?.name, source?.source_type, source?.chain, source?.timeframe_minutes, source?.limit, source?.base_url, source?.path_template]);
-
-    const update = (key, value) => {
-        setDraft((prev) => updateSourceDraft(prev, key, value));
-    };
-
-    const submit = () => {
-        onUpdate?.(source?.id, {
-            ...draft,
-            protocols: splitCSV(draft.protocols),
-            dexes: splitCSV(draft.dexes),
-        });
-    };
-    return (
-        <div className="rounded-xl border border-zinc-100 bg-white/80 px-3 py-3 dark:border-white/5 dark:bg-white/[0.03]">
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className="truncate text-[13px] font-semibold text-zinc-900 dark:text-white/90">{source?.name || '--'}</span>
-                        {current && <span className="rounded px-1.5 py-px text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">IN USE</span>}
-                        <span className={`rounded px-1.5 py-px text-[10px] font-bold ${enabled ? 'bg-zinc-100 text-zinc-600 dark:bg-white/10 dark:text-white/60' : 'bg-red-500/10 text-red-600 dark:text-red-300'}`}>
-                            {enabled ? '启用' : '停用'}
-                        </span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
-                        {formatSourceType(source?.source_type)} · {source?.chain || 'bsc'} · {source?.timeframe_minutes || 5}m · limit {source?.limit || 100}
-                    </div>
-                    <div className="mt-1 truncate text-[11px] text-zinc-400 dark:text-white/30">
-                        {source?.base_url_masked || source?.base_url || '--'}{source?.path_template ? source.path_template : ''}
-                    </div>
-                </div>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-white/45">
-                <div>最近检测 {formatTime(source?.last_checked_at)}</div>
-                <div>最近成功 {formatTime(source?.last_success_at)}</div>
-                <div>延迟 {Number(source?.last_latency_ms || 0) || '--'}ms</div>
-                <div>{coverageText(source)}</div>
-                {source?.last_error && <div className="col-span-2 break-all text-red-600 dark:text-red-300">{source.last_error}</div>}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-                <button type="button" onClick={() => setEditing((v) => !v)} className="rounded-lg border border-zinc-200 px-3 py-1.5 text-[11px] dark:border-white/10">
-                    {editing ? '收起' : '编辑'}
-                </button>
-                <button type="button" onClick={() => onCheck?.(source?.id)} className="rounded-lg border border-zinc-200 px-3 py-1.5 text-[11px] dark:border-white/10">
-                    检查
-                </button>
-                <button type="button" onClick={() => onSwitch?.(source?.id)} disabled={!enabled || current}
-                    className="rounded-lg border border-zinc-200 px-3 py-1.5 text-[11px] disabled:opacity-40 dark:border-white/10">
-                    切换
-                </button>
-                {enabled ? (
-                    <button type="button" onClick={() => onDisable?.(source?.id)} className="rounded-lg border border-amber-200 px-3 py-1.5 text-[11px] text-amber-700 dark:border-amber-500/20 dark:text-amber-300">
-                        停用
-                    </button>
-                ) : (
-                    <button type="button" onClick={() => onEnable?.(source?.id)} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-[11px] text-emerald-700 dark:border-emerald-500/20 dark:text-emerald-300">
-                        启用
-                    </button>
-                )}
-                <button type="button" onClick={() => onDelete?.(source?.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-[11px] text-red-600 dark:border-red-500/20 dark:text-red-300">
-                    删除
-                </button>
-            </div>
         </div>
     );
 }
@@ -336,62 +282,13 @@ function EditableSourceRow({ source, onSwitch, onEnable, onDisable, onDelete, on
             </div>
             {editing && (
                 <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                    <div className="grid grid-cols-2 gap-2">
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">类型</div>
-                            <CustomSelect value={draft.sourceType} onChange={(value) => update('sourceType', value)} options={SOURCE_TYPE_OPTIONS} />
-                        </label>
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">链</div>
-                            <CustomSelect value={draft.chain} onChange={(value) => update('chain', value)} options={CHAIN_OPTIONS} />
-                        </label>
-                    </div>
-                    <label className="mt-2 block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">Base URL</div>
-                        <input value={draft.baseUrl} onChange={(e) => update('baseUrl', e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <label className="mt-2 block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">Path</div>
-                        <input value={draft.pathTemplate} onChange={(e) => update('pathTemplate', e.target.value)}
-                            placeholder="/api/market/pools"
-                            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">Limit</div>
-                            <input type="number" min="1" value={draft.limit} onChange={(e) => update('limit', e.target.value)}
-                                className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            />
-                        </label>
-                        <label className="space-y-1">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/50">窗口(分钟)</div>
-                            <input type="number" min="1" value={draft.timeframeMinutes} onChange={(e) => update('timeframeMinutes', e.target.value)}
-                                className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            />
-                        </label>
-                    </div>
-                    <label className="mt-2 block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">Protocol</div>
-                        <input value={draft.protocols} onChange={(e) => update('protocols', e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <label className="mt-2 block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">DEX</div>
-                        <input value={draft.dexes} onChange={(e) => update('dexes', e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
-                    <label className="mt-2 block space-y-1">
-                        <div className="text-[11px] text-zinc-500 dark:text-white/50">名称</div>
-                        <input value={draft.name} onChange={(e) => update('name', e.target.value)}
-                            placeholder="留空使用域名"
-                            className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
+                    <SourceDraftFields
+                        draft={draft}
+                        update={update}
+                        inputClassName="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white"
+                        sourceTypeLabel="类型"
+                        spacingClassName="mt-2"
+                    />
                     <label className="mt-2 flex items-center gap-2 text-xs text-zinc-600 dark:text-white/60">
                         <input type="checkbox" checked={Boolean(draft.setCurrent)} onChange={(e) => update('setCurrent', e.target.checked)} />
                         保存后设为当前来源

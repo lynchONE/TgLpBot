@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import BottomSheet from '../BottomSheet.jsx';
 import PositionCard from '../PositionCard.jsx';
 import StatusDot from './StatusDot.jsx';
@@ -14,12 +14,6 @@ function formatUserLabel(user) {
     if (fullName) return fullName;
     if (username) return `@${username}`;
     return `用户 ${user.user_id || '--'}`;
-}
-
-function shortAddress(address) {
-    const s = String(address || '').trim();
-    if (s.length < 12) return s || '--';
-    return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
 export default function AdminUserDetailDrawer({

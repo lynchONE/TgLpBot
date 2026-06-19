@@ -1,4 +1,3 @@
-import React from 'react';
 
 const TONE_CLASS = {
     ok: 'bg-emerald-500',

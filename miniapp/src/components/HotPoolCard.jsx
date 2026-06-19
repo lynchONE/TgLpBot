@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useCallback } from 'react';
+import { useMemo, useState, useRef, useCallback } from 'react';
 import { copyToClipboard, hapticNotification, hapticImpact, openLink } from '../lib/telegram';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
@@ -348,9 +348,30 @@ function formatPairLabel(tradingPair) {
     return v.replace(/\//g, '/\u200B');
 }
 
-// 通用变化指示器组件 - 用于显示数值变化（费用、交易量等）
-// 如果本轮数据无变化(diff===0)，保持上次的变化箭头不消失
-const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
+const formatCountChange = (val) => {
+    if (val >= 1000000) {
+        return `${(val / 1000000).toFixed(1)}M`;
+    }
+    if (val >= 1000) {
+        return `${(val / 1000).toFixed(1)}K`;
+    }
+    return Math.round(val).toString();
+};
+
+const formatUsdChange = (val) => {
+    if (val >= 1000) {
+        return usdCompact.format(val).replace('$', '');
+    }
+    return val.toFixed(2);
+};
+
+const ChangeIndicator = ({
+    currentValue,
+    previousValue,
+    label = '变化',
+    valueFormatter = formatUsdChange,
+    titleFormatter,
+}) => {
     const lastRef = useRef(null);
     if (previousValue === undefined || previousValue === null) {
         return lastRef.current ? lastRef.current.el : null;
@@ -362,115 +383,54 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
 
     if (!Number.isFinite(diff)) return lastRef.current ? lastRef.current.el : null;
 
-    // diff===0 时使用上次缓存的结果
     if (diff === 0 && lastRef.current) return lastRef.current.el;
     if (diff === 0) return null;
 
     const isIncrease = diff > 0;
     const absValue = Math.abs(diff);
-
-    // 格式化数字显示
-    const formatValue = (val) => {
-        if (val >= 1000) {
-            return usdCompact.format(val).replace('$', '');
-        }
-        return val.toFixed(2);
-    };
+    const sign = isIncrease ? '+' : '-';
+    const title = titleFormatter
+        ? titleFormatter(absValue, sign)
+        : `${label}: ${sign}$${absValue.toFixed(2)}`;
 
     const el = (
         <span
             className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                 }`}
-            title={`${label}: ${isIncrease ? '+' : '-'}$${absValue.toFixed(2)}`}
+            title={title}
         >
             <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
             </svg>
-            <NumberFlowValue value={absValue} formatter={(v) => formatValue(v)} />
+            <NumberFlowValue value={absValue} formatter={(v) => valueFormatter(v)} />
         </span>
     );
     lastRef.current = { el };
     return el;
 };
 
-// 数量变化指示器组件 - 用于显示交易笔数等非美元数值的变化
-// 如果本轮数据无变化(diff===0)，保持上次的变化箭头不消失
 const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
-    const lastRef = useRef(null);
-    if (previousValue === undefined || previousValue === null) {
-        return lastRef.current ? lastRef.current.el : null;
-    }
-
-    const current = Number(currentValue || 0);
-    const previous = Number(previousValue || 0);
-    const diff = current - previous;
-
-    if (!Number.isFinite(diff)) return lastRef.current ? lastRef.current.el : null;
-
-    // diff===0 时使用上次缓存的结果
-    if (diff === 0 && lastRef.current) return lastRef.current.el;
-    if (diff === 0) return null;
-
-    const isIncrease = diff > 0;
-    const absValue = Math.abs(diff);
-
-    // 格式化数量显示（无美元符号）
-    const formatCount = (val) => {
-        if (val >= 1000000) {
-            return (val / 1000000).toFixed(1) + 'M';
-        }
-        if (val >= 1000) {
-            return (val / 1000).toFixed(1) + 'K';
-        }
-        return Math.round(val).toString();
-    };
-
-    const el = (
-        <span
-            className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                }`}
-            title={`${label}: ${isIncrease ? '+' : '-'}${absValue.toLocaleString()}`}
-        >
-            <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
-            </svg>
-            <NumberFlowValue value={absValue} formatter={(v) => formatCount(v)} />
-        </span>
+    return (
+        <ChangeIndicator
+            currentValue={currentValue}
+            previousValue={previousValue}
+            label={label}
+            valueFormatter={formatCountChange}
+            titleFormatter={(absValue, sign) => `${label}: ${sign}${absValue.toLocaleString()}`}
+        />
     );
-    lastRef.current = { el };
-    return el;
 };
 
 const RateChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
-    const lastRef = useRef(null);
-    if (previousValue === undefined || previousValue === null) {
-        return lastRef.current ? lastRef.current.el : null;
-    }
-
-    const current = Number(currentValue);
-    const previous = Number(previousValue);
-    const diff = current - previous;
-
-    if (!Number.isFinite(diff)) return lastRef.current ? lastRef.current.el : null;
-    if (diff === 0 && lastRef.current) return lastRef.current.el;
-    if (diff === 0) return null;
-
-    const isIncrease = diff > 0;
-    const absValue = Math.abs(diff);
-    const el = (
-        <span
-            className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                }`}
-            title={`${label}: ${isIncrease ? '+' : '-'}${absValue.toFixed(4)}%`}
-        >
-            <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
-            </svg>
-            <NumberFlowValue value={absValue} formatter={(v) => `${Number(v).toFixed(3)}%`} />
-        </span>
+    return (
+        <ChangeIndicator
+            currentValue={currentValue}
+            previousValue={previousValue}
+            label={label}
+            valueFormatter={(v) => `${Number(v).toFixed(3)}%`}
+            titleFormatter={(absValue, sign) => `${label}: ${sign}${absValue.toFixed(4)}%`}
+        />
     );
-    lastRef.current = { el };
-    return el;
 };
 
 const STABLE_COINS = ['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol'];

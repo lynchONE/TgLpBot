@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchSystemConfig, updateSystemConfig } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
 

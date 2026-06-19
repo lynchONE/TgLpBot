@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const POSTER_WIDTH = 1080;
 const POSTER_HEIGHT = 1350;
@@ -18,10 +18,6 @@ function formatPctSafe(value) {
   if (!Number.isFinite(number)) return '--';
   const prefix = number > 0 ? '+' : '';
   return `${prefix}${number.toFixed(2)}%`;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function toDisplayName(loginUser) {

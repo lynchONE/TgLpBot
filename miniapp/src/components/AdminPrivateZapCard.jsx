@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchAdminPrivateZap, invalidateAdminPrivateZap } from '../lib/api';
 import ConfirmDialog from './ConfirmDialog.jsx';
 

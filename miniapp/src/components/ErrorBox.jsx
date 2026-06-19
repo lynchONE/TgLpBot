@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertTriangle, XCircle, Info } from 'lucide-react';
 
 const TONE_MAP = {

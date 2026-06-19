@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   KeyRound,
@@ -229,19 +229,6 @@ function formatStatus(status) {
   }
 }
 
-function statusClass(status) {
-  switch (String(status || '').trim().toLowerCase()) {
-    case 'running':
-      return 'am-badge am-badge-ok';
-    case 'opening':
-    case 'waiting':
-    case 'error':
-      return 'am-badge am-badge-warn';
-    default:
-      return 'am-badge';
-  }
-}
-
 function formatChain(chain) {
   return String(chain || '').trim().toLowerCase() === 'base' ? 'Base' : 'BSC';
 }
@@ -467,63 +454,6 @@ function RPCEndpointRow({
           <button type="button" className="am-action-btn" onClick={() => onEnable?.(endpoint)}>启用</button>
         )}
         <button type="button" className="am-action-btn" onClick={() => onDelete?.(endpoint)}>删除</button>
-      </div>
-    </div>
-  );
-}
-
-function PoolDataSourceRow({
-  source,
-  onCheck,
-  onSwitch,
-  onDisable,
-  onEnable,
-  onDelete,
-}) {
-  const enabled = Boolean(source?.is_enabled);
-  const current = Boolean(source?.is_current);
-  const coverage = formatCoverage(source);
-
-  return (
-    <div className="am-list-item am-list-item-wrap">
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div className="am-item-title">{poolSourceDisplayName(source)}</div>
-        <div className="am-item-sub">
-          {formatPoolSourceUrl(source)} / {formatPoolDataSourceType(source?.source_type)} / {Number(source?.timeframe_minutes || 5)}m / limit {Number(source?.limit || 100)}
-        </div>
-        <div className="am-actions" style={{ justifyContent: 'flex-start' }}>
-          <span className={enabled ? 'am-badge am-badge-ok' : 'am-badge am-badge-warn'}>
-            {enabled ? '启用' : '停用'}
-          </span>
-          {current ? <span className="am-badge">当前来源</span> : null}
-          {source?.is_env_fallback ? <span className="am-badge">ENV 兜底</span> : null}
-          {Number(source?.last_latency_ms || 0) > 0 ? (
-            <span className="am-badge">延迟 {Number(source.last_latency_ms)}ms</span>
-          ) : null}
-        </div>
-        <div className="am-item-sub">
-          检测 {formatDateTime(source?.last_checked_at)} / 成功 {formatDateTime(source?.last_success_at)}
-          {coverage ? ` / ${coverage}` : ''}
-        </div>
-        {source?.last_error ? <div className="am-error">{source.last_error}</div> : null}
-      </div>
-
-      <div className="am-btn-group">
-        <button type="button" className="am-action-btn" onClick={() => onCheck?.(source)}>检测</button>
-        <button
-          type="button"
-          className="am-action-btn"
-          disabled={!enabled || current}
-          onClick={() => onSwitch?.(source)}
-        >
-          切换
-        </button>
-        {enabled ? (
-          <button type="button" className="am-action-btn" onClick={() => onDisable?.(source)}>停用</button>
-        ) : (
-          <button type="button" className="am-action-btn" onClick={() => onEnable?.(source)}>启用</button>
-        )}
-        <button type="button" className="am-action-btn" onClick={() => onDelete?.(source)}>删除</button>
       </div>
     </div>
   );

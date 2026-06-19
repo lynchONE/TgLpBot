@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Medal, RefreshCw, Search, Trophy } from 'lucide-react';
 import {
   fetchAdminSmartMoneyLeaderboard,

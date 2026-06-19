@@ -1,9 +1,5 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
-import {
-    Wallet, Search, Plus, ExternalLink, X, Check, Activity,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal,
-    Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings,
-} from 'lucide-react';
+﻿import { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
+import { Wallet, Search, Plus, ExternalLink, X, Check, Activity, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal, Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet, fetchSMZombieWallets, deleteSMZombieWallets,
@@ -551,20 +547,6 @@ function walletSourceContractLabel(value) {
     const poolId = String(value || '').trim();
     if (/^0x[a-fA-F0-9]{64}$/.test(poolId)) return `来源 poolId ${shortAddr(poolId)}`;
     return '';
-}
-
-function CopyBtn({ text }) {
-    const [copied, setCopied] = useState(false);
-    return (
-        <button className="smd-copy-btn" onClick={e => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-        }}>
-            {copied ? <Check size={12} /> : <Copy size={12} />}
-        </button>
-    );
 }
 
 function CopyTinyBtn({ text }) {
@@ -2541,22 +2523,6 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect
     );
 }
 
-function RangeSummary({ position }) {
-    const isClosed = position.status === 'closed';
-    const rangeText = position.price_lower && position.price_upper
-        ? `${position.price_lower} - ${position.price_upper}`
-        : '--';
-
-    return (
-        <div className="smd-range-cell">
-            <div className={`smd-range-main mono muted${isClosed ? ' is-closed' : ''}`}>
-                {rangeText}
-            </div>
-            <div className="smd-range-sub">{formatRangePercent(position.range_percent)}</div>
-        </div>
-    );
-}
-
 function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval = 10 }) {
     const [positions, setPositions] = useState([]);
     const [positionsTotal, setPositionsTotal] = useState(0);
@@ -3300,227 +3266,6 @@ function WalletDetail({
     );
 }
 
-function GoldenDogPanel({ apiBaseUrl, initData }) {
-    return <GoldenDogPanelContent apiBaseUrl={apiBaseUrl} initData={initData} />;
-
-    const hasInitData = Boolean(String(initData || '').trim());
-    const [loading, setLoading] = useState(hasInitData);
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState('');
-    const [savedAt, setSavedAt] = useState('');
-    const [status, setStatus] = useState(null);
-    const [draft, setDraft] = useState({
-        enabled: false,
-        min_wallets: '3',
-        window_minutes: '10',
-        cooldown_minutes: '30',
-    });
-
-    const applyResponse = useCallback((resp) => {
-        setStatus(resp || null);
-        const cfg = resp?.config || {};
-        setDraft({
-            enabled: Boolean(cfg.enabled),
-            min_wallets: String(cfg.min_wallets ?? 3),
-            window_minutes: String(cfg.window_minutes ?? 10),
-            cooldown_minutes: String(cfg.cooldown_minutes ?? 30),
-        });
-    }, []);
-
-    const loadConfig = useCallback(async () => {
-        if (!hasInitData) {
-            setLoading(false);
-            setStatus(null);
-            return;
-        }
-        setLoading(true);
-        setError('');
-        try {
-            applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
-        } catch (err) {
-            setError(String(err?.message || err || '加载失败'));
-        } finally {
-            setLoading(false);
-        }
-    }, [apiBaseUrl, applyResponse, hasInitData, initData]);
-
-    useEffect(() => {
-        loadConfig();
-    }, [loadConfig]);
-
-    const barkStatusText = useMemo(() => {
-        if (status?.bark_ready) return '已就绪';
-        if (status?.bark_configured) return status?.bark_enabled ? '已配置未就绪' : '已配置未开启';
-        return '未配置';
-    }, [status]);
-
-    const handleSave = useCallback(async () => {
-        if (!hasInitData) {
-            setError('请先登录 WebApp，拿到 initData 后才能保存监控通知。');
-            return;
-        }
-
-        const minWallets = Number.parseInt(String(draft.min_wallets || '').trim(), 10);
-        const windowMinutes = Number.parseInt(String(draft.window_minutes || '').trim(), 10);
-        const cooldownMinutes = Number.parseInt(String(draft.cooldown_minutes || '').trim(), 10);
-        if (!Number.isFinite(minWallets) || minWallets < 1) {
-            setError('钱包数量必须大于等于 1。');
-            return;
-        }
-        if (!Number.isFinite(windowMinutes) || windowMinutes < 1) {
-            setError('统计窗口必须大于等于 1 分钟。');
-            return;
-        }
-        if (!Number.isFinite(cooldownMinutes) || cooldownMinutes < 0) {
-            setError('冷却时间不能小于 0。');
-            return;
-        }
-
-        setSaving(true);
-        setError('');
-        setSavedAt('');
-        try {
-            const resp = await saveSMGoldenDogConfig({
-                apiBaseUrl,
-                initData,
-                chain: 'bsc',
-                config: {
-                    enabled: Boolean(draft.enabled),
-                    min_wallets: minWallets,
-                    window_minutes: windowMinutes,
-                    cooldown_minutes: cooldownMinutes,
-                },
-            });
-            applyResponse(resp);
-            setSavedAt('配置已保存');
-        } catch (err) {
-            setError(String(err?.message || err || '保存失败'));
-        } finally {
-            setSaving(false);
-        }
-    }, [apiBaseUrl, applyResponse, draft, hasInitData, initData]);
-
-    return (
-        <div>
-            <div className="smd-detail-card" style={{
-                marginBottom: 16,
-                padding: 18,
-                border: '1px solid rgba(251, 191, 36, 0.18)',
-                background: 'radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 34%), linear-gradient(180deg, rgba(24, 24, 27, 0.94), rgba(9, 9, 11, 0.98))',
-                boxShadow: '0 28px 90px -42px rgba(0, 0, 0, 0.95)',
-            }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
-                        <div style={{
-                            width: 42,
-                            height: 42,
-                            borderRadius: 16,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            border: '1px solid rgba(251, 191, 36, 0.2)',
-                            background: 'rgba(251, 191, 36, 0.10)',
-                            color: '#fcd34d',
-                            flexShrink: 0,
-                        }}>
-                            <Flame size={18} />
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                            <div className="smd-section-title" style={{ marginBottom: 8 }}>监控通知</div>
-                            <div className="smd-pool-card-badges">
-                                <Badge style={draft.enabled
-                                    ? { borderColor: 'rgba(251, 191, 36, 0.2)', background: 'rgba(251, 191, 36, 0.12)', color: '#fde68a' }
-                                    : undefined}>
-                                    {draft.enabled ? '已开启' : '已关闭'}
-                                </Badge>
-                                <Badge>Bark {barkStatusText}</Badge>
-                                <Badge>BSC</Badge>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="smd-filter-group">
-                        <button
-                            type="button"
-                            className={`smd-filter-btn${draft.enabled ? ' active' : ''}`}
-                            onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
-                        >
-                            开启
-                        </button>
-                        <button
-                            type="button"
-                            className={`smd-filter-btn${!draft.enabled ? ' active' : ''}`}
-                            onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
-                        >
-                            关闭
-                        </button>
-                    </div>
-                </div>
-                <div className="smd-stats-grid" style={{ marginTop: 16, marginBottom: 0 }}>
-                    <StatCard label="通知状态" value={draft.enabled ? '运行中' : '暂停'} />
-                    <StatCard label="Bark 状态" value={barkStatusText} />
-                    <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} />
-                    <StatCard label="统计窗口" value={`${draft.window_minutes || '--'} 分钟`} />
-                </div>
-            </div>
-
-            {!hasInitData ? (
-                <div className="smd-inline-error">
-                    Web 端需要先登录 Telegram 才能保存提醒配置。Bark Key 继续复用全局配置，不在这里单独设置。
-                </div>
-            ) : null}
-            {error ? <div className="smd-inline-error">{error}</div> : null}
-            {!error && savedAt ? (
-                <div className="smd-inline-error" style={{ color: '#86efac', borderColor: 'rgba(34,197,94,0.28)', background: 'rgba(34,197,94,0.10)' }}>
-                    {savedAt}
-                </div>
-            ) : null}
-
-            {loading ? <div className="smd-loading">加载中...</div> : (
-                <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'end' }}>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="muted">钱包数量</span>
-                        <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={draft.min_wallets}
-                            onChange={(e) => setDraft((prev) => ({ ...prev, min_wallets: e.target.value }))}
-                        />
-                    </label>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="muted">统计窗口(分钟)</span>
-                        <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={draft.window_minutes}
-                            onChange={(e) => setDraft((prev) => ({ ...prev, window_minutes: e.target.value }))}
-                        />
-                    </label>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="muted">冷却时间(分钟)</span>
-                        <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={draft.cooldown_minutes}
-                            onChange={(e) => setDraft((prev) => ({ ...prev, cooldown_minutes: e.target.value }))}
-                        />
-                    </label>
-                    <button
-                        type="button"
-                        disabled={saving || !hasInitData}
-                        onClick={handleSave}
-                        style={{ gridColumn: '1 / -1' }}
-                    >
-                        {saving ? '保存中...' : '保存监控通知配置'}
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-}
-
 function SettingsPanel({ apiBaseUrl }) {
     const [contracts, setContracts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -4113,15 +3858,6 @@ const GOLDEN_DOG_DEFAULT_AMOUNT_TIERS = [
     { min_amount_usd: '1000', intensity: 'ring' },
     { min_amount_usd: '5000', intensity: 'persistent_ring' },
     { min_amount_usd: '20000', intensity: 'critical_ring' },
-];
-
-const GOLDEN_DOG_FEE_RATE_OPTIONS = [
-    { value: '', label: '不限' },
-    { value: '100', label: '0.0100%' },
-    { value: '500', label: '0.0500%' },
-    { value: '2500', label: '0.2500%' },
-    { value: '3000', label: '0.3000%' },
-    { value: '10000', label: '1.0000%' },
 ];
 
 function createGoldenDogDraft() {

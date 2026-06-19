@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, Star } from 'lucide-react';
 import BottomSheet from '../BottomSheet.jsx';
 import {

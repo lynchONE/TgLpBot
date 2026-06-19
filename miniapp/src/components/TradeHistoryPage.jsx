@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Clock3, ExternalLink, TrendingDown, TrendingUp } from 'lucide-react';
 import BottomSheet from './BottomSheet.jsx';
 import CustomSelect from './CustomSelect.jsx';

@@ -2,7 +2,6 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } fro
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import SystemConfigCard from './components/SystemConfigCard.jsx';
 import BottomSheet from './components/BottomSheet.jsx';
 import ModuleHeader from './components/ModuleHeader.jsx';
 import NumberFlowValue from './components/NumberFlowValue.jsx';
@@ -10,7 +9,7 @@ import StepProgressModal from './components/StepProgressModal.jsx';
 import LiquidityDistributionChart from './components/LiquidityDistributionChart.jsx';
 import GlobalConfigPage from './components/GlobalConfigPage.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
-import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
+import { SkeletonHotPoolCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
 import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye, Wallet, ArrowLeftRight } from 'lucide-react';
 import {
@@ -34,16 +33,11 @@ import {
 } from './lib/api';
 import { fetchSMPoolStats } from './lib/smartMoneyApi';
 import { hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
-import { formatRelativeTime, useTick } from './lib/time';
-import {
-    ACCENT_THEME_OPTIONS,
-    getBrandTheme,
-    normalizeAccentTheme,
-} from './lib/brand';
-import { getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary, normalizeTaskMode } from './lib/taskModes';
+import { useTick } from './lib/time';
+import { ACCENT_THEME_OPTIONS, getBrandTheme } from './lib/brand';
+import { getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary } from './lib/taskModes';
 import useScrollMemory from './hooks/useScrollMemory';
 import useGlobalSettings from './hooks/useGlobalSettings';
-import useAuthData from './hooks/useAuthData';
 import useInitData from './hooks/useInitData';
 import {
     formatUsd,
@@ -69,12 +63,7 @@ import {
     getModulePollSec,
     normalizeModulePollOverrides,
 } from './features/appShell/pollConfig';
-import {
-    DEFAULT_WEB_WORKBENCH_WIDGETS,
-    STORAGE_WEB_WORKBENCH_WIDGETS,
-    WEB_WORKBENCH_WIDGETS,
-    normalizeWebWorkbenchWidgets,
-} from './features/appShell/webWorkbench';
+import { DEFAULT_WEB_WORKBENCH_WIDGETS, STORAGE_WEB_WORKBENCH_WIDGETS, normalizeWebWorkbenchWidgets } from './features/appShell/webWorkbench';
 import { formatUserLabel } from './features/admin/formatUser';
 import {
     HOT_POOL_SORT_TABS,
@@ -91,7 +80,6 @@ import {
     parseMetricNumber,
     resolveHotPoolMarketCap,
 } from './features/hotPools/filter';
-import { buildGmgnUrl } from './features/pools/gmgn';
 import { comparePositionsByCreatedAt } from './features/positions/sort';
 import {
     OPEN_POSITION_RANGE_OPTIONS,
@@ -153,9 +141,6 @@ const CHAIN_SELECT_OPTIONS = [
     { value: 'base', label: 'Base' },
 ];
 
-function formatOnOff(value) {
-    return value ? '开启' : '关闭';
-}
 const icons = {
     bot: Bot,
     chart: BarChart2,

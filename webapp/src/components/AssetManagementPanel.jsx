@@ -1,58 +1,7 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
-import {
-  Activity,
-  AlertTriangle,
-  ArrowRightLeft,
-  Ban,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  ClipboardList,
-  Crown,
-  Eraser,
-  Medal,
-  Plus,
-  RefreshCw,
-  Search,
-  Server,
-  Settings2,
-  Shield,
-  Trash2,
-  TrendingUp,
-  Trophy,
-  Users,
-  Wallet,
-  Zap,
-} from 'lucide-react';
-import {
-  addAdminRPCEndpoint,
-  checkAdminRPCEndpoint,
-  deleteAdminRPCEndpoint,
-  disableAdminRPCEndpointNextMonth,
-  enableAdminRPCEndpoint,
-  fetchAdminActiveTasks,
-  fetchAdminOnlineUsers,
-  fetchAdminPrivateZap,
-  fetchAdminRPCPool,
-  fetchAdminRealtimePositions,
-  fetchAdminSmartMoneyLeaderboard,
-  fetchAdminSmartMoneyOverview,
-  fetchAdminSmartMoneyWallet,
-  fetchAssetHistory,
-  fetchAssetLPStats,
-  fetchAssetOverview,
-  fetchSystemConfig,
-  invalidateAdminPrivateZap,
-  renameAdminRPCEndpoint,
-  clearAssetLPPnLAdjustment,
-  clearAssetLPPnLBaseline,
-  saveAssetLPPnLAdjustment,
-  saveAssetLPPnLBaseline,
-  switchAdminRPCEndpoint,
-  updateSystemConfig,
-} from '../api';
-import { resolveSMAvatarAssetUrl } from '../smartMoneyApi';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createChart, AreaSeries, ColorType } from 'lightweight-charts';
+import { ArrowRightLeft, CheckCircle2, ChevronLeft, ChevronRight, Eraser, RefreshCw, Settings2, Wallet } from 'lucide-react';
+import { fetchAssetHistory, fetchAssetLPStats, fetchAssetOverview, clearAssetLPPnLAdjustment, clearAssetLPPnLBaseline, saveAssetLPPnLAdjustment, saveAssetLPPnLBaseline } from '../api';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
 import GlobalConfigPanel from './GlobalConfigPanel';
 import WalletManagePanel from './WalletManagePanel';
@@ -64,19 +13,6 @@ const PNL_CALENDAR_WINDOWS = [
   { key: '30d', label: '30天' },
 ];
 const CHINA_TIME_ZONE = 'Asia/Shanghai';
-const HISTORY_METRICS = [
-  { key: 'total_usd', label: '总资产', color: '#59f09d' },
-  { key: 'wallet_usd', label: '钱包余额', color: '#52d1ff' },
-  { key: 'position_usd', label: 'LP 持仓', color: '#c792ff' },
-  { key: 'fee_usd', label: '手续费', color: '#ffae42' },
-];
-const SMART_MONEY_WINDOWS = [1, 7, 30];
-const LEADERBOARD_METRICS = [
-  { key: 'pnl', label: '收益额' },
-  { key: 'yield_rate', label: '收益率' },
-  { key: 'participation', label: '参与次数' },
-];
-
 function formatUsd(value) {
   const num = Number(value || 0);
   if (!Number.isFinite(num)) return '$--';
@@ -199,85 +135,12 @@ function summarizePnLCalendarPoints(points) {
   return summary;
 }
 
-function formatChain(chainId) {
-  return Number(chainId) === 8453 ? 'Base' : 'BSC';
-}
-
-function formatPrivateZapKind(kind) {
-  const normalized = String(kind || '').trim().toLowerCase();
-  if (normalized === 'atomic_increase_zap') return 'Atomic Increase Zap';
-  if (normalized === 'zap_simple') return 'Zap Simple';
-  return kind || '--';
-}
-
-function walletKey(wallet) {
-  return `${Number(wallet?.chain_id || 0)}:${String(wallet?.address || '').toLowerCase()}`;
-}
-
-function walletLabel(wallet) {
-  const label = String(wallet?.label || '').trim();
-  if (label) return label;
-  const address = String(wallet?.address || '').trim();
-  return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '--';
-}
-
 function errorText(err) {
   return String(err?.message || err || '').trim();
 }
 
-function isIgnorableSmartMoneyDataError(err) {
-  const message = errorText(err).toLowerCase();
-  return message.includes("unknown column 'open_lp_usd'") || message.includes("unknown column `open_lp_usd`");
-}
-
 /* ─── Wallet Avatar (address-based icon image) ─── */
-const AVATAR_URLS = Object.entries(
-  import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
-).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
-
-function walletAvatarUrl(address) {
-  if (!AVATAR_URLS.length) return '';
-  const hex = String(address || '').toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < hex.length; i++) hash = ((hash << 5) - hash + hex.charCodeAt(i)) | 0;
-  return AVATAR_URLS[Math.abs(hash) % AVATAR_URLS.length] || AVATAR_URLS[0] || '';
-}
-
-function WalletAvatar({ address, size = 28, avatarUrl }) {
-  const fallbackSrc = useMemo(() => walletAvatarUrl(address), [address]);
-  const preferredSrc = resolveSMAvatarAssetUrl(avatarUrl) || fallbackSrc;
-  const [src, setSrc] = useState(preferredSrc);
-
-  useEffect(() => {
-    setSrc(preferredSrc);
-  }, [preferredSrc]);
-
-  if (!src) return null;
-  return (
-    <img
-      src={src}
-      alt=""
-      width={size}
-      height={size}
-      style={{ width: size, height: size, flexShrink: 0, borderRadius: size * 0.22, objectFit: 'cover' }}
-      onError={() => {
-        if (src !== fallbackSrc) {
-          setSrc(fallbackSrc);
-        }
-      }}
-    />
-  );
-}
-
 /* ─── Rank badge for leaderboard ─── */
-function RankBadge({ rank }) {
-  const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', flexShrink: 0 };
-  if (rank === 1) return <span style={{ ...base, background: 'linear-gradient(135deg, #facc15, #f59e0b)', boxShadow: '0 1px 4px rgba(245,158,11,0.3)' }}><Trophy size={14} color="#fff" /></span>;
-  if (rank === 2) return <span style={{ ...base, background: 'linear-gradient(135deg, #cbd5e1, #94a3b8)', boxShadow: '0 1px 4px rgba(148,163,184,0.3)' }}><Medal size={14} color="#fff" /></span>;
-  if (rank === 3) return <span style={{ ...base, background: 'linear-gradient(135deg, #d97706, #92400e)', boxShadow: '0 1px 4px rgba(146,64,14,0.3)' }}><Medal size={14} color="#fff" /></span>;
-  return <span style={{ ...base, background: 'rgba(136,157,191,0.1)', color: 'rgba(136,157,191,0.7)', fontSize: 11, fontWeight: 700 }}>{rank}</span>;
-}
-
 /* ─── TradingView Area Chart (lightweight-charts v5) ─── */
 function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
   const containerRef = useRef(null);
@@ -655,34 +518,6 @@ function ProfitBaselineEditor({ baseline, latestDay = '', saving = false, error 
 }
 
 /* ─── Small sparkline for smart money wallet detail (kept simple) ─── */
-function SparklineChart({ points, stroke = '#52d1ff' }) {
-  const values = Array.isArray(points) ? points.map((item) => Number(item?.value || 0)).filter(Number.isFinite) : [];
-  if (values.length < 2) {
-    return <div className="am-chart-empty">暂无趋势数据</div>;
-  }
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const d = values.map((value, index) => {
-    const x = (index / (values.length - 1)) * 100;
-    const y = 100 - ((value - min) / range) * 88 - 6;
-    return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-  }).join(' ');
-  const areaD = `${d} L 100 100 L 0 100 Z`;
-  return (
-    <svg className="am-chart" viewBox="0 0 100 100" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id={`am-grad-${stroke.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity="0.2" />
-          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={areaD} fill={`url(#am-grad-${stroke.replace('#', '')})`} />
-      <path d={d} fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 const WALLET_COLORS = ['#59f09d', '#52d1ff', '#c792ff', '#ffae42', '#ff6b9d', '#06d6a0', '#ffa630', '#84cc16'];
 
 function DonutChart({ wallets }) {

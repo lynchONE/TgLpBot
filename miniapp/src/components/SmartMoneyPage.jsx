@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity,
@@ -713,15 +713,6 @@ const GOLDEN_DOG_DEFAULT_AMOUNT_TIERS = [
     { min_amount_usd: '1000', intensity: 'ring' },
     { min_amount_usd: '5000', intensity: 'persistent_ring' },
     { min_amount_usd: '20000', intensity: 'critical_ring' },
-];
-
-const GOLDEN_DOG_FEE_RATE_OPTIONS = [
-    { value: '', label: '不限' },
-    { value: '100', label: '0.0100%' },
-    { value: '500', label: '0.0500%' },
-    { value: '2500', label: '0.2500%' },
-    { value: '3000', label: '0.3000%' },
-    { value: '10000', label: '1.0000%' },
 ];
 
 function createGoldenDogDraft() {
@@ -1483,47 +1474,6 @@ function MiniMetric({ label, value }) {
         <div className="rounded-xl border border-white/[0.04] bg-zinc-950/45 px-2.5 py-2 text-center">
             <div className="text-[10px] text-zinc-500">{label}</div>
             <div className="mt-1 text-sm font-semibold text-zinc-100">{value ?? '—'}</div>
-        </div>
-    );
-}
-
-function PositionPreviewMetrics({ position, preview, compact = false }) {
-    const runningText = formatDurationFrom(preview?.runningSince || position?.opened_at) || '--';
-    const previewFeeValue = Number(preview?.feeUsd);
-    const feeValue = Number.isFinite(previewFeeValue) ? previewFeeValue : resolvePositionPreviewFeeUsd(null, position);
-    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(feeValue) : '--';
-    const feeMetricClass = Number.isFinite(feeValue)
-        ? (feeValue > 0
-            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-            : feeValue < 0
-                ? 'border-red-500/20 bg-red-500/10 text-red-300'
-                : 'border-white/[0.05] bg-black/20 text-zinc-300')
-        : 'border-white/[0.05] bg-black/20 text-zinc-300';
-    const feeLabelClass = Number.isFinite(feeValue)
-        ? (feeValue > 0 ? 'text-emerald-200' : feeValue < 0 ? 'text-red-200' : 'text-zinc-100')
-        : 'text-zinc-100';
-    const pnlMetricClass = 'hidden';
-    const pnlLabelClass = '';
-    const pnlText = '';
-    const runtimeMetricClass = runningText !== '--'
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-        : 'border-white/[0.05] bg-black/20 text-zinc-300';
-    const runtimeLabelClass = runningText !== '--' ? 'text-emerald-200' : 'text-zinc-100';
-
-    return (
-        <div className={`mt-2 flex flex-wrap items-stretch gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
-            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${feeMetricClass}`}>
-                <strong className={`font-semibold ${feeLabelClass}`}>手续费</strong>
-                <span className="text-right tabular-nums">{feeText}</span>
-            </span>
-            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${pnlMetricClass}`}>
-                <strong className={`font-semibold ${pnlLabelClass}`}>绝对收益</strong>
-                <span className="text-right tabular-nums">{pnlText}</span>
-            </span>
-            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${runtimeMetricClass}`}>
-                <strong className={`font-semibold ${runtimeLabelClass}`}>运行时间</strong>
-                <span className="text-right tabular-nums">{runningText}</span>
-            </span>
         </div>
     );
 }
@@ -4327,31 +4277,6 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, posit
     );
 }
 
-function SettingsPage({ apiBaseUrl, brand }) {
-    const [tab, setTab] = useState('wallets');
-
-    return (
-        <div>
-            <div className="flex gap-1 mb-4 text-[12px]">
-                {['wallets', 'contracts'].map(t => (
-                    <button
-                        key={t}
-                        className={`px-3 py-1.5 rounded ${tab === t ? brand.softButtonClass : 'bg-zinc-800 text-zinc-400'}`}
-                        onClick={() => setTab(t)}
-                    >
-                        {t === 'wallets' ? '钱包' : '合约'}
-                    </button>
-                ))}
-            </div>
-            {tab === 'wallets' ? (
-                <WalletSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} />
-            ) : (
-                <ContractSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} />
-            )}
-        </div>
-    );
-}
-
 function ContractSettingsPage({ apiBaseUrl, brand, pollIntervalSec = 15 }) {
     return <ContractSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} pollIntervalSec={pollIntervalSec} />;
 }
@@ -5371,159 +5296,6 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 )}
             </section>
             ) : null}
-        </div>
-    );
-}
-
-function WalletSettingsTab({ apiBaseUrl, brand }) {
-    const [wallets, setWallets] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showAdd, setShowAdd] = useState(false);
-    const [newAddr, setNewAddr] = useState('');
-    const [newLabel, setNewLabel] = useState('');
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState('');
-    const [deleteTarget, setDeleteTarget] = useState(null);
-
-    const load = useCallback(() => {
-        setLoading(true);
-        fetchSMWallets({ apiBaseUrl, size: 100 })
-            .then(d => setWallets(d?.list || []))
-            .catch(() => { })
-            .finally(() => setLoading(false));
-    }, [apiBaseUrl]);
-
-    useEffect(() => { load(); }, [load]);
-
-    const handleAdd = async () => {
-        setSaving(true);
-        setError('');
-        try {
-            await addSMWallet({ apiBaseUrl, address: newAddr, label: newLabel });
-            setShowAdd(false);
-            setNewAddr('');
-            setNewLabel('');
-            load();
-        } catch (err) {
-            setError(String(err?.message || err));
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleToggle = async (w) => {
-        setError('');
-        try {
-            await updateSMWallet({ apiBaseUrl, address: w.address, updates: { is_active: !w.is_active } });
-            load();
-        } catch (err) {
-            setError(String(err?.message || err));
-        }
-    };
-
-    const handleDelete = async (w) => {
-        setDeleteTarget(w);
-    };
-
-    const confirmDelete = async () => {
-        const w = deleteTarget;
-        if (!w) return;
-        setDeleteTarget(null);
-        setError('');
-        try {
-            await deleteSMWallet({ apiBaseUrl, address: w.address });
-            load();
-        } catch (err) {
-            setError(String(err?.message || err));
-        }
-    };
-
-    return (
-        <div>
-            <div className="flex justify-between items-center mb-3">
-                <span className="text-sm text-zinc-300">监控钱包</span>
-                <button
-                    onClick={() => setShowAdd(!showAdd)}
-                    className={`${brand.solidButtonClass} ${brand.solidRingClass} rounded-lg px-3 py-1.5 text-xs flex items-center gap-1`}
-                >
-                    <Plus size={12} /> 添加钱包
-                </button>
-            </div>
-
-            {showAdd && (
-                <div className="bg-zinc-800 rounded-lg p-3 mb-3 space-y-2">
-                    <input
-                        className="w-full bg-zinc-900 rounded px-3 py-2 text-sm text-zinc-200 outline-none"
-                        placeholder="钱包地址 (0x...)"
-                        value={newAddr}
-                        onChange={e => setNewAddr(e.target.value)}
-                    />
-                    <input
-                        className="w-full bg-zinc-900 rounded px-3 py-2 text-sm text-zinc-200 outline-none"
-                        placeholder="标签（可选）"
-                        value={newLabel}
-                        onChange={e => setNewLabel(e.target.value)}
-                    />
-                    <div className="flex gap-2 justify-end">
-                        <button onClick={() => setShowAdd(false)} className="text-xs text-zinc-400 hover:text-zinc-300 px-3 py-1.5">取消</button>
-                        <button onClick={handleAdd} disabled={saving} className={`text-xs ${brand.solidButtonClass} rounded px-3 py-1.5 disabled:opacity-50`}>
-                            {saving ? '保存中...' : '添加'}
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {error ? (
-                <div className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                    {error}
-                </div>
-            ) : null}
-
-            {loading ? (
-                <div className="text-center text-zinc-500 py-4">加载中...</div>
-            ) : wallets.length === 0 ? (
-                <div className="text-center text-zinc-500 py-4">暂无钱包。</div>
-            ) : (
-                <div className="space-y-2">
-                    {wallets.map(w => (
-                        <div key={w.address} className="bg-zinc-800/60 rounded-lg p-3 flex items-center justify-between">
-                            <div>
-                                <div className="text-sm text-zinc-200">{w.label || shortAddr(w.address)}</div>
-                                <div className="text-[10px] text-zinc-500 font-mono">{shortAddr(w.address)}</div>
-                                <div className="flex gap-1 mt-1 text-[10px]">
-                                    <span className={`px-1.5 py-0.5 rounded border ${walletSourceBadgeClass(w.source)}`}>
-                                        {walletSourceLabel(w.source)}
-                                    </span>
-                                    {walletSourceContractLabel(w.source_contract) ? (
-                                        <span className="px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400">
-                                            {walletSourceContractLabel(w.source_contract)}
-                                        </span>
-                                    ) : null}
-                                    <span className={`px-1.5 py-0.5 rounded ${w.is_active ? 'bg-green-600/20 text-green-400' : 'bg-zinc-700 text-zinc-500'}`}>
-                                        {w.is_active ? '监控中' : '已暂停'}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="flex gap-1">
-                                <button onClick={() => handleToggle(w)} className="p-1.5 text-zinc-500 hover:text-zinc-300">
-                                    {w.is_active ? <Pause size={14} /> : <Play size={14} />}
-                                </button>
-                                <button onClick={() => handleDelete(w)} className="p-1.5 text-zinc-500 hover:text-red-400">
-                                    <Trash2 size={14} />
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-            <ConfirmDialog
-                open={Boolean(deleteTarget)}
-                title="删除钱包"
-                description={`确认删除钱包 ${shortAddr(deleteTarget?.address)}？该钱包的聪明钱历史数据也会删除。`}
-                confirmLabel="删除"
-                onCancel={() => setDeleteTarget(null)}
-                onConfirm={confirmDelete}
-            />
         </div>
     );
 }

@@ -1,7 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertTriangle, BriefcaseBusiness } from 'lucide-react';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
-import NumberFlowValue from './NumberFlowValue';
 import TaskActionMenu from './TaskActionMenu';
 import {
   compactPrice,

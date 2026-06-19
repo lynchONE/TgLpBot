@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getBrandTheme } from '../lib/brand';
 
 function StatusIcon({ tone, brand }) {
