@@ -177,8 +177,11 @@ export default function SwapModule({
 
     const debounceRef = useRef(null);
     const refreshTimerRef = useRef(null);
+    const walletsAbortRef = useRef(null);
+    const walletsSeqRef = useRef(0);
     const walletTokensAbortRef = useRef(null);
     const walletTokensSeqRef = useRef(0);
+    const [walletTokensKey, setWalletTokensKey] = useState('');
     const [tick, setTick] = useState(0);
 
     /* chain change → reset tokens to defaults */
@@ -192,6 +195,8 @@ export default function SwapModule({
         setQuoteError('');
         setExecError('');
         setSelectedWalletId('');
+        setWalletTokens([]);
+        setWalletTokensKey('');
         setTokenMetaMap({});
     }, [chain]);
 
@@ -203,12 +208,30 @@ export default function SwapModule({
 
     const chainConfig = useMemo(() => getChainConfig(chain), [chain]);
     const nativeSymbol = chainConfig.nativeSymbol;
+    const currentWalletTokensKey = useMemo(
+        () => (selectedWalletId ? `${chain}:${selectedWalletId}` : ''),
+        [chain, selectedWalletId],
+    );
+    const walletTokensReady = walletTokensKey === currentWalletTokensKey;
 
     const loadWallets = useCallback(async () => {
         if (!hasInitData) return;
+        const seq = walletsSeqRef.current + 1;
+        walletsSeqRef.current = seq;
+        if (walletsAbortRef.current) {
+            walletsAbortRef.current.abort();
+        }
+        const controller = new AbortController();
+        walletsAbortRef.current = controller;
         setWalletLoading(true);
         try {
-            const resp = await fetchWallets({ apiBaseUrl, initData, chain });
+            const resp = await fetchWallets({
+                apiBaseUrl,
+                initData,
+                chain,
+                signal: controller.signal,
+            });
+            if (controller.signal.aborted || walletsSeqRef.current !== seq) return;
             const list = resp?.wallets || [];
             setWallets(list);
             setSelectedWalletId((current) => {
@@ -217,9 +240,15 @@ export default function SwapModule({
                 return def ? String(def.id) : '';
             });
         } catch (e) {
+            if (controller.signal.aborted || walletsSeqRef.current !== seq) return;
             onNotice?.(String(e?.message || e));
         } finally {
-            setWalletLoading(false);
+            if (walletsAbortRef.current === controller) {
+                walletsAbortRef.current = null;
+            }
+            if (walletsSeqRef.current === seq) {
+                setWalletLoading(false);
+            }
         }
     }, [apiBaseUrl, initData, chain, hasInitData, onNotice]);
 
@@ -230,8 +259,10 @@ export default function SwapModule({
                 walletTokensAbortRef.current = null;
             }
             setWalletTokens([]);
+            setWalletTokensKey('');
             return;
         }
+        const requestKey = `${chain}:${selectedWalletId}`;
         const seq = walletTokensSeqRef.current + 1;
         walletTokensSeqRef.current = seq;
         if (walletTokensAbortRef.current) {
@@ -265,10 +296,12 @@ export default function SwapModule({
                 disabledReason: t.disabled_reason || '',
             })).filter((t) => t.address);
             setWalletTokens(list);
+            setWalletTokensKey(requestKey);
         } catch (e) {
             if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
             setWalletTokensError(String(e?.message || e));
             setWalletTokens([]);
+            setWalletTokensKey(requestKey);
         } finally {
             if (walletTokensAbortRef.current === controller) {
                 walletTokensAbortRef.current = null;
@@ -282,6 +315,9 @@ export default function SwapModule({
     useEffect(() => { loadWallets(); }, [loadWallets]);
     useEffect(() => { loadWalletTokens(); }, [loadWalletTokens]);
     useEffect(() => () => {
+        if (walletsAbortRef.current) {
+            walletsAbortRef.current.abort();
+        }
         if (walletTokensAbortRef.current) {
             walletTokensAbortRef.current.abort();
         }
@@ -290,8 +326,8 @@ export default function SwapModule({
     /* enriched token lists with logo / name from tokenMetaMap */
     const rawPresetTokens = useMemo(() => getPresetTokens(chain), [chain]);
     const enrichedWalletTokens = useMemo(
-        () => walletTokens.map((t) => applyTokenMetadata(t, tokenMetaMap, chain)),
-        [walletTokens, tokenMetaMap, chain],
+        () => (walletTokensReady ? walletTokens.map((t) => applyTokenMetadata(t, tokenMetaMap, chain)) : []),
+        [walletTokens, tokenMetaMap, chain, walletTokensReady],
     );
 
     const fromTokenEnriched = useMemo(
@@ -359,10 +395,11 @@ export default function SwapModule({
     }, [apiBaseUrl, initData, chain, hasInitData, rawPresetTokens, walletTokens, fromToken, toToken, tokenMetaMap]);
 
     const fromBalanceToken = useMemo(() => {
+        if (!walletTokensReady) return null;
         if (!fromToken?.address) return null;
         const found = walletTokens.find((t) => t.address === normalizeHex(fromToken.address));
         return found || null;
-    }, [walletTokens, fromToken]);
+    }, [walletTokens, fromToken, walletTokensReady]);
 
     const fromBalanceText = fromBalanceToken ? formatTokenAmount(fromBalanceToken.balance) : '--';
     const fromValueUsdText = fromBalanceToken && fromBalanceToken.valueUSDT
@@ -450,6 +487,19 @@ export default function SwapModule({
         pushRecentToken(chain, token);
         setAmount('');
         setQuote(null);
+    };
+
+    const handleSelectWallet = (wallet) => {
+        if (!wallet?.id) return;
+        const nextId = String(wallet.id);
+        setSelectedWalletId(nextId);
+        setWalletTokens([]);
+        setWalletTokensKey('');
+        setAmount('');
+        setQuote(null);
+        setQuoteError('');
+        setExecError('');
+        setLastQuoteAt(0);
     };
 
     const handlePreset = (ratio) => {
@@ -910,7 +960,7 @@ export default function SwapModule({
                 wallets={wallets}
                 selectedWalletId={selectedWalletId}
                 nativeSymbol={nativeSymbol}
-                onSelect={(w) => setSelectedWalletId(String(w.id))}
+                onSelect={handleSelectWallet}
             />
             <SwapQuoteDetails
                 open={quoteDetailsOpen}
