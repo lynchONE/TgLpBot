@@ -169,10 +169,6 @@ function GoldenDogPageContent({
             : GOLDEN_DOG_INTENSITY_OPTIONS),
         [status],
     );
-    const activePoolThresholdCount = useMemo(
-        () => countGoldenDogPoolThresholds(draft.pool_mode),
-        [draft.pool_mode],
-    );
     const watchedWalletList = useMemo(
         () => Array.from(new Set((Array.isArray(watchedWallets) ? watchedWallets : [])
             .map((item) => normalizeWalletAddress(item))
@@ -839,17 +835,6 @@ function goldenDogIntensityLabel(value) {
     return GOLDEN_DOG_INTENSITY_OPTIONS.find((item) => item.value === value)?.label || '响铃';
 }
 
-function countGoldenDogPoolThresholds(poolMode) {
-    return [
-        'min_total_fees',
-        'min_transaction_count',
-        'min_tvl',
-        'min_volume',
-        'min_fee_rate',
-        'min_active_liquidity_ratio',
-    ].reduce((count, key) => count + (String(poolMode?.[key] || '').trim() ? 1 : 0), 0);
-}
-
 function goldenDogThresholdText(value, prefix = '', suffix = '') {
     const raw = String(value || '').trim();
     return raw ? `${prefix}${raw}${suffix}` : '--';
@@ -1001,7 +986,7 @@ function resolveSmartMoneyPoolMarketCapDisplay(pool) {
     return NaN;
 }
 
-function resolveSmartMoneyPoolMarketCapLabel(pool) {
+function resolveSmartMoneyPoolMarketCapLabel() {
     return 'FDV';
 }
 
@@ -1555,7 +1540,7 @@ function PositionPagination({ page, total, brand, pageSize = POSITION_LIST_PAGE_
     );
 }
 
-function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose }) {
+function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -1630,7 +1615,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
                     position={detail}
                     walletAddress={detail.wallet_address}
                     updatedAt={detail.updated_at}
-                    pollIntervalSec={detail.poll_interval_sec}
                     allowTaskActions={false}
                     showAbsolutePnl={false}
                     headerAccessory={(
@@ -3057,7 +3041,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                     </div>
                     {pools.map(pool => {
                         const marketCap = resolveSmartMoneyPoolMarketCapDisplay(pool);
-                        const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel(pool);
+                        const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel();
                         const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
                         return (
                             <button
@@ -3177,7 +3161,6 @@ function PoolFeeHeatmapPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, p
     const [windowKey, setWindowKey] = useState('1m');
     const [protocolFilter, setProtocolFilter] = useState('all');
     const [search, setSearch] = useState('');
-    const [updatedAt, setUpdatedAt] = useState('');
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
@@ -3209,7 +3192,6 @@ function PoolFeeHeatmapPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, p
                 }
                 setRows(data.list);
                 setTotal(nextTotal);
-                setUpdatedAt(data.updated_at || '');
                 setError('');
             })
             .catch((err) => {
@@ -3343,7 +3325,7 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
     const reliable = String(row?.sample_status || '') === 'ok';
     const partial = String(row?.sample_status || '') === 'partial';
     const marketCap = resolveSmartMoneyPoolMarketCapDisplay(row);
-    const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel(row);
+    const marketCapLabel = resolveSmartMoneyPoolMarketCapLabel();
     const marketCapAvailable = Number.isFinite(marketCap) && marketCap > 0;
     return (
         <button
@@ -3477,7 +3459,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     }, [positions, selectedPosition]);
     const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
     const poolStatsMarketCap = resolveSmartMoneyPoolMarketCapDisplay(poolStats || pool);
-    const poolStatsMarketCapLabel = resolveSmartMoneyPoolMarketCapLabel(poolStats || pool);
+    const poolStatsMarketCapLabel = resolveSmartMoneyPoolMarketCapLabel();
     const poolStatsMarketCapAvailable = Number.isFinite(poolStatsMarketCap) && poolStatsMarketCap > 0;
 
     return (
@@ -5841,7 +5823,7 @@ function AddWalletModal({ apiBaseUrl, onClose, onAdded, brand }) {
 }
 
 // ============ MAIN COMPONENT ============
-export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData, isAdmin = false, accentTheme = 'lime', tick, pollIntervalSec = 15, onOpenPosition, onNotice }) {
+export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData, isAdmin = false, accentTheme = 'lime', pollIntervalSec = 15, onOpenPosition }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
@@ -6116,10 +6098,8 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                             initData={initData}
                             hasInitData={Boolean(String(initData || '').trim())}
                             isAdmin={isAdmin}
-                            tick={tick}
                             pollIntervalSec={pollIntervalSec}
                             accentTheme={accentTheme}
-                            onNotice={onNotice}
                         />
                     </Suspense>
                 ) : (

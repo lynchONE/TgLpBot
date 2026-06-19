@@ -63,7 +63,6 @@ import {
     getModulePollSec,
     normalizeModulePollOverrides,
 } from './features/appShell/pollConfig';
-import { DEFAULT_WEB_WORKBENCH_WIDGETS, STORAGE_WEB_WORKBENCH_WIDGETS, normalizeWebWorkbenchWidgets } from './features/appShell/webWorkbench';
 import { formatUserLabel } from './features/admin/formatUser';
 import {
     HOT_POOL_SORT_TABS,
@@ -105,7 +104,6 @@ import {
     buildDefaultFocusedPercentageRange,
     buildDefaultFocusedTickRange,
     buildDisplayPriceRangeFromTicks,
-    buildGridBins,
     estimateDisplayGridStepPercent,
     normalizeDisplayPriceTickRange,
     nudgeDisplayPriceBoundary,
@@ -268,19 +266,13 @@ export default function App() {
         setOpenPositionPriceUpper,
         openPositionInvertPrice,
         setOpenPositionInvertPrice,
-        openPositionGridBoundaryTarget,
-        setOpenPositionGridBoundaryTarget,
         openPositionSlippage,
         setOpenPositionSlippage,
         openPositionError,
         setOpenPositionError,
         openPositionPrepareChecks,
         openPositionChecks,
-        setOpenPositionChecks,
-        openPositionRiskAck,
-        setOpenPositionRiskAck,
         openPositionEntrySwapPreview,
-        setOpenPositionEntrySwapPreview,
         openPositionEntrySwapPreviewLoading,
         setOpenPositionEntrySwapPreviewLoading,
         openPositionPreviewPending,
@@ -288,29 +280,21 @@ export default function App() {
         openPositionPreviewSuspended,
         setOpenPositionPreviewSuspended,
         openPositionEntrySwapPreviewError,
-        setOpenPositionEntrySwapPreviewError,
         openPositionDefaultRangeSeededRef,
         openPositionPreviewResumeTimerRef,
         openPositionAutoSingleSideRangeRef,
         openPositionPreparePrivateZapInfo,
         openPositionPrivateZapInfo,
-        setOpenPositionPrivateZapInfo,
         openPositionPrepareTokenRisk,
         openPositionPreviewTokenRisk,
         openPositionRangeEditor,
         openPositionPreviewRangeEditor,
-        openPositionSizingAdvice,
-        setOpenPositionSizingAdvice,
         openPositionEntrySwapSlippage,
         setOpenPositionEntrySwapSlippage,
-        openPositionEntrySwapSlippageDirty,
         setOpenPositionEntrySwapSlippageDirty,
-        openPositionEntrySwapConfirm,
         openPositionLoading,
-        setOpenPositionLoading,
         openPositionSmartRanges,
         setOpenPositionSmartRanges,
-        openPositionSmartRangesLoading,
         setOpenPositionSmartRangesLoading,
         openPositionDCAEnabled,
         setOpenPositionDCAEnabled,
@@ -354,7 +338,6 @@ export default function App() {
 
 
     const [adminUsers, setAdminUsers] = useState([]);
-    const [adminUsersError, setAdminUsersError] = useState('');
     const [adminUsersLoading, setAdminUsersLoading] = useState(false);
     const [adminSelectedUserId, setAdminSelectedUserId] = useState(null);
     const [adminPositions, setAdminPositions] = useState(null);
@@ -366,7 +349,7 @@ export default function App() {
     const confirmResolveRef = useRef(null);
     const noticeTimerRef = useRef(null);
 
-    const { theme, setTheme, toggleTheme, accentTheme, setAccentTheme } = useGlobalSettings();
+    const { theme, toggleTheme, accentTheme, setAccentTheme } = useGlobalSettings();
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [modulePollOverrides, setModulePollOverrides] = useState(() =>
         normalizeModulePollOverrides(storage.get(STORAGE_MODULE_POLL_SECS), storage.get(STORAGE_POLL_SEC))
@@ -376,21 +359,6 @@ export default function App() {
     const [notice, setNotice] = useState(null);
     const [globalConfigOpen, setGlobalConfigOpen] = useState(false);
     const [globalConfig, setGlobalConfig] = useState(null);
-
-    const [isDesktopWebMode, setIsDesktopWebMode] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        return window.matchMedia('(min-width: 1024px)').matches;
-    });
-    const [webWorkbenchWidgets, setWebWorkbenchWidgets] = useState(() => {
-        const saved = storage.get(STORAGE_WEB_WORKBENCH_WIDGETS);
-        if (!saved) return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
-        try {
-            return normalizeWebWorkbenchWidgets(JSON.parse(saved));
-        } catch {
-            return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
-        }
-    });
-    const [webWorkbenchGmgnPool, setWebWorkbenchGmgnPool] = useState(null);
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
@@ -537,10 +505,6 @@ export default function App() {
         if (options.clear !== false) setOpenPositionError('');
         return true;
     }, [openPositionSyncPriceInputsFromTicks]);
-    const openPositionGridBins = useMemo(
-        () => buildGridBins(openPositionEffectiveRangeEditor),
-        [openPositionEffectiveRangeEditor],
-    );
     const openPositionDefaultFocusedRange = useMemo(
         () => buildDefaultFocusedTickRange(openPositionEffectiveRangeEditor),
         [openPositionEffectiveRangeEditor],
@@ -806,8 +770,6 @@ export default function App() {
         : '输入 USDT 金额后会显示与当前仓位的大致比例。';
 
     const activeError = showAdmin ? adminPositionsError : error;
-    const activeLoading = showAdmin ? adminPositionsLoading : loading;
-
     const walletUsdFromTokens = useMemo(() => {
         const byAddr = new Map();
         for (const p of positions) {
@@ -1281,7 +1243,6 @@ export default function App() {
             if (inFlight) return;
             inFlight = true;
             setAdminUsersLoading(true);
-            setAdminUsersError('');
             try {
                 const resp = await fetchAdminRealtimeUsers({
                     apiBaseUrl,
@@ -1294,7 +1255,6 @@ export default function App() {
                 setAdminUsers(users);
             } catch (e) {
                 if (aborted) return;
-                setAdminUsersError(String(e?.message || e));
             } finally {
                 inFlight = false;
                 if (!aborted) setAdminUsersLoading(false);
@@ -1638,9 +1598,6 @@ export default function App() {
         () => (openPositionHasSmartQuickRanges ? smartQuickRangeOptions : defaultQuickRangeOptions),
         [openPositionHasSmartQuickRanges, smartQuickRangeOptions, defaultQuickRangeOptions],
     );
-    const openPositionQuickRangeIntro = openPositionHasSmartQuickRanges
-        ? '优先展示聪明钱常用区间；点一下即可套用，也可以继续手动微调。'
-        : '可直接选 1 / 3 / 5 / 10 / 20 的默认区间，后续仍可切到 Tick/价格模式细调。';
     const openPositionVisibleRangeMode = openPositionRangeInputMode === 'percentage' ? 'percentage' : 'grid';
     const openPositionShowLiquidityChart = openPositionVisibleRangeMode === 'grid';
     const openPositionOutOfRangeActions = useMemo(
@@ -1771,34 +1728,6 @@ export default function App() {
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
         openPositionInvertPrice,
-        applyOpenPositionTickRange,
-        suppressOpenPositionPreview,
-    ]);
-
-    const applyOpenPositionGridBin = useCallback((bin) => {
-        if (!bin) return;
-        const spacing = Number(openPositionEffectiveRangeEditor?.tick_spacing);
-        if (!Number.isFinite(spacing) || spacing <= 0) return;
-        let nextLower = Number.isInteger(openPositionSelectedManualTickLower)
-            ? openPositionSelectedManualTickLower
-            : Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
-        let nextUpper = Number.isInteger(openPositionSelectedManualTickUpper)
-            ? openPositionSelectedManualTickUpper
-            : Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
-        if (openPositionGridBoundaryTarget === 'lower') {
-            nextLower = bin.lowerTick;
-            if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
-        } else {
-            nextUpper = bin.upperTick;
-            if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
-        }
-        suppressOpenPositionPreview();
-        applyOpenPositionTickRange(nextLower, nextUpper);
-    }, [
-        openPositionEffectiveRangeEditor,
-        openPositionSelectedManualTickLower,
-        openPositionSelectedManualTickUpper,
-        openPositionGridBoundaryTarget,
         applyOpenPositionTickRange,
         suppressOpenPositionPreview,
     ]);
@@ -2632,17 +2561,6 @@ export default function App() {
             ? '正在加载用户仓位...'
             : '当前用户没有活跃仓位'
         : '请选择用户查看仓位';
-    const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
-    const hotPoolsPairMap = useMemo(() => {
-        const m = new Map();
-        for (const row of hotPoolsRows) {
-            const addr = String(row?.pool_address || '').trim().toLowerCase();
-            const pair = String(row?.trading_pair || '').trim();
-            if (addr && pair && !m.has(addr)) m.set(addr, pair);
-        }
-        return m;
-    }, [hotPoolsRows]);
-
     const initDataMissing = viewMode !== 'hot_pools' && !hasInitData;
     const noticeClass = notice?.tone === 'error'
         ? 'bg-red-600 text-white'
@@ -2753,8 +2671,6 @@ export default function App() {
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
                                 hasInitData={hasInitData}
-                                isAdmin={isAdmin}
-                                tick={tick}
                                 pollIntervalSec={assetsPollIntervalSec}
                                 accentTheme={accentTheme}
                                 onNotice={showNotice}
@@ -2769,10 +2685,8 @@ export default function App() {
                             hasInitData={hasInitData}
                             isAdmin={isAdmin}
                             accentTheme={accentTheme}
-                            tick={tick}
                             pollIntervalSec={smartMoneyPollIntervalSec}
                             onOpenPosition={openPositionModal}
-                            onNotice={showNotice}
                         />
                     </div>
                 ) : isAdminPage ? (
@@ -2796,7 +2710,6 @@ export default function App() {
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
                                 hasInitData={hasInitData}
-                                accentTheme={accentTheme}
                                 pollIntervalSec={swapPollIntervalSec}
                                 multiChainEnabled={multiChainEnabled}
                                 onNotice={showNotice}
@@ -3068,7 +2981,7 @@ export default function App() {
 
             <div className={`${isHotPools ? 'mini-data-list mini-data-list--pools' : 'mini-data-list mini-data-list--positions'} space-y-4 animate-fade-in-up`}>
                 {isHotPools
-                    ? hotPoolsVisibleRows.map((row, index) => {
+                    ? hotPoolsVisibleRows.map((row) => {
                         const proto = String(row?.protocol_version || '').trim();
                         const addr = String(row?.pool_address || '').trim().toLowerCase();
                         const poolKey = `${proto}:${addr}`;
@@ -3082,7 +2995,6 @@ export default function App() {
                                 accentTheme={accentTheme}
                                 onOpenKline={hasKlineAccess ? setKlinePool : undefined}
                                 onOpenPosition={openPositionModal}
-                                apiBaseUrl={apiBaseUrl}
                                 chain={hotPoolsData?.chain || 'bsc'}
                             />
                         );
@@ -3102,8 +3014,6 @@ export default function App() {
                                         ].join(':')}
                                         position={p}
                                         walletAddress={walletAddress}
-                                        bnbBalance={bnbBalance}
-                                        pollIntervalSec={pollIntervalSec}
                                         updatedAt={updatedAt}
                                         allowTaskActions={!showAdmin && hasInitData}
                                         onSetTaskPaused={handleSetTaskPaused}
@@ -3250,7 +3160,6 @@ export default function App() {
                                                     metric={hotPoolsSort}
                                                     previousData={null}
                                                     accentTheme={accentTheme}
-                                                    apiBaseUrl={apiBaseUrl}
                                                     onOpenKline={hasKlineAccess ? setKlinePool : undefined}
                                                     onOpenPosition={selectPoolFromSearch}
                                                     chain={poolSearchChain}

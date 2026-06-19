@@ -306,8 +306,6 @@ function PositionCard({
                     onDelete={onTaskDelete}
                     onEditRange={onTaskEditRange}
                     onWithdrawLiquidity={onWithdrawLiquidity}
-                    onSwapDust={onSwapDust}
-                    onTriggerRebalance={onTriggerRebalance}
                     onAddLiquidity={onAddLiquidity}
                     onClose={onCloseTaskActionMenu}
                   />

@@ -175,10 +175,6 @@ function resolveView(operation, progress) {
         return resolveOpenPositionView(tone, error, progress);
     }
 
-    if (operation === 'open_position') {
-        return resolveOpenPositionView(tone, error, progress);
-    }
-
     if (tone === 'done') {
         return {
             tone,

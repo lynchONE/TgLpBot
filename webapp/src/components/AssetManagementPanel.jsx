@@ -637,7 +637,6 @@ export default function AssetManagementPanel({
   apiBaseUrl,
   initData,
   hasInitData,
-  isAdmin = false,
   refreshInterval = 10,
 }) {
   const tabs = useMemo(() => {

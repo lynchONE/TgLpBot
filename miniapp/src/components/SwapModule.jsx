@@ -15,7 +15,6 @@ import {
     walletSwapSingleExecute,
     walletSwapSingleQuote,
 } from '../lib/api';
-import { getBrandTheme } from '../lib/brand';
 import { AMOUNT_PRESETS, AUTO_QUOTE_REFRESH_MS, CHAIN_META, MIN_WALLET_TOKEN_VALUE_USD, SLIPPAGE_PRESETS, applyAmountPreset, applyTokenMetadata, formatQuoteGasCostSummary, formatQuoteRelativeTime, formatTokenAmount, formatUSDCompact, getChainConfig, getNativePresetToken, getPresetTokens, normalizeHex, pushRecentToken, shortAddress, shouldFetchTokenMetadata } from '../lib/swapMeta';
 const CHAIN_OPTIONS = Object.values(CHAIN_META).map((c) => ({
     key: c.key,
@@ -129,13 +128,10 @@ export default function SwapModule({
     apiBaseUrl,
     initData,
     hasInitData,
-    accentTheme = 'lime',
     onNotice,
     pollIntervalSec = 8,
     multiChainEnabled = true,
 }) {
-    const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
-
     /* core state */
     const [mode, setMode] = useState('market');
     const [chain, setChain] = useState('bsc');
@@ -146,7 +142,7 @@ export default function SwapModule({
     const [selectedWalletId, setSelectedWalletId] = useState('');
 
     const [walletTokens, setWalletTokens] = useState([]);
-    const [walletTokensLoading, setWalletTokensLoading] = useState(false);
+    const [, setWalletTokensLoading] = useState(false);
     const [walletTokensError, setWalletTokensError] = useState('');
 
     const [fromToken, setFromToken] = useState(() => getNativePresetToken('bsc'));
@@ -293,10 +289,6 @@ export default function SwapModule({
 
     /* enriched token lists with logo / name from tokenMetaMap */
     const rawPresetTokens = useMemo(() => getPresetTokens(chain), [chain]);
-    const presetTokens = useMemo(
-        () => rawPresetTokens.map((t) => applyTokenMetadata(t, tokenMetaMap, chain)),
-        [rawPresetTokens, tokenMetaMap, chain],
-    );
     const enrichedWalletTokens = useMemo(
         () => walletTokens.map((t) => applyTokenMetadata(t, tokenMetaMap, chain)),
         [walletTokens, tokenMetaMap, chain],

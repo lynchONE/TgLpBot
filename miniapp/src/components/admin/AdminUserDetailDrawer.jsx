@@ -157,8 +157,6 @@ export default function AdminUserDetailDrawer({
                         ].join(':')}
                         position={position}
                         walletAddress={wallet?.address || ''}
-                        bnbBalance={wallet?.bnb_balance || ''}
-                        pollIntervalSec={pollIntervalSec}
                         updatedAt={positions?.updated_at}
                         allowTaskActions={false}
                     />

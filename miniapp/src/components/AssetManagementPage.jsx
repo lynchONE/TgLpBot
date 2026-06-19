@@ -800,8 +800,6 @@ export default function AssetManagementPage({
     apiBaseUrl,
     initData,
     hasInitData,
-    isAdmin = false,
-    tick,
     pollIntervalSec = 15,
     accentTheme = 'lime',
     moduleAccess,

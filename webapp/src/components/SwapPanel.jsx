@@ -636,10 +636,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     if (quoteGasNative !== '--') return quoteGasNative;
     return '--';
   }, [quoteGasNative, quoteGasUSD]);
-  const selectedQuoteFeeText = useMemo(
-    () => selectedQuote?.fee_summary || selectedQuote?.fee_rule || '--',
-    [selectedQuote]
-  );
   const selectedQuoteFeeDisplay = useMemo(() => {
     const rule = selectedQuote?.fee_rule || '';
     if (!rule) return '--';

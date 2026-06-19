@@ -435,7 +435,7 @@ const RateChangeIndicator = ({ currentValue, previousValue, label = '变化' }) 
 
 const STABLE_COINS = ['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol'];
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, apiBaseUrl, chain, accentTheme = 'lime' }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, chain, accentTheme = 'lime' }) {
     const brand = getBrandTheme(accentTheme);
     const [copied, setCopied] = useState(false);
     const [badgesExpanded, setBadgesExpanded] = useState(false);
@@ -444,9 +444,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
     // 左滑触发黑名单
     const swipeRef = useRef({ x: 0, y: 0, triggered: false });
-    const swipeThreshold = 60;
-    const swipeSlack = 12;
-
     const handleTouchStart = useCallback((e) => {
         const touch = e.touches?.[0];
         if (!touch) return;
@@ -456,8 +453,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const handleTouchMove = useCallback((e) => {
         const touch = e.touches?.[0];
         if (!touch) return;
-        const dx = touch.clientX - swipeRef.current.x;
-        const dy = touch.clientY - swipeRef.current.y;
         if (swipeRef.current.triggered) return;
     }, []);
 
@@ -512,7 +507,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const feeRateValue = useMemo(() => Number(pool?.fee_rate ?? 0), [pool?.fee_rate]);
     const totalFeesValue = useMemo(() => Number(pool?.total_fees ?? 0), [pool?.total_fees]);
     const marketCapValue = useMemo(() => resolveHotPoolMarketCapDisplay(pool), [pool]);
-    const marketCapLabel = useMemo(() => resolveHotPoolMarketCapLabel(pool), [pool]);
+    const marketCapLabel = resolveHotPoolMarketCapLabel();
     const activeLiquidityFeeRateValue = useMemo(
         () => computeActiveLiquidityFeeRate(pool),
         [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],

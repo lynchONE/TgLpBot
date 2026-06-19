@@ -16,7 +16,7 @@ function Row({ label, value, accent = false }) {
     );
 }
 
-function ProviderCard({ entry, isBest, fromSymbol, toSymbol, nativeSymbol }) {
+function ProviderCard({ entry, isBest, toSymbol, nativeSymbol }) {
     const provider = entry?.provider || entry?.source || '--';
     const status = entry?.status || (entry?.error ? 'error' : 'available');
     const toAmount = entry?.to_amount_float || formatTokenAmount(entry?.to_amount_human || 0);

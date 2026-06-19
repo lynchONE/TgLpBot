@@ -74,7 +74,6 @@ export function OpenPositionDCAPanel({
     singleSided,
     summaryItems,
     interval,
-    brand,
     onToggleEnabled,
     onToggleExpanded,
     children,
@@ -157,7 +156,6 @@ export function OpenPositionPrecheckPanel({
             {displayChecks.length > 0 ? (
                 <div className="space-y-2">
                     {displayChecks.map((item) => {
-                        const isPass = item.status === 'pass';
                         const isWarn = item.status === 'warn';
                         const isFail = item.status === 'fail';
                         return (

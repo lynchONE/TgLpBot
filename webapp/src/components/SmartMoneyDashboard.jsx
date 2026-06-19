@@ -2281,7 +2281,6 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
     const [proto, setProto] = useState('all');
     const [sort, setSort] = useState('rate');
     const [windowKey, setWindowKey] = useState('1m');
-    const [updatedAt, setUpdatedAt] = useState('');
     const loadSeqRef = useRef(0);
     const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
     const refreshIntervalMs = useMemo(
@@ -2319,7 +2318,6 @@ function PoolFeeHeatmap({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, re
                 }
                 setRows(data.list);
                 setTotal(nextTotal);
-                setUpdatedAt(data.updated_at || '');
                 setError('');
             })
             .catch((err) => {
@@ -4021,17 +4019,6 @@ function goldenDogIntensityLabel(value) {
     return GOLDEN_DOG_INTENSITY_OPTIONS.find((item) => item.value === value)?.label || '响铃';
 }
 
-function countGoldenDogPoolThresholds(poolMode) {
-    return [
-        'min_total_fees',
-        'min_transaction_count',
-        'min_tvl',
-        'min_volume',
-        'min_fee_rate',
-        'min_active_liquidity_ratio',
-    ].reduce((count, key) => count + (String(poolMode?.[key] || '').trim() ? 1 : 0), 0);
-}
-
 function goldenDogThresholdText(value, prefix = '', suffix = '') {
     const raw = String(value || '').trim();
     return raw ? `${prefix}${raw}${suffix}` : '--';
@@ -4214,10 +4201,6 @@ function GoldenDogPanelContent({
             : GOLDEN_DOG_INTENSITY_OPTIONS),
         [status],
     );
-    const activePoolThresholdCount = useMemo(
-        () => countGoldenDogPoolThresholds(draft.pool_mode),
-        [draft.pool_mode],
-    );
     const watchedWalletList = useMemo(
         () => Array.from(new Set((Array.isArray(watchedWallets) ? watchedWallets : [])
             .map((item) => normalizeWalletAddress(item))
@@ -4376,7 +4359,6 @@ function GoldenDogPanelContent({
         color: '#fcd34d',
     };
 
-    const miniStatCss = { display: 'flex', alignItems: 'baseline', gap: 6, padding: '6px 0' };
     const miniStatLabel = { fontSize: 11, color: '#a1a1aa', fontWeight: 500 };
     const miniStatValue = { fontSize: 13, color: '#e4e4e7', fontWeight: 600, fontVariantNumeric: 'tabular-nums' };
 

@@ -227,8 +227,6 @@ function buildPositionPairTitle(position, token0, token1) {
 export default function PositionCard({
     position,
     walletAddress,
-    bnbBalance,
-    pollIntervalSec,
     updatedAt,
     allowTaskActions = true,
     showAbsolutePnl = true,
@@ -342,24 +340,6 @@ export default function PositionCard({
     const currentPriceBase = useMemo(() => priceFromTick(currentTick, decimals0, decimals1), [currentTick, decimals0, decimals1]);
     const currentPrice = shouldInvertPrice ? safeInvert(currentPriceBase) : currentPriceBase;
 
-    const currentGridIndex = useMemo(() => {
-        if (!Number.isFinite(currentTick) || !Number.isFinite(tickLowerRaw) || !tickSpacingRaw) return null;
-        return Math.floor((currentTick - tickLowerRaw) / tickSpacingRaw) + 1;
-    }, [currentTick, tickLowerRaw, tickSpacingRaw]);
-
-    const { gridLower, gridUpper } = useMemo(() => {
-        if (currentGridIndex === null || !tickSpacingRaw || !Number.isFinite(tickLowerRaw)) return { gridLower: null, gridUpper: null };
-        const t1 = tickLowerRaw + (currentGridIndex - 1) * tickSpacingRaw;
-        const t2 = t1 + tickSpacingRaw;
-        const p1Base = priceFromTick(t1, decimals0, decimals1);
-        const p2Base = priceFromTick(t2, decimals0, decimals1);
-        if (p1Base === null || p2Base === null) return { gridLower: null, gridUpper: null };
-        const p1 = shouldInvertPrice ? safeInvert(p1Base) : p1Base;
-        const p2 = shouldInvertPrice ? safeInvert(p2Base) : p2Base;
-        if (p1 === null || p2 === null) return { gridLower: null, gridUpper: null };
-        return { gridLower: Math.min(p1, p2), gridUpper: Math.max(p1, p2) };
-    }, [currentGridIndex, tickLowerRaw, tickSpacingRaw, decimals0, decimals1, shouldInvertPrice]);
-
     const gridCountRaw = useMemo(() => {
         if (!Number.isFinite(tickLowerRaw) || !Number.isFinite(tickUpperRaw)) return null;
         const diff = Math.abs(tickUpperRaw - tickLowerRaw);
@@ -381,22 +361,6 @@ export default function PositionCard({
     const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
     const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
 
-    const taskRange = useMemo(() => {
-        const low = Number(position?.task_range_lower_pct);
-        const up = Number(position?.task_range_upper_pct);
-        if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
-        const asymmetric = Math.abs(low - up) >= 0.01;
-        const avg = (low + up) / 2;
-        const totalWidth = low + up;
-        const summaryText = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
-        let text = `${summaryText} · 总宽度 ${totalWidth.toFixed(2)}%`;
-        const amountUsdt = Number(position?.task_amount_usdt);
-        if (Number.isFinite(amountUsdt) && amountUsdt > 0) {
-            text += ` | $${amountUsdt.toFixed(2)}`;
-        }
-        return { text, badgeText: `宽度 ${totalWidth.toFixed(2)}%` };
-    }, [position?.task_range_lower_pct, position?.task_range_upper_pct, position?.task_amount_usdt]);
-
     const displayTaskRange = useMemo(() => buildTaskRangeDisplay(position), [
         position?.task_range_lower_pct,
         position?.task_range_upper_pct,
@@ -411,7 +375,6 @@ export default function PositionCard({
     const taskPaused = Boolean(position?.task_paused);
     const currentTaskMode = normalizeTaskMode(position?.task_mode, position?.task_paused);
     const statusLabel = String(position?.status_label || '');
-    const isStopped = statusLabel.includes('停止') || statusLabel.includes('结束');
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤仓中') || statusLabel.includes('处理中');
     const isStoppedState = isStoppedStatus(statusLabel);
     const isBusyState = isBusyStatus(statusLabel);
@@ -1078,9 +1041,6 @@ export default function PositionCard({
                     gridStepPct={gridStepPct}
                     rangeBadgeText={displayTaskRange?.badgeText || ''}
                     inRange={position?.in_range}
-                    currentGridIndex={currentGridIndex}
-                    currentGridLower={gridLower}
-                    currentGridUpper={gridUpper}
                     taskRangeText={displayTaskRange?.text || ''}
                     runningDuration={runningDuration}
                 />

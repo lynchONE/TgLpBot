@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export default function TaskActionMenu({ position, onPause, onStop, onPartialExit, onDelete, onEditRange, onWithdrawLiquidity, onSwapDust, onAddLiquidity, onClose, anchorRef }) {
+export default function TaskActionMenu({ position, onPause, onStop, onPartialExit, onDelete, onEditRange, onWithdrawLiquidity, onAddLiquidity, onClose }) {
   const [editMode, setEditMode] = useState(false);
   const [rangeLower, setRangeLower] = useState(String(position?.task_range_lower_pct || '2'));
   const [rangeUpper, setRangeUpper] = useState(String(position?.task_range_upper_pct || '2'));

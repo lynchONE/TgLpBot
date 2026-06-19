@@ -62,7 +62,6 @@ export default function useOpenPositionFlow({
         openPositionPreviewPending,
         setOpenPositionPreviewPending,
         openPositionPreviewSuspended,
-        setOpenPositionPreviewSuspended,
         openPositionEntrySwapPreviewError,
         setOpenPositionEntrySwapPreviewError,
         setOpenPositionPreparePrivateZapInfo,

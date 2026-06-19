@@ -1169,10 +1169,6 @@ export default function OpenPositionModal({
     return '';
   }, [version]);
 
-  // 默认以非稳定币为基准显示价格：若 token0 是 USDT/USDC 等计价币，就反转显示
-  const _unusedManualRangeInputOptions = useMemo(() => (
-    [...RANGE_INPUT_OPTIONS, { key: 'price', label: '价格区间' }]
-  ), []);
   const reloadLiqProfile = useCallback(() => {
     if (!addr || !protocolKind || !chain) {
       setLiqProfile(null);

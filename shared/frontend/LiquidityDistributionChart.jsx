@@ -554,7 +554,7 @@ function formatUsdCompact(v) {
     return `$${v.toExponential(2)}`;
 }
 
-function RangeHandle({ x, color, side, interactive, handleHitPx, onDown, onUp, onLostCapture }) {
+function RangeHandle({ x, color, interactive, handleHitPx, onDown, onUp, onLostCapture }) {
     // 柱子区域在容器内：top: 22px（标题下方），bottom: 28px（底部价格标签上方）。
     // 手柄严格限制在这个区域内，不溢出；取消上下端圆点，只保留中间拖把。
     return (

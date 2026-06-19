@@ -623,7 +623,6 @@ export default function App() {
   const positionSmartMoneyRangesRef = useRef(positionSmartMoneyRanges);
 
   const [walletBalances, setWalletBalances] = useState(null);
-  const [walletBalancesChain, setWalletBalancesChain] = useState('');
 
   const [selectedPool, setSelectedPool] = useState(null);
   const [klineInterval, setKlineInterval] = useState('1m');
@@ -631,7 +630,6 @@ export default function App() {
   const [klineCandles, setKlineCandles] = useState([]);
   const [klineLoading, setKlineLoading] = useState(false);
   const [klineError, setKlineError] = useState('');
-  const [klineSource, setKlineSource] = useState('');
   const [klineRefreshNonce, setKlineRefreshNonce] = useState(0);
   const [klineDrawTool, setKlineDrawTool] = useState('none');
   const [klineDrawResetNonce, setKlineDrawResetNonce] = useState(0);
@@ -653,7 +651,6 @@ export default function App() {
   );
   const [klineWatchToggleMap, setKlineWatchToggleMap] = useState({});
 
-  const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [workMode, setWorkMode] = useState(false);
@@ -1410,7 +1407,6 @@ export default function App() {
       try {
         const resp = await fetchWallets({ apiBaseUrl, initData, chain, signal });
         setWalletBalances(resp?.wallets || []);
-        setWalletBalancesChain(resp?.chain || chain);
       } catch (e) {
         if (e?.name !== 'AbortError') setWalletBalances(null);
         throw e;
@@ -1423,13 +1419,11 @@ export default function App() {
     async (signal) => {
       if (!hasInitData) {
         setKlineCandles([]);
-        setKlineSource('');
         setKlineError('请先点击右上角 Telegram 图标扫码登录。');
         return;
       }
       if (!klineTokenAddress) {
         setKlineCandles([]);
-        setKlineSource('');
         setKlineError('');
         return;
       }
@@ -1447,11 +1441,9 @@ export default function App() {
           limit: klineIntervalMeta.limit,
           signal,
         });
-        setKlineSource('token-usd');
         setKlineCandles(Array.isArray(resp?.candles) ? resp.candles : []);
       } catch (e) {
         if (e?.name !== 'AbortError') {
-          setKlineSource('');
           setKlineError(String(e?.message || e));
         }
         throw e;
@@ -1649,7 +1641,6 @@ export default function App() {
 
   useEffect(() => {
     setKlineTokenSide('auto');
-    setKlineSource('');
     setKlineDrawTool('none');
     setKlineDrawResetNonce((prev) => prev + 1);
     setKlineHeightSettingsOpen(false);
@@ -1740,17 +1731,6 @@ export default function App() {
     setKlineActiveMarkerId('');
     setKlineFocusedWalletAddress('');
   }, [clearLoginState]);
-
-  const refreshAll = useCallback(async () => {
-    if (!hasInitData) return;
-    setRefreshing(true);
-    try {
-      await Promise.all([loadHotPools(), loadPositions()]);
-      setKlineRefreshNonce((v) => v + 1);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [hasInitData, loadHotPools, loadPositions]);
 
   const refreshKline = useCallback(() => {
     setKlineRefreshNonce((v) => v + 1);
@@ -2105,12 +2085,6 @@ export default function App() {
     await loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
-  const handleAddLiquidity = useCallback(async (taskId, position) => {
-    const resolvedTaskId = Number(taskId || position?.task_id || 0);
-    if (!Number.isFinite(resolvedTaskId) || resolvedTaskId <= 0) return;
-    setAddLiqPosition({ ...position, task_id: resolvedTaskId });
-  }, []);
-
   const openAddLiquidityModal = useCallback((taskId, position) => {
     const resolvedTaskId = Number(taskId || position?.task_id || 0);
     if (!Number.isFinite(resolvedTaskId) || resolvedTaskId <= 0) return;
@@ -2151,7 +2125,6 @@ export default function App() {
     );
   };
 
-  const summary = positions?.summary || {};
   const panelMap = {
     create_pool: (
       <CreatePoolPanel
@@ -2622,7 +2595,6 @@ export default function App() {
           apiBaseUrl={apiBaseUrl}
           initData={initData}
           hasInitData={hasInitData}
-          isAdmin={isAdminUser}
           refreshInterval={assetsRefreshInterval}
         />
       </Suspense>

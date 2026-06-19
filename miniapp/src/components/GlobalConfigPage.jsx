@@ -472,7 +472,7 @@ function MutedHint({ children }) {
     );
 }
 
-function DCASection({ draft, updateDraft, inputClass, brand }) {
+function DCASection({ draft, updateDraft, inputClass }) {
     const percentages = Array.isArray(draft.dca_percentages) ? draft.dca_percentages : [];
     const sum = useMemo(
         () => percentages.reduce((acc, v) => acc + (Number(v) || 0), 0),

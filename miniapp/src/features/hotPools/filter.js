@@ -82,7 +82,7 @@ export function resolveHotPoolMarketCapDisplay(pool) {
     return NaN;
 }
 
-export function resolveHotPoolMarketCapLabel(pool) {
+export function resolveHotPoolMarketCapLabel() {
     return 'FDV';
 }
 

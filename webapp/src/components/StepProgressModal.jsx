@@ -132,39 +132,6 @@ function resolveView(operation, progress) {
     return resolveOpenPositionView(tone, error);
   }
 
-  if (operation === 'open_position') {
-    if (tone === 'done') {
-      return {
-        tone,
-        panelTitle: '开仓状态',
-        badge: '已完成',
-        headline: '开仓成功',
-        summary: '新仓位已经创建完成。',
-        detail: '持仓列表刷新后会显示最新结果。',
-      };
-    }
-
-    if (tone === 'error') {
-      return {
-        tone,
-        panelTitle: '开仓状态',
-        badge: '失败',
-        headline: '开仓失败',
-        summary: error || '开仓请求执行失败。',
-        detail: '请检查参数、钱包余额和链上状态后重试。',
-      };
-    }
-
-    return {
-      tone,
-      panelTitle: '开仓状态',
-      badge: '处理中',
-      headline: '开仓请求已提交',
-      summary: '系统正在校验参数并创建仓位。',
-      detail: '处理完成前请勿重复提交相同请求。',
-    };
-  }
-
   if (tone === 'done') {
     return {
       tone,

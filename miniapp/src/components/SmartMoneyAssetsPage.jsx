@@ -199,7 +199,7 @@ function PnLCalendar({ data, loading=false, viewDate, onMonthChange }) {
 /* ═══════════════════════════════════════════════════════ */
 export default function SmartMoneyAssetsPage({
     apiBaseUrl, initData, hasInitData, isAdmin = false,
-    tick, pollIntervalSec = 15, accentTheme = 'lime', onNotice,
+    pollIntervalSec = 15, accentTheme = 'lime',
 }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
 

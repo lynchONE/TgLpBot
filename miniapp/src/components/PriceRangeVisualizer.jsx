@@ -64,8 +64,6 @@ export default function PriceRangeVisualizer({
     gridStepPct = null,
     rangeBadgeText = '',
     inRange,
-    currentGridLower,
-    currentGridUpper,
     taskRangeText = '',
     runningDuration = '',
 }) {
