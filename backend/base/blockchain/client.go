@@ -140,6 +140,22 @@ func GetEVMClient(chain string) (*ethclient.Client, *big.Int, error) {
 	return c, new(big.Int).Set(id), nil
 }
 
+// PeekEVMClient returns an already-initialized EVM client without dialing or probing RPC.
+func PeekEVMClient(chain string) (*ethclient.Client, *big.Int, bool) {
+	chain = config.NormalizeChain(chain)
+	evmMu.RLock()
+	c := evmClients[chain]
+	id := evmChainIDs[chain]
+	evmMu.RUnlock()
+	if c == nil {
+		return nil, nil, false
+	}
+	if id == nil {
+		return nil, nil, false
+	}
+	return c, new(big.Int).Set(id), true
+}
+
 func ensureEVMClient(chain string) error {
 	if config.AppConfig == nil {
 		return fmt.Errorf("config not loaded")

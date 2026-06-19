@@ -232,7 +232,10 @@ export default function SwapModule({
                 signal: controller.signal,
             });
             if (controller.signal.aborted || walletsSeqRef.current !== seq) return;
-            const list = resp?.wallets || [];
+            if (!Array.isArray(resp.wallets)) {
+                throw new Error('钱包列表响应格式错误');
+            }
+            const list = resp.wallets;
             setWallets(list);
             setSelectedWalletId((current) => {
                 if (list.some((item) => String(item.id) === String(current))) return current;
@@ -241,6 +244,8 @@ export default function SwapModule({
             });
         } catch (e) {
             if (controller.signal.aborted || walletsSeqRef.current !== seq) return;
+            setWallets([]);
+            setSelectedWalletId('');
             onNotice?.(String(e?.message || e));
         } finally {
             if (walletsAbortRef.current === controller) {

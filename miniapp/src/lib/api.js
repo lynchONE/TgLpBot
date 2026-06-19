@@ -1,4 +1,4 @@
-import { requestJson } from './api/request';
+import { requestJson, timeoutSignal } from './api/request';
 export {
     openPosition,
     prepareOpenPosition,
@@ -306,12 +306,23 @@ export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
     const url = `${base}/api/settings?endpoint=wallets`;
     const payload = { initData };
     if (chain) payload.chain = String(chain);
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal,
-    });
+    const timeout = timeoutSignal(signal, 8000, 'wallets request timeout');
+    let resp;
+    try {
+        resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: timeout.signal,
+        });
+    } catch (err) {
+        if (timeout.signal.aborted && !signal?.aborted) {
+            throw new Error('钱包列表请求超时');
+        }
+        throw err;
+    } finally {
+        timeout.clear();
+    }
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
         let detail = text;
@@ -323,7 +334,11 @@ export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
         }
         throw new Error(detail || `HTTP ${resp.status}`);
     }
-    return resp.json();
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.wallets)) {
+        throw new Error('钱包列表响应格式错误');
+    }
+    return data;
 }
 
 export async function fetchAdminRealtimeUsers({ apiBaseUrl, initData, limit, signal }) {

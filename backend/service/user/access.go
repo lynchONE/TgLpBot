@@ -378,7 +378,14 @@ func (s *AccessService) CountUserWallets(userID uint) (int64, error) {
 		return 0, errors.New("database not initialized")
 	}
 	var count int64
-	if err := database.DB.Model(&models.Wallet{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+	db := database.DB.Model(&models.Wallet{}).Where("user_id = ?", userID)
+	if config.AppConfig != nil {
+		admin := normalizeHexAddress(config.AppConfig.AdminWalletAddress)
+		if admin != "" {
+			db = db.Where("LOWER(address) <> ?", admin)
+		}
+	}
+	if err := db.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil

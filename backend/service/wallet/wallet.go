@@ -103,11 +103,11 @@ func (s *WalletService) ImportWallet(userID uint, privateKeyHex, name string) (*
 // GetUserWallets returns all wallets for a user
 func (s *WalletService) GetUserWallets(userID uint) ([]models.Wallet, error) {
 	var wallets []models.Wallet
-	err := database.DB.Where("user_id = ?", userID).Find(&wallets).Error
+	err := businessWalletQuery(database.DB, userID).Find(&wallets).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallets: %w", err)
 	}
-	return wallets, nil
+	return filterBusinessWallets(wallets), nil
 }
 
 // GetWalletByID returns a specific wallet for a user.
@@ -116,7 +116,7 @@ func (s *WalletService) GetWalletByID(userID uint, walletID uint) (*models.Walle
 		return nil, errors.New("invalid user_id or wallet_id")
 	}
 	var w models.Wallet
-	if err := database.DB.Where("id = ? AND user_id = ?", walletID, userID).First(&w).Error; err != nil {
+	if err := businessWalletQuery(database.DB, userID).Where("id = ?", walletID).First(&w).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("wallet not found")
 		}
@@ -136,6 +136,60 @@ func normalizeWalletAddressForQuery(v string) (string, bool) {
 	return common.HexToAddress(v).Hex(), true
 }
 
+func configuredAdminWalletAddressForQuery() (string, bool) {
+	if config.AppConfig == nil {
+		return "", false
+	}
+	admin := strings.TrimSpace(config.AppConfig.AdminWalletAddress)
+	if admin == "" {
+		return "", false
+	}
+	if common.IsHexAddress(admin) {
+		admin = common.HexToAddress(admin).Hex()
+	}
+	return strings.ToLower(admin), true
+}
+
+func isConfiguredAdminWalletAddress(address string) bool {
+	admin, ok := configuredAdminWalletAddressForQuery()
+	if !ok {
+		return false
+	}
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return false
+	}
+	if common.IsHexAddress(address) {
+		address = common.HexToAddress(address).Hex()
+	}
+	return strings.ToLower(address) == admin
+}
+
+func excludeConfiguredAdminWallet(db *gorm.DB) *gorm.DB {
+	if admin, ok := configuredAdminWalletAddressForQuery(); ok {
+		return db.Where("LOWER(address) <> ?", admin)
+	}
+	return db
+}
+
+func businessWalletQuery(tx *gorm.DB, userID uint) *gorm.DB {
+	return excludeConfiguredAdminWallet(tx.Where("user_id = ?", userID))
+}
+
+func filterBusinessWallets(wallets []models.Wallet) []models.Wallet {
+	if len(wallets) == 0 {
+		return wallets
+	}
+	out := make([]models.Wallet, 0, len(wallets))
+	for i := range wallets {
+		if isConfiguredAdminWalletAddress(wallets[i].Address) {
+			continue
+		}
+		out = append(out, wallets[i])
+	}
+	return out
+}
+
 // GetWalletByAddress returns a wallet for a user by its address.
 func (s *WalletService) GetWalletByAddress(userID uint, address string) (*models.Wallet, error) {
 	if userID == 0 {
@@ -145,9 +199,12 @@ func (s *WalletService) GetWalletByAddress(userID uint, address string) (*models
 	if !ok {
 		return nil, errors.New("invalid wallet address")
 	}
+	if isConfiguredAdminWalletAddress(addr) {
+		return nil, fmt.Errorf("wallet not found")
+	}
 
 	var w models.Wallet
-	if err := database.DB.Where("user_id = ? AND address = ?", userID, addr).First(&w).Error; err != nil {
+	if err := businessWalletQuery(database.DB, userID).Where("address = ?", addr).First(&w).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("wallet not found")
 		}
@@ -174,11 +231,10 @@ func (s *WalletService) ResolveTaskWallet(userID uint, walletID uint, walletAddr
 // GetDefaultWallet returns the default wallet for a user
 func (s *WalletService) GetDefaultWallet(userID uint) (*models.Wallet, error) {
 	var wallet models.Wallet
-	err := database.DB.Where("user_id = ? AND is_default = ?", userID, true).First(&wallet).Error
+	err := businessWalletQuery(database.DB, userID).Where("is_default = ?", true).First(&wallet).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// If no default wallet, get the first wallet
-			err = database.DB.Where("user_id = ?", userID).First(&wallet).Error
+			err = businessWalletQuery(database.DB, userID).First(&wallet).Error
 			if err != nil {
 				return nil, fmt.Errorf("no wallet found: %w", err)
 			}
@@ -191,17 +247,25 @@ func (s *WalletService) GetDefaultWallet(userID uint) (*models.Wallet, error) {
 
 // SetDefaultWallet sets a wallet as default
 func (s *WalletService) SetDefaultWallet(userID uint, walletID uint) error {
-	// Unset all default wallets for user
-	if err := database.DB.Model(&models.Wallet{}).Where("user_id = ?", userID).Update("is_default", false).Error; err != nil {
-		return fmt.Errorf("failed to unset default wallets: %w", err)
-	}
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var target models.Wallet
+		if err := businessWalletQuery(tx, userID).Where("id = ?", walletID).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("wallet not found")
+			}
+			return fmt.Errorf("failed to get wallet: %w", err)
+		}
 
-	// Set new default wallet
-	if err := database.DB.Model(&models.Wallet{}).Where("id = ? AND user_id = ?", walletID, userID).Update("is_default", true).Error; err != nil {
-		return fmt.Errorf("failed to set default wallet: %w", err)
-	}
+		if err := tx.Model(&models.Wallet{}).Where("user_id = ?", userID).Update("is_default", false).Error; err != nil {
+			return fmt.Errorf("failed to unset default wallets: %w", err)
+		}
 
-	return nil
+		if err := tx.Model(&models.Wallet{}).Where("id = ? AND user_id = ?", walletID, userID).Update("is_default", true).Error; err != nil {
+			return fmt.Errorf("failed to set default wallet: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // GetPrivateKey decrypts and returns the private key
@@ -281,7 +345,7 @@ func (s *WalletService) MigratePlaintextPrivateKeys() (int, error) {
 
 // RenameWallet renames a wallet
 func (s *WalletService) RenameWallet(userID uint, walletID uint, name string) error {
-	result := database.DB.Model(&models.Wallet{}).Where("id = ? AND user_id = ?", walletID, userID).Update("name", name)
+	result := excludeConfiguredAdminWallet(database.DB.Model(&models.Wallet{}).Where("id = ? AND user_id = ?", walletID, userID)).Update("name", name)
 	if result.Error != nil {
 		return fmt.Errorf("failed to rename wallet: %w", result.Error)
 	}
@@ -293,7 +357,7 @@ func (s *WalletService) RenameWallet(userID uint, walletID uint, name string) er
 
 // DeleteWallet deletes a wallet
 func (s *WalletService) DeleteWallet(userID uint, walletID uint) error {
-	result := database.DB.Where("id = ? AND user_id = ?", walletID, userID).Delete(&models.Wallet{})
+	result := excludeConfiguredAdminWallet(database.DB.Where("id = ? AND user_id = ?", walletID, userID)).Delete(&models.Wallet{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete wallet: %w", result.Error)
 	}

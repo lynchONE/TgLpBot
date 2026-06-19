@@ -176,11 +176,11 @@ func smartMoneyWalletLiveCacheKey(chainID int, address string) string {
 }
 
 func smartMoneyLeaderboardDailyCacheKey(snapshotDay time.Time, metric string, days int) string {
-	return fmt.Sprintf("assets:smart-money:leaderboard:v3:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
+	return fmt.Sprintf("assets:smart-money:leaderboard:v4:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
 }
 
 func smartMoneyLeaderboardLiveCacheKey(snapshotDay time.Time, metric string, days int) string {
-	return fmt.Sprintf("assets:smart-money:leaderboard-live:v1:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
+	return fmt.Sprintf("assets:smart-money:leaderboard-live:v2:%s:%d:%s", formatDay(snapshotDay), clampLPDays(days), normalizeLeaderboardMetric(metric))
 }
 
 func transferNetUSD(transferInUSD float64, transferOutUSD float64) float64 {
@@ -189,6 +189,11 @@ func transferNetUSD(transferInUSD float64, transferOutUSD float64) float64 {
 
 func transferTotalCount(transferInCount int, transferOutCount int) int {
 	return transferInCount + transferOutCount
+}
+
+func round2ValuePtr(value float64) *float64 {
+	rounded := round2(value)
+	return &rounded
 }
 
 func adjustedPnL(delta float64, transferInUSD float64, transferOutUSD float64) float64 {
@@ -425,17 +430,21 @@ func smartMoneySourceContractValue(walletRow models.MonitoredWallet) string {
 	return strings.TrimSpace(*walletRow.SourceContract)
 }
 
-func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smartMoneyWalletLiveState) SmartMoneyWalletSummary {
+func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smartMoneyWalletLiveState, baseline *models.SmartMoneyWalletDailySnapshot) SmartMoneyWalletSummary {
 	summary := SmartMoneyWalletSummary{
 		Address:         walletRow.Address,
 		Source:          strings.TrimSpace(walletRow.Source),
 		SourceContract:  smartMoneySourceContractValue(walletRow),
 		ChainID:         walletRow.ChainID,
 		Assets:          live.assets,
+		CurrentTotalUSD: round2ValuePtr(live.assets.TotalUSD),
 		ActivePoolCount: live.activePoolCount,
 		TodayEventCount: live.todayEventCount,
 		LastActiveAt:    live.lastActiveAt,
 		RecognizedBasis: recognizedAssetBasis,
+	}
+	if baseline != nil {
+		summary.BaselineTotalUSD = round2ValuePtr(baseline.TotalUSD)
 	}
 	if walletRow.Label != nil {
 		summary.Label = strings.TrimSpace(*walletRow.Label)
@@ -469,6 +478,8 @@ func smartMoneyWalletSummaryFromSnapshot(walletRow models.MonitoredWallet, snaps
 			TotalUSD:          round2(snapshot.TotalUSD),
 			TrackedTokenCount: snapshot.TrackedTokenCount,
 		}
+		summary.BaselineTotalUSD = round2ValuePtr(snapshot.TotalUSD)
+		summary.CurrentTotalUSD = round2ValuePtr(snapshot.TotalUSD)
 	}
 	if dailyStat != nil {
 		summary.ActivePoolCount = dailyStat.ActivePoolCount
@@ -599,13 +610,14 @@ func (s *Service) GetSmartMoneyOverviewSections(ctx context.Context, days int, p
 			if err != nil {
 				resp.Warnings = append(resp.Warnings, fmt.Sprintf("钱包 %s 本地实时资产暂不可用：%v", walletRow.Address, err))
 			}
+			key := formatDay(snapshotDay) + "|" + smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
+			baselineSnapshot := snapshotMap[key]
 			if ok {
-				resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromLive(walletRow, live))
+				resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromLive(walletRow, live, baselineSnapshot))
 				resp.Warnings = append(resp.Warnings, live.warnings...)
 				continue
 			}
-			key := formatDay(snapshotDay) + "|" + smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
-			resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromSnapshot(walletRow, snapshotMap[key], lpStatMap[smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]))
+			resp.Wallets = append(resp.Wallets, smartMoneyWalletSummaryFromSnapshot(walletRow, baselineSnapshot, lpStatMap[smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]))
 		}
 	}
 
@@ -909,7 +921,13 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	if err != nil {
 		return nil, err
 	}
-	summary := smartMoneyWalletSummaryFromLive(*walletRow, live)
+	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	baselineMap, err := s.loadSmartMoneySnapshotRows(ctx, []models.MonitoredWallet{*walletRow}, snapshotDay)
+	if err != nil {
+		return nil, err
+	}
+	baseline := baselineMap[formatDay(snapshotDay)+"|"+smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]
+	summary := smartMoneyWalletSummaryFromLive(*walletRow, live, baseline)
 
 	startOfToday := dayStart(timeutil.Now())
 	start := startOfToday.AddDate(0, 0, -days)
@@ -1623,6 +1641,7 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 			ChainID:                 input.Wallet.ChainID,
 			EstimatedRealizedPnLUSD: estimatedPnL,
 			YieldRate:               yieldRate,
+			CurrentTotalUSD:         round2(input.Current.TotalUSD),
 			HasTransferIn:           input.Current.HasTransferIn,
 			HasTransferOut:          input.Current.HasTransferOut,
 			TransferInCount:         input.Current.TransferInCount,
@@ -1631,6 +1650,9 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 			TransferInUSD:           round2(input.Current.TransferInUSD),
 			TransferOutUSD:          round2(input.Current.TransferOutUSD),
 			TransferNetUSD:          transferNetUSD(input.Current.TransferInUSD, input.Current.TransferOutUSD),
+		}
+		if input.Previous != nil {
+			entry.BaselineTotalUSD = round2(input.Previous.TotalUSD)
 		}
 		if input.Wallet.Label != nil {
 			entry.Label = strings.TrimSpace(*input.Wallet.Label)

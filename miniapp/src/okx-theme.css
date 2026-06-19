@@ -611,36 +611,50 @@ body::before {
     background: rgba(var(--okx-warning-rgb), 0.1) !important;
 }
 
-.miniapp-shell nav {
-    max-width: min(430px, calc(100vw - 24px)) !important;
-    border: 1px solid var(--okx-line-strong) !important;
-    border-radius: 8px !important;
-    background: rgba(28, 32, 39, 0.98) !important;
+.miniapp-shell .mini-bottom-nav-wrap {
+    padding-bottom: max(0.45rem, env(safe-area-inset-bottom)) !important;
+}
+
+.miniapp-shell .mini-bottom-nav {
+    width: min(390px, calc(100vw - 24px)) !important;
+    min-height: 52px !important;
+    border: 0 !important;
+    border-radius: 26px !important;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 42%),
+        rgba(28, 32, 39, 0.92) !important;
     padding: 6px !important;
-    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.38) !important;
+    box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.32) !important;
+    outline: 0 !important;
 }
 
-.miniapp-shell nav.rounded-full {
-    border-radius: 8px !important;
-}
-
-.miniapp-shell nav button {
-    min-height: 44px !important;
-    border-radius: 7px !important;
+.miniapp-shell .mini-bottom-nav-item {
+    min-width: 42px !important;
+    min-height: 40px !important;
+    gap: 5px !important;
+    border: 0 !important;
+    border-radius: 20px !important;
+    padding: 0 10px !important;
     color: var(--okx-muted) !important;
 }
 
-.miniapp-shell nav button.rounded-full {
-    border-radius: 7px !important;
-}
-
-.miniapp-shell nav button[aria-pressed='true'] {
+.miniapp-shell .mini-bottom-nav-item[aria-pressed='true'] {
+    min-width: 98px !important;
     background: var(--okx-accent) !important;
     color: #050700 !important;
+    box-shadow: 0 7px 18px rgba(var(--okx-accent-rgb), 0.16) !important;
 }
 
-.miniapp-shell nav button[aria-pressed='true'] * {
+.miniapp-shell .mini-bottom-nav-item[aria-pressed='true'] * {
     color: #050700 !important;
+}
+
+.miniapp-shell .mini-bottom-nav-label {
+    max-width: 62px;
+    overflow: hidden;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .miniapp-shell :is(.fixed.inset-0, .absolute.inset-0).bg-black\/40,
@@ -836,6 +850,21 @@ body::before {
 
 .miniapp-shell .mini-module-actions::-webkit-scrollbar {
     display: none;
+}
+
+.miniapp-shell .mini-hot-sort-tabs {
+    min-width: 0;
+}
+
+.miniapp-shell .mini-hot-sort-tabs > button {
+    min-height: 40px !important;
+}
+
+.miniapp-shell .mini-hot-search-btn,
+.miniapp-shell .mini-hot-filter-btn {
+    flex: 0 0 44px;
+    min-width: 44px !important;
+    min-height: 44px !important;
 }
 
 .miniapp-shell .mini-module-header-body {
@@ -1202,7 +1231,7 @@ body::before {
 }
 
 .miniapp-shell .mini-sm-page {
-    padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
 }
 
 .miniapp-shell .mini-sm-shell {
@@ -1746,6 +1775,13 @@ body::before {
     color: #050700 !important;
 }
 
+.miniapp-shell .op-footer-primary[data-step='submit']:not(:disabled),
+.miniapp-shell .op-footer-primary[data-step='submit']:not(:disabled) * {
+    border-color: rgba(var(--okx-accent-rgb), 0.72) !important;
+    background: var(--okx-accent) !important;
+    color: #050700 !important;
+}
+
 .miniapp-shell .op-footer-primary:disabled {
     border: 1px solid var(--okx-line) !important;
     background: var(--okx-disabled-bg) !important;
@@ -1803,14 +1839,63 @@ body::before {
         min-height: 42px !important;
     }
 
-    .miniapp-shell nav {
-        max-width: calc(100vw - 18px) !important;
+    .miniapp-shell .mini-hot-module-header .mini-module-header-main {
+        display: grid !important;
+        grid-template-columns: 1fr;
+        align-items: stretch;
+        gap: 10px !important;
     }
 
-    .miniapp-shell nav button {
-        min-width: 42px !important;
-        padding-left: 8px !important;
-        padding-right: 8px !important;
+    .miniapp-shell .mini-hot-module-header .mini-module-title {
+        min-width: 0;
+    }
+
+    .miniapp-shell .mini-hot-module-header .mini-module-actions {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) 44px 44px;
+        width: 100%;
+        max-width: none;
+        gap: 8px !important;
+        overflow: visible;
+    }
+
+    .miniapp-shell .mini-hot-sort-tabs {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+        min-width: 0;
+    }
+
+    .miniapp-shell .mini-hot-sort-tabs > button {
+        min-width: 0 !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .miniapp-shell .mini-hot-search-btn,
+    .miniapp-shell .mini-hot-filter-btn {
+        width: 44px !important;
+        height: 44px !important;
+        justify-self: end;
+    }
+
+    .miniapp-shell .mini-bottom-nav {
+        width: calc(100vw - 18px) !important;
+        min-height: 50px !important;
+        padding: 5px !important;
+    }
+
+    .miniapp-shell .mini-bottom-nav-item {
+        min-width: 40px !important;
+        min-height: 38px !important;
+        padding-left: 9px !important;
+        padding-right: 9px !important;
+    }
+
+    .miniapp-shell .mini-bottom-nav-item[aria-pressed='true'] {
+        min-width: 96px !important;
     }
 
     .miniapp-shell .mini-pool-row-main {

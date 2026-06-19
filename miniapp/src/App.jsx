@@ -2581,7 +2581,7 @@ export default function App() {
 
     return (
         <div
-            className={`miniapp-shell min-h-screen max-w-[720px] xl:max-w-[960px] 2xl:max-w-[1080px] mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] ${(isPositions || isSwap) ? 'pb-[calc(96px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'}`}
+            className={`miniapp-shell min-h-screen max-w-[720px] xl:max-w-[960px] 2xl:max-w-[1080px] mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] ${(isPositions || isSwap) ? 'pb-[calc(76px+env(safe-area-inset-bottom))]' : 'pb-[calc(68px+env(safe-area-inset-bottom))]'}`}
             data-accent-theme={accentTheme}
         >
             {notice ? (
@@ -2718,10 +2718,11 @@ export default function App() {
                     </div>
                 ) : isHotPools ? (
                     <ModuleHeader
+                        className="mini-hot-module-header"
                         title={hotPoolsSort === 'fee_rate' ? '费率排序' : hotPoolsSort === 'volume' ? '成交量排序' : '涨跌幅排序'}
                         actions={(
                             <>
-                                <div className="flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
+                                <div className="mini-hot-sort-tabs flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
                                     {HOT_POOL_SORT_TABS.map((tab) => (
                                         <button
                                             key={tab.key}
@@ -2740,7 +2741,7 @@ export default function App() {
                                 <button
                                     type="button"
                                     onClick={openPoolSearch}
-                                    className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/70 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                    className="mini-hot-search-btn inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/70 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
                                     aria-label="搜索池子"
                                     title="搜索池子"
                                 >
@@ -2752,7 +2753,7 @@ export default function App() {
                                         closePoolSearch();
                                         setHotPoolsFilterOpen(true);
                                     }}
-                                    className={`relative inline-flex h-9 w-9 items-center justify-center rounded-2xl ring-1 transition ${hotPoolsFilterEnabled
+                                    className={`mini-hot-filter-btn relative inline-flex h-9 w-9 items-center justify-center rounded-2xl ring-1 transition ${hotPoolsFilterEnabled
                                         ? brand.softButtonClass
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                         }`}
@@ -4337,8 +4338,8 @@ export default function App() {
             }
 
             {/* Bottom Navigation */}
-            <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none pb-[max(0.75rem,env(safe-area-inset-bottom))] px-4">
-                <nav className="pointer-events-auto max-w-[400px] mx-auto flex items-center justify-between rounded-full border border-zinc-200/60 bg-white/95 px-3 py-2.5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-[#1c2026]/95 dark:shadow-black/70 ring-1 ring-black/5 dark:ring-white/5">
+            <div className="mini-bottom-nav-wrap fixed bottom-0 left-0 right-0 z-50 pointer-events-none px-3">
+                <nav className="mini-bottom-nav pointer-events-auto mx-auto flex items-center justify-between rounded-full bg-white/95 backdrop-blur-xl dark:bg-[#1c2026]/95" aria-label="底部导航">
                     {topNavItems.map((item) => {
                         const isActive = viewMode === item.key;
                         let iconPath = icons.bot;
@@ -4356,13 +4357,13 @@ export default function App() {
                                 onClick={() => setViewMode(item.key)}
                                 aria-pressed={isActive}
                                 aria-label={item.label}
-                                className={`relative flex min-h-[44px] min-w-[44px] flex-col items-center justify-center rounded-full px-4 py-2.5 transition-all duration-300 ${isActive
+                                className={`mini-bottom-nav-item relative inline-flex items-center justify-center rounded-full transition-all duration-300 ${isActive
                                     ? brand.navActiveClass
                                     : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
                                     }`}
                             >
-                                <Icon path={iconPath} className={`h-5 w-5 transition-transform duration-300 ${isActive ? 'scale-110 mb-0.5' : 'mb-0 scale-100'}`} />
-                                {isActive && <span className="text-[10px] font-bold tracking-wide mt-0.5">{item.label}</span>}
+                                <Icon path={iconPath} className={`mini-bottom-nav-icon h-5 w-5 transition-transform duration-300 ${isActive ? 'scale-105' : 'scale-100'}`} />
+                                {isActive && <span className="mini-bottom-nav-label text-[11px] font-bold">{item.label}</span>}
                             </button>
                         );
                     })}

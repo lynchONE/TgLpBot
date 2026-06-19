@@ -100,6 +100,12 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesDailyStatPnLWhenAvailable(t *tes
 	if got, want := first.YieldRate, 0.3875; got != want {
 		t.Fatalf("first yield = %.4f, want %.4f", got, want)
 	}
+	if got, want := first.BaselineTotalUSD, 100.0; got != want {
+		t.Fatalf("first baseline total = %.2f, want %.2f", got, want)
+	}
+	if got, want := first.CurrentTotalUSD, 120.0; got != want {
+		t.Fatalf("first current total = %.2f, want %.2f", got, want)
+	}
 	if !first.HasTransferOut || first.TransferOutCount != 1 {
 		t.Fatalf("first transfer out flag/count = %v/%d, want true/1", first.HasTransferOut, first.TransferOutCount)
 	}
@@ -184,7 +190,9 @@ func TestSmartMoneyWalletSummaryFromLive_IncludesWalletMetadata(t *testing.T) {
 		SourceContract: &sourceContract,
 		Label:          &label,
 		AvatarURL:      &avatarURL,
-	}, smartMoneyWalletLiveState{})
+	}, smartMoneyWalletLiveState{
+		assets: smartMoneyAssetBreakdown{TotalUSD: 123.45},
+	}, &models.SmartMoneyWalletDailySnapshot{TotalUSD: 100})
 
 	if got.AvatarURL != avatarURL {
 		t.Fatalf("avatar url = %s, want %s", got.AvatarURL, avatarURL)
@@ -194,6 +202,12 @@ func TestSmartMoneyWalletSummaryFromLive_IncludesWalletMetadata(t *testing.T) {
 	}
 	if got.SourceContract != sourceContract {
 		t.Fatalf("source contract = %s, want %s", got.SourceContract, sourceContract)
+	}
+	if got.CurrentTotalUSD == nil || *got.CurrentTotalUSD != 123.45 {
+		t.Fatalf("current total = %v, want 123.45", got.CurrentTotalUSD)
+	}
+	if got.BaselineTotalUSD == nil || *got.BaselineTotalUSD != 100 {
+		t.Fatalf("baseline total = %v, want 100", got.BaselineTotalUSD)
 	}
 }
 

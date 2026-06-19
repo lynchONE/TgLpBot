@@ -19,7 +19,6 @@ const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const LEADERBOARD_METRICS = [
   { key: 'pnl', label: '收益额' },
   { key: 'yield_rate', label: '收益率' },
-  { key: 'participation', label: '参与次数' },
 ];
 const PAGE_SIZE = 10;
 
@@ -51,6 +50,27 @@ function formatUsdCompact(value) {
   if (abs >= 100) return `$${number.toFixed(0)}`;
   if (abs >= 10) return `$${number.toFixed(1).replace(/\.0$/, '')}`;
   return `$${number.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function formatMaybeUsdCompact(value, fallback = undefined) {
+  const picked = value ?? fallback;
+  if (picked === undefined || picked === null || picked === '') return '--';
+  return formatUsdCompact(picked);
+}
+
+function assetDeltaUsd(source) {
+  const baseline = Number(source?.baseline_total_usd);
+  const current = Number(source?.current_total_usd ?? source?.assets?.total_usd);
+  if (!Number.isFinite(baseline) || !Number.isFinite(current)) return null;
+  return current - baseline;
+}
+
+function formatSignedUsdCompact(value) {
+  if (value === undefined || value === null || value === '') return '--';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  if (number < 0) return `-${formatUsdCompact(Math.abs(number))}`;
+  return `+${formatUsdCompact(number)}`;
 }
 
 function formatPct(value, digits = 2) {
@@ -655,13 +675,13 @@ export default function SmartMoneyAssetsPanel({
                     <div style={{ minWidth: 0 }}>
                       <div className="am-item-title">{walletLabel(wallet)}</div>
                       <div className="am-item-sub">
-                        {formatChain(wallet.chain_id)} / {walletSourceLabel(wallet)} / {Number(wallet.active_pool_count || 0)} 池 / {Number(wallet.today_event_count || 0)} 事件
+                        {formatChain(wallet.chain_id)} / {walletSourceLabel(wallet)} / 0点 {formatMaybeUsdCompact(wallet?.baseline_total_usd)} / 最新 {formatMaybeUsdCompact(wallet?.current_total_usd, wallet?.assets?.total_usd)}
                         {walletSourceContractLabel(wallet) ? ` / ${walletSourceContractLabel(wallet)}` : ''}
                       </div>
                     </div>
                   </div>
                   <div className="am-list-end">
-                    <strong>{formatUsdCompact(wallet?.assets?.total_usd)}</strong>
+                    <strong>{formatMaybeUsdCompact(wallet?.current_total_usd, wallet?.assets?.total_usd)}</strong>
                     <ChevronRight size={14} />
                   </div>
                 </button>
@@ -723,23 +743,23 @@ export default function SmartMoneyAssetsPanel({
                 </div>
               </div>
               <div className="am-wallet-total">
-                <div className="am-item-sub">总资产</div>
-                <strong>{formatUsdCompact(walletDetail?.wallet?.assets?.total_usd)}</strong>
+                <div className="am-item-sub">最新</div>
+                <strong>{formatMaybeUsdCompact(walletDetail?.wallet?.current_total_usd, walletDetail?.wallet?.assets?.total_usd)}</strong>
               </div>
             </div>
 
             <div className="am-wallet-breakdown">
               <div className="am-wallet-cell">
-                <span>今日收益</span>
-                <strong>{formatUsd(walletDetail?.today?.estimated_realized_pnl_usd)}</strong>
+                <span>0点资产</span>
+                <strong>{formatMaybeUsdCompact(walletDetail?.wallet?.baseline_total_usd)}</strong>
               </div>
               <div className="am-wallet-cell">
-                <span>加仓次数</span>
-                <strong>{Number(walletDetail?.today?.add_count || 0)}</strong>
+                <span>最新资产</span>
+                <strong>{formatMaybeUsdCompact(walletDetail?.wallet?.current_total_usd, walletDetail?.wallet?.assets?.total_usd)}</strong>
               </div>
               <div className="am-wallet-cell">
-                <span>减仓次数</span>
-                <strong>{Number(walletDetail?.today?.remove_count || 0)}</strong>
+                <span>变化</span>
+                <strong>{formatSignedUsdCompact(assetDeltaUsd(walletDetail?.wallet))}</strong>
               </div>
             </div>
           </div>
@@ -808,17 +828,11 @@ export default function SmartMoneyAssetsPanel({
               const rank = leaderboardPage * PAGE_SIZE + index + 1;
               const pnl = Number(item?.estimated_realized_pnl_usd || 0);
               const yieldRate = Number(item?.yield_rate || 0);
-              const participationCount = Number(item?.participation_count || 0);
-              const primaryColor = leaderboardMetric === 'participation'
-                ? 'var(--text-primary)'
-                : ((leaderboardMetric === 'yield_rate' ? yieldRate : pnl) >= 0 ? 'var(--positive)' : 'var(--negative)');
+              const primaryColor = (leaderboardMetric === 'yield_rate' ? yieldRate : pnl) >= 0 ? 'var(--positive)' : 'var(--negative)';
               let primaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
               let secondaryText = formatPct(yieldRate);
               if (leaderboardMetric === 'yield_rate') {
                 primaryText = formatPct(yieldRate);
-                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
-              } else if (leaderboardMetric === 'participation') {
-                primaryText = `${participationCount} 次`;
                 secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
               }
               return (
@@ -834,7 +848,7 @@ export default function SmartMoneyAssetsPanel({
                     <div style={{ minWidth: 0 }}>
                       <div className="am-item-title">{walletLabel(item)}</div>
                       <div className="am-item-sub">
-                        {formatChain(item.chain_id)} / {walletSourceLabel(item)} / 参与 {Number(item.participation_count || 0)} 次
+                        {formatChain(item.chain_id)} / {walletSourceLabel(item)} / 0点 {formatMaybeUsdCompact(item?.baseline_total_usd)} / 最新 {formatMaybeUsdCompact(item?.current_total_usd)}
                         {walletSourceContractLabel(item) ? ` / ${walletSourceContractLabel(item)}` : ''}
                       </div>
                     </div>

@@ -24,7 +24,6 @@ const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const LEADERBOARD_METRICS = [
     { key: 'pnl', label: '收益额' },
     { key: 'yield_rate', label: '收益率' },
-    { key: 'participation', label: '参与次数' },
 ];
 const SM_PAGE_SIZE = 10;
 
@@ -38,6 +37,24 @@ function formatUsdCompact(v) {
     if (a >= 100) return `$${n.toFixed(0)}`;
     if (a >= 10) return `$${n.toFixed(1).replace(/\.0$/,'')}`;
     return `$${n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}`;
+}
+function formatMaybeUsdCompact(v, fallback = undefined) {
+    const picked = v ?? fallback;
+    if (picked === undefined || picked === null || picked === '') return '--';
+    return formatUsdCompact(picked);
+}
+function assetDeltaUsd(source) {
+    const baseline = Number(source?.baseline_total_usd);
+    const current = Number(source?.current_total_usd ?? source?.assets?.total_usd);
+    if (!Number.isFinite(baseline) || !Number.isFinite(current)) return null;
+    return current - baseline;
+}
+function formatSignedUsdCompact(v) {
+    if (v === undefined || v === null || v === '') return '--';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '--';
+    if (n < 0) return `-${formatUsdCompact(Math.abs(n))}`;
+    return `+${formatUsdCompact(n)}`;
 }
 function formatPct(v, d=2) { const n=Number(v||0); return Number.isFinite(n)?`${(n*100).toFixed(d).replace(/\.?0+$/,'')}%`:'--'; }
 function formatChain(cid) { return Number(cid) === 8453 ? 'Base' : 'BSC'; }
@@ -227,7 +244,7 @@ export default function SmartMoneyAssetsPage({
 
     const selectSmartMoneyWallet = useCallback((wallet, { openDetail = false } = {}) => {
         if (!wallet) return;
-        const next = { address: wallet.address, chain_id: wallet.chain_id, label: wallet.label, avatar_url: wallet.avatar_url, source: wallet.source, source_contract: wallet.source_contract, assets: wallet.assets, active_pool_count: wallet.active_pool_count, today_event_count: wallet.today_event_count, last_active_at: wallet.last_active_at };
+        const next = { address: wallet.address, chain_id: wallet.chain_id, label: wallet.label, avatar_url: wallet.avatar_url, source: wallet.source, source_contract: wallet.source_contract, assets: wallet.assets, baseline_total_usd: wallet.baseline_total_usd, current_total_usd: wallet.current_total_usd, active_pool_count: wallet.active_pool_count, today_event_count: wallet.today_event_count, last_active_at: wallet.last_active_at };
         const id = walletKey(next);
         setSelectedWalletId(id);
         setSelectedWalletMeta(next);
@@ -413,21 +430,21 @@ export default function SmartMoneyAssetsPage({
                             return (
                                 <button key={walletKey(wallet)} type="button" onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}
                                     className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${selected ? `${brand.selectionClass} dark:text-white` : 'border-zinc-100 bg-zinc-50/60 text-zinc-700 hover:bg-white dark:border-white/[0.04] dark:bg-[#0f1116] dark:text-white/75 dark:hover:bg-white/[0.06]'}`}>
-                                    <div className="flex items-center justify-between gap-3 w-full">
-                                        <div className="flex items-center gap-2.5 min-w-0">
-                                            <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
-                                            <div className="min-w-0">
-                                                <div className="truncate text-[12px] font-semibold">{walletLabel(wallet)}</div>
-                                                <div className="mt-0.5 text-[10px] opacity-60">
-                                                    {formatChain(wallet.chain_id)} · {walletSourceLabel(wallet)} · {Number(wallet.today_event_count||0)} 事件 · {Number(wallet.active_pool_count||0)} 池
-                                                    {walletSourceContractLabel(wallet) ? ` · ${walletSourceContractLabel(wallet)}` : ''}
+                                        <div className="flex items-center justify-between gap-3 w-full">
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-[12px] font-semibold">{walletLabel(wallet)}</div>
+                                                    <div className="mt-0.5 text-[10px] opacity-60">
+                                                        {formatChain(wallet.chain_id)} · {walletSourceLabel(wallet)} · 0点 {formatMaybeUsdCompact(wallet?.baseline_total_usd)} · 最新 {formatMaybeUsdCompact(wallet?.current_total_usd, wallet?.assets?.total_usd)}
+                                                        {walletSourceContractLabel(wallet) ? ` · ${walletSourceContractLabel(wallet)}` : ''}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            <span className="text-[13px] font-bold tabular-nums">{formatUsdCompact(wallet.assets?.total_usd)}</span>
-                                            <ChevronRight className="h-3 w-3 opacity-40" />
-                                        </div>
+                                            <div className="flex items-center gap-1.5 shrink-0">
+                                                <span className="text-[13px] font-bold tabular-nums">{formatMaybeUsdCompact(wallet?.current_total_usd, wallet?.assets?.total_usd)}</span>
+                                                <ChevronRight className="h-3 w-3 opacity-40" />
+                                            </div>
                                     </div>
                                     {total > 0 && (
                                         <div className="w-full">
@@ -457,21 +474,21 @@ export default function SmartMoneyAssetsPage({
                     </button>
                     {selectedWallet && smartMoneyWallet ? (
                         <div className="flex flex-col gap-2.5">
-                            <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] ring-1 ring-emerald-500/20 dark:bg-emerald-500/[0.08] dark:ring-emerald-400/25 px-3 py-2.5">
-                                <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
-                                <div className="flex-1 min-w-0">
-                                    <div className="text-[12px] font-bold text-zinc-900 dark:text-white/95 truncate">{walletLabel(selectedWallet)}</div>
-                                    <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                        {formatChain(selectedWallet.chain_id)} · {walletSourceLabel(smartMoneyWallet.wallet || selectedWallet)} · 总资产 <span className="font-bold text-zinc-900 dark:text-white/90">{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</span>
-                                        {walletSourceContractLabel(smartMoneyWallet.wallet || selectedWallet) ? ` · ${walletSourceContractLabel(smartMoneyWallet.wallet || selectedWallet)}` : ''}
+                                <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] ring-1 ring-emerald-500/20 dark:bg-emerald-500/[0.08] dark:ring-emerald-400/25 px-3 py-2.5">
+                                    <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-[12px] font-bold text-zinc-900 dark:text-white/95 truncate">{walletLabel(selectedWallet)}</div>
+                                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                            {formatChain(selectedWallet.chain_id)} · {walletSourceLabel(smartMoneyWallet.wallet || selectedWallet)} · 0点 <span className="font-bold text-zinc-900 dark:text-white/90">{formatMaybeUsdCompact(smartMoneyWallet.wallet?.baseline_total_usd)}</span> · 最新 <span className="font-bold text-zinc-900 dark:text-white/90">{formatMaybeUsdCompact(smartMoneyWallet.wallet?.current_total_usd, smartMoneyWallet.wallet?.assets?.total_usd)}</span>
+                                            {walletSourceContractLabel(smartMoneyWallet.wallet || selectedWallet) ? ` · ${walletSourceContractLabel(smartMoneyWallet.wallet || selectedWallet)}` : ''}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-1.5">
-                                <StatBlock label="今日收益" value={formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)} tone={Number(smartMoneyWallet.today?.estimated_realized_pnl_usd||0)>=0?'accent':'warn'} />
-                                <StatBlock label="加仓次数" value={`${Number(smartMoneyWallet.today?.add_count||0)} 次`} />
-                                <StatBlock label="撤仓次数" value={`${Number(smartMoneyWallet.today?.remove_count||0)} 次`} />
-                            </div>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                    <StatBlock label="0点资产" value={formatMaybeUsdCompact(smartMoneyWallet.wallet?.baseline_total_usd)} />
+                                    <StatBlock label="最新资产" value={formatMaybeUsdCompact(smartMoneyWallet.wallet?.current_total_usd, smartMoneyWallet.wallet?.assets?.total_usd)} tone="accent" />
+                                    <StatBlock label="资产变化" value={formatSignedUsdCompact(assetDeltaUsd(smartMoneyWallet.wallet))} tone={Number(assetDeltaUsd(smartMoneyWallet.wallet) || 0)>=0?'accent':'warn'} />
+                                </div>
                             {smartMoneyRows.length > 1 && <MiniChart data={smartMoneyRows} color="#10b981" height={120} />}
                             <PnLCalendar data={smartMoneyPnlCalData} loading={smartMoneyLoading} viewDate={smDetailCalendarMonth} onMonthChange={setSmDetailCalendarMonth} />
                         </div>
@@ -480,12 +497,12 @@ export default function SmartMoneyAssetsPage({
             )}
 
             {/* leaderboard */}
-            {smSubTab === 'leaderboard' && (
-                <Card>
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">排行榜 (昨日)</span>
-                        <div className="flex gap-1">
-                            {LEADERBOARD_METRICS.map(m => <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>)}
+                {smSubTab === 'leaderboard' && (
+                    <Card>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">实时排行榜</span>
+                            <div className="flex gap-1">
+                                {LEADERBOARD_METRICS.map(m => <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>)}
                         </div>
                     </div>
                     <div className="mt-2"><SmSearchInput value={smLeaderSearch} onChange={v => { setSmLeaderSearch(v); setSmLeaderPage(0); }} placeholder="搜索地址或标签" /></div>
@@ -495,35 +512,29 @@ export default function SmartMoneyAssetsPage({
                             return (
                                 <button key={`${item.address}:${item.chain_id}`} type="button"
                                     onClick={() => selectSmartMoneyWallet(item, { openDetail: true })}
-                                    className="flex w-full items-center gap-2.5 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 text-left transition active:scale-[0.98] hover:bg-white dark:border-white/[0.04] dark:bg-[#0f1116] dark:text-white/75 dark:hover:bg-white/[0.06]">
-                                    <RankBadge rank={rank} />
-                                    <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={28} />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">{walletLabel(item)}</div>
-                                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                            {formatChain(item.chain_id)} · {walletSourceLabel(item)} · {Number(item.participation_count||0)} 笔
-                                            {walletSourceContractLabel(item) ? ` · ${walletSourceContractLabel(item)}` : ''}
+                                        className="flex w-full items-center gap-2.5 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 text-left transition active:scale-[0.98] hover:bg-white dark:border-white/[0.04] dark:bg-[#0f1116] dark:text-white/75 dark:hover:bg-white/[0.06]">
+                                        <RankBadge rank={rank} />
+                                        <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={28} />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">{walletLabel(item)}</div>
+                                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                                {formatChain(item.chain_id)} · {walletSourceLabel(item)} · 0点 {formatMaybeUsdCompact(item?.baseline_total_usd)} · 最新 {formatMaybeUsdCompact(item?.current_total_usd)}
+                                                {walletSourceContractLabel(item) ? ` · ${walletSourceContractLabel(item)}` : ''}
+                                            </div>
                                         </div>
-                                    </div>
                                     <div className="text-right shrink-0">
-                                        {(() => {
-                                            const pnl = Number(item.estimated_realized_pnl_usd || 0);
-                                            const yieldRate = Number(item.yield_rate || 0);
-                                            const participationCount = Number(item.participation_count || 0);
-                                            const primaryClass = leaderboardMetric === 'participation'
-                                                ? 'text-zinc-700 dark:text-white/80'
-                                                : ((leaderboardMetric === 'yield_rate' ? yieldRate : pnl) >= 0
+                                            {(() => {
+                                                const pnl = Number(item.estimated_realized_pnl_usd || 0);
+                                                const yieldRate = Number(item.yield_rate || 0);
+                                                const primaryClass = (leaderboardMetric === 'yield_rate' ? yieldRate : pnl) >= 0
                                                     ? 'text-emerald-600 dark:text-emerald-300'
-                                                    : 'text-red-600 dark:text-red-300');
-                                            let primaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
-                                            let secondaryText = formatPct(yieldRate);
-                                            if (leaderboardMetric === 'yield_rate') {
-                                                primaryText = formatPct(yieldRate);
-                                                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
-                                            } else if (leaderboardMetric === 'participation') {
-                                                primaryText = `${participationCount} 次`;
-                                                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
-                                            }
+                                                    : 'text-red-600 dark:text-red-300';
+                                                let primaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+                                                let secondaryText = formatPct(yieldRate);
+                                                if (leaderboardMetric === 'yield_rate') {
+                                                    primaryText = formatPct(yieldRate);
+                                                    secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+                                                }
                                             return (
                                                 <>
                                                     <div className={`text-[12px] font-bold tabular-nums ${primaryClass}`}>
@@ -544,5 +555,4 @@ export default function SmartMoneyAssetsPage({
         </div>
     );
 }
-
 

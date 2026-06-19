@@ -341,17 +341,19 @@ type SmartMoneyWindowStats struct {
 }
 
 type SmartMoneyWalletSummary struct {
-	Address         string                   `json:"address"`
-	Label           string                   `json:"label,omitempty"`
-	AvatarURL       string                   `json:"avatar_url,omitempty"`
-	Source          string                   `json:"source"`
-	SourceContract  string                   `json:"source_contract,omitempty"`
-	ChainID         int                      `json:"chain_id"`
-	Assets          smartMoneyAssetBreakdown `json:"assets"`
-	ActivePoolCount int                      `json:"active_pool_count"`
-	TodayEventCount int                      `json:"today_event_count"`
-	LastActiveAt    *time.Time               `json:"last_active_at,omitempty"`
-	RecognizedBasis string                   `json:"recognized_basis"`
+	Address          string                   `json:"address"`
+	Label            string                   `json:"label,omitempty"`
+	AvatarURL        string                   `json:"avatar_url,omitempty"`
+	Source           string                   `json:"source"`
+	SourceContract   string                   `json:"source_contract,omitempty"`
+	ChainID          int                      `json:"chain_id"`
+	Assets           smartMoneyAssetBreakdown `json:"assets"`
+	BaselineTotalUSD *float64                 `json:"baseline_total_usd,omitempty"`
+	CurrentTotalUSD  *float64                 `json:"current_total_usd,omitempty"`
+	ActivePoolCount  int                      `json:"active_pool_count"`
+	TodayEventCount  int                      `json:"today_event_count"`
+	LastActiveAt     *time.Time               `json:"last_active_at,omitempty"`
+	RecognizedBasis  string                   `json:"recognized_basis"`
 }
 
 type SmartMoneyOverview struct {
@@ -400,6 +402,8 @@ type SmartMoneyLeaderboardEntry struct {
 	MetricValue             float64 `json:"metric_value"`
 	EstimatedRealizedPnLUSD float64 `json:"estimated_realized_pnl_usd"`
 	YieldRate               float64 `json:"yield_rate"`
+	BaselineTotalUSD        float64 `json:"baseline_total_usd"`
+	CurrentTotalUSD         float64 `json:"current_total_usd"`
 	ParticipationCount      int     `json:"participation_count"`
 	ActivePoolCount         int     `json:"active_pool_count"`
 	UnmatchedRemoveCount    int     `json:"unmatched_remove_count"`

@@ -31,3 +31,39 @@ export async function requestJson(url, options) {
     }
     return resp.json();
 }
+
+export function timeoutSignal(parentSignal, timeoutMs, reason = 'request timeout') {
+    const ms = Number(timeoutMs);
+    if (!Number.isFinite(ms) || ms <= 0) {
+        throw new Error('invalid timeout');
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+        controller.abort(new Error(reason));
+    }, ms);
+    let settled = false;
+    let detachParent = () => {};
+    const clear = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        detachParent();
+    };
+
+    if (parentSignal) {
+        if (parentSignal.aborted) {
+            controller.abort(parentSignal.reason);
+            clear();
+        } else {
+            const abortFromParent = () => {
+                controller.abort(parentSignal.reason);
+                clear();
+            };
+            parentSignal.addEventListener('abort', abortFromParent, { once: true });
+            detachParent = () => parentSignal.removeEventListener('abort', abortFromParent);
+        }
+    }
+
+    controller.signal.addEventListener('abort', clear, { once: true });
+    return { signal: controller.signal, clear };
+}

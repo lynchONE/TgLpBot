@@ -65,6 +65,7 @@ export function OpenPositionFooter({
                         type="button"
                         onClick={onSubmit}
                         disabled={openPositionSubmitDisabled}
+                        data-step="submit"
                         className={`op-footer-primary flex-1 rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
                             ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
                             : brand.solidButtonClass

@@ -152,7 +152,7 @@ func (s *Server) handleWallets(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	client, _, cerr := blockchain.GetEVMClient(chain)
+	client, _, hasClient := blockchain.PeekEVMClient(chain)
 	stableAddrStr := strings.TrimSpace(cc.StableAddress)
 	stableAddrOk := common.IsHexAddress(stableAddrStr)
 	stableAddr := common.Address{}
@@ -165,13 +165,13 @@ func (s *Server) handleWallets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var stableToken *blockchain.ERC20
-	if client != nil && cerr == nil && stableAddrOk {
+	if client != nil && hasClient && stableAddrOk {
 		if t, err := blockchain.NewERC20(stableAddr, client); err == nil {
 			stableToken = t
 		}
 	}
 
-	if client != nil && cerr == nil {
+	if client != nil && hasClient {
 		g := new(errgroup.Group)
 		g.SetLimit(4)
 
