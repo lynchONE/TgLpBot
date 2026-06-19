@@ -1589,12 +1589,6 @@ func slippagePercentToBps(slippagePercent float64) *big.Int {
 	return big.NewInt(bps)
 }
 
-func percentToBpsOrZero(percent float64) *big.Int {
-	// 临时使用 100% (10000 bps) 的 dust 容忍度进行测试
-	// TODO: 测试成功后改回合理的值（如 5%）
-	return big.NewInt(10000) // 100% dust 容忍度
-}
-
 // parseZapInV3Result parses tokenId/liquidity/amount0Used/amount1Used from ZapSimple.ZapInV3 event.
 func parseZapInV3Result(receipt *types.Receipt, zapAddr common.Address) (*big.Int, *big.Int, *big.Int, *big.Int, error) {
 	parsed, err := abi.JSON(strings.NewReader(blockchain.ZapSimpleABI))
@@ -2572,12 +2566,4 @@ func parseZapSwapExecutedEvent(receipt *types.Receipt, zapAddr common.Address) (
 	}
 
 	return common.Address{}, common.Address{}, nil, nil, false
-}
-
-// percentageToBps converts float percent (e.g. 0.5) to bps (e.g. 50)
-func percentageToBps(p float64) *big.Int {
-	if p <= 0 {
-		return big.NewInt(0)
-	}
-	return big.NewInt(int64(p * 100))
 }

@@ -4,10 +4,12 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/liquidity"
 	"TgLpBot/service/trade"
 	"TgLpBot/service/txexec"
 	"fmt"
 	"log"
+	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -31,6 +33,26 @@ func dcaRetryDelay(attempt int) (time.Duration, bool) {
 		return 0, false
 	}
 	return dcaRetrySchedule[idx], true
+}
+
+// dcaRetrySlippagePercent widens the swap slippage tolerance with the DCA retry attempt so a
+// batch that failed on a moving market gets a realistic chance on retry: base × 2^attempt,
+// base defaulting to 0.5%, capped at 10% (mirrors effectiveExitSlippagePercent in the liquidity layer).
+func dcaRetrySlippagePercent(base float64, attempt int) float64 {
+	if base <= 0 {
+		base = 0.5
+	}
+	if attempt <= 0 {
+		return base
+	}
+	widened := base * math.Pow(2, float64(attempt))
+	if widened > 10 {
+		widened = 10
+	}
+	if widened < base {
+		widened = base
+	}
+	return widened
 }
 
 func isRetryableDCASlippageError(err error) bool {
@@ -212,7 +234,16 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 		s.notify(task.UserID, fmt.Sprintf("🧧 分批加仓 %d/%d 开始：$%.2f", batchNum, total, amountUSDT))
 	}
 
-	res, err := s.liquidityService.IncreaseLiquidityForTask(task.UserID, &task, amountUSDT)
+	// On retry, widen slippage and bump gas so a batch that failed on a moving market
+	// is not re-submitted with the identical (too-tight, too-cheap) parameters.
+	opts := liquidity.TxOptions{}
+	if task.DCARetryCount > 0 {
+		sl := dcaRetrySlippagePercent(task.SlippageTolerance, task.DCARetryCount)
+		opts.SlippageToleranceOverride = &sl
+		opts.GasMultiplier = retryGasMultiplier(task.DCARetryCount)
+		log.Printf("[Strategy] DCA task #%d retry %d: widen slippage=%.4f%% gasMultiplier=%.2f", task.ID, task.DCARetryCount, sl, opts.GasMultiplier)
+	}
+	res, err := s.liquidityService.IncreaseLiquidityForTaskWithOptions(task.UserID, &task, amountUSDT, opts)
 	if err != nil {
 		log.Printf("[Strategy] DCA task #%d batch %d failed: %v", task.ID, batchNum, err)
 		if isRetryableDCASlippageError(err) {

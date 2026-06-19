@@ -821,6 +821,21 @@ func (s *StrategyService) scheduleRebalanceRetry(task *models.StrategyTask, atte
 	s.notify(task.UserID, fmt.Sprintf("❌ %s失败（%d 次）：%v\n将在 %ds 后重试，任务保持运行中。", actionName, attempt, err, int(delay.Seconds())))
 }
 
+// retryGasMultiplier escalates the gas-price multiplier with the retry attempt so a stuck
+// transaction is replaced (on the next attempt) by a higher-priced one: 1.0, 1.25, 1.5, ...
+// capped at 3.0. (normalizeGasMultiplier in the liquidity layer also hard-caps at 10.)
+// Shared by exit retries (here) and DCA add-liquidity retries (strategy_dca.go).
+func retryGasMultiplier(attempt int) float64 {
+	if attempt <= 0 {
+		return 1.0
+	}
+	m := 1.0 + 0.25*float64(attempt)
+	if m > 3.0 {
+		m = 3.0
+	}
+	return m
+}
+
 func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt int, err error, txHashes []string) {
 	if task == nil {
 		return
@@ -869,13 +884,15 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 
 	delay := exitRetryDelay(attempt)
 	nextAt := now.Add(delay)
+	gasMult := retryGasMultiplier(attempt)
 	updates := map[string]interface{}{
-		"status":             models.StrategyStatusRunning,
-		"exit_retry_count":   attempt,
-		"exit_next_retry_at": &nextAt,
-		"exit_last_error":    errText,
-		"exit_give_up_at":    nil,
-		"error_message":      "",
+		"status":              models.StrategyStatusRunning,
+		"exit_retry_count":    attempt,
+		"exit_next_retry_at":  &nextAt,
+		"exit_last_error":     errText,
+		"exit_give_up_at":     nil,
+		"exit_gas_multiplier": gasMult,
+		"error_message":       "",
 	}
 	_ = database.DB.Model(task).Updates(updates).Error
 
@@ -884,6 +901,7 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 	task.ExitNextRetryAt = &nextAt
 	task.ExitLastError = errText
 	task.ExitGiveUpAt = nil
+	task.ExitGasMultiplier = gasMult
 
 	s.scheduleExitRetryWake(task.ID, task.UserID, delay)
 

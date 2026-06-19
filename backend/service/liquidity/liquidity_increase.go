@@ -506,6 +506,15 @@ func (s *LiquidityService) increaseV3Liquidity(
 		}
 	}
 
+	// Cap desired amounts to actual wallet balance to avoid an increaseLiquidity transferFrom
+	// revert when the pre-add swap returned slightly less than the computed amount (mirrors the V4 path).
+	if bal0 := tokenBalanceOrZero(exec, token0, walletAddr); bal0 != nil && amount0In.Cmp(bal0) > 0 {
+		amount0In = bal0
+	}
+	if bal1 := tokenBalanceOrZero(exec, token1, walletAddr); bal1 != nil && amount1In.Cmp(bal1) > 0 {
+		amount1In = bal1
+	}
+
 	if amount0In.Sign() <= 0 && amount1In.Sign() <= 0 {
 		return nil, fmt.Errorf("both token amounts are zero after swap")
 	}
