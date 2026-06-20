@@ -28,6 +28,7 @@ import (
 const maxFollowDelaySeconds = 24 * 60 * 60
 const defaultFollowTriggerWindowSeconds = 5 * 60
 const maxFollowTriggerWindowSeconds = 24 * 60 * 60
+const monitoredWalletSourceAutoFollow = "auto_follow"
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -199,6 +200,12 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 		normalized.ExecutionWalletID = executionWallet.ID
 		normalized.ExecutionWalletAddr = normalizeWalletAddress(executionWallet.Address)
 
+		if normalized.Enabled {
+			if err := ensureFollowTargetWalletsMonitored(ctx, tx, chainID, normalized.TargetWallets); err != nil {
+				return err
+			}
+		}
+
 		var existing models.SmartMoneyFollowConfig
 		var existingFound bool
 		if normalized.ID != 0 {
@@ -295,6 +302,52 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 		return nil, err
 	}
 	return &saved, nil
+}
+
+func ensureFollowTargetWalletsMonitored(ctx context.Context, tx *gorm.DB, chainID int, wallets []string) error {
+	if tx == nil {
+		return fmt.Errorf("db transaction is nil")
+	}
+	if chainID <= 0 {
+		return fmt.Errorf("invalid chain_id")
+	}
+	if len(wallets) == 0 {
+		return fmt.Errorf("target wallet set is empty")
+	}
+	for _, raw := range wallets {
+		addr := normalizeWalletAddress(raw)
+		if addr == "" {
+			return fmt.Errorf("invalid target wallet address")
+		}
+		var existing models.MonitoredWallet
+		err := tx.WithContext(ctx).
+			Where("address = ? AND chain_id = ?", addr, chainID).
+			First(&existing).Error
+		if err == nil {
+			if existing.IsActive {
+				continue
+			}
+			if err := tx.Model(&models.MonitoredWallet{}).
+				Where("id = ?", existing.ID).
+				Update("is_active", true).Error; err != nil {
+				return fmt.Errorf("reactivate follow target wallet failed: %w", err)
+			}
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("load follow target wallet failed: %w", err)
+		}
+		wallet := &models.MonitoredWallet{
+			Address:  addr,
+			ChainID:  chainID,
+			Source:   monitoredWalletSourceAutoFollow,
+			IsActive: true,
+		}
+		if err := tx.Create(wallet).Error; err != nil {
+			return fmt.Errorf("create follow target wallet failed: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) DeleteConfig(ctx context.Context, userID uint, id uint) error {
@@ -482,6 +535,11 @@ func (s *Service) scanNewEvents(ctx context.Context) error {
 		if len(wallets) == 0 {
 			log.Printf("[SmartMoneyFollow] skip config with empty wallet set: config_id=%d", cfg.ID)
 			continue
+		}
+		if err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return ensureFollowTargetWalletsMonitored(ctx, tx, cfg.ChainID, wallets)
+		}); err != nil {
+			return fmt.Errorf("ensure follow target wallets monitored config_id=%d: %w", cfg.ID, err)
 		}
 		var events []models.SmartMoneyLPEvent
 		if err := database.DB.WithContext(ctx).
