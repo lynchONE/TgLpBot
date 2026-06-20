@@ -4918,6 +4918,7 @@ const AUTO_FOLLOW_DRAFT_INITIAL = Object.freeze({
     delay_mode: 'immediate',
     delay_seconds: '0',
     follow_close: true,
+    range_shift_grids: '0',
 });
 
 function normalizeAutoFollowWalletList(config) {
@@ -5009,6 +5010,7 @@ function createAutoFollowDraft(config) {
         delay_mode: config.delay_mode === 'fixed_delay' ? 'fixed_delay' : 'immediate',
         delay_seconds: config.delay_seconds != null ? String(config.delay_seconds) : '0',
         follow_close: Boolean(config.follow_close),
+        range_shift_grids: config.range_shift_grids != null ? String(config.range_shift_grids) : '0',
     };
 }
 
@@ -5056,6 +5058,10 @@ function normalizeAutoFollowDraft(draft) {
     if (delayMode === 'fixed_delay') {
         delaySeconds = Math.max(0, Math.round(Number(draft.delay_seconds) || 0));
     }
+    const rangeShiftGrids = Math.round(Number(draft.range_shift_grids));
+    if (!Number.isFinite(rangeShiftGrids) || rangeShiftGrids < 0 || rangeShiftGrids > 20) {
+        throw new Error('区间上移格数必须在 0 到 20 之间');
+    }
     const triggerMode = draft.trigger_mode === 'threshold' ? 'threshold' : 'any';
     let triggerMinWallets = 1;
     let triggerWindowSeconds = 300;
@@ -5088,6 +5094,7 @@ function normalizeAutoFollowDraft(draft) {
         delay_mode: delayMode,
         delay_seconds: delaySeconds,
         follow_close: Boolean(draft.follow_close),
+        range_shift_grids: rangeShiftGrids,
     };
 }
 
@@ -5462,6 +5469,23 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, executionWallets
                 )}
             </div>
 
+            <div className="af-form-row">
+                <label className="af-field-label">区间上移</label>
+                <div className="af-input-wrap">
+                    <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        step="1"
+                        className="af-input"
+                        placeholder="0"
+                        value={draft.range_shift_grids}
+                        onChange={(e) => dispatch({ type: 'set', payload: { range_shift_grids: e.target.value } })}
+                    />
+                    <span className="af-input-suffix">格</span>
+                </div>
+            </div>
+
             <div className="af-form-actions">
                 {editing && (
                     <button type="button" className="af-btn af-btn--ghost" onClick={onReset} disabled={saving}>
@@ -5486,6 +5510,7 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
         ? `${Math.round(Number(config.ratio || 0) * 100)}% 仓位`
         : `${formatUsd(config.fixed_amount_usdt)} 固定`;
     const delayText = config.delay_mode === 'fixed_delay' ? `延时 ${config.delay_seconds}s` : '立即跟单';
+    const rangeShiftGrids = Number(config.range_shift_grids) || 0;
     const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
     return (
         <div className={`af-config-card${config.enabled ? ' active' : ''}`}>
@@ -5528,6 +5553,7 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
                 <span className="af-meta-tag"><Wallet size={11} />{formatAutoFollowExecutionWallet(config, executionWallets)}</span>
                 <span className="af-meta-tag"><DollarSign size={11} />{amountText}</span>
                 <span className="af-meta-tag"><Clock size={11} />{delayText}</span>
+                <span className="af-meta-tag"><SlidersHorizontal size={11} />区间上移 {rangeShiftGrids} 格</span>
                 <span className="af-meta-tag">
                     {config.follow_close ? <Check size={11} /> : <X size={11} />}
                     撤仓{config.follow_close ? '跟单' : '忽略'}
@@ -5809,6 +5835,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                     delay_mode: config.delay_mode,
                     delay_seconds: config.delay_seconds,
                     follow_close: config.follow_close,
+                    range_shift_grids: Number(config.range_shift_grids || 0),
                 },
             });
             setNotice(config.enabled ? '已暂停' : '已开启');

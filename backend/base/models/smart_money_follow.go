@@ -94,6 +94,7 @@ type SmartMoneyFollowConfig struct {
 	DelayMode            string      `gorm:"size:20;not null;default:'immediate'" json:"delay_mode"`
 	DelaySeconds         int         `gorm:"not null;default:0" json:"delay_seconds"`
 	FollowClose          bool        `gorm:"not null;default:false" json:"follow_close"`
+	RangeShiftGrids      int         `gorm:"not null;default:0" json:"range_shift_grids"`
 	CursorEventID        uint        `gorm:"not null;default:0" json:"cursor_event_id"`
 	LastSeenEventID      uint        `gorm:"not null;default:0" json:"last_seen_event_id"`
 	CreatedAt            time.Time   `gorm:"not null;autoCreateTime" json:"created_at"`

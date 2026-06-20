@@ -3,6 +3,7 @@ package smart_money_follow
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	poolsvc "TgLpBot/service/pool"
 	"errors"
 	"testing"
 	"time"
@@ -68,6 +69,21 @@ func TestNormalizeSaveInputRejectsInvalidDelay(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid delay error")
+	}
+}
+
+func TestNormalizeSaveInputRejectsInvalidRangeShiftGrids(t *testing.T) {
+	ensureTestChainConfig(t)
+	_, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:               "bsc",
+		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+		AmountMode:          models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:     10,
+		DelayMode:           models.SmartMoneyFollowDelayModeImmediate,
+		RangeShiftGrids:     maxFollowRangeShiftGrids + 1,
+	})
+	if err == nil {
+		t.Fatal("expected invalid range shift grids error")
 	}
 }
 
@@ -148,6 +164,37 @@ func TestNormalizeSaveInputRejectsThresholdAboveWalletCount(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected threshold wallet count error")
+	}
+}
+
+func TestShiftFollowRangeByGrids(t *testing.T) {
+	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 500, 100, 1)
+	if err != nil {
+		t.Fatalf("shiftFollowRangeByGrids returned error: %v", err)
+	}
+	if !shifted || lower != 200 || upper != 600 {
+		t.Fatalf("shifted range = %d-%d shifted=%v, want 200-600 true", lower, upper, shifted)
+	}
+}
+
+func TestShiftFollowRangeByGridsSkipsNarrowRange(t *testing.T) {
+	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 300, 100, 1)
+	if err != nil {
+		t.Fatalf("shiftFollowRangeByGrids returned error: %v", err)
+	}
+	if shifted || lower != 100 || upper != 300 {
+		t.Fatalf("range = %d-%d shifted=%v, want unchanged false", lower, upper, shifted)
+	}
+}
+
+func TestShiftFollowRangeByGridsRejectsOutOfFullRange(t *testing.T) {
+	_, maxTick, err := poolsvc.FullRangeTicks(200)
+	if err != nil {
+		t.Fatalf("FullRangeTicks returned error: %v", err)
+	}
+	_, _, _, err = shiftFollowRangeByGrids(maxTick-600, maxTick, 200, 1)
+	if err == nil {
+		t.Fatal("expected shifted range outside full range error")
 	}
 }
 

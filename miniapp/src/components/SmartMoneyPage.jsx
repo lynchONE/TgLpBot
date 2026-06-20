@@ -4551,6 +4551,7 @@ const AUTO_FOLLOW_DEFAULT_DRAFT = {
     delay_mode: 'immediate',
     delay_seconds: '0',
     follow_close: true,
+    range_shift_grids: '0',
 };
 
 function normalizeAutoFollowWalletList(config) {
@@ -4639,6 +4640,7 @@ function createAutoFollowDraft(config) {
         delay_mode: String(config.delay_mode || 'immediate'),
         delay_seconds: String(config.delay_seconds || '0'),
         follow_close: Boolean(config.follow_close),
+        range_shift_grids: config.range_shift_grids != null ? String(config.range_shift_grids) : '0',
     };
 }
 
@@ -4653,6 +4655,7 @@ function normalizeAutoFollowDraft(draft) {
     const ratioPercent = Number(String(draft.ratio_percent || '').trim());
     const delayMode = String(draft.delay_mode || '').trim();
     const delaySeconds = Number(String(draft.delay_seconds || '').trim());
+    const rangeShiftGrids = Math.round(Number(String(draft.range_shift_grids || '').trim()));
 
     if (amountMode !== 'fixed' && amountMode !== 'ratio') throw new Error('请选择跟单金额模式');
     if (amountMode === 'fixed' && (!Number.isFinite(fixedAmount) || fixedAmount <= 0)) throw new Error('固定金额必须大于 0');
@@ -4660,6 +4663,9 @@ function normalizeAutoFollowDraft(draft) {
     if (delayMode !== 'immediate' && delayMode !== 'fixed_delay') throw new Error('请选择跟单延时模式');
     if (delayMode === 'fixed_delay' && (!Number.isFinite(delaySeconds) || delaySeconds < 0 || delaySeconds > 86400)) {
         throw new Error('延时秒数必须在 0 到 86400 之间');
+    }
+    if (!Number.isFinite(rangeShiftGrids) || rangeShiftGrids < 0 || rangeShiftGrids > 20) {
+        throw new Error('区间上移格数必须在 0 到 20 之间');
     }
     const triggerMode = draft.trigger_mode === 'threshold' ? 'threshold' : 'any';
     let triggerMinWallets = 1;
@@ -4690,6 +4696,7 @@ function normalizeAutoFollowDraft(draft) {
         delay_mode: delayMode,
         delay_seconds: delayMode === 'fixed_delay' ? Math.round(delaySeconds) : 0,
         follow_close: Boolean(draft.follow_close),
+        range_shift_grids: rangeShiftGrids,
     };
 }
 
@@ -4897,6 +4904,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     delay_mode: config.delay_mode,
                     delay_seconds: config.delay_seconds,
                     follow_close: config.follow_close,
+                    range_shift_grids: Number(config.range_shift_grids || 0),
                 },
             });
             await load();
@@ -5327,6 +5335,22 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         />
                     </label>
 
+                    <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-3">
+                        <span className="text-sm text-zinc-200">区间上移</span>
+                        <div className="flex min-w-0 items-center gap-2">
+                            <input
+                                className={`${getInputClass(brand)} w-24 text-right`}
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="1"
+                                value={draft.range_shift_grids}
+                                onChange={(e) => setDraft((prev) => ({ ...prev, range_shift_grids: e.target.value }))}
+                            />
+                            <span className="text-xs text-zinc-500">格</span>
+                        </div>
+                    </label>
+
                     <button
                         type="button"
                         onClick={saveDraft}
@@ -5379,6 +5403,9 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                             </Badge>
                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
                                                 {config.delay_mode === 'fixed_delay' ? `${config.delay_seconds}s` : '立即'}
+                                            </Badge>
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                区间上移 {Number(config.range_shift_grids || 0)} 格
                                             </Badge>
                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
                                                 撤仓{config.follow_close ? '跟单' : '忽略'}

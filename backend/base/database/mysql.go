@@ -571,6 +571,9 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 	if err := ensureColumnExists(tableName, "follow_close", "TINYINT(1) NULL"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(tableName, "range_shift_grids", "BIGINT NULL"); err != nil {
+		return err
+	}
 	if err := ensureColumnExists(tableName, "cursor_event_id", "BIGINT UNSIGNED NULL"); err != nil {
 		return err
 	}
@@ -749,6 +752,13 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		WHERE follow_close IS NULL
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("backfill %s.follow_close: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET range_shift_grids = 0
+		WHERE range_shift_grids IS NULL OR range_shift_grids < 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.range_shift_grids: %w", tableName, err)
 	}
 
 	if err := backfillSmartMoneyFollowConfigCursors(tableName); err != nil {

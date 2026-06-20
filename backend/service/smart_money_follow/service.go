@@ -34,6 +34,7 @@ const defaultFollowTriggerWindowSeconds = 5 * 60
 const maxFollowTriggerWindowSeconds = 24 * 60 * 60
 const monitoredWalletSourceAutoFollow = "auto_follow"
 const maxFollowJobRetryCount = 6
+const maxFollowRangeShiftGrids = 20
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -60,6 +61,7 @@ type SaveConfigInput struct {
 	DelayMode            string
 	DelaySeconds         int
 	FollowClose          bool
+	RangeShiftGrids      int
 }
 
 type followJobTrigger struct {
@@ -490,6 +492,7 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 				"delay_mode":               normalized.DelayMode,
 				"delay_seconds":            normalized.DelaySeconds,
 				"follow_close":             normalized.FollowClose,
+				"range_shift_grids":        normalized.RangeShiftGrids,
 				"cursor_event_id":          cursorID,
 			}
 			if latestID > existing.LastSeenEventID {
@@ -523,6 +526,7 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			DelayMode:            normalized.DelayMode,
 			DelaySeconds:         normalized.DelaySeconds,
 			FollowClose:          normalized.FollowClose,
+			RangeShiftGrids:      normalized.RangeShiftGrids,
 			CursorEventID:        cursorID,
 			LastSeenEventID:      latestID,
 		}
@@ -616,6 +620,9 @@ func NormalizeSaveInput(input SaveConfigInput) (SaveConfigInput, error) {
 			return SaveConfigInput{}, fmt.Errorf("invalid execution wallet address")
 		}
 		input.ExecutionWalletAddr = executionAddr
+	}
+	if input.RangeShiftGrids < 0 || input.RangeShiftGrids > maxFollowRangeShiftGrids {
+		return SaveConfigInput{}, fmt.Errorf("range shift grids must be between 0 and %d", maxFollowRangeShiftGrids)
 	}
 
 	amountMode := strings.ToLower(strings.TrimSpace(input.AmountMode))
@@ -1802,6 +1809,14 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		return nil, fmt.Errorf("pool tick spacing is invalid")
 	}
 	hooksAddr := normalizeHookAddress(poolInfo.HooksAddress)
+	tickLower, tickUpper, shifted, err := shiftFollowRangeByGrids(*event.TickLower, *event.TickUpper, tickSpacing, cfg.RangeShiftGrids)
+	if err != nil {
+		return nil, err
+	}
+	if shifted {
+		log.Printf("[SmartMoneyFollow] shifted follow range config_id=%d event_id=%d grids=%d original=%d-%d shifted=%d-%d",
+			cfg.ID, event.ID, cfg.RangeShiftGrids, *event.TickLower, *event.TickUpper, tickLower, tickUpper)
+	}
 
 	task := &models.StrategyTask{
 		UserID:                 cfg.UserID,
@@ -1819,8 +1834,8 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		HooksAddress:           hooksAddr,
 		Fee:                    poolInfo.Fee,
 		TickSpacing:            tickSpacing,
-		TickLower:              *event.TickLower,
-		TickUpper:              *event.TickUpper,
+		TickLower:              tickLower,
+		TickUpper:              tickUpper,
 		AmountUSDT:             amountUSDT,
 		CurrentLiquidity:       "0",
 		ReopenDelaySeconds:     strategy.NormalizeRebalanceTimeout(globalCfg.RebalanceTimeout),
@@ -1837,6 +1852,46 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		return nil, err
 	}
 	return task, nil
+}
+
+func shiftFollowRangeByGrids(tickLower int, tickUpper int, tickSpacing int, rangeShiftGrids int) (int, int, bool, error) {
+	if tickUpper <= tickLower {
+		return 0, 0, false, fmt.Errorf("invalid tick range")
+	}
+	if tickSpacing <= 0 {
+		return 0, 0, false, fmt.Errorf("invalid tick spacing")
+	}
+	if rangeShiftGrids < 0 {
+		return 0, 0, false, fmt.Errorf("range shift grids is invalid")
+	}
+	if rangeShiftGrids == 0 {
+		return tickLower, tickUpper, false, nil
+	}
+
+	width := int64(tickUpper) - int64(tickLower)
+	if width <= int64(tickSpacing)*2 {
+		return tickLower, tickUpper, false, nil
+	}
+
+	shift := int64(rangeShiftGrids) * int64(tickSpacing)
+	shiftedLower := int64(tickLower) + shift
+	shiftedUpper := int64(tickUpper) + shift
+	maxInt := int64(int(^uint(0) >> 1))
+	minInt := -maxInt - 1
+	if shiftedLower < minInt || shiftedLower > maxInt || shiftedUpper < minInt || shiftedUpper > maxInt {
+		return 0, 0, false, fmt.Errorf("shifted tick range overflows int")
+	}
+	minTick, maxTick, err := pool.FullRangeTicks(tickSpacing)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if shiftedLower < int64(minTick) || shiftedUpper > int64(maxTick) {
+		return 0, 0, false, fmt.Errorf("shifted tick range %d-%d outside valid range %d-%d", shiftedLower, shiftedUpper, minTick, maxTick)
+	}
+	if shiftedUpper <= shiftedLower {
+		return 0, 0, false, fmt.Errorf("shifted tick range is invalid")
+	}
+	return int(shiftedLower), int(shiftedUpper), true, nil
 }
 
 func fillFollowTaskRangePercentages(task *models.StrategyTask) error {

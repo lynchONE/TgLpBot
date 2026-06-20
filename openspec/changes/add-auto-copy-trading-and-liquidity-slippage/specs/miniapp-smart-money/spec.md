@@ -47,6 +47,26 @@ MiniApp SHALL 在聪明钱模块中提供独立的“自动跟单”页签，用
 - **WHEN** 用户保存的延时秒数不满足系统允许范围
 - **THEN** 系统 MUST 拒绝保存该自动跟单配置
 
+### Requirement: 自动跟单支持新建仓位区间上移
+系统 SHALL 允许用户在自动跟单配置中设置 `range_shift_grids`，用于将新建跟单仓位的 tick 区间整体向更高价格方向移动指定数量的 `tickSpacing` 格子。
+
+#### Scenario: 宽区间按配置上移
+- **WHEN** 目标钱包发生新建仓位事件
+- **AND** 自动跟单配置的 `range_shift_grids` 大于 0
+- **AND** 目标仓位区间宽度大于 2 个 `tickSpacing` 格子
+- **THEN** 系统 MUST 在创建跟单仓位前，将 `tick_lower` 和 `tick_upper` 同时增加 `range_shift_grids * tickSpacing`
+- **AND** MUST 保持目标仓位映射仍指向原始被跟单仓位，确保后续加仓和撤仓能关联同一跟单仓位
+
+#### Scenario: 窄区间不上移
+- **WHEN** 目标钱包发生新建仓位事件
+- **AND** 目标仓位区间宽度小于或等于 2 个 `tickSpacing` 格子
+- **THEN** 系统 MUST 使用目标事件原始 tick 区间创建跟单仓位
+- **AND** MUST NOT 因区间上移配置把跟单仓位移出原目标区间
+
+#### Scenario: 非法区间上移配置
+- **WHEN** 用户保存的 `range_shift_grids` 小于 0 或超过系统允许上限
+- **THEN** 系统 MUST 拒绝保存该自动跟单配置
+
 ### Requirement: 自动跟单支持撤仓跟单配置
 系统 SHALL 允许用户配置是否跟随目标钱包撤仓。撤仓跟单开启时，系统 MUST 仅对该自动跟单配置创建的对应跟单仓位执行撤仓。
 

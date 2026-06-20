@@ -25,6 +25,7 @@ type smartMoneyAutoFollowSaveRequest struct {
 	DelayMode            string   `json:"delay_mode"`
 	DelaySeconds         int      `json:"delay_seconds"`
 	FollowClose          bool     `json:"follow_close"`
+	RangeShiftGrids      int      `json:"range_shift_grids"`
 }
 
 type smartMoneyAutoFollowRequest struct {
@@ -94,6 +95,7 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 			DelayMode:            req.Config.DelayMode,
 			DelaySeconds:         req.Config.DelaySeconds,
 			FollowClose:          req.Config.FollowClose,
+			RangeShiftGrids:      req.Config.RangeShiftGrids,
 		}
 		cfg, err := smartMoneyFollowService().SaveConfig(r.Context(), user.ID, input)
 		if err != nil {
