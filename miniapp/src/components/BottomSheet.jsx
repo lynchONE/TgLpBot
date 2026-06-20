@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 // 通用底部抽屉组件 (Bottom Sheet)
 export default function BottomSheet({
@@ -8,7 +9,7 @@ export default function BottomSheet({
     children,
     maxHeightClass = 'max-h-[85vh]',
     className = '',
-    contentClassName = 'px-5 pb-6 sm:pb-5',
+    contentClassName = 'px-5 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] sm:pb-5',
     headerClassName = 'px-5 pt-3 sm:pt-5 pb-3',
     headerRight = null,
     footer = null,
@@ -43,8 +44,8 @@ export default function BottomSheet({
 
     if (!isVisible) return null;
 
-    return (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center">
+    const sheet = (
+        <div className="mini-bottom-sheet-root fixed inset-0 z-[80] flex items-end justify-center sm:items-center">
             {/* Backdrop */}
             <div
                 className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out ${isAnimating ? 'opacity-100' : 'opacity-0'}`}
@@ -99,4 +100,7 @@ export default function BottomSheet({
             </div>
         </div >
     );
+
+    if (typeof document === 'undefined') return sheet;
+    return createPortal(sheet, document.body);
 }
