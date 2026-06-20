@@ -5,7 +5,7 @@ import PriceRangeVisualizer from './PriceRangeVisualizer';
 import NumberFlowValue from './NumberFlowValue.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
-import { TASK_MODE_OPTIONS } from '../lib/taskModes';
+import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../lib/taskModes';
 import { formatUsd, formatUsdCompact, formatFeeUsd, formatBotAmount, formatRangePercentPlain } from '../lib/format';
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -225,16 +225,7 @@ function buildPositionPairTitle(position, token0, token1) {
 }
 
 function normalizeDisplayStrategyMode(position, taskPaused) {
-    const strategyValues = new Set(
-        TASK_MODE_OPTIONS
-            .filter((option) => option.value !== 'pause')
-            .map((option) => option.value)
-    );
-    const strategyMode = String(position?.task_strategy_mode || '').trim();
-    if (strategyValues.has(strategyMode)) return strategyMode;
-    const taskMode = String(position?.task_mode || '').trim();
-    if (!taskPaused && strategyValues.has(taskMode)) return taskMode;
-    return '';
+    return normalizeTaskMode(position?.task_mode, taskPaused);
 }
 
 function followCloseLabel(position) {
@@ -750,20 +741,6 @@ export default function PositionCard({
                                 </div>
                             </div>
                         )}
-                        {typeof onSetTaskPaused === 'function' && (
-                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
-                                title={taskPaused ? '恢复任务' : '暂停任务'}
-                                className="mini-position-pause-action inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-amber-400/40 bg-amber-50 px-2.5 text-[10.5px] font-semibold text-amber-700 shadow-sm transition-all hover:bg-amber-100 active:scale-95 disabled:opacity-40 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25">
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
-                                    {taskPaused ? (
-                                        <path d="M8 5v14l11-7z" />
-                                    ) : (
-                                        <path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z" />
-                                    )}
-                                </svg>
-                                <span>{actionPending === 'pause' ? '...' : taskPaused ? '恢复' : '暂停'}</span>
-                            </button>
-                        )}
                         {typeof onPartialExit === 'function' && (
                             <button type="button" onClick={openWithdrawPanel} disabled={!canPartialExit || Boolean(actionPending)}
                                 title="撤出流动性"
@@ -783,7 +760,7 @@ export default function PositionCard({
                         ) : (
                             typeof onUpdateTaskMode === 'function' && (
                                 <>
-                                    {TASK_MODE_OPTIONS.filter((option) => option.value !== 'pause').map((option) => {
+                                    {TASK_MODE_OPTIONS.map((option) => {
                                         const active = currentStrategyMode === option.value;
                                         return (
                                             <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}

@@ -102,6 +102,51 @@ func TestDisplayTaskAmountUSDT(t *testing.T) {
 	}
 }
 
+func TestFollowStrategySummaryForTask(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	disabled := false
+
+	tests := []struct {
+		name  string
+		task  *models.StrategyTask
+		close *bool
+		want  string
+	}{
+		{name: "nil task", want: ""},
+		{name: "non-follow task", task: &models.StrategyTask{}, want: ""},
+		{
+			name:  "follow close enabled",
+			task:  &models.StrategyTask{IsFollow: true},
+			close: &enabled,
+			want:  "目标撤仓跟随 / 下破保底撤出 / 上破继续跟随",
+		},
+		{
+			name:  "follow close disabled",
+			task:  &models.StrategyTask{IsFollow: true},
+			close: &disabled,
+			want:  "目标撤仓未开启 / 下破保底撤出 / 上破继续跟随",
+		},
+		{
+			name: "follow close unknown",
+			task: &models.StrategyTask{IsFollow: true},
+			want: "目标撤仓未确认 / 下破保底撤出 / 上破继续跟随",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := followStrategySummaryForTask(tt.task, tt.close); got != tt.want {
+				t.Fatalf("followStrategySummaryForTask() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSortRealtimePositionsByCreationTimeAscending(t *testing.T) {
 	t.Parallel()
 

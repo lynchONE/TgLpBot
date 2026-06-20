@@ -2071,6 +2071,7 @@ export default function App() {
 
         try {
             await setTaskPaused({ apiBaseUrl, initData, taskId: id, paused: wantPaused });
+            await refreshRealtimePositionsNow();
 			showNotice(wantPaused ? '任务已暂停。' : '任务已恢复。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
@@ -2300,6 +2301,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await updateTaskMode({ apiBaseUrl, initData, taskId: id, taskMode });
+            await refreshRealtimePositionsNow();
             showNotice(resp?.ok ? `Mode: ${getTaskModeMeta(taskMode).label}` : 'Task mode updated.', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
