@@ -5,7 +5,7 @@ import PriceRangeVisualizer from './PriceRangeVisualizer';
 import NumberFlowValue from './NumberFlowValue.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
-import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../lib/taskModes';
+import { TASK_MODE_OPTIONS } from '../lib/taskModes';
 import { formatUsd, formatUsdCompact, formatFeeUsd, formatBotAmount, formatRangePercentPlain } from '../lib/format';
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -224,6 +224,19 @@ function buildPositionPairTitle(position, token0, token1) {
     return rawTitle;
 }
 
+function normalizeDisplayStrategyMode(position, taskPaused) {
+    const strategyValues = new Set(
+        TASK_MODE_OPTIONS
+            .filter((option) => option.value !== 'pause')
+            .map((option) => option.value)
+    );
+    const strategyMode = String(position?.task_strategy_mode || '').trim();
+    if (strategyValues.has(strategyMode)) return strategyMode;
+    const taskMode = String(position?.task_mode || '').trim();
+    if (!taskPaused && strategyValues.has(taskMode)) return taskMode;
+    return '';
+}
+
 export default function PositionCard({
     position,
     walletAddress,
@@ -374,7 +387,7 @@ export default function PositionCard({
     const isFollowPosition = Boolean(position?.is_follow);
 
     const taskPaused = Boolean(position?.task_paused);
-    const currentTaskMode = normalizeTaskMode(position?.task_mode, position?.task_paused);
+    const currentStrategyMode = normalizeDisplayStrategyMode(position, taskPaused);
     const statusLabel = String(position?.status_label || '');
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤仓中') || statusLabel.includes('处理中');
     const isStoppedState = isStoppedStatus(statusLabel);
@@ -583,15 +596,9 @@ export default function PositionCard({
                                 </button>
                                 {menuOpen && (
                                     <div className="absolute right-0 top-full z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/95 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1c2026]/95">
-                                        {typeof onSetTaskPaused === 'function' && (
-                                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
-                                                className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
-                                            </button>
-                                        )}
                                         {typeof onUpdateTaskRange === 'function' && (
                                             <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
-                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
+                                                className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
                                                 {actionPending === 'range' ? '处理中...' : '修改区间'}
                                             </button>
                                         )}
@@ -737,6 +744,20 @@ export default function PositionCard({
                                 </div>
                             </div>
                         )}
+                        {typeof onSetTaskPaused === 'function' && (
+                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
+                                title={taskPaused ? '恢复任务' : '暂停任务'}
+                                className="mini-position-pause-action inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-amber-400/40 bg-amber-50 px-2.5 text-[10.5px] font-semibold text-amber-700 shadow-sm transition-all hover:bg-amber-100 active:scale-95 disabled:opacity-40 dark:border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+                                    {taskPaused ? (
+                                        <path d="M8 5v14l11-7z" />
+                                    ) : (
+                                        <path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z" />
+                                    )}
+                                </svg>
+                                <span>{actionPending === 'pause' ? '...' : taskPaused ? '恢复' : '暂停'}</span>
+                            </button>
+                        )}
                         {typeof onPartialExit === 'function' && (
                             <button type="button" onClick={openWithdrawPanel} disabled={!canPartialExit || Boolean(actionPending)}
                                 title="撤出流动性"
@@ -747,28 +768,23 @@ export default function PositionCard({
                                 <span>{actionPending === 'withdraw' ? '...' : '撤仓'}</span>
                             </button>
                         )}
-                        {typeof onWithdrawLiquidity === 'function' && (
-                            <button type="button" onClick={withdrawAllLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
-                                title="取回流动性"
-                                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-cyan-400/40 bg-cyan-50 px-2.5 text-[10.5px] font-semibold text-cyan-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-cyan-100 dark:bg-cyan-500/15 dark:text-cyan-400 dark:border-cyan-500/25 dark:hover:bg-cyan-500/25">
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
-                                    <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
-                                </svg>
-                                <span>{actionPending === 'withdrawAll' ? '...' : '取回'}</span>
-                            </button>
-                        )}
                         {typeof onUpdateTaskMode === 'function' && (
                             <>
-                                {TASK_MODE_OPTIONS.map((option) => (
-                                    <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
-                                        title={option.description}
-                                        className={`inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentTaskMode === option.value
-                                            ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
-                                            : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
-                                            }`}>
-                                        <span>{option.shortLabel}</span>
-                                    </button>
-                                ))}
+                                {TASK_MODE_OPTIONS.filter((option) => option.value !== 'pause').map((option) => {
+                                    const active = currentStrategyMode === option.value;
+                                    return (
+                                        <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
+                                            title={option.description}
+                                            data-active={active ? 'true' : 'false'}
+                                            aria-pressed={active}
+                                            className={`mini-position-mode-action inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${active
+                                                ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
+                                                : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
+                                                }`}>
+                                            <span>{option.shortLabel}</span>
+                                        </button>
+                                    );
+                                })}
                             </>
                         )}
                     </div>
@@ -811,7 +827,7 @@ export default function PositionCard({
                                 {TASK_MODE_OPTIONS.map((option) => (
                                     <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
                                         title={option.description}
-                                        className={`inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentTaskMode === option.value
+                                        className={`inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentStrategyMode === option.value
                                             ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
                                             : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
                                             }`}>

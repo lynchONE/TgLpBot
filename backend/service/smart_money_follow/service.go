@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/notify"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
+	"TgLpBot/service/pricing"
 	sm "TgLpBot/service/smart_money"
 	smgd "TgLpBot/service/smart_money_golden_dog"
 	"TgLpBot/service/strategy"
@@ -2311,13 +2312,24 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		return nil, fmt.Errorf("pool tick spacing is invalid")
 	}
 	hooksAddr := normalizeHookAddress(poolInfo.HooksAddress)
-	tickLower, tickUpper, shifted, err := shiftFollowRangeByGrids(*event.TickLower, *event.TickUpper, tickSpacing, cfg.RangeShiftGrids)
+
+	rangeRef := &models.StrategyTask{
+		Chain:         cfg.Chain,
+		PoolId:        poolID,
+		PoolVersion:   poolVersion,
+		Token0Symbol:  token0Symbol,
+		Token1Symbol:  token1Symbol,
+		Token0Address: token0,
+		Token1Address: token1,
+	}
+	invertShift := followRangeShiftInvertsTick(rangeRef)
+	tickLower, tickUpper, shifted, err := shiftFollowRangeByGrids(*event.TickLower, *event.TickUpper, tickSpacing, cfg.RangeShiftGrids, invertShift)
 	if err != nil {
 		return nil, err
 	}
 	if shifted {
-		log.Printf("[SmartMoneyFollow] shifted follow range config_id=%d event_id=%d grids=%d original=%d-%d shifted=%d-%d",
-			cfg.ID, event.ID, cfg.RangeShiftGrids, *event.TickLower, *event.TickUpper, tickLower, tickUpper)
+		log.Printf("[SmartMoneyFollow] shifted follow range config_id=%d event_id=%d grids=%d invert_tick=%t original=%d-%d shifted=%d-%d",
+			cfg.ID, event.ID, cfg.RangeShiftGrids, invertShift, *event.TickLower, *event.TickUpper, tickLower, tickUpper)
 	}
 
 	task := &models.StrategyTask{
@@ -2356,7 +2368,11 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 	return task, nil
 }
 
-func shiftFollowRangeByGrids(tickLower int, tickUpper int, tickSpacing int, rangeShiftGrids int) (int, int, bool, error) {
+func followRangeShiftInvertsTick(task *models.StrategyTask) bool {
+	return pricing.PriceQuoteSideFromTask(task) == 0
+}
+
+func shiftFollowRangeByGrids(tickLower int, tickUpper int, tickSpacing int, rangeShiftGrids int, invertTickDirection bool) (int, int, bool, error) {
 	if tickUpper <= tickLower {
 		return 0, 0, false, fmt.Errorf("invalid tick range")
 	}
@@ -2376,6 +2392,9 @@ func shiftFollowRangeByGrids(tickLower int, tickUpper int, tickSpacing int, rang
 	}
 
 	shift := int64(rangeShiftGrids) * int64(tickSpacing)
+	if invertTickDirection {
+		shift = -shift
+	}
 	shiftedLower := int64(tickLower) + shift
 	shiftedUpper := int64(tickUpper) + shift
 	maxInt := int64(int(^uint(0) >> 1))

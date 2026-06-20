@@ -168,7 +168,7 @@ func TestNormalizeSaveInputRejectsThresholdAboveWalletCount(t *testing.T) {
 }
 
 func TestShiftFollowRangeByGrids(t *testing.T) {
-	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 500, 100, 1)
+	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 500, 100, 1, false)
 	if err != nil {
 		t.Fatalf("shiftFollowRangeByGrids returned error: %v", err)
 	}
@@ -177,8 +177,18 @@ func TestShiftFollowRangeByGrids(t *testing.T) {
 	}
 }
 
+func TestShiftFollowRangeByGridsInvertsForToken0Quote(t *testing.T) {
+	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 500, 100, 1, true)
+	if err != nil {
+		t.Fatalf("shiftFollowRangeByGrids returned error: %v", err)
+	}
+	if !shifted || lower != 0 || upper != 400 {
+		t.Fatalf("shifted range = %d-%d shifted=%v, want 0-400 true", lower, upper, shifted)
+	}
+}
+
 func TestShiftFollowRangeByGridsSkipsNarrowRange(t *testing.T) {
-	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 300, 100, 1)
+	lower, upper, shifted, err := shiftFollowRangeByGrids(100, 300, 100, 1, false)
 	if err != nil {
 		t.Fatalf("shiftFollowRangeByGrids returned error: %v", err)
 	}
@@ -192,9 +202,39 @@ func TestShiftFollowRangeByGridsRejectsOutOfFullRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FullRangeTicks returned error: %v", err)
 	}
-	_, _, _, err = shiftFollowRangeByGrids(maxTick-600, maxTick, 200, 1)
+	_, _, _, err = shiftFollowRangeByGrids(maxTick-600, maxTick, 200, 1, false)
 	if err == nil {
 		t.Fatal("expected shifted range outside full range error")
+	}
+}
+
+func TestFollowRangeShiftInvertsTickForQuoteToken0(t *testing.T) {
+	for _, quote := range []string{"USDT", "USDC", "WBNB", "BNB"} {
+		t.Run(quote, func(t *testing.T) {
+			task := &models.StrategyTask{
+				Chain:        "bsc",
+				Token0Symbol: quote,
+				Token1Symbol: "TOKEN",
+			}
+			if !followRangeShiftInvertsTick(task) {
+				t.Fatalf("expected token0 quote %s to invert raw tick shift", quote)
+			}
+		})
+	}
+}
+
+func TestFollowRangeShiftDoesNotInvertTickForQuoteToken1(t *testing.T) {
+	for _, quote := range []string{"USDT", "USDC", "WBNB", "BNB"} {
+		t.Run(quote, func(t *testing.T) {
+			task := &models.StrategyTask{
+				Chain:        "bsc",
+				Token0Symbol: "TOKEN",
+				Token1Symbol: quote,
+			}
+			if followRangeShiftInvertsTick(task) {
+				t.Fatalf("expected token1 quote %s to keep raw tick shift", quote)
+			}
+		})
 	}
 }
 

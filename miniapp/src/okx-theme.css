@@ -1214,6 +1214,21 @@ body::before {
     box-shadow: none !important;
 }
 
+.miniapp-shell .mini-position-action-bar .mini-position-mode-action[data-active='true'] {
+    border-color: rgba(var(--okx-positive-rgb), 0.52) !important;
+    background: rgba(var(--okx-positive-rgb), 0.14) !important;
+    color: var(--okx-positive) !important;
+}
+
+.miniapp-shell .mini-position-action-bar .mini-position-mode-action[data-active='true'] * {
+    color: var(--okx-positive) !important;
+}
+
+.miniapp-shell .mini-position-action-bar .mini-position-mode-action[data-active='false'],
+.miniapp-shell .mini-position-action-bar .mini-position-pause-action {
+    border-color: var(--okx-line-strong) !important;
+}
+
 .miniapp-shell .mini-position-exit-panel {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;

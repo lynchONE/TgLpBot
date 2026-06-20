@@ -95,6 +95,7 @@ type RealtimePosition struct {
 	TaskPaused            bool               `json:"task_paused"`
 	TaskRebalanceEnabled  bool               `json:"task_rebalance_enabled"`
 	TaskMode              string             `json:"task_mode,omitempty"`
+	TaskStrategyMode      string             `json:"task_strategy_mode,omitempty"`
 	TaskAmountUSDT        float64            `json:"task_amount_usdt,omitempty"`
 	TaskSlippageTolerance float64            `json:"task_slippage_tolerance,omitempty"`
 	StatusLabel           string             `json:"status_label"`
@@ -1047,6 +1048,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	taskPaused := false
 	taskRebalanceEnabled := true
 	taskMode := ""
+	taskStrategyMode := ""
 	initialCostUSD := 0.0
 	netInvestedUSD := 0.0
 	currentValueUSD := 0.0
@@ -1059,8 +1061,10 @@ func (s *RealtimePositionsService) buildV3Position(
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
-		taskRebalanceEnabled = models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task))
+		outOfRangeMode := models.ResolveStrategyOutOfRangeMode(task)
+		taskRebalanceEnabled = models.RebalanceEnabledForOutOfRangeMode(outOfRangeMode)
 		taskMode = models.EffectiveStrategyTaskMode(task)
+		taskStrategyMode = string(outOfRangeMode)
 		pnlMetrics = s.getTaskPnLViewMetrics(task)
 		taskSlippageTolerance = task.SlippageTolerance
 		initialCostUSD = pnlMetrics.initialCost
@@ -1113,6 +1117,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		TaskPaused:            taskPaused,
 		TaskRebalanceEnabled:  taskRebalanceEnabled,
 		TaskMode:              taskMode,
+		TaskStrategyMode:      taskStrategyMode,
 		TaskAmountUSDT:        displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
 		TaskSlippageTolerance: taskSlippageTolerance,
 		StatusLabel:           statusLabel,
@@ -1505,6 +1510,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		TaskPaused:            task.Paused,
 		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:              models.EffectiveStrategyTaskMode(task),
+		TaskStrategyMode:      string(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskAmountUSDT:        displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
 		TaskSlippageTolerance: task.SlippageTolerance,
 		StatusLabel:           statusLabelFromTask(task),
@@ -1752,6 +1758,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		TaskPaused:            task.Paused,
 		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:              models.EffectiveStrategyTaskMode(task),
+		TaskStrategyMode:      string(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskAmountUSDT:        displayTaskAmountUSDTWithMetrics(task, pnlMetrics),
 		TaskSlippageTolerance: task.SlippageTolerance,
 		StatusLabel:           statusLabelFromTask(task),

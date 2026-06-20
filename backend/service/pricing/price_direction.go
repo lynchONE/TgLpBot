@@ -122,6 +122,12 @@ func IsQuoteLikeSymbol(sym string) bool {
 	return isQuoteLikeSymbol(sym)
 }
 
+// PriceQuoteSideFromTask returns which token is treated as the display quote side.
+// -1: unknown, 0: token0, 1: token1.
+func PriceQuoteSideFromTask(task *models.StrategyTask) int {
+	return priceQuoteSideFromTask(task)
+}
+
 func isStableAddress(chain string, addr string) bool {
 	if config.AppConfig == nil {
 		return false
