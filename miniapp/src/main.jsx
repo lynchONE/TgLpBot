@@ -5,10 +5,14 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 import './index.css';
 import './okx-theme.css';
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-    <React.StrictMode>
-        <ErrorBoundary>
-            <App />
-        </ErrorBoundary>
-    </React.StrictMode>
-);
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('mockSwap') === '1') {
+    import('./swap-module.mock.jsx');
+} else {
+    ReactDOM.createRoot(document.getElementById('root')).render(
+        <React.StrictMode>
+            <ErrorBoundary>
+                <App />
+            </ErrorBoundary>
+        </React.StrictMode>
+    );
+}

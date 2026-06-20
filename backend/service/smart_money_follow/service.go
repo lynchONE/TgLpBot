@@ -221,6 +221,7 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 		Find(&configs).Error; err != nil {
 		return nil, fmt.Errorf("list follow configs failed: %w", err)
 	}
+	configs = effectiveFollowConfigs(configs)
 	for i := range configs {
 		fillConfigExecutionWallet(&configs[i], defaultWallet)
 	}
@@ -517,12 +518,14 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 				return err
 			}
 			existingFound = true
-		} else if normalized.TriggerMode == models.SmartMoneyFollowTriggerModeAny && len(normalized.TargetWallets) == 1 {
-			err := tx.Where("user_id = ? AND chain = ? AND target_wallet_address = ?", userID, chain, normalized.TargetWalletAddress).First(&existing).Error
-			if err == nil {
-				existingFound = true
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		} else {
+			found, ok, err := findExistingFollowConfigForSave(ctx, tx, userID, chain, normalized)
+			if err != nil {
 				return err
+			}
+			if ok {
+				existing = found
+				existingFound = true
 			}
 		}
 
@@ -864,13 +867,16 @@ func parsePositiveUSD(raw *string) (float64, bool) {
 func (s *Service) scanNewEvents(ctx context.Context) error {
 	var configs []models.SmartMoneyFollowConfig
 	if err := database.DB.WithContext(ctx).
-		Where("enabled = ?", true).
 		Find(&configs).Error; err != nil {
 		return fmt.Errorf("list enabled follow configs failed: %w", err)
 	}
+	configs = effectiveFollowConfigs(configs)
 
 	for i := range configs {
 		cfg := configs[i]
+		if !cfg.Enabled {
+			continue
+		}
 		wallets, err := configTargetWallets(&cfg)
 		if err != nil {
 			log.Printf("[SmartMoneyFollow] skip invalid follow config wallet set: config_id=%d err=%v", cfg.ID, err)
@@ -933,13 +939,17 @@ func (s *Service) createJobsForEvent(ctx context.Context, event *models.SmartMon
 
 	var configs []models.SmartMoneyFollowConfig
 	if err := database.DB.WithContext(ctx).
-		Where("enabled = ? AND chain_id = ? AND cursor_event_id < ?", true, event.ChainID, event.ID).
+		Where("chain_id = ?", event.ChainID).
 		Find(&configs).Error; err != nil {
 		return fmt.Errorf("list follow configs for event failed: %w", err)
 	}
+	configs = effectiveFollowConfigs(configs)
 	matchedConfigs := 0
 	for i := range configs {
 		cfg := configs[i]
+		if !cfg.Enabled || cfg.CursorEventID >= event.ID {
+			continue
+		}
 		wallets, err := configTargetWallets(&cfg)
 		if err != nil {
 			log.Printf("[SmartMoneyFollow] skip invalid follow config wallet set for event: config_id=%d event_id=%d err=%v", cfg.ID, event.ID, err)
@@ -1405,6 +1415,12 @@ func (s *Service) executeJob(ctx context.Context, job *models.SmartMoneyFollowJo
 	}
 	if claimed.RowsAffected == 0 {
 		return nil
+	}
+
+	if skipped, err := obsoleteFollowJobMessage(ctx, job); err != nil {
+		return s.finishJob(ctx, job.ID, models.SmartMoneyFollowJobStatusFailed, nil, err.Error())
+	} else if skipped != "" {
+		return s.finishJob(ctx, job.ID, models.SmartMoneyFollowJobStatusSkipped, nil, skipped)
 	}
 
 	var err error
@@ -2991,6 +3007,113 @@ func followConfigTriggerChanged(existing *models.SmartMoneyFollowConfig, next Sa
 		return false, err
 	}
 	return !stringSlicesEqual(wallets, next.TargetWallets), nil
+}
+
+func findExistingFollowConfigForSave(ctx context.Context, tx *gorm.DB, userID uint, chain string, input SaveConfigInput) (models.SmartMoneyFollowConfig, bool, error) {
+	var configs []models.SmartMoneyFollowConfig
+	if err := tx.WithContext(ctx).
+		Where("user_id = ? AND chain = ?", userID, chain).
+		Order("updated_at DESC, id DESC").
+		Find(&configs).Error; err != nil {
+		return models.SmartMoneyFollowConfig{}, false, err
+	}
+	targetKey := followConfigIdentityKey(chain, input.TriggerMode, input.TargetWallets)
+	for i := range configs {
+		wallets, err := configTargetWallets(&configs[i])
+		if err != nil {
+			return models.SmartMoneyFollowConfig{}, false, err
+		}
+		if followConfigIdentityKey(configs[i].Chain, normalizeConfigTriggerMode(configs[i].TriggerMode), wallets) == targetKey {
+			return configs[i], true, nil
+		}
+	}
+	return models.SmartMoneyFollowConfig{}, false, nil
+}
+
+func effectiveFollowConfigs(configs []models.SmartMoneyFollowConfig) []models.SmartMoneyFollowConfig {
+	if len(configs) <= 1 {
+		return configs
+	}
+	selected := make(map[string]models.SmartMoneyFollowConfig, len(configs))
+	for i := range configs {
+		cfg := configs[i]
+		wallets, err := configTargetWallets(&cfg)
+		if err != nil {
+			selected[followConfigRowKey(&cfg)] = cfg
+			continue
+		}
+		key := followConfigIdentityKey(cfg.Chain, normalizeConfigTriggerMode(cfg.TriggerMode), wallets)
+		existing, ok := selected[key]
+		if !ok || followConfigNewer(cfg, existing) {
+			selected[key] = cfg
+		}
+	}
+	out := make([]models.SmartMoneyFollowConfig, 0, len(selected))
+	for _, cfg := range selected {
+		out = append(out, cfg)
+	}
+	sort.Slice(out, func(i, j int) bool { return followConfigNewer(out[i], out[j]) })
+	return out
+}
+
+func followConfigIdentityKey(chain string, triggerMode string, wallets []string) string {
+	normalized := normalizeConfigTriggerMode(triggerMode)
+	items := append([]string(nil), wallets...)
+	sort.Strings(items)
+	return strings.ToLower(strings.TrimSpace(chain)) + "|" + normalized + "|" + strings.Join(items, ",")
+}
+
+func followConfigRowKey(cfg *models.SmartMoneyFollowConfig) string {
+	if cfg == nil {
+		return "invalid:0"
+	}
+	return fmt.Sprintf("invalid:%d", cfg.ID)
+}
+
+func followConfigNewer(a, b models.SmartMoneyFollowConfig) bool {
+	if !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return a.UpdatedAt.After(b.UpdatedAt)
+	}
+	return a.ID > b.ID
+}
+
+func obsoleteFollowJobMessage(ctx context.Context, job *models.SmartMoneyFollowJob) (string, error) {
+	if job == nil || job.ConfigID == 0 {
+		return "", nil
+	}
+	var cfg models.SmartMoneyFollowConfig
+	if err := database.DB.WithContext(ctx).
+		Where("id = ? AND user_id = ?", job.ConfigID, job.UserID).
+		First(&cfg).Error; err != nil {
+		return "", fmt.Errorf("load follow config for duplicate check failed: %w", err)
+	}
+	wallets, err := configTargetWallets(&cfg)
+	if err != nil {
+		return "", err
+	}
+	key := followConfigIdentityKey(cfg.Chain, normalizeConfigTriggerMode(cfg.TriggerMode), wallets)
+
+	var configs []models.SmartMoneyFollowConfig
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND chain = ?", cfg.UserID, cfg.Chain).
+		Find(&configs).Error; err != nil {
+		return "", fmt.Errorf("list follow configs for duplicate check failed: %w", err)
+	}
+	for i := range configs {
+		other := configs[i]
+		if other.ID == cfg.ID {
+			continue
+		}
+		otherWallets, err := configTargetWallets(&other)
+		if err != nil {
+			continue
+		}
+		otherKey := followConfigIdentityKey(other.Chain, normalizeConfigTriggerMode(other.TriggerMode), otherWallets)
+		if otherKey == key && followConfigNewer(other, cfg) {
+			return fmt.Sprintf("%s: superseded by follow config #%d", errFollowJobSkipped.Error(), other.ID), nil
+		}
+	}
+	return "", nil
 }
 
 func stringSlicesEqual(a, b []string) bool {

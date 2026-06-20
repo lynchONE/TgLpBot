@@ -181,8 +181,13 @@ export default function SwapModule({
     const walletsSeqRef = useRef(0);
     const walletTokensAbortRef = useRef(null);
     const walletTokensSeqRef = useRef(0);
+    const onNoticeRef = useRef(onNotice);
     const [walletTokensKey, setWalletTokensKey] = useState('');
     const [tick, setTick] = useState(0);
+
+    useEffect(() => {
+        onNoticeRef.current = onNotice;
+    }, [onNotice]);
 
     /* chain change → reset tokens to defaults */
     useEffect(() => {
@@ -246,7 +251,7 @@ export default function SwapModule({
             if (controller.signal.aborted || walletsSeqRef.current !== seq) return;
             setWallets([]);
             setSelectedWalletId('');
-            onNotice?.(String(e?.message || e));
+            onNoticeRef.current?.(String(e?.message || e));
         } finally {
             if (walletsAbortRef.current === controller) {
                 walletsAbortRef.current = null;
@@ -255,7 +260,7 @@ export default function SwapModule({
                 setWalletLoading(false);
             }
         }
-    }, [apiBaseUrl, initData, chain, hasInitData, onNotice]);
+    }, [apiBaseUrl, initData, chain, hasInitData]);
 
     const loadWalletTokens = useCallback(async () => {
         if (!hasInitData || !selectedWalletId) {

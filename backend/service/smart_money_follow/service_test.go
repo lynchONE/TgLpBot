@@ -264,6 +264,111 @@ func TestFollowOpenEventAction(t *testing.T) {
 	}
 }
 
+func TestEffectiveFollowConfigsKeepsLatestForSameWalletSet(t *testing.T) {
+	oldTime := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
+	newTime := oldTime.Add(time.Minute)
+	configs := []models.SmartMoneyFollowConfig{
+		{
+			ID:                   1,
+			Chain:                "bsc",
+			TargetWalletAddress:  "0x0000000000000000000000000000000000000001",
+			TargetWallets:        models.StringArray{"0x0000000000000000000000000000000000000001", "0x0000000000000000000000000000000000000002"},
+			ExecutionWalletID:    11,
+			ExecutionWalletIDs:   models.UintArray{11},
+			ExecutionWalletMode:  models.SmartMoneyFollowExecutionWalletModeFixed,
+			TriggerMode:          models.SmartMoneyFollowTriggerModeAny,
+			TriggerWindowSeconds: 300,
+			TriggerMinWallets:    1,
+			UpdatedAt:            oldTime,
+		},
+		{
+			ID:                   2,
+			Chain:                "bsc",
+			TargetWalletAddress:  "0x0000000000000000000000000000000000000002",
+			TargetWallets:        models.StringArray{"0x0000000000000000000000000000000000000002", "0x0000000000000000000000000000000000000001"},
+			ExecutionWalletID:    21,
+			ExecutionWalletIDs:   models.UintArray{21, 22},
+			ExecutionWalletMode:  models.SmartMoneyFollowExecutionWalletModeRandom,
+			TriggerMode:          models.SmartMoneyFollowTriggerModeAny,
+			TriggerWindowSeconds: 300,
+			TriggerMinWallets:    1,
+			UpdatedAt:            newTime,
+		},
+	}
+
+	got := effectiveFollowConfigs(configs)
+	if len(got) != 1 {
+		t.Fatalf("effective config count = %d, want 1", len(got))
+	}
+	if got[0].ID != 2 {
+		t.Fatalf("effective config id = %d, want 2", got[0].ID)
+	}
+	if got[0].ExecutionWalletID != 21 {
+		t.Fatalf("execution wallet id = %d, want 21", got[0].ExecutionWalletID)
+	}
+}
+
+func TestEffectiveFollowConfigsKeepsDifferentTriggerModes(t *testing.T) {
+	wallets := models.StringArray{"0x0000000000000000000000000000000000000001", "0x0000000000000000000000000000000000000002"}
+	configs := []models.SmartMoneyFollowConfig{
+		{
+			ID:                  1,
+			Chain:               "bsc",
+			TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+			TargetWallets:       wallets,
+			TriggerMode:         models.SmartMoneyFollowTriggerModeAny,
+		},
+		{
+			ID:                  2,
+			Chain:               "bsc",
+			TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+			TargetWallets:       wallets,
+			TriggerMode:         models.SmartMoneyFollowTriggerModeThreshold,
+		},
+	}
+
+	got := effectiveFollowConfigs(configs)
+	if len(got) != 2 {
+		t.Fatalf("effective config count = %d, want 2", len(got))
+	}
+}
+
+func TestEffectiveFollowConfigsDisabledLatestSupersedesEnabledOld(t *testing.T) {
+	oldTime := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
+	newTime := oldTime.Add(time.Minute)
+	configs := []models.SmartMoneyFollowConfig{
+		{
+			ID:                  1,
+			Chain:               "bsc",
+			TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+			TargetWallets:       models.StringArray{"0x0000000000000000000000000000000000000001"},
+			TriggerMode:         models.SmartMoneyFollowTriggerModeAny,
+			Enabled:             true,
+			UpdatedAt:           oldTime,
+		},
+		{
+			ID:                  2,
+			Chain:               "bsc",
+			TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+			TargetWallets:       models.StringArray{"0x0000000000000000000000000000000000000001"},
+			TriggerMode:         models.SmartMoneyFollowTriggerModeAny,
+			Enabled:             false,
+			UpdatedAt:           newTime,
+		},
+	}
+
+	got := effectiveFollowConfigs(configs)
+	if len(got) != 1 {
+		t.Fatalf("effective config count = %d, want 1", len(got))
+	}
+	if got[0].ID != 2 {
+		t.Fatalf("effective config id = %d, want 2", got[0].ID)
+	}
+	if got[0].Enabled {
+		t.Fatal("expected disabled latest config to supersede enabled old config")
+	}
+}
+
 func TestRetryableFollowSlippageError(t *testing.T) {
 	if !isRetryableFollowSlippageError(errors.New("swap failed: slippage exceeded")) {
 		t.Fatal("expected slippage error to be retryable")

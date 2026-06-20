@@ -1093,7 +1093,7 @@ export default function App() {
         if (typeof resolve === 'function') resolve(result);
     };
 
-    const showNotice = (message, tone = 'info') => {
+    const showNotice = useCallback((message, tone = 'info') => {
         const text = String(message || '').trim();
         if (!text) return;
         setNotice({ message: text, tone });
@@ -1101,7 +1101,7 @@ export default function App() {
         const charCount = [...text].length;
         const duration = Math.min(8000, Math.max(3500, 3500 + Math.floor(charCount / 10) * 600));
         noticeTimerRef.current = setTimeout(() => setNotice(null), duration);
-    };
+    }, []);
 
     useEffect(() => {
         if (!hasInitData) return;
