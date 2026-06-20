@@ -4714,11 +4714,36 @@ function autoFollowStatusClass(status) {
     }
 }
 
+function autoFollowEventActionLabel(eventType) {
+    return String(eventType || '').toLowerCase() === 'remove' ? '撤 LP' : '加 LP';
+}
+
+function autoFollowEventActionClass(eventType) {
+    return String(eventType || '').toLowerCase() === 'remove'
+        ? 'border-red-400/20 bg-red-500/10 text-red-200'
+        : 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200';
+}
+
+function formatAutoFollowEventAmount(event) {
+    const total = Number(event?.total_usd);
+    if (Number.isFinite(total) && total > 0) return formatUSDCompact(total);
+    return '--';
+}
+
+function formatAutoFollowEventRange(event) {
+    if (event?.tick_lower === null || event?.tick_lower === undefined || event?.tick_upper === null || event?.tick_upper === undefined) {
+        return '';
+    }
+    return `${event.tick_lower} - ${event.tick_upper}`;
+}
+
 function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     const [loading, setLoading] = useState(Boolean(hasInitData));
     const [saving, setSaving] = useState(false);
     const [configs, setConfigs] = useState([]);
     const [jobs, setJobs] = useState([]);
+    const [targetEvents, setTargetEvents] = useState([]);
+    const [jobEvents, setJobEvents] = useState([]);
     const [executionWallets, setExecutionWallets] = useState([]);
     const [draft, setDraft] = useState(() => createAutoFollowDraft());
     const [activeTab, setActiveTab] = useState('configure');
@@ -4730,6 +4755,8 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setLoading(false);
             setConfigs([]);
             setJobs([]);
+            setTargetEvents([]);
+            setJobEvents([]);
             setExecutionWallets([]);
             return;
         }
@@ -4741,6 +4768,8 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setExecutionWallets(wallets);
             setConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
             setJobs(Array.isArray(resp?.jobs) ? resp.jobs : []);
+            setTargetEvents(Array.isArray(resp?.target_events) ? resp.target_events : []);
+            setJobEvents(Array.isArray(resp?.job_events) ? resp.job_events : []);
             setDraft((prev) => ensureAutoFollowDraftExecutionWallet(prev, wallets));
         } catch (err) {
             setError(String(err?.message || err || '加载失败'));
@@ -4836,6 +4865,28 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     }, [apiBaseUrl, hasInitData, initData, load]);
 
     const activeCount = configs.filter((item) => item?.enabled).length;
+    const autoFollowEventByID = useMemo(() => {
+        const map = new Map();
+        [...targetEvents, ...jobEvents].forEach((event) => {
+            const id = Number(event?.id) || 0;
+            if (id > 0) map.set(id, event);
+        });
+        return map;
+    }, [jobEvents, targetEvents]);
+    const autoFollowJobByEventID = useMemo(() => {
+        const map = new Map();
+        jobs.forEach((job) => {
+            const put = (value) => {
+                const id = Number(value) || 0;
+                if (id > 0 && !map.has(id)) map.set(id, job);
+            };
+            put(job?.event_id);
+            if (Array.isArray(job?.trigger_event_ids)) {
+                job.trigger_event_ids.forEach(put);
+            }
+        });
+        return map;
+    }, [jobs]);
     const draftWallets = Array.isArray(draft.target_wallet_addresses) && draft.target_wallet_addresses.length > 0
         ? draft.target_wallet_addresses
         : [''];
@@ -5257,40 +5308,108 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             {activeTab === 'jobs' ? (
             <section className="space-y-2">
                 <div className="text-sm font-semibold text-zinc-100">最近任务</div>
-                {jobs.length === 0 ? (
+                {jobs.length === 0 && targetEvents.length === 0 ? (
                     <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
-                        暂无执行记录
+                        暂无目标事件和执行记录
                     </div>
                 ) : (
-                    jobs.slice(0, 8).map((job) => {
-                        const triggerWallets = Array.isArray(job.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
-                        return (
-                            <div key={job.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <Badge className={autoFollowStatusClass(job.status)}>{job.status}</Badge>
-                                            <span className="text-sm text-zinc-100">{job.action === 'close' ? '撤仓' : '开仓'}</span>
-                                        </div>
-                                        <div className="mt-1 truncate text-[11px] text-zinc-500">
-                                            {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)}
-                                            {' · '}
-                                            执行 {formatAutoFollowExecutionWallet(job, executionWallets)}
-                                            {' · '}
-                                            {formatAutoFollowJobTime(job.scheduled_at)}
-                                        </div>
-                                        {job.error_message ? (
-                                            <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{job.error_message}</div>
-                                        ) : null}
-                                    </div>
-                                    <div className="shrink-0 text-right">
-                                        <div className="text-sm font-semibold text-zinc-100">{Number(job.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
-                                        <div className="text-[10px] text-zinc-500">#{job.id}</div>
-                                    </div>
-                                </div>
+                    <div className="grid gap-3 lg:grid-cols-2">
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-500">
+                                <span>被跟单钱包事件流</span>
+                                <span>{targetEvents.length}</span>
                             </div>
-                        );
-                    })
+                            {targetEvents.length === 0 ? (
+                                <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
+                                    暂无目标钱包 LP 事件
+                                </div>
+                            ) : (
+                                targetEvents.slice(0, 8).map((event) => {
+                                    const linkedJob = autoFollowJobByEventID.get(Number(event.id) || 0);
+                                    const rangeText = formatAutoFollowEventRange(event);
+                                    return (
+                                        <div key={event.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <Badge className={autoFollowEventActionClass(event.event_type)}>
+                                                            {autoFollowEventActionLabel(event.event_type)}
+                                                        </Badge>
+                                                        {linkedJob ? (
+                                                            <Badge className={autoFollowStatusClass(linkedJob.status)}>
+                                                                跟单 {linkedJob.status}
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
+                                                                未生成跟单
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{getPairLabel(event)}</div>
+                                                    <div className="mt-1 truncate text-[11px] text-zinc-500">
+                                                        {shortAddr(event.wallet_address)}
+                                                        {' · '}
+                                                        {formatAutoFollowJobTime(event.tx_timestamp)}
+                                                        {rangeText ? ` · Tick ${rangeText}` : ''}
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 text-right">
+                                                    <div className="text-sm font-semibold text-zinc-100">{formatAutoFollowEventAmount(event)}</div>
+                                                    <div className="text-[10px] text-zinc-500">事件 #{event.id}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-500">
+                                <span>我们的跟单事件流</span>
+                                <span>{jobs.length}</span>
+                            </div>
+                            {jobs.length === 0 ? (
+                                <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
+                                    暂无跟单任务
+                                </div>
+                            ) : (
+                                jobs.slice(0, 8).map((job) => {
+                                    const triggerWallets = Array.isArray(job.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
+                                    const event = autoFollowEventByID.get(Number(job.event_id) || 0);
+                                    return (
+                                        <div key={job.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <Badge className={autoFollowStatusClass(job.status)}>{job.status}</Badge>
+                                                        <span className="text-sm text-zinc-100">{job.action === 'close' ? '撤仓' : '开仓'}</span>
+                                                    </div>
+                                                    <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
+                                                        {event ? getPairLabel(event) : `事件 #${job.event_id || '--'}`}
+                                                    </div>
+                                                    <div className="mt-1 truncate text-[11px] text-zinc-500">
+                                                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)}
+                                                        {' · '}
+                                                        执行 {formatAutoFollowExecutionWallet(job, executionWallets)}
+                                                        {' · '}
+                                                        {formatAutoFollowJobTime(job.scheduled_at)}
+                                                    </div>
+                                                    {job.error_message ? (
+                                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{job.error_message}</div>
+                                                    ) : null}
+                                                </div>
+                                                <div className="shrink-0 text-right">
+                                                    <div className="text-sm font-semibold text-zinc-100">{Number(job.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
+                                                    <div className="text-[10px] text-zinc-500">任务 #{job.id}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
                 )}
             </section>
             ) : null}

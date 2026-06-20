@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,11 +66,13 @@ type followJobTrigger struct {
 }
 
 type ConfigEnvelope struct {
-	OK      bool                            `json:"ok"`
-	Chain   string                          `json:"chain"`
-	Configs []models.SmartMoneyFollowConfig `json:"configs"`
-	Jobs    []models.SmartMoneyFollowJob    `json:"jobs"`
-	Wallets []ExecutionWalletOption         `json:"wallets"`
+	OK           bool                            `json:"ok"`
+	Chain        string                          `json:"chain"`
+	Configs      []models.SmartMoneyFollowConfig `json:"configs"`
+	Jobs         []models.SmartMoneyFollowJob    `json:"jobs"`
+	TargetEvents []models.SmartMoneyLPEvent      `json:"target_events"`
+	JobEvents    []models.SmartMoneyLPEvent      `json:"job_events"`
+	Wallets      []ExecutionWalletOption         `json:"wallets"`
 }
 
 type ExecutionWalletOption struct {
@@ -140,7 +143,7 @@ func (s *Service) HandleEvent(ctx context.Context, event *models.SmartMoneyLPEve
 }
 
 func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (*ConfigEnvelope, error) {
-	chain, _, err := ResolveChain(chain)
+	chain, chainID, err := ResolveChain(chain)
 	if err != nil {
 		return nil, err
 	}
@@ -171,13 +174,105 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 		fillJobExecutionWallet(&jobs[i], defaultWallet)
 	}
 
+	targetEvents, err := listRecentTargetEventsForConfigs(ctx, chainID, configs)
+	if err != nil {
+		return nil, err
+	}
+	jobEvents, err := listRecentEventsForJobs(ctx, jobs)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ConfigEnvelope{
-		OK:      true,
-		Chain:   chain,
-		Configs: configs,
-		Jobs:    jobs,
-		Wallets: walletOptions,
+		OK:           true,
+		Chain:        chain,
+		Configs:      configs,
+		Jobs:         jobs,
+		TargetEvents: targetEvents,
+		JobEvents:    jobEvents,
+		Wallets:      walletOptions,
 	}, nil
+}
+
+func listRecentTargetEventsForConfigs(ctx context.Context, chainID int, configs []models.SmartMoneyFollowConfig) ([]models.SmartMoneyLPEvent, error) {
+	walletSet := make(map[string]struct{})
+	for i := range configs {
+		cfg := configs[i]
+		wallets, err := configTargetWallets(&cfg)
+		if err != nil {
+			log.Printf("[SmartMoneyFollow] skip invalid config when listing target events: config_id=%d err=%v", cfg.ID, err)
+			continue
+		}
+		for _, wallet := range wallets {
+			walletSet[wallet] = struct{}{}
+		}
+	}
+	if len(walletSet) == 0 {
+		return nil, nil
+	}
+
+	wallets := make([]string, 0, len(walletSet))
+	for wallet := range walletSet {
+		wallets = append(wallets, wallet)
+	}
+	sort.Strings(wallets)
+
+	var events []models.SmartMoneyLPEvent
+	if err := database.DB.WithContext(ctx).
+		Where("wallet_address IN ? AND chain_id = ? AND event_type IN ?", wallets, chainID, []string{"add", "remove"}).
+		Order("id DESC").
+		Limit(50).
+		Find(&events).Error; err != nil {
+		return nil, fmt.Errorf("list follow target events failed: %w", err)
+	}
+	return events, nil
+}
+
+func listRecentEventsForJobs(ctx context.Context, jobs []models.SmartMoneyFollowJob) ([]models.SmartMoneyLPEvent, error) {
+	eventIDs := followJobEventIDs(jobs)
+	if len(eventIDs) == 0 {
+		return nil, nil
+	}
+	var events []models.SmartMoneyLPEvent
+	if err := database.DB.WithContext(ctx).
+		Where("id IN ?", eventIDs).
+		Order("id DESC").
+		Limit(50).
+		Find(&events).Error; err != nil {
+		return nil, fmt.Errorf("list follow job events failed: %w", err)
+	}
+	return events, nil
+}
+
+func followJobEventIDs(jobs []models.SmartMoneyFollowJob) []uint {
+	seen := make(map[uint]struct{})
+	eventIDs := make([]uint, 0, len(jobs))
+	appendID := func(id uint) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		eventIDs = append(eventIDs, id)
+	}
+	for i := range jobs {
+		job := jobs[i]
+		appendID(job.EventID)
+		for _, raw := range job.TriggerEventIDs {
+			id, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+			if err != nil || id == 0 {
+				continue
+			}
+			appendID(uint(id))
+		}
+	}
+	sort.Slice(eventIDs, func(i, j int) bool { return eventIDs[i] > eventIDs[j] })
+	if len(eventIDs) > 50 {
+		return eventIDs[:50]
+	}
+	return eventIDs
 }
 
 func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigInput) (*models.SmartMoneyFollowConfig, error) {
@@ -530,7 +625,8 @@ func (s *Service) scanNewEvents(ctx context.Context) error {
 		cfg := configs[i]
 		wallets, err := configTargetWallets(&cfg)
 		if err != nil {
-			return fmt.Errorf("invalid follow config wallet set config_id=%d: %w", cfg.ID, err)
+			log.Printf("[SmartMoneyFollow] skip invalid follow config wallet set: config_id=%d err=%v", cfg.ID, err)
+			continue
 		}
 		if len(wallets) == 0 {
 			log.Printf("[SmartMoneyFollow] skip config with empty wallet set: config_id=%d", cfg.ID)
@@ -539,7 +635,8 @@ func (s *Service) scanNewEvents(ctx context.Context) error {
 		if err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			return ensureFollowTargetWalletsMonitored(ctx, tx, cfg.ChainID, wallets)
 		}); err != nil {
-			return fmt.Errorf("ensure follow target wallets monitored config_id=%d: %w", cfg.ID, err)
+			log.Printf("[SmartMoneyFollow] ensure follow target wallets monitored failed: config_id=%d err=%v", cfg.ID, err)
+			continue
 		}
 		var events []models.SmartMoneyLPEvent
 		if err := database.DB.WithContext(ctx).
@@ -553,6 +650,7 @@ func (s *Service) scanNewEvents(ctx context.Context) error {
 			event := events[j]
 			if err := s.createJobForConfig(ctx, &cfg, &event); err != nil {
 				log.Printf("[SmartMoneyFollow] create job failed config_id=%d event_id=%d err=%v", cfg.ID, event.ID, err)
+				break
 			}
 			if event.ID > cfg.CursorEventID {
 				cfg.CursorEventID = event.ID
@@ -591,17 +689,21 @@ func (s *Service) createJobsForEvent(ctx context.Context, event *models.SmartMon
 		Find(&configs).Error; err != nil {
 		return fmt.Errorf("list follow configs for event failed: %w", err)
 	}
+	matchedConfigs := 0
 	for i := range configs {
 		cfg := configs[i]
 		wallets, err := configTargetWallets(&cfg)
 		if err != nil {
-			return fmt.Errorf("invalid follow config wallet set config_id=%d: %w", cfg.ID, err)
+			log.Printf("[SmartMoneyFollow] skip invalid follow config wallet set for event: config_id=%d event_id=%d err=%v", cfg.ID, event.ID, err)
+			continue
 		}
 		if !stringSliceContains(wallets, address) {
 			continue
 		}
+		matchedConfigs++
 		if err := s.createJobForConfig(ctx, &cfg, event); err != nil {
 			log.Printf("[SmartMoneyFollow] create event job failed config_id=%d event_id=%d err=%v", cfg.ID, event.ID, err)
+			continue
 		}
 		if advanceCursor {
 			if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowConfig{}).
@@ -613,6 +715,10 @@ func (s *Service) createJobsForEvent(ctx context.Context, event *models.SmartMon
 				return err
 			}
 		}
+	}
+	if matchedConfigs > 0 {
+		log.Printf("[SmartMoneyFollow] event processed: event_id=%d wallet=%s chain_id=%d candidate_configs=%d matched_configs=%d advance_cursor=%t",
+			event.ID, address, event.ChainID, len(configs), matchedConfigs, advanceCursor)
 	}
 	return nil
 }
@@ -630,6 +736,8 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		return err
 	}
 	if !ok {
+		log.Printf("[SmartMoneyFollow] job trigger not ready: config_id=%d event_id=%d trigger_mode=%s action=%s",
+			cfg.ID, event.ID, normalizeConfigTriggerMode(cfg.TriggerMode), action)
 		return nil
 	}
 	status := models.SmartMoneyFollowJobStatusPending
@@ -659,6 +767,8 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 			return err
 		}
 		if exists {
+			log.Printf("[SmartMoneyFollow] skip duplicate threshold open job: config_id=%d event_id=%d position_ref=%s",
+				cfg.ID, event.ID, positionRef)
 			return nil
 		}
 	}
@@ -692,11 +802,18 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		AmountUSDT:          amountUSDT,
 		ErrorMessage:        errorMessage,
 	}
-	if err := database.DB.WithContext(ctx).
+	result := database.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&job).Error; err != nil {
-		return fmt.Errorf("create follow job failed: %w", err)
+		Create(&job)
+	if result.Error != nil {
+		return fmt.Errorf("create follow job failed: %w", result.Error)
 	}
+	if result.RowsAffected == 0 {
+		log.Printf("[SmartMoneyFollow] follow job already exists: config_id=%d event_id=%d action=%s", cfg.ID, trigger.PrimaryEventID, action)
+		return nil
+	}
+	log.Printf("[SmartMoneyFollow] follow job created: job_id=%d config_id=%d event_id=%d action=%s status=%s amount=%.8f error=%s",
+		job.ID, cfg.ID, trigger.PrimaryEventID, action, status, amountUSDT, errorMessage)
 	return nil
 }
 

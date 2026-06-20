@@ -174,3 +174,19 @@ func TestTargetPositionRefForThresholdIgnoresWallet(t *testing.T) {
 		t.Fatalf("threshold refs differ: %s vs %s", refA, refB)
 	}
 }
+
+func TestFollowJobEventIDsIncludesTriggerEvents(t *testing.T) {
+	got := followJobEventIDs([]models.SmartMoneyFollowJob{
+		{EventID: 10, TriggerEventIDs: models.StringArray{"9", "10", "bad", "0"}},
+		{EventID: 11, TriggerEventIDs: models.StringArray{"8"}},
+	})
+	want := []uint{11, 10, 9, 8}
+	if len(got) != len(want) {
+		t.Fatalf("event id count = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("event ids = %v, want %v", got, want)
+		}
+	}
+}
