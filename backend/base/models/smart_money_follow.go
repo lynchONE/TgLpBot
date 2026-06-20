@@ -149,6 +149,18 @@ type SmartMoneyFollowAttempt struct {
 
 func (SmartMoneyFollowAttempt) TableName() string { return "smart_money_follow_attempts" }
 
+type SmartMoneyFollowLogCursor struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	UserID         uint      `gorm:"not null;uniqueIndex:uq_sm_follow_log_cursor_user_chain,priority:1;index" json:"user_id"`
+	Chain          string    `gorm:"size:16;not null;default:'bsc';uniqueIndex:uq_sm_follow_log_cursor_user_chain,priority:2;index" json:"chain"`
+	ClearedAt      time.Time `gorm:"not null;index" json:"cleared_at"`
+	ClearedEventID uint      `gorm:"not null;default:0;index" json:"cleared_event_id"`
+	CreatedAt      time.Time `gorm:"not null;autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"not null;autoUpdateTime" json:"updated_at"`
+}
+
+func (SmartMoneyFollowLogCursor) TableName() string { return "smart_money_follow_log_cursors" }
+
 type SmartMoneyFollowTask struct {
 	ID                  uint      `gorm:"primaryKey" json:"id"`
 	ConfigID            uint      `gorm:"not null;index:idx_sm_follow_task_config_ref,priority:1" json:"config_id"`

@@ -119,6 +119,7 @@ func autoMigrate() error {
 
 	if err := DB.AutoMigrate(
 		&models.SmartMoneyFollowAttempt{},
+		&models.SmartMoneyFollowLogCursor{},
 		&models.SmartMoneyFollowJob{},
 		&models.SmartMoneyFollowTask{},
 	); err != nil {

@@ -76,6 +76,11 @@ type ConfigEnvelope struct {
 	Wallets      []ExecutionWalletOption          `json:"wallets"`
 }
 
+type DeleteLogsResult struct {
+	DeletedJobs     int64 `json:"deleted_jobs"`
+	DeletedAttempts int64 `json:"deleted_attempts"`
+}
+
 type ExecutionWalletOption struct {
 	ID        uint   `json:"id"`
 	Address   string `json:"address"`
@@ -162,10 +167,21 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 	for i := range configs {
 		fillConfigExecutionWallet(&configs[i], defaultWallet)
 	}
+	logCursor, err := followLogCursor(ctx, userID, chain)
+	if err != nil {
+		return nil, err
+	}
 
 	var jobs []models.SmartMoneyFollowJob
-	if err := database.DB.WithContext(ctx).
-		Where("user_id = ? AND chain = ?", userID, chain).
+	jobsQuery := database.DB.WithContext(ctx).
+		Where("user_id = ? AND chain = ?", userID, chain)
+	if logCursor != nil {
+		jobsQuery = jobsQuery.Where("(created_at > ? OR status IN ?)", logCursor.ClearedAt, []string{
+			models.SmartMoneyFollowJobStatusPending,
+			models.SmartMoneyFollowJobStatusRunning,
+		})
+	}
+	if err := jobsQuery.
 		Order("created_at DESC").
 		Limit(30).
 		Find(&jobs).Error; err != nil {
@@ -176,8 +192,12 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 	}
 
 	var attempts []models.SmartMoneyFollowAttempt
-	if err := database.DB.WithContext(ctx).
-		Where("user_id = ? AND chain = ?", userID, chain).
+	attemptsQuery := database.DB.WithContext(ctx).
+		Where("user_id = ? AND chain = ?", userID, chain)
+	if logCursor != nil {
+		attemptsQuery = attemptsQuery.Where("created_at > ?", logCursor.ClearedAt)
+	}
+	if err := attemptsQuery.
 		Order("created_at DESC").
 		Limit(50).
 		Find(&attempts).Error; err != nil {
@@ -187,7 +207,7 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 		fillAttemptExecutionWallet(&attempts[i], defaultWallet)
 	}
 
-	targetEvents, err := listRecentTargetEventsForConfigs(ctx, chainID, configs)
+	targetEvents, err := listRecentTargetEventsForConfigs(ctx, chainID, configs, logCursor)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +228,94 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 	}, nil
 }
 
-func listRecentTargetEventsForConfigs(ctx context.Context, chainID int, configs []models.SmartMoneyFollowConfig) ([]models.SmartMoneyLPEvent, error) {
+func (s *Service) DeleteLogs(ctx context.Context, userID uint, chain string) (*DeleteLogsResult, error) {
+	chain, chainID, err := ResolveChain(chain)
+	if err != nil {
+		return nil, err
+	}
+	result := &DeleteLogsResult{}
+	err = database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		clearedAt := time.Now()
+		clearedEventID, err := maxLPEventIDForChain(tx, chainID)
+		if err != nil {
+			return err
+		}
+		cursor := models.SmartMoneyFollowLogCursor{
+			UserID:         userID,
+			Chain:          chain,
+			ClearedAt:      clearedAt,
+			ClearedEventID: clearedEventID,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "user_id"}, {Name: "chain"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"cleared_at":       clearedAt,
+				"cleared_event_id": clearedEventID,
+				"updated_at":       clearedAt,
+			}),
+		}).Create(&cursor).Error; err != nil {
+			return fmt.Errorf("save follow log cursor failed: %w", err)
+		}
+
+		attempts := tx.
+			Where("user_id = ? AND chain = ? AND created_at <= ?", userID, chain, clearedAt).
+			Delete(&models.SmartMoneyFollowAttempt{})
+		if attempts.Error != nil {
+			return fmt.Errorf("delete follow attempts failed: %w", attempts.Error)
+		}
+		result.DeletedAttempts = attempts.RowsAffected
+
+		jobs := tx.
+			Where("user_id = ? AND chain = ? AND status IN ?", userID, chain, []string{
+				models.SmartMoneyFollowJobStatusSuccess,
+				models.SmartMoneyFollowJobStatusFailed,
+				models.SmartMoneyFollowJobStatusSkipped,
+			}).
+			Where("created_at <= ?", clearedAt).
+			Delete(&models.SmartMoneyFollowJob{})
+		if jobs.Error != nil {
+			return fmt.Errorf("delete follow jobs failed: %w", jobs.Error)
+		}
+		result.DeletedJobs = jobs.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func maxLPEventIDForChain(tx *gorm.DB, chainID int) (uint, error) {
+	var event models.SmartMoneyLPEvent
+	err := tx.Model(&models.SmartMoneyLPEvent{}).
+		Select("id").
+		Where("chain_id = ?", chainID).
+		Order("id DESC").
+		Take(&event).Error
+	if err == nil {
+		return event.ID, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	return 0, fmt.Errorf("load max LP event id failed: %w", err)
+}
+
+func followLogCursor(ctx context.Context, userID uint, chain string) (*models.SmartMoneyFollowLogCursor, error) {
+	var cursor models.SmartMoneyFollowLogCursor
+	err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND chain = ?", userID, chain).
+		First(&cursor).Error
+	if err == nil {
+		return &cursor, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("load follow log cursor failed: %w", err)
+}
+
+func listRecentTargetEventsForConfigs(ctx context.Context, chainID int, configs []models.SmartMoneyFollowConfig, cursor *models.SmartMoneyFollowLogCursor) ([]models.SmartMoneyLPEvent, error) {
 	walletSet := make(map[string]struct{})
 	for i := range configs {
 		cfg := configs[i]
@@ -232,8 +339,16 @@ func listRecentTargetEventsForConfigs(ctx context.Context, chainID int, configs 
 	sort.Strings(wallets)
 
 	var events []models.SmartMoneyLPEvent
-	if err := database.DB.WithContext(ctx).
-		Where("wallet_address IN ? AND chain_id = ? AND event_type IN ?", wallets, chainID, []string{"add", "remove"}).
+	query := database.DB.WithContext(ctx).
+		Where("wallet_address IN ? AND chain_id = ? AND event_type IN ?", wallets, chainID, []string{"add", "remove"})
+	if cursor != nil {
+		if cursor.ClearedEventID > 0 {
+			query = query.Where("id > ?", cursor.ClearedEventID)
+		} else {
+			query = query.Where("tx_timestamp > ?", cursor.ClearedAt)
+		}
+	}
+	if err := query.
 		Order("id DESC").
 		Limit(50).
 		Find(&events).Error; err != nil {
@@ -831,7 +946,16 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 	}
 	if result.RowsAffected == 0 {
 		log.Printf("[SmartMoneyFollow] follow job already exists: config_id=%d event_id=%d action=%s", cfg.ID, trigger.PrimaryEventID, action)
-		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "follow job already exists", nil)
+		existing, err := findExistingFollowJob(ctx, cfg.ID, trigger.PrimaryEventID, action)
+		if err != nil {
+			recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusFailed, err.Error(), nil)
+			return err
+		}
+		if existing != nil {
+			recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, "", &existing.ID)
+			return nil
+		}
+		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "follow job already exists but row not found", nil)
 		return nil
 	}
 	recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, errorMessage, &job.ID)
@@ -882,6 +1006,20 @@ func recordFollowAttempt(ctx context.Context, cfg *models.SmartMoneyFollowConfig
 		Create(&attempt).Error; err != nil {
 		log.Printf("[SmartMoneyFollow] record follow attempt failed: config_id=%d event_id=%d action=%s err=%v", cfg.ID, event.ID, action, err)
 	}
+}
+
+func findExistingFollowJob(ctx context.Context, configID uint, eventID uint, action string) (*models.SmartMoneyFollowJob, error) {
+	var job models.SmartMoneyFollowJob
+	err := database.DB.WithContext(ctx).
+		Where("config_id = ? AND event_id = ? AND action = ?", configID, eventID, action).
+		First(&job).Error
+	if err == nil {
+		return &job, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("find existing follow job failed: %w", err)
 }
 
 func followActionForEvent(eventType string) (string, bool) {

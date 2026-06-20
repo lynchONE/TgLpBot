@@ -114,6 +114,17 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "delete_logs", "clear_logs":
+		result, err := smartMoneyFollowService().DeleteLogs(r.Context(), user.ID, firstSmartMoneyAutoFollowChain(req.Chain, req.Config.Chain))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":               true,
+			"deleted_jobs":     result.DeletedJobs,
+			"deleted_attempts": result.DeletedAttempts,
+		})
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)
 	}

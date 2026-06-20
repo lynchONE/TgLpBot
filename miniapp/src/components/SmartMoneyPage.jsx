@@ -17,7 +17,7 @@ import {
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchWallets, fetchSMWatchActivity, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
-    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig,
+    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig, deleteSMAutoFollowLogs,
     buildSMEventsWsUrl,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
@@ -4702,8 +4702,9 @@ function formatAutoFollowJobTime(value) {
 function autoFollowStatusClass(status) {
     switch (String(status || '').toLowerCase()) {
         case 'success':
-        case 'created':
             return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200';
+        case 'created':
+            return 'border-sky-400/20 bg-sky-500/10 text-sky-200';
         case 'failed':
             return 'border-red-400/20 bg-red-500/10 text-red-200';
         case 'running':
@@ -4832,6 +4833,25 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         }
     }, [apiBaseUrl, hasInitData, initData, load]);
 
+    const deleteLogs = useCallback(async () => {
+        if (!hasInitData) return;
+        if (!window.confirm('确认清空自动跟单任务日志？不会删除跟单配置和正在执行的任务。')) return;
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            const resp = await deleteSMAutoFollowLogs({ apiBaseUrl, initData, chain: 'bsc' });
+            const deletedJobs = Number(resp?.deleted_jobs || 0);
+            const deletedAttempts = Number(resp?.deleted_attempts || 0);
+            setNotice(`已清理 ${deletedJobs} 条任务日志、${deletedAttempts} 条尝试记录`);
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '清理失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, hasInitData, initData, load]);
+
     const toggleConfig = useCallback(async (config) => {
         if (!config || !hasInitData) return;
         setSaving(true);
@@ -4915,6 +4935,39 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         });
         return items.sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
     }, [attempts, jobs]);
+    const autoFollowTimelineItems = useMemo(() => {
+        const rows = new Map();
+        targetEvents.forEach((event) => {
+            const eventID = Number(event?.id) || 0;
+            if (eventID <= 0) return;
+            rows.set(`event:${eventID}`, {
+                key: `event:${eventID}`,
+                time: event?.tx_timestamp,
+                event,
+                job: autoFollowJobByEventID.get(eventID),
+                attempt: autoFollowAttemptByEventID.get(eventID),
+            });
+        });
+        autoFollowFlowItems.forEach((item) => {
+            const row = item.job || item.attempt;
+            const eventID = Number(row?.event_id) || 0;
+            const existing = eventID > 0 ? rows.get(`event:${eventID}`) : null;
+            if (existing) {
+                if (!existing.job && item.job) existing.job = item.job;
+                if (!existing.attempt && item.attempt) existing.attempt = item.attempt;
+                if (!existing.time) existing.time = item.time;
+                return;
+            }
+            rows.set(`${item.kind}:${row?.id || eventID}`, {
+                key: `${item.kind}:${row?.id || eventID}`,
+                time: item.time,
+                event: eventID > 0 ? autoFollowEventByID.get(eventID) : null,
+                job: item.job,
+                attempt: item.attempt,
+            });
+        });
+        return Array.from(rows.values()).sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
+    }, [autoFollowAttemptByEventID, autoFollowEventByID, autoFollowFlowItems, autoFollowJobByEventID, targetEvents]);
     const draftWallets = Array.isArray(draft.target_wallet_addresses) && draft.target_wallet_addresses.length > 0
         ? draft.target_wallet_addresses
         : [''];
@@ -4982,7 +5035,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 <div className="mt-4 grid grid-cols-3 gap-2">
                     <StatCard label="配置数" value={configs.length} compact />
                     <StatCard label="运行中" value={activeCount} compact />
-                    <StatCard label="最近任务" value={autoFollowFlowItems.length} compact />
+                    <StatCard label="最近任务" value={autoFollowTimelineItems.length} compact />
                 </div>
             </section>
 
@@ -5006,7 +5059,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 {[
                     { key: 'configure', label: draft.id ? '编辑任务' : '配置任务', icon: Settings },
                     { key: 'configs', label: '我的跟单', icon: Users, count: configs.length },
-                    { key: 'jobs', label: '最近任务', icon: Activity, count: autoFollowFlowItems.length },
+                    { key: 'jobs', label: '最近任务', icon: Activity, count: autoFollowTimelineItems.length },
                 ].map(({ key, label, icon: Icon, count }) => (
                     <button
                         key={key}
@@ -5335,122 +5388,86 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
 
             {activeTab === 'jobs' ? (
             <section className="space-y-2">
-                <div className="text-sm font-semibold text-zinc-100">最近任务</div>
-                {autoFollowFlowItems.length === 0 && targetEvents.length === 0 ? (
+                <div className="flex items-center justify-between gap-2">
+                    <div>
+                        <div className="text-sm font-semibold text-zinc-100">最近任务</div>
+                        <div className="mt-0.5 text-[11px] text-zinc-500">事件 {targetEvents.length} · 跟单 {autoFollowFlowItems.length}</div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={deleteLogs}
+                        disabled={saving || !hasInitData || autoFollowTimelineItems.length === 0}
+                        className={`inline-flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs disabled:opacity-50 ${getFilterButtonClass(false, brand)}`}
+                    >
+                        <Trash2 size={13} />
+                        清空日志
+                    </button>
+                </div>
+                {autoFollowTimelineItems.length === 0 ? (
                     <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
                         暂无目标事件和执行记录
                     </div>
                 ) : (
-                    <div className="grid gap-3 lg:grid-cols-2">
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-500">
-                                <span>被跟单钱包事件流</span>
-                                <span>{targetEvents.length}</span>
-                            </div>
-                            {targetEvents.length === 0 ? (
-                                <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
-                                    暂无目标钱包 LP 事件
-                                </div>
-                            ) : (
-                                targetEvents.slice(0, 8).map((event) => {
-                                    const linkedJob = autoFollowJobByEventID.get(Number(event.id) || 0);
-                                    const linkedAttempt = autoFollowAttemptByEventID.get(Number(event.id) || 0);
-                                    const followStatus = linkedJob?.status || linkedAttempt?.status || '';
-                                    const rangeText = formatAutoFollowEventRange(event);
-                                    return (
-                                        <div key={event.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
-                                                    <div className="flex flex-wrap items-center gap-1.5">
-                                                        <Badge className={autoFollowEventActionClass(event.event_type)}>
-                                                            {autoFollowEventActionLabel(event.event_type)}
-                                                        </Badge>
-                                                        {followStatus ? (
-                                                            <Badge className={autoFollowStatusClass(followStatus)}>
-                                                                跟单 {followStatus}
-                                                            </Badge>
-                                                        ) : (
-                                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
-                                                                未生成跟单
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{getPairLabel(event)}</div>
-                                                    <div className="mt-1 truncate text-[11px] text-zinc-500">
-                                                        {shortAddr(event.wallet_address)}
-                                                        {' · '}
-                                                        {formatAutoFollowJobTime(event.tx_timestamp)}
-                                                        {rangeText ? ` · Tick ${rangeText}` : ''}
-                                                    </div>
-                                                    {!linkedJob && linkedAttempt?.message ? (
-                                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{linkedAttempt.message}</div>
-                                                    ) : null}
-                                                </div>
-                                                <div className="shrink-0 text-right">
-                                                    <div className="text-sm font-semibold text-zinc-100">{formatAutoFollowEventAmount(event)}</div>
-                                                    <div className="text-[10px] text-zinc-500">事件 #{event.id}</div>
-                                                </div>
+                    <div className="space-y-2">
+                        {autoFollowTimelineItems.slice(0, 12).map((item) => {
+                            const event = item.event;
+                            const job = item.job;
+                            const attempt = item.attempt;
+                            const row = job || attempt;
+                            const status = job?.status || attempt?.status || '';
+                            const action = job?.action || attempt?.action || (String(event?.event_type || '').toLowerCase() === 'remove' ? 'close' : 'open');
+                            const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
+                            const message = job?.error_message || (!job ? attempt?.message : '') || '';
+                            const rangeText = event ? formatAutoFollowEventRange(event) : '';
+                            return (
+                                <div key={item.key} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                {event ? (
+                                                    <Badge className={autoFollowEventActionClass(event.event_type)}>
+                                                        {autoFollowEventActionLabel(event.event_type)}
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
+                                                        {action === 'close' ? '撤仓' : '开仓'}
+                                                    </Badge>
+                                                )}
+                                                {status ? (
+                                                    <Badge className={autoFollowStatusClass(status)}>
+                                                        跟单 {status}
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
+                                                        未生成跟单
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
+                                                {event ? getPairLabel(event) : `事件 #${row?.event_id || '--'}`}
+                                            </div>
+                                            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-zinc-500">
+                                                <span>{shortAddr(event?.wallet_address || triggerWallets[0] || row?.target_wallet_address)}</span>
+                                                <span>{formatAutoFollowJobTime(event?.tx_timestamp || job?.scheduled_at || attempt?.updated_at || attempt?.created_at)}</span>
+                                                {rangeText ? <span>Tick {rangeText}</span> : null}
+                                                {row ? <span>执行 {formatAutoFollowExecutionWallet(row, executionWallets)}</span> : null}
+                                            </div>
+                                            {message ? (
+                                                <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{message}</div>
+                                            ) : null}
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <div className="text-sm font-semibold text-zinc-100">
+                                                {Number(job?.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : formatAutoFollowEventAmount(event)}
+                                            </div>
+                                            <div className="text-[10px] text-zinc-500">
+                                                {job ? `任务 #${job.id}` : attempt ? `尝试 #${attempt.id}` : `事件 #${event?.id || '--'}`}
                                             </div>
                                         </div>
-                                    );
-                                })
-                            )}
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-500">
-                                <span>我们的跟单事件流</span>
-                                <span>{autoFollowFlowItems.length}</span>
-                            </div>
-                            {autoFollowFlowItems.length === 0 ? (
-                                <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
-                                    暂无跟单任务
+                                    </div>
                                 </div>
-                            ) : (
-                                autoFollowFlowItems.slice(0, 8).map((item) => {
-                                    const job = item.job;
-                                    const attempt = item.attempt;
-                                    const row = job || attempt;
-                                    const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
-                                    const event = autoFollowEventByID.get(Number(row?.event_id) || 0);
-                                    const status = job?.status || attempt?.status || '';
-                                    const action = job?.action || attempt?.action;
-                                    const message = job?.error_message || attempt?.message || '';
-                                    return (
-                                        <div key={`${item.kind}:${row?.id || row?.event_id}`} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
-                                                    <div className="flex flex-wrap items-center gap-1.5">
-                                                        <Badge className={autoFollowStatusClass(status)}>{status}</Badge>
-                                                        <span className="text-sm text-zinc-100">{action === 'close' ? '撤仓' : '开仓'}</span>
-                                                        {item.kind === 'attempt' ? (
-                                                            <Badge className="border-red-400/20 bg-red-500/10 text-red-200">未建任务</Badge>
-                                                        ) : null}
-                                                    </div>
-                                                    <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
-                                                        {event ? getPairLabel(event) : `事件 #${row?.event_id || '--'}`}
-                                                    </div>
-                                                    <div className="mt-1 truncate text-[11px] text-zinc-500">
-                                                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || row?.target_wallet_address)}
-                                                        {' · '}
-                                                        执行 {formatAutoFollowExecutionWallet(row, executionWallets)}
-                                                        {' · '}
-                                                        {formatAutoFollowJobTime(job?.scheduled_at || attempt?.created_at)}
-                                                    </div>
-                                                    {message ? (
-                                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{message}</div>
-                                                    ) : null}
-                                                </div>
-                                                <div className="shrink-0 text-right">
-                                                    <div className="text-sm font-semibold text-zinc-100">{Number(job?.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
-                                                    <div className="text-[10px] text-zinc-500">{job ? `任务 #${job.id}` : `尝试 #${attempt?.id}`}</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
+                            );
+                        })}
                     </div>
                 )}
             </section>
