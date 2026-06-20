@@ -106,6 +106,44 @@ func requireModulePermission(check userSvc.AccessCheck, moduleKey string) (int, 
 	return 0, ""
 }
 
+func requireAnyModulePermission(check userSvc.AccessCheck, moduleKeys ...string) (int, string) {
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		return status, msg
+	}
+	if check.IsAdmin {
+		return 0, ""
+	}
+	if check.Access == nil {
+		return http.StatusForbidden, "forbidden"
+	}
+
+	normalizedKeys := make([]string, 0, len(moduleKeys))
+	for _, moduleKey := range moduleKeys {
+		moduleKey = strings.TrimSpace(moduleKey)
+		if !models.IsAccessModuleKey(moduleKey) {
+			return http.StatusForbidden, "unknown module"
+		}
+		normalizedKeys = append(normalizedKeys, moduleKey)
+	}
+	if len(normalizedKeys) == 0 {
+		return http.StatusForbidden, "unknown module"
+	}
+
+	enabled, err := models.AccessModuleKeysFromJSON(check.Access.EnabledModules)
+	if err != nil {
+		if errors.Is(err, models.ErrAccessModulesNotConfigured) {
+			return http.StatusForbidden, "modules not configured"
+		}
+		return http.StatusForbidden, "invalid module permission config"
+	}
+	for _, moduleKey := range normalizedKeys {
+		if models.AccessModuleKeysContain(enabled, moduleKey) {
+			return 0, ""
+		}
+	}
+	return http.StatusForbidden, "module permission denied"
+}
+
 func enabledModulesForAccessCheck(check userSvc.AccessCheck) ([]string, error) {
 	if check.IsAdmin {
 		return models.DefaultAccessModuleKeys(), nil
