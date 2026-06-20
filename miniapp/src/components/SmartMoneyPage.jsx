@@ -4702,10 +4702,12 @@ function formatAutoFollowJobTime(value) {
 function autoFollowStatusClass(status) {
     switch (String(status || '').toLowerCase()) {
         case 'success':
+        case 'created':
             return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200';
         case 'failed':
             return 'border-red-400/20 bg-red-500/10 text-red-200';
         case 'running':
+        case 'matched':
             return 'border-amber-400/20 bg-amber-500/10 text-amber-200';
         case 'skipped':
             return 'border-white/10 bg-zinc-800/80 text-zinc-400';
@@ -4742,6 +4744,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     const [saving, setSaving] = useState(false);
     const [configs, setConfigs] = useState([]);
     const [jobs, setJobs] = useState([]);
+    const [attempts, setAttempts] = useState([]);
     const [targetEvents, setTargetEvents] = useState([]);
     const [jobEvents, setJobEvents] = useState([]);
     const [executionWallets, setExecutionWallets] = useState([]);
@@ -4755,6 +4758,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setLoading(false);
             setConfigs([]);
             setJobs([]);
+            setAttempts([]);
             setTargetEvents([]);
             setJobEvents([]);
             setExecutionWallets([]);
@@ -4768,6 +4772,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setExecutionWallets(wallets);
             setConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
             setJobs(Array.isArray(resp?.jobs) ? resp.jobs : []);
+            setAttempts(Array.isArray(resp?.attempts) ? resp.attempts : []);
             setTargetEvents(Array.isArray(resp?.target_events) ? resp.target_events : []);
             setJobEvents(Array.isArray(resp?.job_events) ? resp.job_events : []);
             setDraft((prev) => ensureAutoFollowDraftExecutionWallet(prev, wallets));
@@ -4887,6 +4892,29 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         });
         return map;
     }, [jobs]);
+    const autoFollowAttemptByEventID = useMemo(() => {
+        const map = new Map();
+        attempts.forEach((attempt) => {
+            const id = Number(attempt?.event_id) || 0;
+            if (id > 0 && !map.has(id)) map.set(id, attempt);
+        });
+        return map;
+    }, [attempts]);
+    const autoFollowFlowItems = useMemo(() => {
+        const items = [];
+        const seenAttempts = new Set();
+        jobs.forEach((job) => {
+            const attempt = attempts.find((item) => Number(item?.job_id) === Number(job?.id));
+            if (attempt?.id) seenAttempts.add(Number(attempt.id));
+            items.push({ kind: 'job', job, attempt, time: job?.created_at || job?.scheduled_at });
+        });
+        attempts.forEach((attempt) => {
+            const id = Number(attempt?.id) || 0;
+            if (id > 0 && seenAttempts.has(id)) return;
+            items.push({ kind: 'attempt', attempt, time: attempt?.created_at || attempt?.updated_at });
+        });
+        return items.sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
+    }, [attempts, jobs]);
     const draftWallets = Array.isArray(draft.target_wallet_addresses) && draft.target_wallet_addresses.length > 0
         ? draft.target_wallet_addresses
         : [''];
@@ -4954,7 +4982,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 <div className="mt-4 grid grid-cols-3 gap-2">
                     <StatCard label="配置数" value={configs.length} compact />
                     <StatCard label="运行中" value={activeCount} compact />
-                    <StatCard label="最近任务" value={jobs.length} compact />
+                    <StatCard label="最近任务" value={autoFollowFlowItems.length} compact />
                 </div>
             </section>
 
@@ -4978,7 +5006,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 {[
                     { key: 'configure', label: draft.id ? '编辑任务' : '配置任务', icon: Settings },
                     { key: 'configs', label: '我的跟单', icon: Users, count: configs.length },
-                    { key: 'jobs', label: '最近任务', icon: Activity, count: jobs.length },
+                    { key: 'jobs', label: '最近任务', icon: Activity, count: autoFollowFlowItems.length },
                 ].map(({ key, label, icon: Icon, count }) => (
                     <button
                         key={key}
@@ -5308,7 +5336,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             {activeTab === 'jobs' ? (
             <section className="space-y-2">
                 <div className="text-sm font-semibold text-zinc-100">最近任务</div>
-                {jobs.length === 0 && targetEvents.length === 0 ? (
+                {autoFollowFlowItems.length === 0 && targetEvents.length === 0 ? (
                     <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
                         暂无目标事件和执行记录
                     </div>
@@ -5326,6 +5354,8 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             ) : (
                                 targetEvents.slice(0, 8).map((event) => {
                                     const linkedJob = autoFollowJobByEventID.get(Number(event.id) || 0);
+                                    const linkedAttempt = autoFollowAttemptByEventID.get(Number(event.id) || 0);
+                                    const followStatus = linkedJob?.status || linkedAttempt?.status || '';
                                     const rangeText = formatAutoFollowEventRange(event);
                                     return (
                                         <div key={event.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
@@ -5335,9 +5365,9 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                                         <Badge className={autoFollowEventActionClass(event.event_type)}>
                                                             {autoFollowEventActionLabel(event.event_type)}
                                                         </Badge>
-                                                        {linkedJob ? (
-                                                            <Badge className={autoFollowStatusClass(linkedJob.status)}>
-                                                                跟单 {linkedJob.status}
+                                                        {followStatus ? (
+                                                            <Badge className={autoFollowStatusClass(followStatus)}>
+                                                                跟单 {followStatus}
                                                             </Badge>
                                                         ) : (
                                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
@@ -5352,6 +5382,9 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                                         {formatAutoFollowJobTime(event.tx_timestamp)}
                                                         {rangeText ? ` · Tick ${rangeText}` : ''}
                                                     </div>
+                                                    {!linkedJob && linkedAttempt?.message ? (
+                                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{linkedAttempt.message}</div>
+                                                    ) : null}
                                                 </div>
                                                 <div className="shrink-0 text-right">
                                                     <div className="text-sm font-semibold text-zinc-100">{formatAutoFollowEventAmount(event)}</div>
@@ -5367,41 +5400,50 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         <div className="space-y-2">
                             <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-500">
                                 <span>我们的跟单事件流</span>
-                                <span>{jobs.length}</span>
+                                <span>{autoFollowFlowItems.length}</span>
                             </div>
-                            {jobs.length === 0 ? (
+                            {autoFollowFlowItems.length === 0 ? (
                                 <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
                                     暂无跟单任务
                                 </div>
                             ) : (
-                                jobs.slice(0, 8).map((job) => {
-                                    const triggerWallets = Array.isArray(job.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
-                                    const event = autoFollowEventByID.get(Number(job.event_id) || 0);
+                                autoFollowFlowItems.slice(0, 8).map((item) => {
+                                    const job = item.job;
+                                    const attempt = item.attempt;
+                                    const row = job || attempt;
+                                    const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
+                                    const event = autoFollowEventByID.get(Number(row?.event_id) || 0);
+                                    const status = job?.status || attempt?.status || '';
+                                    const action = job?.action || attempt?.action;
+                                    const message = job?.error_message || attempt?.message || '';
                                     return (
-                                        <div key={job.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
+                                        <div key={`${item.kind}:${row?.id || row?.event_id}`} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0">
                                                     <div className="flex flex-wrap items-center gap-1.5">
-                                                        <Badge className={autoFollowStatusClass(job.status)}>{job.status}</Badge>
-                                                        <span className="text-sm text-zinc-100">{job.action === 'close' ? '撤仓' : '开仓'}</span>
+                                                        <Badge className={autoFollowStatusClass(status)}>{status}</Badge>
+                                                        <span className="text-sm text-zinc-100">{action === 'close' ? '撤仓' : '开仓'}</span>
+                                                        {item.kind === 'attempt' ? (
+                                                            <Badge className="border-red-400/20 bg-red-500/10 text-red-200">未建任务</Badge>
+                                                        ) : null}
                                                     </div>
                                                     <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
-                                                        {event ? getPairLabel(event) : `事件 #${job.event_id || '--'}`}
+                                                        {event ? getPairLabel(event) : `事件 #${row?.event_id || '--'}`}
                                                     </div>
                                                     <div className="mt-1 truncate text-[11px] text-zinc-500">
-                                                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)}
+                                                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || row?.target_wallet_address)}
                                                         {' · '}
-                                                        执行 {formatAutoFollowExecutionWallet(job, executionWallets)}
+                                                        执行 {formatAutoFollowExecutionWallet(row, executionWallets)}
                                                         {' · '}
-                                                        {formatAutoFollowJobTime(job.scheduled_at)}
+                                                        {formatAutoFollowJobTime(job?.scheduled_at || attempt?.created_at)}
                                                     </div>
-                                                    {job.error_message ? (
-                                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{job.error_message}</div>
+                                                    {message ? (
+                                                        <div className="mt-1 text-[11px] text-red-200 line-clamp-2">{message}</div>
                                                     ) : null}
                                                 </div>
                                                 <div className="shrink-0 text-right">
-                                                    <div className="text-sm font-semibold text-zinc-100">{Number(job.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
-                                                    <div className="text-[10px] text-zinc-500">任务 #{job.id}</div>
+                                                    <div className="text-sm font-semibold text-zinc-100">{Number(job?.amount_usdt) > 0 ? formatUSDCompact(job.amount_usdt) : '--'}</div>
+                                                    <div className="text-[10px] text-zinc-500">{job ? `任务 #${job.id}` : `尝试 #${attempt?.id}`}</div>
                                                 </div>
                                             </div>
                                         </div>

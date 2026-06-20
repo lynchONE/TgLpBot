@@ -176,11 +176,13 @@ func TestTargetPositionRefForThresholdIgnoresWallet(t *testing.T) {
 }
 
 func TestFollowJobEventIDsIncludesTriggerEvents(t *testing.T) {
-	got := followJobEventIDs([]models.SmartMoneyFollowJob{
+	got := followJobAndAttemptEventIDs([]models.SmartMoneyFollowJob{
 		{EventID: 10, TriggerEventIDs: models.StringArray{"9", "10", "bad", "0"}},
 		{EventID: 11, TriggerEventIDs: models.StringArray{"8"}},
+	}, []models.SmartMoneyFollowAttempt{
+		{EventID: 12},
 	})
-	want := []uint{11, 10, 9, 8}
+	want := []uint{12, 11, 10, 9, 8}
 	if len(got) != len(want) {
 		t.Fatalf("event id count = %d, want %d: %v", len(got), len(want), got)
 	}

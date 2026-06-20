@@ -26,6 +26,11 @@ const (
 	SmartMoneyFollowJobStatusFailed  = "failed"
 	SmartMoneyFollowJobStatusSkipped = "skipped"
 
+	SmartMoneyFollowAttemptStatusMatched = "matched"
+	SmartMoneyFollowAttemptStatusCreated = "created"
+	SmartMoneyFollowAttemptStatusFailed  = "failed"
+	SmartMoneyFollowAttemptStatusSkipped = "skipped"
+
 	SmartMoneyFollowTaskStatusOpen   = "open"
 	SmartMoneyFollowTaskStatusClosed = "closed"
 )
@@ -123,6 +128,26 @@ type SmartMoneyFollowJob struct {
 }
 
 func (SmartMoneyFollowJob) TableName() string { return "smart_money_follow_jobs" }
+
+type SmartMoneyFollowAttempt struct {
+	ID                  uint      `gorm:"primaryKey" json:"id"`
+	ConfigID            uint      `gorm:"not null;uniqueIndex:uq_sm_follow_attempt_config_event_action,priority:1;index" json:"config_id"`
+	UserID              uint      `gorm:"not null;index" json:"user_id"`
+	Chain               string    `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
+	ChainID             int       `gorm:"not null;default:56;index" json:"chain_id"`
+	TargetWalletAddress string    `gorm:"size:42;not null;index" json:"target_wallet_address"`
+	ExecutionWalletID   uint      `gorm:"not null;default:0;index" json:"execution_wallet_id"`
+	ExecutionWalletAddr string    `gorm:"column:execution_wallet_address;size:42;not null;default:'';index" json:"execution_wallet_address"`
+	EventID             uint      `gorm:"not null;uniqueIndex:uq_sm_follow_attempt_config_event_action,priority:2;index" json:"event_id"`
+	Action              string    `gorm:"size:16;not null;uniqueIndex:uq_sm_follow_attempt_config_event_action,priority:3;index" json:"action"`
+	Status              string    `gorm:"size:16;not null;default:'matched';index" json:"status"`
+	Message             string    `gorm:"type:text" json:"message"`
+	JobID               *uint     `gorm:"index" json:"job_id,omitempty"`
+	CreatedAt           time.Time `gorm:"not null;autoCreateTime" json:"created_at"`
+	UpdatedAt           time.Time `gorm:"not null;autoUpdateTime" json:"updated_at"`
+}
+
+func (SmartMoneyFollowAttempt) TableName() string { return "smart_money_follow_attempts" }
 
 type SmartMoneyFollowTask struct {
 	ID                  uint      `gorm:"primaryKey" json:"id"`

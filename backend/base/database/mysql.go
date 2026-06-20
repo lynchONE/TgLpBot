@@ -118,6 +118,7 @@ func autoMigrate() error {
 	}
 
 	if err := DB.AutoMigrate(
+		&models.SmartMoneyFollowAttempt{},
 		&models.SmartMoneyFollowJob{},
 		&models.SmartMoneyFollowTask{},
 	); err != nil {
@@ -296,6 +297,21 @@ func allowNullableLegacyWalletAddress(tableName string) error {
 		return fmt.Errorf("make legacy %s.wallet_address nullable: %w", tableName, err)
 	}
 	log.Printf("[DB] made legacy %s.wallet_address nullable", tableName)
+	return nil
+}
+
+func allowNullableLegacyUintColumn(tableName, columnName string) error {
+	if DB == nil {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(
+		"ALTER TABLE %s MODIFY COLUMN %s BIGINT UNSIGNED NULL DEFAULT NULL",
+		quoteTableName(tableName),
+		quoteColumnName(columnName),
+	)).Error; err != nil {
+		return fmt.Errorf("make legacy %s.%s nullable: %w", tableName, columnName, err)
+	}
+	log.Printf("[DB] made legacy %s.%s nullable", tableName, columnName)
 	return nil
 }
 
@@ -863,6 +879,9 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 		`, quoteTableName(tableName))).Error; err != nil {
 			return fmt.Errorf("backfill %s.event_id from event_seq: %w", tableName, err)
 		}
+		if err := allowNullableLegacyUintColumn(tableName, "event_seq"); err != nil {
+			return err
+		}
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s
@@ -1418,6 +1437,9 @@ func backfillSmartMoneyFollowTaskEvents(tableName string) error {
 		`, quoteTableName(tableName))).Error; err != nil {
 			return fmt.Errorf("backfill %s.open_event_id: %w", tableName, err)
 		}
+		if err := allowNullableLegacyUintColumn(tableName, "last_add_event_seq"); err != nil {
+			return err
+		}
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s
@@ -1439,6 +1461,9 @@ func backfillSmartMoneyFollowTaskEvents(tableName string) error {
 			  AND last_remove_event_seq > 0
 		`, quoteTableName(tableName))).Error; err != nil {
 			return fmt.Errorf("backfill %s.close_event_id: %w", tableName, err)
+		}
+		if err := allowNullableLegacyUintColumn(tableName, "last_remove_event_seq"); err != nil {
+			return err
 		}
 	}
 	return nil

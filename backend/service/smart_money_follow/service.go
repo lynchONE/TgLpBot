@@ -66,13 +66,14 @@ type followJobTrigger struct {
 }
 
 type ConfigEnvelope struct {
-	OK           bool                            `json:"ok"`
-	Chain        string                          `json:"chain"`
-	Configs      []models.SmartMoneyFollowConfig `json:"configs"`
-	Jobs         []models.SmartMoneyFollowJob    `json:"jobs"`
-	TargetEvents []models.SmartMoneyLPEvent      `json:"target_events"`
-	JobEvents    []models.SmartMoneyLPEvent      `json:"job_events"`
-	Wallets      []ExecutionWalletOption         `json:"wallets"`
+	OK           bool                             `json:"ok"`
+	Chain        string                           `json:"chain"`
+	Configs      []models.SmartMoneyFollowConfig  `json:"configs"`
+	Jobs         []models.SmartMoneyFollowJob     `json:"jobs"`
+	Attempts     []models.SmartMoneyFollowAttempt `json:"attempts"`
+	TargetEvents []models.SmartMoneyLPEvent       `json:"target_events"`
+	JobEvents    []models.SmartMoneyLPEvent       `json:"job_events"`
+	Wallets      []ExecutionWalletOption          `json:"wallets"`
 }
 
 type ExecutionWalletOption struct {
@@ -174,11 +175,23 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 		fillJobExecutionWallet(&jobs[i], defaultWallet)
 	}
 
+	var attempts []models.SmartMoneyFollowAttempt
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND chain = ?", userID, chain).
+		Order("created_at DESC").
+		Limit(50).
+		Find(&attempts).Error; err != nil {
+		return nil, fmt.Errorf("list follow attempts failed: %w", err)
+	}
+	for i := range attempts {
+		fillAttemptExecutionWallet(&attempts[i], defaultWallet)
+	}
+
 	targetEvents, err := listRecentTargetEventsForConfigs(ctx, chainID, configs)
 	if err != nil {
 		return nil, err
 	}
-	jobEvents, err := listRecentEventsForJobs(ctx, jobs)
+	jobEvents, err := listRecentEventsForJobsAndAttempts(ctx, jobs, attempts)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +201,7 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 		Chain:        chain,
 		Configs:      configs,
 		Jobs:         jobs,
+		Attempts:     attempts,
 		TargetEvents: targetEvents,
 		JobEvents:    jobEvents,
 		Wallets:      walletOptions,
@@ -228,8 +242,8 @@ func listRecentTargetEventsForConfigs(ctx context.Context, chainID int, configs 
 	return events, nil
 }
 
-func listRecentEventsForJobs(ctx context.Context, jobs []models.SmartMoneyFollowJob) ([]models.SmartMoneyLPEvent, error) {
-	eventIDs := followJobEventIDs(jobs)
+func listRecentEventsForJobsAndAttempts(ctx context.Context, jobs []models.SmartMoneyFollowJob, attempts []models.SmartMoneyFollowAttempt) ([]models.SmartMoneyLPEvent, error) {
+	eventIDs := followJobAndAttemptEventIDs(jobs, attempts)
 	if len(eventIDs) == 0 {
 		return nil, nil
 	}
@@ -244,9 +258,9 @@ func listRecentEventsForJobs(ctx context.Context, jobs []models.SmartMoneyFollow
 	return events, nil
 }
 
-func followJobEventIDs(jobs []models.SmartMoneyFollowJob) []uint {
+func followJobAndAttemptEventIDs(jobs []models.SmartMoneyFollowJob, attempts []models.SmartMoneyFollowAttempt) []uint {
 	seen := make(map[uint]struct{})
-	eventIDs := make([]uint, 0, len(jobs))
+	eventIDs := make([]uint, 0, len(jobs)+len(attempts))
 	appendID := func(id uint) {
 		if id == 0 {
 			return
@@ -267,6 +281,9 @@ func followJobEventIDs(jobs []models.SmartMoneyFollowJob) []uint {
 			}
 			appendID(uint(id))
 		}
+	}
+	for i := range attempts {
+		appendID(attempts[i].EventID)
 	}
 	sort.Slice(eventIDs, func(i, j int) bool { return eventIDs[i] > eventIDs[j] })
 	if len(eventIDs) > 50 {
@@ -738,6 +755,7 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 	if !ok {
 		log.Printf("[SmartMoneyFollow] job trigger not ready: config_id=%d event_id=%d trigger_mode=%s action=%s",
 			cfg.ID, event.ID, normalizeConfigTriggerMode(cfg.TriggerMode), action)
+		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "trigger not ready", nil)
 		return nil
 	}
 	status := models.SmartMoneyFollowJobStatusPending
@@ -769,6 +787,7 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		if exists {
 			log.Printf("[SmartMoneyFollow] skip duplicate threshold open job: config_id=%d event_id=%d position_ref=%s",
 				cfg.ID, event.ID, positionRef)
+			recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "duplicate threshold open job", nil)
 			return nil
 		}
 	}
@@ -802,19 +821,67 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		AmountUSDT:          amountUSDT,
 		ErrorMessage:        errorMessage,
 	}
+	recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusMatched, "matched follow config", nil)
 	result := database.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&job)
 	if result.Error != nil {
+		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusFailed, result.Error.Error(), nil)
 		return fmt.Errorf("create follow job failed: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		log.Printf("[SmartMoneyFollow] follow job already exists: config_id=%d event_id=%d action=%s", cfg.ID, trigger.PrimaryEventID, action)
+		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "follow job already exists", nil)
 		return nil
 	}
+	recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, errorMessage, &job.ID)
 	log.Printf("[SmartMoneyFollow] follow job created: job_id=%d config_id=%d event_id=%d action=%s status=%s amount=%.8f error=%s",
 		job.ID, cfg.ID, trigger.PrimaryEventID, action, status, amountUSDT, errorMessage)
 	return nil
+}
+
+func recordFollowAttempt(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, action string, status string, message string, jobID *uint) {
+	if cfg == nil || event == nil || database.DB == nil {
+		return
+	}
+	if cfg.ID == 0 || event.ID == 0 || strings.TrimSpace(action) == "" {
+		return
+	}
+	attempt := models.SmartMoneyFollowAttempt{
+		ConfigID:            cfg.ID,
+		UserID:              cfg.UserID,
+		Chain:               cfg.Chain,
+		ChainID:             cfg.ChainID,
+		TargetWalletAddress: normalizeWalletAddress(event.WalletAddress),
+		ExecutionWalletID:   cfg.ExecutionWalletID,
+		ExecutionWalletAddr: cfg.ExecutionWalletAddr,
+		EventID:             event.ID,
+		Action:              action,
+		Status:              status,
+		Message:             strings.TrimSpace(message),
+		JobID:               jobID,
+	}
+	now := time.Now()
+	updates := map[string]any{
+		"user_id":                  attempt.UserID,
+		"chain":                    attempt.Chain,
+		"chain_id":                 attempt.ChainID,
+		"target_wallet_address":    attempt.TargetWalletAddress,
+		"execution_wallet_id":      attempt.ExecutionWalletID,
+		"execution_wallet_address": attempt.ExecutionWalletAddr,
+		"status":                   attempt.Status,
+		"message":                  attempt.Message,
+		"job_id":                   attempt.JobID,
+		"updated_at":               now,
+	}
+	if err := database.DB.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "config_id"}, {Name: "event_id"}, {Name: "action"}},
+			DoUpdates: clause.Assignments(updates),
+		}).
+		Create(&attempt).Error; err != nil {
+		log.Printf("[SmartMoneyFollow] record follow attempt failed: config_id=%d event_id=%d action=%s err=%v", cfg.ID, event.ID, action, err)
+	}
 }
 
 func followActionForEvent(eventType string) (string, bool) {
@@ -1587,6 +1654,25 @@ func fillJobExecutionWallet(job *models.SmartMoneyFollowJob, defaultWallet *mode
 	}
 	if strings.TrimSpace(job.ExecutionWalletAddr) == "" {
 		job.ExecutionWalletAddr = normalizeWalletAddress(defaultWallet.Address)
+	}
+}
+
+func fillAttemptExecutionWallet(attempt *models.SmartMoneyFollowAttempt, defaultWallet *models.Wallet) {
+	if attempt == nil {
+		return
+	}
+	if attempt.ExecutionWalletID != 0 && strings.TrimSpace(attempt.ExecutionWalletAddr) != "" {
+		attempt.ExecutionWalletAddr = normalizeWalletAddress(attempt.ExecutionWalletAddr)
+		return
+	}
+	if defaultWallet == nil {
+		return
+	}
+	if attempt.ExecutionWalletID == 0 {
+		attempt.ExecutionWalletID = defaultWallet.ID
+	}
+	if strings.TrimSpace(attempt.ExecutionWalletAddr) == "" {
+		attempt.ExecutionWalletAddr = normalizeWalletAddress(defaultWallet.Address)
 	}
 }
 
