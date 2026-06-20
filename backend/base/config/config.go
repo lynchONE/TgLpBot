@@ -230,8 +230,9 @@ type Config struct {
 	SmartLPScanTimeoutSeconds  int
 
 	// Smart Money monitoring
-	SmartMoneyEnabled      bool
-	SmartMoneyPollInterval int
+	SmartMoneyEnabled            bool
+	SmartMoneyPollInterval       int
+	SmartMoneyConfirmationBlocks int
 
 	// Multi-chain (single instance). Chains are keyed by lower-case chain slug (e.g. "bsc", "base").
 	EnabledChains []string
@@ -287,6 +288,10 @@ func LoadConfig() error {
 	bscRPCURL := strings.TrimSpace(getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"))
 	bscRPCWSURL := strings.TrimSpace(getEnv("BSC_RPC_WS_URL", ""))
 	smartMoneyPollInterval := getEnvInt("SMART_MONEY_POLL_INTERVAL_SEC", getEnvInt("SMART_MONEY_RECONNECT_INTERVAL_SEC", 2))
+	smartMoneyConfirmationBlocks := getEnvInt("SMART_MONEY_CONFIRMATION_BLOCKS", 3)
+	if smartMoneyConfirmationBlocks < 0 {
+		smartMoneyConfirmationBlocks = 0
+	}
 
 	if workerMaxParallelUsers <= 0 {
 		workerMaxParallelUsers = 1
@@ -454,8 +459,9 @@ func LoadConfig() error {
 		SmartLPScanTimeoutSeconds:  smartLPScanTimeoutSeconds,
 
 		// Smart Money monitoring
-		SmartMoneyEnabled:      getEnvBool("SMART_MONEY_ENABLED", false),
-		SmartMoneyPollInterval: smartMoneyPollInterval,
+		SmartMoneyEnabled:            getEnvBool("SMART_MONEY_ENABLED", false),
+		SmartMoneyPollInterval:       smartMoneyPollInterval,
+		SmartMoneyConfirmationBlocks: smartMoneyConfirmationBlocks,
 	}
 
 	// Build per-chain configs (single-instance multi-chain).
@@ -552,6 +558,7 @@ func LoadConfig() error {
 	log.Printf("   - SmartMoney Enabled: %v", AppConfig.SmartMoneyEnabled)
 	log.Printf("   - SmartMoney BSC HTTP RPC: %s", maskURL(AppConfig.BSCRpcURL))
 	log.Printf("   - SmartMoney Poll Interval: %d seconds", AppConfig.SmartMoneyPollInterval)
+	log.Printf("   - SmartMoney Confirmation Blocks: %d", AppConfig.SmartMoneyConfirmationBlocks)
 	log.Println("[Config] Configuration loaded")
 	log.Println("========================================")
 

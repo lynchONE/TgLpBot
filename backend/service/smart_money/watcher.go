@@ -44,15 +44,16 @@ const (
 )
 
 type Watcher struct {
-	repo             *Repository
-	notifier         func(*models.SmartMoneyLPEvent)
-	lpContracts      []common.Address
-	lpTopics         [][]common.Hash
-	chainID          int64
-	pollIntervalSec  int
-	maxBlocksPerPoll int
-	eventWorkers     int
-	stopCh           chan struct{}
+	repo               *Repository
+	notifier           func(*models.SmartMoneyLPEvent)
+	lpContracts        []common.Address
+	lpTopics           [][]common.Hash
+	chainID            int64
+	pollIntervalSec    int
+	maxBlocksPerPoll   int
+	confirmationBlocks int
+	eventWorkers       int
+	stopCh             chan struct{}
 }
 
 type blockTransaction struct {
@@ -127,7 +128,7 @@ type pollResult struct {
 	Remaining uint64
 }
 
-func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uniswapV4PoolManager string, pollIntervalSec int) *Watcher {
+func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uniswapV4PoolManager string, pollIntervalSec int, confirmationBlocks int) *Watcher {
 	var lpContracts []common.Address
 	if common.IsHexAddress(strings.TrimSpace(pancakeV3NPM)) {
 		lpContracts = append(lpContracts, common.HexToAddress(strings.TrimSpace(pancakeV3NPM)))
@@ -142,6 +143,9 @@ func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uni
 	if pollIntervalSec <= 0 {
 		pollIntervalSec = 2
 	}
+	if confirmationBlocks < 0 {
+		confirmationBlocks = 0
+	}
 
 	lpTopics := [][]common.Hash{{
 		TopicIncreaseLiquidity,
@@ -150,14 +154,15 @@ func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uni
 	}}
 
 	return &Watcher{
-		repo:             repo,
-		lpContracts:      lpContracts,
-		lpTopics:         lpTopics,
-		chainID:          chainID,
-		pollIntervalSec:  pollIntervalSec,
-		maxBlocksPerPoll: smartMoneyMaxBlocksPerPoll,
-		eventWorkers:     defaultSmartMoneyEventWorkers(),
-		stopCh:           make(chan struct{}),
+		repo:               repo,
+		lpContracts:        lpContracts,
+		lpTopics:           lpTopics,
+		chainID:            chainID,
+		pollIntervalSec:    pollIntervalSec,
+		maxBlocksPerPoll:   smartMoneyMaxBlocksPerPoll,
+		confirmationBlocks: confirmationBlocks,
+		eventWorkers:       defaultSmartMoneyEventWorkers(),
+		stopCh:             make(chan struct{}),
 	}
 }
 
@@ -303,12 +308,20 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 	if err != nil {
 		return pollResult{}, err
 	}
-	if latestBlock <= *lastProcessed {
+	// Hold back a few confirmations so a shallow reorg does not leave stale events behind.
+	effectiveLatest := latestBlock
+	if w.confirmationBlocks > 0 {
+		if latestBlock < uint64(w.confirmationBlocks) {
+			return pollResult{}, nil
+		}
+		effectiveLatest = latestBlock - uint64(w.confirmationBlocks)
+	}
+	if effectiveLatest <= *lastProcessed {
 		return pollResult{}, nil
 	}
 
 	fromBlock := *lastProcessed + 1
-	toBlock := latestBlock
+	toBlock := effectiveLatest
 	if w.maxBlocksPerPoll > 0 {
 		maxToBlock := fromBlock + uint64(w.maxBlocksPerPoll) - 1
 		if toBlock > maxToBlock {
@@ -319,7 +332,7 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 	stats := watcherScanStats{
 		FromBlock:   fromBlock,
 		ToBlock:     toBlock,
-		LatestBlock: latestBlock,
+		LatestBlock: effectiveLatest,
 		Blocks:      int(toBlock - fromBlock + 1),
 		StartedAt:   time.Now(),
 	}
@@ -401,7 +414,7 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 		}
 
 		if blockStats.LPLogCount > 0 {
-			lpStats, err := w.processLPLogsForBlock(ctx, block, logsByBlock[block.Number], smartMoneyWallets)
+			lpStats, err := w.processLPLogsForBlock(ctx, httpClient, block, logsByBlock[block.Number], smartMoneyWallets)
 			if err != nil {
 				return pollResult{}, fmt.Errorf("process block %d lp logs: %w", block.Number, err)
 			}
@@ -668,21 +681,46 @@ func (w *Watcher) loadLPLogsByBlock(ctx context.Context, client *ethclient.Clien
 	if len(w.lpContracts) == 0 {
 		return logsByBlock, nil
 	}
-
-	query := ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(fromBlock),
-		ToBlock:   new(big.Int).SetUint64(toBlock),
-		Addresses: w.lpContracts,
-		Topics:    w.lpTopics,
+	if toBlock < fromBlock {
+		return logsByBlock, nil
 	}
 
-	logs, err := client.FilterLogs(ctx, query)
-	if err != nil {
-		handleSmartMoneyRPCEndpointError(eff, err)
-		return nil, err
-	}
-	for _, vlog := range logs {
-		logsByBlock[vlog.BlockNumber] = append(logsByBlock[vlog.BlockNumber], vlog)
+	// Scan in sub-ranges, halving the span when the RPC rejects the query as too
+	// large / returning too many results, so a busy range is not dropped on a single error.
+	chunk := toBlock - fromBlock + 1
+	for start := fromBlock; start <= toBlock; {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		end := start + chunk - 1
+		if end > toBlock {
+			end = toBlock
+		}
+		query := ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(start),
+			ToBlock:   new(big.Int).SetUint64(end),
+			Addresses: w.lpContracts,
+			Topics:    w.lpTopics,
+		}
+		logs, err := client.FilterLogs(ctx, query)
+		if err != nil {
+			if isRPCLogRangeLimitError(err) && chunk > 1 {
+				chunk /= 2
+				if chunk == 0 {
+					chunk = 1
+				}
+				continue
+			}
+			handleSmartMoneyRPCEndpointError(eff, err)
+			return nil, err
+		}
+		for _, vlog := range logs {
+			logsByBlock[vlog.BlockNumber] = append(logsByBlock[vlog.BlockNumber], vlog)
+		}
+		if end == toBlock {
+			break
+		}
+		start = end + 1
 	}
 	return logsByBlock, nil
 }
@@ -1226,7 +1264,7 @@ func enrichERC20TransferEvents(ctx context.Context, client *ethclient.Client, ch
 	}
 }
 
-func (w *Watcher) processLPLogsForBlock(ctx context.Context, block *blockSnapshot, logs []types.Log, activeWallets map[string]struct{}) (lpLogStats, error) {
+func (w *Watcher) processLPLogsForBlock(ctx context.Context, client *ethclient.Client, block *blockSnapshot, logs []types.Log, activeWallets map[string]struct{}) (lpLogStats, error) {
 	stats := lpLogStats{
 		TotalLogs: len(logs),
 	}
@@ -1236,26 +1274,57 @@ func (w *Watcher) processLPLogsForBlock(ctx context.Context, block *blockSnapsho
 
 	blockTime := block.Timestamp
 	events := make([]*models.SmartMoneyLPEvent, 0, len(logs))
-	for _, vlog := range logs {
-		sender, ok := block.TxSenders[vlog.TxHash]
-		if !ok || sender == "" {
-			log.Printf("[SmartMoney Watcher] tx sender missing in block snapshot: tx=%s", shortAddr(vlog.TxHash.Hex()))
-			continue
-		}
-		if _, ok := activeWallets[sender]; !ok {
-			continue
-		}
-		stats.ActiveWalletLogs++
+	var pending []*pendingOwnerResolve
 
-		event, err := w.buildLPEvent(vlog, sender, block.Number, blockTime)
+	// Pass 1: parse and classify each LP log.
+	//   Fast path — tx.From is itself a monitored wallet (direct operation): zero extra RPC.
+	//   Slow path — otherwise resolve the real NFT owner on-chain, so liquidity added/removed
+	//               via a zap/aggregator/contract wallet on behalf of a monitored wallet is not missed.
+	for _, vlog := range logs {
+		event, err := w.buildLPEvent(vlog, "", block.Number, blockTime)
 		if err != nil {
-			return stats, fmt.Errorf("parse lp log tx=%s log_index=%d: %w", vlog.TxHash.Hex(), vlog.Index, err)
+			log.Printf("[SmartMoney Watcher] skip unparseable lp log tx=%s log_index=%d: %v", shortAddr(vlog.TxHash.Hex()), vlog.Index, err)
+			continue
 		}
-		events = append(events, event)
+
+		if sender := block.TxSenders[vlog.TxHash]; sender != "" {
+			if _, ok := activeWallets[sender]; ok {
+				event.WalletAddress = sender
+				events = append(events, event)
+				continue
+			}
+		}
+
+		// The slow path needs a tokenId to look up the owner. A V4 ModifyLiquidity not routed
+		// through the position manager carries no tokenId and cannot be attributed (unchanged behaviour).
+		if event.NftTokenID == nil || *event.NftTokenID == 0 {
+			continue
+		}
+		pm, ok := w.positionManagerForEvent(event, vlog)
+		if !ok {
+			continue
+		}
+		pending = append(pending, &pendingOwnerResolve{event: event, positionManager: pm, blockNumber: vlog.BlockNumber})
 	}
+
+	// Pass 2: resolve slow-path owners in a single Multicall3 batch, then keep only monitored wallets.
+	if len(pending) > 0 {
+		resolveOwnersInPlace(ctx, client, pending)
+		for _, p := range pending {
+			owner := p.event.WalletAddress
+			if owner == "" {
+				continue
+			}
+			if _, ok := activeWallets[owner]; ok {
+				events = append(events, p.event)
+			}
+		}
+	}
+
 	if len(events) == 0 {
 		return stats, nil
 	}
+	stats.ActiveWalletLogs = len(events)
 
 	groups := groupLPEventsByPosition(events)
 	handled, err := w.processLPEventGroups(ctx, groups)

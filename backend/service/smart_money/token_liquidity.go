@@ -764,7 +764,7 @@ func newPoolLiquidityRadarWatcher(chainID int) *Watcher {
 			v4PoolManager = strings.TrimSpace(config.AppConfig.UniswapV4PoolManagerAddress)
 		}
 	}
-	return NewWatcher(nil, int64(chainID), pancakeNPM, uniswapNPM, v4PoolManager, 2)
+	return NewWatcher(nil, int64(chainID), pancakeNPM, uniswapNPM, v4PoolManager, 2, 0)
 }
 
 type poolLiquidityLogVisitor func(types.Log) (bool, error)

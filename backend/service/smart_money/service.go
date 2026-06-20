@@ -42,6 +42,7 @@ func NewService() *Service {
 			cfg.UniswapV3PositionManagerAddress,
 			cfg.UniswapV4PoolManagerAddress,
 			cfg.SmartMoneyPollInterval,
+			cfg.SmartMoneyConfirmationBlocks,
 		)
 	}
 
