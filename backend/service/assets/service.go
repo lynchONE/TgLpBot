@@ -312,14 +312,15 @@ type UserLPProfitCurvePoint struct {
 }
 
 type UserLPStatsResponse struct {
-	Windows        []UserLPWindowStats           `json:"windows"`
-	Today          UserLPWindowStats             `json:"today"`
-	TodayPoint     *UserLPDailyPoint             `json:"today_point,omitempty"`
-	TodayPools     []UserLPPoolPnL               `json:"today_pools,omitempty"`
-	DailyHistory   []UserLPDailyPoint            `json:"daily_history,omitempty"`
-	ProfitCurve    []UserLPProfitCurvePoint      `json:"profit_curve,omitempty"`
-	ProfitBaseline *UserLPProfitBaselineResponse `json:"profit_baseline,omitempty"`
-	Timezone       string                        `json:"timezone"`
+	Windows           []UserLPWindowStats           `json:"windows"`
+	Today             UserLPWindowStats             `json:"today"`
+	TodayPoint        *UserLPDailyPoint             `json:"today_point,omitempty"`
+	TodayPools        []UserLPPoolPnL               `json:"today_pools,omitempty"`
+	DailyHistory      []UserLPDailyPoint            `json:"daily_history,omitempty"`
+	ProfitCurve       []UserLPProfitCurvePoint      `json:"profit_curve,omitempty"`
+	FollowProfitCurve []UserLPProfitCurvePoint      `json:"follow_profit_curve,omitempty"`
+	ProfitBaseline    *UserLPProfitBaselineResponse `json:"profit_baseline,omitempty"`
+	Timezone          string                        `json:"timezone"`
 }
 
 type UserLPDailyPnLAdjustmentResponse struct {

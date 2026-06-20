@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } fro
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity,
-    Clock, DollarSign, Percent, Users, Zap, Radar,
+    Clock, DollarSign, Percent, Users, Zap, Radar, Bell, Repeat2, Shuffle, TrendingUp,
 } from 'lucide-react';
 
 const LazySmartMoneyAssetsPage = lazy(() => import('./SmartMoneyAssetsPage.jsx'));
@@ -4541,6 +4541,8 @@ const AUTO_FOLLOW_DEFAULT_DRAFT = {
     target_wallet_addresses: [''],
     execution_wallet_id: '',
     execution_wallet_address: '',
+    execution_wallet_ids: [],
+    execution_wallet_mode: 'fixed',
     trigger_mode: 'any',
     trigger_min_wallets: '2',
     trigger_window_seconds: '300',
@@ -4552,6 +4554,10 @@ const AUTO_FOLLOW_DEFAULT_DRAFT = {
     delay_seconds: '0',
     follow_close: true,
     range_shift_grids: '0',
+    notify_enabled: false,
+    notify_intensity: 'ring',
+    take_profit_usdt: '',
+    stop_loss_usdt: '',
 };
 
 function normalizeAutoFollowWalletList(config) {
@@ -4599,7 +4605,11 @@ function findAutoFollowExecutionWallet(wallets, id, address) {
 }
 
 function formatAutoFollowExecutionWallet(value, wallets) {
-    const wallet = findAutoFollowExecutionWallet(wallets, value?.execution_wallet_id, value?.execution_wallet_address);
+    const walletIDs = normalizeAutoFollowExecutionWalletIDs(value);
+    if (walletIDs.length > 1) {
+        return `${walletIDs.length} wallets · ${autoFollowExecutionWalletModeLabel(value?.execution_wallet_mode)}`;
+    }
+    const wallet = findAutoFollowExecutionWallet(wallets, value?.execution_wallet_id || walletIDs[0], value?.execution_wallet_address);
     if (wallet) {
         const name = String(wallet.name || '').trim();
         const addr = normalizeWalletAddress(wallet.address);
@@ -4608,8 +4618,44 @@ function formatAutoFollowExecutionWallet(value, wallets) {
     return shortAddr(normalizeWalletAddress(value?.execution_wallet_address)) || '未设置';
 }
 
+function normalizeAutoFollowExecutionWalletIDs(value) {
+    const seen = new Set();
+    const out = [];
+    const append = (id) => {
+        const n = Number(id) || 0;
+        if (n <= 0 || seen.has(n)) return;
+        seen.add(n);
+        out.push(n);
+    };
+    if (Array.isArray(value?.execution_wallet_ids)) value.execution_wallet_ids.forEach(append);
+    append(value?.execution_wallet_id);
+    return out;
+}
+
+function autoFollowExecutionWalletModeLabel(mode) {
+    switch (String(mode || '').toLowerCase()) {
+        case 'round_robin':
+            return '轮询';
+        case 'random':
+            return '随机';
+        default:
+            return '固定';
+    }
+}
+
+function autoFollowNotifyIntensityLabel(value) {
+    switch (String(value || '').toLowerCase()) {
+        case 'persistent_ring':
+            return '持续';
+        case 'critical_ring':
+            return '强提醒';
+        default:
+            return '普通';
+    }
+}
+
 function ensureAutoFollowDraftExecutionWallet(draft, wallets) {
-    if (Number(draft?.execution_wallet_id) > 0) return draft;
+    if (normalizeAutoFollowExecutionWalletIDs(draft).length > 0) return draft;
     const source = Array.isArray(wallets) ? wallets : [];
     const wallet = source.find((item) => item?.is_default) || source[0];
     if (!wallet) return draft;
@@ -4617,6 +4663,7 @@ function ensureAutoFollowDraftExecutionWallet(draft, wallets) {
         ...draft,
         execution_wallet_id: String(wallet.id),
         execution_wallet_address: normalizeWalletAddress(wallet.address),
+        execution_wallet_ids: [Number(wallet.id)],
     };
 }
 
@@ -4630,6 +4677,8 @@ function createAutoFollowDraft(config) {
         target_wallet_addresses: wallets,
         execution_wallet_id: config.execution_wallet_id ? String(config.execution_wallet_id) : '',
         execution_wallet_address: normalizeWalletAddress(config.execution_wallet_address),
+        execution_wallet_ids: normalizeAutoFollowExecutionWalletIDs(config),
+        execution_wallet_mode: ['round_robin', 'random'].includes(String(config.execution_wallet_mode || '').toLowerCase()) ? config.execution_wallet_mode : 'fixed',
         trigger_mode: config.trigger_mode === 'threshold' ? 'threshold' : 'any',
         trigger_min_wallets: config.trigger_min_wallets != null ? String(config.trigger_min_wallets) : '2',
         trigger_window_seconds: config.trigger_window_seconds != null ? String(config.trigger_window_seconds) : '300',
@@ -4641,14 +4690,22 @@ function createAutoFollowDraft(config) {
         delay_seconds: String(config.delay_seconds || '0'),
         follow_close: Boolean(config.follow_close),
         range_shift_grids: config.range_shift_grids != null ? String(config.range_shift_grids) : '0',
+        notify_enabled: Boolean(config.notify_enabled),
+        notify_intensity: config.notify_intensity || 'ring',
+        take_profit_usdt: config.take_profit_usdt != null && Number(config.take_profit_usdt) > 0 ? String(config.take_profit_usdt) : '',
+        stop_loss_usdt: config.stop_loss_usdt != null && Number(config.stop_loss_usdt) > 0 ? String(config.stop_loss_usdt) : '',
     };
 }
 
 function normalizeAutoFollowDraft(draft) {
     const wallets = parseAutoFollowWalletInputs(draft.target_wallet_addresses);
-    const executionWalletID = Number(draft.execution_wallet_id);
+    const executionWalletIDs = normalizeAutoFollowExecutionWalletIDs(draft);
+    const executionWalletID = executionWalletIDs[0] || 0;
     if (!Number.isFinite(executionWalletID) || executionWalletID <= 0) throw new Error('请选择执行钱包');
     const executionWalletAddress = normalizeWalletAddress(draft.execution_wallet_address);
+    const executionWalletMode = ['round_robin', 'random'].includes(String(draft.execution_wallet_mode || '').toLowerCase())
+        ? String(draft.execution_wallet_mode).toLowerCase()
+        : 'fixed';
 
     const amountMode = String(draft.amount_mode || '').trim();
     const fixedAmount = Number(String(draft.fixed_amount_usdt || '').trim());
@@ -4667,6 +4724,15 @@ function normalizeAutoFollowDraft(draft) {
     if (!Number.isFinite(rangeShiftGrids) || rangeShiftGrids < 0 || rangeShiftGrids > 20) {
         throw new Error('区间上移格数必须在 0 到 20 之间');
     }
+    const parseRiskValue = (value, label) => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return 0;
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num < 0) throw new Error(`${label}必须大于或等于 0`);
+        return num;
+    };
+    const takeProfit = parseRiskValue(draft.take_profit_usdt, '止盈金额');
+    const stopLoss = parseRiskValue(draft.stop_loss_usdt, '止损金额');
     const triggerMode = draft.trigger_mode === 'threshold' ? 'threshold' : 'any';
     let triggerMinWallets = 1;
     let triggerWindowSeconds = 300;
@@ -4686,6 +4752,8 @@ function normalizeAutoFollowDraft(draft) {
         target_wallet_addresses: wallets,
         execution_wallet_id: executionWalletID,
         execution_wallet_address: executionWalletAddress,
+        execution_wallet_ids: executionWalletIDs,
+        execution_wallet_mode: executionWalletMode,
         trigger_mode: triggerMode,
         trigger_min_wallets: triggerMinWallets,
         trigger_window_seconds: triggerWindowSeconds,
@@ -4697,6 +4765,10 @@ function normalizeAutoFollowDraft(draft) {
         delay_seconds: delayMode === 'fixed_delay' ? Math.round(delaySeconds) : 0,
         follow_close: Boolean(draft.follow_close),
         range_shift_grids: rangeShiftGrids,
+        notify_enabled: Boolean(draft.notify_enabled),
+        notify_intensity: draft.notify_intensity || 'ring',
+        take_profit_usdt: takeProfit,
+        stop_loss_usdt: stopLoss,
     };
 }
 
@@ -4765,6 +4837,55 @@ function formatAutoFollowEventRangeWidth(event) {
     return formatRangePercent(pct);
 }
 
+function AutoFollowStatusMiniCard({ status, config, executionWallets }) {
+    const pnl = Number(status?.total_pnl_usdt) || 0;
+    const realized = Number(status?.realized_pnl_usdt) || 0;
+    const unrealized = Number(status?.unrealized_pnl_usdt) || 0;
+    const stopReason = String(status?.stop_triggered_reason || '');
+    return (
+        <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/60 p-3">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-zinc-100">
+                        {config ? formatAutoFollowExecutionWallet(config, executionWallets) : `配置 #${status?.config_id || '--'}`}
+                    </div>
+                    <div className="mt-1 text-[11px] text-zinc-500">
+                        {Number(status?.open_tasks || 0)} open / {Number(status?.closed_tasks || 0)} closed · {autoFollowExecutionWalletModeLabel(status?.execution_wallet_mode)}
+                    </div>
+                </div>
+                <Badge className={status?.enabled ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
+                    {status?.enabled ? '运行中' : stopReason ? '风控停止' : '暂停'}
+                </Badge>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+                <div className="rounded-xl border border-white/[0.04] bg-zinc-950/45 p-2">
+                    <div className="text-[10px] text-zinc-500">总盈亏</div>
+                    <div className={`mt-1 text-sm font-semibold ${pnl > 0 ? 'text-emerald-300' : pnl < 0 ? 'text-red-300' : 'text-zinc-200'}`}>{formatUSDCompact(pnl)}</div>
+                </div>
+                <div className="rounded-xl border border-white/[0.04] bg-zinc-950/45 p-2">
+                    <div className="text-[10px] text-zinc-500">已实现</div>
+                    <div className={`mt-1 text-sm font-semibold ${realized > 0 ? 'text-emerald-300' : realized < 0 ? 'text-red-300' : 'text-zinc-200'}`}>{formatUSDCompact(realized)}</div>
+                </div>
+                <div className="rounded-xl border border-white/[0.04] bg-zinc-950/45 p-2">
+                    <div className="text-[10px] text-zinc-500">未实现</div>
+                    <div className={`mt-1 text-sm font-semibold ${unrealized > 0 ? 'text-emerald-300' : unrealized < 0 ? 'text-red-300' : 'text-zinc-200'}`}>{formatUSDCompact(unrealized)}</div>
+                </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                    止盈 {Number(status?.take_profit_usdt || 0) || '--'}U / 止损 {Number(status?.stop_loss_usdt || 0) || '--'}U
+                </Badge>
+                {stopReason ? (
+                    <Badge className="border-amber-400/20 bg-amber-500/10 text-amber-200">
+                        {stopReason === 'stop_loss' ? '止损触发' : '止盈触发'} {formatUSDCompact(status?.stop_triggered_pnl_usdt)}
+                    </Badge>
+                ) : null}
+            </div>
+            {status?.pnl_error ? <div className="mt-2 text-[11px] text-red-200 line-clamp-2">{status.pnl_error}</div> : null}
+        </div>
+    );
+}
+
 function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     const [loading, setLoading] = useState(Boolean(hasInitData));
     const [saving, setSaving] = useState(false);
@@ -4774,6 +4895,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     const [targetEvents, setTargetEvents] = useState([]);
     const [jobEvents, setJobEvents] = useState([]);
     const [executionWallets, setExecutionWallets] = useState([]);
+    const [statuses, setStatuses] = useState([]);
     const [draft, setDraft] = useState(() => createAutoFollowDraft());
     const [activeTab, setActiveTab] = useState('configure');
     const [error, setError] = useState('');
@@ -4788,6 +4910,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setTargetEvents([]);
             setJobEvents([]);
             setExecutionWallets([]);
+            setStatuses([]);
             return;
         }
         setLoading(true);
@@ -4801,6 +4924,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setAttempts(Array.isArray(resp?.attempts) ? resp.attempts : []);
             setTargetEvents(Array.isArray(resp?.target_events) ? resp.target_events : []);
             setJobEvents(Array.isArray(resp?.job_events) ? resp.job_events : []);
+            setStatuses(Array.isArray(resp?.statuses) ? resp.statuses : []);
             setDraft((prev) => ensureAutoFollowDraftExecutionWallet(prev, wallets));
         } catch (err) {
             setError(String(err?.message || err || '加载失败'));
@@ -4894,6 +5018,8 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     target_wallet_addresses: normalizeAutoFollowWalletList(config).filter(Boolean),
                     execution_wallet_id: Number(config.execution_wallet_id || 0),
                     execution_wallet_address: config.execution_wallet_address || '',
+                    execution_wallet_ids: normalizeAutoFollowExecutionWalletIDs(config),
+                    execution_wallet_mode: config.execution_wallet_mode || 'fixed',
                     trigger_mode: config.trigger_mode || 'any',
                     trigger_min_wallets: Number(config.trigger_min_wallets || 1),
                     trigger_window_seconds: Number(config.trigger_window_seconds || 300),
@@ -4905,6 +5031,10 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     delay_seconds: config.delay_seconds,
                     follow_close: config.follow_close,
                     range_shift_grids: Number(config.range_shift_grids || 0),
+                    notify_enabled: Boolean(config.notify_enabled),
+                    notify_intensity: config.notify_intensity || 'ring',
+                    take_profit_usdt: Number(config.take_profit_usdt || 0),
+                    stop_loss_usdt: Number(config.stop_loss_usdt || 0),
                 },
             });
             await load();
@@ -4994,9 +5124,15 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         });
         return Array.from(rows.values()).sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
     }, [autoFollowAttemptByEventID, autoFollowEventByID, autoFollowFlowItems, autoFollowJobByEventID, targetEvents]);
+    const configByID = useMemo(() => {
+        const map = new Map();
+        configs.forEach((config) => map.set(Number(config?.id), config));
+        return map;
+    }, [configs]);
     const draftWallets = Array.isArray(draft.target_wallet_addresses) && draft.target_wallet_addresses.length > 0
         ? draft.target_wallet_addresses
         : [''];
+    const draftExecutionWalletIDs = normalizeAutoFollowExecutionWalletIDs(draft);
     const setDraftWallet = (index, value) => {
         setDraft((prev) => {
             const current = Array.isArray(prev.target_wallet_addresses) && prev.target_wallet_addresses.length > 0
@@ -5025,12 +5161,41 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         });
     };
     const setExecutionWallet = (id) => {
-        const wallet = findAutoFollowExecutionWallet(executionWallets, id, '');
-        setDraft((prev) => ({
-            ...prev,
-            execution_wallet_id: wallet ? String(wallet.id) : '',
-            execution_wallet_address: wallet ? normalizeWalletAddress(wallet.address) : '',
-        }));
+        const walletID = Number(id) || 0;
+        const wallet = findAutoFollowExecutionWallet(executionWallets, walletID, '');
+        setDraft((prev) => {
+            const mode = String(prev.execution_wallet_mode || 'fixed').toLowerCase();
+            const current = normalizeAutoFollowExecutionWalletIDs(prev);
+            let nextIDs;
+            if (mode === 'fixed') {
+                nextIDs = walletID > 0 ? [walletID] : [];
+            } else if (current.includes(walletID)) {
+                nextIDs = current.filter((item) => item !== walletID);
+            } else {
+                nextIDs = [...current, walletID].filter((item) => item > 0);
+            }
+            if (nextIDs.length === 0 && walletID > 0) nextIDs = [walletID];
+            const primary = findAutoFollowExecutionWallet(executionWallets, nextIDs[0], '') || wallet;
+            return {
+                ...prev,
+                execution_wallet_id: primary ? String(primary.id) : '',
+                execution_wallet_address: primary ? normalizeWalletAddress(primary.address) : '',
+                execution_wallet_ids: nextIDs,
+            };
+        });
+    };
+    const setExecutionWalletMode = (mode) => {
+        const nextMode = ['round_robin', 'random'].includes(mode) ? mode : 'fixed';
+        setDraft((prev) => {
+            const ids = normalizeAutoFollowExecutionWalletIDs(prev);
+            const nextIDs = ids.length > 0 ? (nextMode === 'fixed' ? [ids[0]] : ids) : [];
+            return {
+                ...prev,
+                execution_wallet_mode: nextMode,
+                execution_wallet_ids: nextIDs,
+                execution_wallet_id: nextIDs[0] ? String(nextIDs[0]) : '',
+            };
+        });
     };
 
     return (
@@ -5081,10 +5246,11 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 </div>
             ) : null}
 
-            <div className="mini-sm-follow-tabs grid grid-cols-3 gap-1.5 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1.5">
+            <div className="mini-sm-follow-tabs grid grid-cols-4 gap-1.5 rounded-[22px] border border-white/[0.05] bg-zinc-950/50 p-1.5">
                 {[
                     { key: 'configure', label: draft.id ? '编辑任务' : '配置任务', icon: Settings },
                     { key: 'configs', label: '我的跟单', icon: Users, count: configs.length },
+                    { key: 'status', label: '状态', icon: TrendingUp, count: statuses.length },
                     { key: 'jobs', label: '最近任务', icon: Activity, count: autoFollowTimelineItems.length },
                 ].map(({ key, label, icon: Icon, count }) => (
                     <button
@@ -5122,7 +5288,10 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
 
                 <div className="space-y-3">
                     <div className="space-y-2">
-                        <div className="text-[11px] font-medium text-zinc-500">执行钱包</div>
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-[11px] font-medium text-zinc-500">执行钱包池</div>
+                            <div className="text-[10px] text-zinc-500">{draftExecutionWalletIDs.length} 个已选</div>
+                        </div>
                         {loading && executionWallets.length === 0 ? (
                             <div className="rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-3 text-xs text-zinc-500">
                                 加载钱包中...
@@ -5130,7 +5299,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         ) : (
                             <div className="grid gap-2 sm:grid-cols-2">
                                 {executionWallets.map((wallet) => {
-                                    const active = Number(draft.execution_wallet_id) === Number(wallet.id);
+                                    const active = draftExecutionWalletIDs.includes(Number(wallet.id));
                                     const addr = normalizeWalletAddress(wallet.address);
                                     return (
                                         <button
@@ -5143,7 +5312,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                                     : 'border-white/[0.05] bg-zinc-950/45 text-zinc-400 hover:bg-white/[0.04]'
                                             }`}
                                         >
-                                            <Wallet size={14} className="shrink-0" />
+                                            {active ? <Check size={14} className="shrink-0" /> : <Wallet size={14} className="shrink-0" />}
                                             <span className="min-w-0">
                                                 <span className="block truncate text-sm font-semibold">
                                                     {String(wallet.name || '').trim() || `钱包 #${wallet.id}`}
@@ -5157,6 +5326,29 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                 })}
                             </div>
                         )}
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                            <button
+                                type="button"
+                                className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.execution_wallet_mode === 'fixed', brand)}`}
+                                onClick={() => setExecutionWalletMode('fixed')}
+                            >
+                                <Wallet size={13} className="mr-1 inline" /> 固定
+                            </button>
+                            <button
+                                type="button"
+                                className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.execution_wallet_mode === 'round_robin', brand)}`}
+                                onClick={() => setExecutionWalletMode('round_robin')}
+                            >
+                                <Repeat2 size={13} className="mr-1 inline" /> 轮询
+                            </button>
+                            <button
+                                type="button"
+                                className={`rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(draft.execution_wallet_mode === 'random', brand)}`}
+                                onClick={() => setExecutionWalletMode('random')}
+                            >
+                                <Shuffle size={13} className="mr-1 inline" /> 随机
+                            </button>
+                        </div>
                     </div>
 
                     <div className="space-y-2">
@@ -5351,6 +5543,57 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                         </div>
                     </label>
 
+                    <div className="grid grid-cols-2 gap-2">
+                        <input
+                            className={getInputClass(brand)}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="止盈停止 U"
+                            value={draft.take_profit_usdt}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, take_profit_usdt: e.target.value }))}
+                        />
+                        <input
+                            className={getInputClass(brand)}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="止损停止 U"
+                            value={draft.stop_loss_usdt}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, stop_loss_usdt: e.target.value }))}
+                        />
+                    </div>
+
+                    <div className="space-y-2 rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-zinc-200">Bark 通知</span>
+                            <input
+                                type="checkbox"
+                                className="h-5 w-5 accent-lime-400"
+                                checked={draft.notify_enabled}
+                                onChange={(e) => setDraft((prev) => ({ ...prev, notify_enabled: e.target.checked }))}
+                            />
+                        </div>
+                        {draft.notify_enabled ? (
+                            <div className="grid grid-cols-3 gap-2">
+                                {[
+                                    ['ring', '普通'],
+                                    ['persistent_ring', '持续'],
+                                    ['critical_ring', '强提醒'],
+                                ].map(([value, label]) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        className={`rounded-2xl px-3 py-2 text-xs ${getFilterButtonClass(draft.notify_intensity === value, brand)}`}
+                                        onClick={() => setDraft((prev) => ({ ...prev, notify_intensity: value }))}
+                                    >
+                                        <Bell size={12} className="mr-1 inline" /> {label}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+
                     <button
                         type="button"
                         onClick={saveDraft}
@@ -5397,6 +5640,9 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                                 执行 {formatAutoFollowExecutionWallet(config, executionWallets)}
                                             </Badge>
                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                {autoFollowExecutionWalletModeLabel(config.execution_wallet_mode)}
+                                            </Badge>
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
                                                 {config.amount_mode === 'ratio'
                                                     ? `${Number(config.ratio * 100).toFixed(0)}%`
                                                     : formatUSDCompact(config.fixed_amount_usdt)}
@@ -5409,6 +5655,14 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                             </Badge>
                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
                                                 撤仓{config.follow_close ? '跟单' : '忽略'}
+                                            </Badge>
+                                            {(Number(config.take_profit_usdt) > 0 || Number(config.stop_loss_usdt) > 0) ? (
+                                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                    止盈 {Number(config.take_profit_usdt || 0) || '--'}U / 止损 {Number(config.stop_loss_usdt || 0) || '--'}U
+                                                </Badge>
+                                            ) : null}
+                                            <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                通知{config.notify_enabled ? autoFollowNotifyIntensityLabel(config.notify_intensity) : '关闭'}
                                             </Badge>
                                         </div>
                                     </div>
@@ -5427,6 +5681,26 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             </div>
                         );
                     })
+                )}
+            </section>
+            ) : null}
+
+            {activeTab === 'status' ? (
+            <section className="space-y-2">
+                <div className="text-sm font-semibold text-zinc-100">跟单状态</div>
+                {statuses.length === 0 ? (
+                    <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 px-3 py-4 text-center text-sm text-zinc-500">
+                        暂无跟单状态，创建跟单仓位后会显示盈亏。
+                    </div>
+                ) : (
+                    statuses.map((status) => (
+                        <AutoFollowStatusMiniCard
+                            key={status.config_id}
+                            status={status}
+                            config={configByID.get(Number(status.config_id))}
+                            executionWallets={executionWallets}
+                        />
+                    ))
                 )}
             </section>
             ) : null}

@@ -15,6 +15,8 @@ type smartMoneyAutoFollowSaveRequest struct {
 	TargetWallets        []string `json:"target_wallet_addresses"`
 	ExecutionWalletID    uint     `json:"execution_wallet_id"`
 	ExecutionWalletAddr  string   `json:"execution_wallet_address"`
+	ExecutionWalletIDs   []uint   `json:"execution_wallet_ids"`
+	ExecutionWalletMode  string   `json:"execution_wallet_mode"`
 	TriggerMode          string   `json:"trigger_mode"`
 	TriggerMinWallets    int      `json:"trigger_min_wallets"`
 	TriggerWindowSeconds int      `json:"trigger_window_seconds"`
@@ -26,6 +28,10 @@ type smartMoneyAutoFollowSaveRequest struct {
 	DelaySeconds         int      `json:"delay_seconds"`
 	FollowClose          bool     `json:"follow_close"`
 	RangeShiftGrids      int      `json:"range_shift_grids"`
+	NotifyEnabled        bool     `json:"notify_enabled"`
+	NotifyIntensity      string   `json:"notify_intensity"`
+	TakeProfitUSDT       float64  `json:"take_profit_usdt"`
+	StopLossUSDT         float64  `json:"stop_loss_usdt"`
 }
 
 type smartMoneyAutoFollowRequest struct {
@@ -85,6 +91,8 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 			TargetWallets:        req.Config.TargetWallets,
 			ExecutionWalletID:    req.Config.ExecutionWalletID,
 			ExecutionWalletAddr:  req.Config.ExecutionWalletAddr,
+			ExecutionWalletIDs:   req.Config.ExecutionWalletIDs,
+			ExecutionWalletMode:  req.Config.ExecutionWalletMode,
 			TriggerMode:          req.Config.TriggerMode,
 			TriggerMinWallets:    req.Config.TriggerMinWallets,
 			TriggerWindowSeconds: req.Config.TriggerWindowSeconds,
@@ -96,6 +104,10 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 			DelaySeconds:         req.Config.DelaySeconds,
 			FollowClose:          req.Config.FollowClose,
 			RangeShiftGrids:      req.Config.RangeShiftGrids,
+			NotifyEnabled:        req.Config.NotifyEnabled,
+			NotifyIntensity:      req.Config.NotifyIntensity,
+			TakeProfitUSDT:       req.Config.TakeProfitUSDT,
+			StopLossUSDT:         req.Config.StopLossUSDT,
 		}
 		cfg, err := smartMoneyFollowService().SaveConfig(r.Context(), user.ID, input)
 		if err != nil {

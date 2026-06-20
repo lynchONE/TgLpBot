@@ -541,6 +541,15 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 	if err := ensureColumnExists(tableName, "execution_wallet_address", "VARCHAR(42) NULL"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(tableName, "execution_wallet_ids", "JSON NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "execution_wallet_mode", "VARCHAR(20) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "execution_wallet_cursor", "BIGINT NULL"); err != nil {
+		return err
+	}
 	if err := ensureColumnExists(tableName, "trigger_mode", "VARCHAR(16) NULL"); err != nil {
 		return err
 	}
@@ -572,6 +581,27 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		return err
 	}
 	if err := ensureColumnExists(tableName, "range_shift_grids", "BIGINT NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "notify_enabled", "TINYINT(1) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "notify_intensity", "VARCHAR(32) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "take_profit_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "stop_loss_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "stop_triggered_at", "DATETIME(3) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "stop_triggered_reason", "VARCHAR(32) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "stop_triggered_pnl_usdt", "DECIMAL(20,8) NULL"); err != nil {
 		return err
 	}
 	if err := ensureColumnExists(tableName, "cursor_event_id", "BIGINT UNSIGNED NULL"); err != nil {
@@ -642,6 +672,48 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		WHERE COALESCE(TRIM(execution_wallet_address), '') <> ''
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("normalize %s.execution_wallet_address: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET execution_wallet_ids = JSON_ARRAY(CAST(execution_wallet_id AS UNSIGNED))
+		WHERE (execution_wallet_ids IS NULL OR JSON_LENGTH(execution_wallet_ids) = 0)
+		  AND execution_wallet_id IS NOT NULL
+		  AND execution_wallet_id > 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.execution_wallet_ids: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET execution_wallet_ids = JSON_ARRAY()
+		WHERE execution_wallet_ids IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("finalize %s.execution_wallet_ids: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET execution_wallet_mode = '%s'
+		WHERE COALESCE(TRIM(execution_wallet_mode), '') = ''
+	`, quoteTableName(tableName), models.SmartMoneyFollowExecutionWalletModeFixed)).Error; err != nil {
+		return fmt.Errorf("backfill %s.execution_wallet_mode: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET execution_wallet_mode = '%s'
+		WHERE execution_wallet_mode NOT IN ('%s', '%s', '%s')
+	`, quoteTableName(tableName),
+		models.SmartMoneyFollowExecutionWalletModeFixed,
+		models.SmartMoneyFollowExecutionWalletModeFixed,
+		models.SmartMoneyFollowExecutionWalletModeRoundRobin,
+		models.SmartMoneyFollowExecutionWalletModeRandom,
+	)).Error; err != nil {
+		return fmt.Errorf("normalize %s.execution_wallet_mode: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET execution_wallet_cursor = 0
+		WHERE execution_wallet_cursor IS NULL OR execution_wallet_cursor < 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.execution_wallet_cursor: %w", tableName, err)
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s
@@ -759,6 +831,49 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		WHERE range_shift_grids IS NULL OR range_shift_grids < 0
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("backfill %s.range_shift_grids: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET notify_enabled = 0
+		WHERE notify_enabled IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.notify_enabled: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET notify_intensity = 'ring'
+		WHERE COALESCE(TRIM(notify_intensity), '') = ''
+		   OR notify_intensity NOT IN ('ring', 'persistent_ring', 'critical_ring')
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.notify_intensity: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET take_profit_usdt = 0
+		WHERE take_profit_usdt IS NULL OR take_profit_usdt < 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.take_profit_usdt: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET stop_loss_usdt = 0
+		WHERE stop_loss_usdt IS NULL OR stop_loss_usdt < 0
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.stop_loss_usdt: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET stop_triggered_reason = ''
+		WHERE stop_triggered_reason IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.stop_triggered_reason: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET stop_triggered_pnl_usdt = 0
+		WHERE stop_triggered_pnl_usdt IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.stop_triggered_pnl_usdt: %w", tableName, err)
 	}
 
 	if err := backfillSmartMoneyFollowConfigCursors(tableName); err != nil {

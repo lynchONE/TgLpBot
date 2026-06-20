@@ -912,9 +912,15 @@ export default function AssetManagementPage({
         return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0), close: Number(item?.value_usd || 0) }));
     }, [assetsData.lp]);
     const profitTrendRows = useMemo(() => filterRowsByWindow(profitCurveRows, historyDays), [profitCurveRows, historyDays]);
-    const activeTrendRows = trendMode === 'profit' ? profitTrendRows : chartRows;
+    const followProfitCurveRows = useMemo(() => {
+        const rows = Array.isArray(assetsData.lp?.follow_profit_curve) ? assetsData.lp.follow_profit_curve : [];
+        return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0), close: Number(item?.value_usd || 0) }));
+    }, [assetsData.lp]);
+    const followProfitTrendRows = useMemo(() => filterRowsByWindow(followProfitCurveRows, historyDays), [followProfitCurveRows, historyDays]);
+    const activeTrendRows = trendMode === 'profit' ? profitTrendRows : trendMode === 'follow_profit' ? followProfitTrendRows : chartRows;
     const activeTrendValue = activeTrendRows[activeTrendRows.length - 1]?.value;
     const latestProfitCurveDay = profitCurveRows[profitCurveRows.length - 1]?.day || formatChinaDay();
+    const latestFollowProfitCurveDay = followProfitCurveRows[followProfitCurveRows.length - 1]?.day || formatChinaDay();
     const pnlCalendarAllRows = useMemo(() => mergeDailyPoints(assetsData.lp?.daily_history, assetsData.lp?.today_point), [assetsData.lp]);
     const pnlCalendarRows = useMemo(() => filterPnLCalendarRows(pnlCalendarAllRows, pnlCalendarWindow), [pnlCalendarAllRows, pnlCalendarWindow]);
     const pnlCalendarSummary = useMemo(() => summarizePnLCalendarRows(pnlCalendarRows), [pnlCalendarRows]);
@@ -1122,11 +1128,12 @@ export default function AssetManagementPage({
                     {/* trend chart */}
                     <Card>
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">{trendMode === 'profit' ? '总盈利趋势' : '总资产趋势'}</span>
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">{trendMode === 'profit' ? '总盈利趋势' : trendMode === 'follow_profit' ? '跟单盈利趋势' : '总资产趋势'}</span>
                             <div className="flex flex-wrap justify-end gap-1.5">
                                 <div className="flex gap-1.5">
                                     <Pill active={trendMode === 'assets'} brand={brand} onClick={() => setTrendMode('assets')}>总资产</Pill>
                                     <Pill active={trendMode === 'profit'} brand={brand} onClick={() => setTrendMode('profit')}>总盈利</Pill>
+                                    <Pill active={trendMode === 'follow_profit'} brand={brand} onClick={() => setTrendMode('follow_profit')}>跟单盈利</Pill>
                                 </div>
                                 <div className="flex gap-1.5">
                                     {HISTORY_WINDOWS.map((d) => (
@@ -1139,7 +1146,7 @@ export default function AssetManagementPage({
                             <div className="flex items-end justify-between gap-2">
                                 <div>
                                     <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">
-                                        {trendMode === 'profit' ? '总盈利' : '总资产'}
+                                        {trendMode === 'profit' ? '总盈利' : trendMode === 'follow_profit' ? '跟单盈利' : '总资产'}
                                     </div>
                                     <div className="mt-1 text-xl font-extrabold tabular-nums text-zinc-900 dark:text-white leading-none">
                                         <NumberFlowValue value={activeTrendValue || 0} formatter={(v) => formatUsd(v)} />
@@ -1147,7 +1154,7 @@ export default function AssetManagementPage({
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1.5">
                                     <span className="text-[10px] text-zinc-400 dark:text-white/30">
-                                        {trendMode === 'profit' && assetsData.lp?.profit_baseline ? `起点 ${assetsData.lp.profit_baseline.day}` : formatChinaTime(assetsData.overview?.updated_at)}
+                                        {trendMode === 'profit' && assetsData.lp?.profit_baseline ? `起点 ${assetsData.lp.profit_baseline.day}` : trendMode === 'follow_profit' ? `最新 ${latestFollowProfitCurveDay}` : formatChinaTime(assetsData.overview?.updated_at)}
                                     </span>
                                     {trendMode === 'profit' ? (
                                         <button
@@ -1166,7 +1173,7 @@ export default function AssetManagementPage({
                                 </div>
                             </div>
                             <div className="mt-3">
-                                <LWAreaChart data={activeTrendRows} color={trendMode === 'profit' ? '#0ea5e9' : '#10b981'} loading={assetsLoading} />
+                                <LWAreaChart data={activeTrendRows} color={trendMode === 'profit' ? '#0ea5e9' : trendMode === 'follow_profit' ? '#22c55e' : '#10b981'} loading={assetsLoading} />
                             </div>
                         </div>
                         {trendMode === 'profit' && showProfitBaselineEditor ? (

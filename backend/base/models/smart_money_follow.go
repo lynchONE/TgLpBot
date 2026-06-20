@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -16,6 +17,13 @@ const (
 
 	SmartMoneyFollowTriggerModeAny       = "any"
 	SmartMoneyFollowTriggerModeThreshold = "threshold"
+
+	SmartMoneyFollowExecutionWalletModeFixed      = "fixed"
+	SmartMoneyFollowExecutionWalletModeRoundRobin = "round_robin"
+	SmartMoneyFollowExecutionWalletModeRandom     = "random"
+
+	SmartMoneyFollowStopReasonTakeProfit = "take_profit"
+	SmartMoneyFollowStopReasonStopLoss   = "stop_loss"
 
 	SmartMoneyFollowJobActionOpen         = "open"
 	SmartMoneyFollowJobActionAddLiquidity = "add_liquidity"
@@ -75,30 +83,92 @@ func (a *StringArray) Scan(value any) error {
 	return nil
 }
 
+type UintArray []uint
+
+func (a UintArray) Value() (driver.Value, error) {
+	if len(a) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal([]uint(a))
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func (a *UintArray) Scan(value any) error {
+	if value == nil {
+		*a = nil
+		return nil
+	}
+	var raw []byte
+	switch v := value.(type) {
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return fmt.Errorf("scan UintArray from %T", value)
+	}
+	if len(raw) == 0 {
+		*a = nil
+		return nil
+	}
+	var out []uint
+	if err := json.Unmarshal(raw, &out); err == nil {
+		*a = out
+		return nil
+	}
+	var rawStrings []string
+	if err := json.Unmarshal(raw, &rawStrings); err != nil {
+		return err
+	}
+	out = make([]uint, 0, len(rawStrings))
+	for _, item := range rawStrings {
+		id64, err := strconv.ParseUint(item, 10, 64)
+		if err != nil {
+			return err
+		}
+		out = append(out, uint(id64))
+	}
+	*a = out
+	return nil
+}
+
 type SmartMoneyFollowConfig struct {
-	ID                   uint        `gorm:"primaryKey" json:"id"`
-	UserID               uint        `gorm:"not null;index" json:"user_id"`
-	Chain                string      `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
-	ChainID              int         `gorm:"not null;default:56;index" json:"chain_id"`
-	TargetWalletAddress  string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
-	TargetWallets        StringArray `gorm:"column:target_wallet_addresses;type:json" json:"target_wallet_addresses"`
-	ExecutionWalletID    uint        `gorm:"not null;default:0;index" json:"execution_wallet_id"`
-	ExecutionWalletAddr  string      `gorm:"column:execution_wallet_address;size:42;not null;default:'';index" json:"execution_wallet_address"`
-	TriggerMode          string      `gorm:"size:16;not null;default:'any'" json:"trigger_mode"`
-	TriggerMinWallets    int         `gorm:"not null;default:1" json:"trigger_min_wallets"`
-	TriggerWindowSeconds int         `gorm:"not null;default:300" json:"trigger_window_seconds"`
-	Enabled              bool        `gorm:"not null;default:false;index" json:"enabled"`
-	AmountMode           string      `gorm:"size:16;not null;default:'fixed'" json:"amount_mode"`
-	FixedAmountUSDT      float64     `gorm:"type:decimal(20,8);not null;default:0" json:"fixed_amount_usdt"`
-	Ratio                float64     `gorm:"type:decimal(12,8);not null;default:1" json:"ratio"`
-	DelayMode            string      `gorm:"size:20;not null;default:'immediate'" json:"delay_mode"`
-	DelaySeconds         int         `gorm:"not null;default:0" json:"delay_seconds"`
-	FollowClose          bool        `gorm:"not null;default:false" json:"follow_close"`
-	RangeShiftGrids      int         `gorm:"not null;default:0" json:"range_shift_grids"`
-	CursorEventID        uint        `gorm:"not null;default:0" json:"cursor_event_id"`
-	LastSeenEventID      uint        `gorm:"not null;default:0" json:"last_seen_event_id"`
-	CreatedAt            time.Time   `gorm:"not null;autoCreateTime" json:"created_at"`
-	UpdatedAt            time.Time   `gorm:"not null;autoUpdateTime" json:"updated_at"`
+	ID                    uint        `gorm:"primaryKey" json:"id"`
+	UserID                uint        `gorm:"not null;index" json:"user_id"`
+	Chain                 string      `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
+	ChainID               int         `gorm:"not null;default:56;index" json:"chain_id"`
+	TargetWalletAddress   string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
+	TargetWallets         StringArray `gorm:"column:target_wallet_addresses;type:json" json:"target_wallet_addresses"`
+	ExecutionWalletID     uint        `gorm:"not null;default:0;index" json:"execution_wallet_id"`
+	ExecutionWalletAddr   string      `gorm:"column:execution_wallet_address;size:42;not null;default:'';index" json:"execution_wallet_address"`
+	ExecutionWalletIDs    UintArray   `gorm:"column:execution_wallet_ids;type:json" json:"execution_wallet_ids"`
+	ExecutionWalletMode   string      `gorm:"size:20;not null;default:'fixed'" json:"execution_wallet_mode"`
+	ExecutionWalletCursor int         `gorm:"not null;default:0" json:"execution_wallet_cursor"`
+	TriggerMode           string      `gorm:"size:16;not null;default:'any'" json:"trigger_mode"`
+	TriggerMinWallets     int         `gorm:"not null;default:1" json:"trigger_min_wallets"`
+	TriggerWindowSeconds  int         `gorm:"not null;default:300" json:"trigger_window_seconds"`
+	Enabled               bool        `gorm:"not null;default:false;index" json:"enabled"`
+	AmountMode            string      `gorm:"size:16;not null;default:'fixed'" json:"amount_mode"`
+	FixedAmountUSDT       float64     `gorm:"type:decimal(20,8);not null;default:0" json:"fixed_amount_usdt"`
+	Ratio                 float64     `gorm:"type:decimal(12,8);not null;default:1" json:"ratio"`
+	DelayMode             string      `gorm:"size:20;not null;default:'immediate'" json:"delay_mode"`
+	DelaySeconds          int         `gorm:"not null;default:0" json:"delay_seconds"`
+	FollowClose           bool        `gorm:"not null;default:false" json:"follow_close"`
+	RangeShiftGrids       int         `gorm:"not null;default:0" json:"range_shift_grids"`
+	NotifyEnabled         bool        `gorm:"not null;default:false" json:"notify_enabled"`
+	NotifyIntensity       string      `gorm:"size:32;not null;default:'ring'" json:"notify_intensity"`
+	TakeProfitUSDT        float64     `gorm:"column:take_profit_usdt;type:decimal(20,8);not null;default:0" json:"take_profit_usdt"`
+	StopLossUSDT          float64     `gorm:"column:stop_loss_usdt;type:decimal(20,8);not null;default:0" json:"stop_loss_usdt"`
+	StopTriggeredAt       *time.Time  `json:"stop_triggered_at,omitempty"`
+	StopTriggeredReason   string      `gorm:"size:32;not null;default:''" json:"stop_triggered_reason"`
+	StopTriggeredPnLUSDT  float64     `gorm:"column:stop_triggered_pnl_usdt;type:decimal(20,8);not null;default:0" json:"stop_triggered_pnl_usdt"`
+	CursorEventID         uint        `gorm:"not null;default:0" json:"cursor_event_id"`
+	LastSeenEventID       uint        `gorm:"not null;default:0" json:"last_seen_event_id"`
+	CreatedAt             time.Time   `gorm:"not null;autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time   `gorm:"not null;autoUpdateTime" json:"updated_at"`
 }
 
 func (SmartMoneyFollowConfig) TableName() string { return "smart_money_follow_configs" }

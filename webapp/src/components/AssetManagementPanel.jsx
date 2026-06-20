@@ -756,9 +756,15 @@ export default function AssetManagementPanel({
     return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0) }));
   }, [assetState.lp]);
   const profitTrendPoints = useMemo(() => filterPointsByWindow(profitCurvePoints, historyDays), [profitCurvePoints, historyDays]);
-  const activeTrendPoints = trendMode === 'profit' ? profitTrendPoints : chartPoints;
+  const followProfitCurvePoints = useMemo(() => {
+    const rows = Array.isArray(assetState?.lp?.follow_profit_curve) ? assetState.lp.follow_profit_curve : [];
+    return rows.map((item) => ({ day: item.day, value: Number(item?.value_usd || 0) }));
+  }, [assetState.lp]);
+  const followProfitTrendPoints = useMemo(() => filterPointsByWindow(followProfitCurvePoints, historyDays), [followProfitCurvePoints, historyDays]);
+  const activeTrendPoints = trendMode === 'profit' ? profitTrendPoints : trendMode === 'follow_profit' ? followProfitTrendPoints : chartPoints;
   const activeTrendValue = activeTrendPoints[activeTrendPoints.length - 1]?.value;
   const latestProfitCurveDay = profitCurvePoints[profitCurvePoints.length - 1]?.day || formatChinaDay();
+  const latestFollowProfitCurveDay = followProfitCurvePoints[followProfitCurvePoints.length - 1]?.day || formatChinaDay();
   const pnlCalendarAllPoints = useMemo(() => mergeDailyPoints(assetState.lp?.daily_history, assetState.lp?.today_point), [assetState.lp]);
   const pnlCalendarPoints = useMemo(() => filterPnLCalendarPoints(pnlCalendarAllPoints, pnlCalendarWindow), [pnlCalendarAllPoints, pnlCalendarWindow]);
   const pnlCalendarSummary = useMemo(() => summarizePnLCalendarPoints(pnlCalendarPoints), [pnlCalendarPoints]);
@@ -953,7 +959,7 @@ export default function AssetManagementPanel({
 
           <div className="am-card">
             <div className="am-card-header">
-              <div className="am-card-title">{trendMode === 'profit' ? '总盈利趋势' : '总资产趋势'}</div>
+              <div className="am-card-title">{trendMode === 'profit' ? '总盈利趋势' : trendMode === 'follow_profit' ? '跟单盈利趋势' : '总资产趋势'}</div>
               <div className="am-trend-controls">
                 <div className="am-pill-group">
                   <button type="button" className={`am-pill ${trendMode === 'assets' ? 'active' : ''}`} onClick={() => setTrendMode('assets')}>
@@ -961,6 +967,9 @@ export default function AssetManagementPanel({
                   </button>
                   <button type="button" className={`am-pill ${trendMode === 'profit' ? 'active' : ''}`} onClick={() => setTrendMode('profit')}>
                     总盈利
+                  </button>
+                  <button type="button" className={`am-pill ${trendMode === 'follow_profit' ? 'active' : ''}`} onClick={() => setTrendMode('follow_profit')}>
+                    跟单盈利
                   </button>
                 </div>
                 <div className="am-pill-group">
@@ -974,12 +983,12 @@ export default function AssetManagementPanel({
             </div>
             <div className="am-chart-header">
               <div>
-                <div className="am-chart-label">{trendMode === 'profit' ? '总盈利' : '总资产'}</div>
+                <div className="am-chart-label">{trendMode === 'profit' ? '总盈利' : trendMode === 'follow_profit' ? '跟单盈利' : '总资产'}</div>
                 <div className="am-chart-value">{formatUsd(activeTrendValue)}</div>
               </div>
               <div className="am-chart-meta">
                 <span className="am-badge">
-                  {trendMode === 'profit' && assetState.lp?.profit_baseline ? `起点 ${assetState.lp.profit_baseline.day}` : formatChinaTime(assetState.overview?.updated_at)}
+                  {trendMode === 'profit' && assetState.lp?.profit_baseline ? `起点 ${assetState.lp.profit_baseline.day}` : trendMode === 'follow_profit' ? `最新 ${latestFollowProfitCurveDay}` : formatChinaTime(assetState.overview?.updated_at)}
                 </span>
                 {trendMode === 'profit' ? (
                   <button
@@ -993,7 +1002,7 @@ export default function AssetManagementPanel({
                 ) : null}
               </div>
             </div>
-            <LWAreaChart points={activeTrendPoints} stroke={trendMode === 'profit' ? '#52d1ff' : metricColor} />
+            <LWAreaChart points={activeTrendPoints} stroke={trendMode === 'profit' ? '#52d1ff' : trendMode === 'follow_profit' ? '#22c55e' : metricColor} />
             {trendMode === 'profit' && showProfitBaselineEditor ? (
               <ProfitBaselineEditor
                 baseline={assetState.lp?.profit_baseline}

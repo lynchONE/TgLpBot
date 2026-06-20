@@ -5,15 +5,18 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/base/notify"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	sm "TgLpBot/service/smart_money"
+	smgd "TgLpBot/service/smart_money_golden_dog"
 	"TgLpBot/service/strategy"
 	"TgLpBot/service/trade"
 	"TgLpBot/service/txexec"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
 	"context"
+	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -35,6 +38,8 @@ const maxFollowTriggerWindowSeconds = 24 * 60 * 60
 const monitoredWalletSourceAutoFollow = "auto_follow"
 const maxFollowJobRetryCount = 6
 const maxFollowRangeShiftGrids = 20
+const maxFollowExecutionWallets = 20
+const maxFollowRiskThresholdUSDT = 1_000_000_000
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -51,6 +56,8 @@ type SaveConfigInput struct {
 	TargetWallets        []string
 	ExecutionWalletID    uint
 	ExecutionWalletAddr  string
+	ExecutionWalletIDs   []uint
+	ExecutionWalletMode  string
 	TriggerMode          string
 	TriggerMinWallets    int
 	TriggerWindowSeconds int
@@ -62,6 +69,10 @@ type SaveConfigInput struct {
 	DelaySeconds         int
 	FollowClose          bool
 	RangeShiftGrids      int
+	NotifyEnabled        bool
+	NotifyIntensity      string
+	TakeProfitUSDT       float64
+	StopLossUSDT         float64
 }
 
 type followJobTrigger struct {
@@ -72,14 +83,17 @@ type followJobTrigger struct {
 }
 
 type ConfigEnvelope struct {
-	OK           bool                             `json:"ok"`
-	Chain        string                           `json:"chain"`
-	Configs      []models.SmartMoneyFollowConfig  `json:"configs"`
-	Jobs         []models.SmartMoneyFollowJob     `json:"jobs"`
-	Attempts     []models.SmartMoneyFollowAttempt `json:"attempts"`
-	TargetEvents []models.SmartMoneyLPEvent       `json:"target_events"`
-	JobEvents    []models.SmartMoneyLPEvent       `json:"job_events"`
-	Wallets      []ExecutionWalletOption          `json:"wallets"`
+	OK                   bool                             `json:"ok"`
+	Chain                string                           `json:"chain"`
+	Configs              []models.SmartMoneyFollowConfig  `json:"configs"`
+	Jobs                 []models.SmartMoneyFollowJob     `json:"jobs"`
+	Attempts             []models.SmartMoneyFollowAttempt `json:"attempts"`
+	TargetEvents         []models.SmartMoneyLPEvent       `json:"target_events"`
+	JobEvents            []models.SmartMoneyLPEvent       `json:"job_events"`
+	Wallets              []ExecutionWalletOption          `json:"wallets"`
+	Statuses             []FollowConfigStatus             `json:"statuses"`
+	AvailableIntensities []smgd.BarkIntensityOption       `json:"available_intensities"`
+	BarkStatus           FollowConfigEnvelopeBarkStatus   `json:"bark_status"`
 }
 
 type DeleteLogsResult struct {
@@ -92,6 +106,37 @@ type ExecutionWalletOption struct {
 	Address   string `json:"address"`
 	Name      string `json:"name,omitempty"`
 	IsDefault bool   `json:"is_default"`
+}
+
+type FollowConfigEnvelopeBarkStatus struct {
+	Enabled    bool `json:"enabled"`
+	Configured bool `json:"configured"`
+	Ready      bool `json:"ready"`
+}
+
+type FollowConfigStatus struct {
+	ConfigID             uint       `json:"config_id"`
+	Enabled              bool       `json:"enabled"`
+	ExecutionWalletCount int        `json:"execution_wallet_count"`
+	ExecutionWalletMode  string     `json:"execution_wallet_mode"`
+	OpenTasks            int        `json:"open_tasks"`
+	ClosedTasks          int        `json:"closed_tasks"`
+	RealizedPnLUSDT      float64    `json:"realized_pnl_usdt"`
+	UnrealizedPnLUSDT    float64    `json:"unrealized_pnl_usdt"`
+	TotalPnLUSDT         float64    `json:"total_pnl_usdt"`
+	TakeProfitUSDT       float64    `json:"take_profit_usdt"`
+	StopLossUSDT         float64    `json:"stop_loss_usdt"`
+	StopTriggeredAt      *time.Time `json:"stop_triggered_at,omitempty"`
+	StopTriggeredReason  string     `json:"stop_triggered_reason"`
+	StopTriggeredPnLUSDT float64    `json:"stop_triggered_pnl_usdt"`
+	LastFollowTaskID     uint       `json:"last_follow_task_id,omitempty"`
+	LastFollowTaskAt     *time.Time `json:"last_follow_task_at,omitempty"`
+	PnLError             string     `json:"pnl_error,omitempty"`
+}
+
+type executionWalletChoice struct {
+	ID      uint
+	Address string
 }
 
 func NewService() *Service {
@@ -142,6 +187,9 @@ func (s *Service) ScanAndExecute(ctx context.Context) error {
 	if err := s.executeDueJobs(ctx); err != nil {
 		return err
 	}
+	if err := s.enforceFollowRiskStops(ctx); err != nil {
+		return err
+	}
 	if err := backfillFollowTaskRangePercentages(ctx); err != nil {
 		return err
 	}
@@ -175,6 +223,15 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 	}
 	for i := range configs {
 		fillConfigExecutionWallet(&configs[i], defaultWallet)
+	}
+	statuses, err := s.buildFollowStatuses(ctx, configs)
+	if err != nil {
+		return nil, err
+	}
+	barkStatus, err := smgd.ResolveUserBarkStatus(ctx, userID)
+	if err != nil {
+		log.Printf("[SmartMoneyFollow] load bark status failed for envelope: user=%d err=%v", userID, err)
+		barkStatus = smgd.BarkStatus{}
 	}
 	logCursor, err := followLogCursor(ctx, userID, chain)
 	if err != nil {
@@ -226,14 +283,21 @@ func (s *Service) ListEnvelope(ctx context.Context, userID uint, chain string) (
 	}
 
 	return &ConfigEnvelope{
-		OK:           true,
-		Chain:        chain,
-		Configs:      configs,
-		Jobs:         jobs,
-		Attempts:     attempts,
-		TargetEvents: targetEvents,
-		JobEvents:    jobEvents,
-		Wallets:      walletOptions,
+		OK:                   true,
+		Chain:                chain,
+		Configs:              configs,
+		Jobs:                 jobs,
+		Attempts:             attempts,
+		TargetEvents:         targetEvents,
+		JobEvents:            jobEvents,
+		Wallets:              walletOptions,
+		Statuses:             statuses,
+		AvailableIntensities: smgd.BarkIntensityOptions(),
+		BarkStatus: FollowConfigEnvelopeBarkStatus{
+			Enabled:    barkStatus.Enabled,
+			Configured: barkStatus.Configured,
+			Ready:      barkStatus.Ready,
+		},
 	}, nil
 }
 
@@ -429,12 +493,13 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 
 	var saved models.SmartMoneyFollowConfig
 	err = database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		executionWallet, err := resolveExecutionWalletForSave(ctx, tx, userID, normalized.ExecutionWalletID, normalized.ExecutionWalletAddr)
+		executionWallets, err := resolveExecutionWalletsForSave(ctx, tx, userID, normalized.ExecutionWalletIDs, normalized.ExecutionWalletID, normalized.ExecutionWalletAddr)
 		if err != nil {
 			return err
 		}
-		normalized.ExecutionWalletID = executionWallet.ID
-		normalized.ExecutionWalletAddr = normalizeWalletAddress(executionWallet.Address)
+		normalized.ExecutionWalletID = executionWallets[0].ID
+		normalized.ExecutionWalletAddr = normalizeWalletAddress(executionWallets[0].Address)
+		normalized.ExecutionWalletIDs = walletIDsFromRows(executionWallets)
 
 		if normalized.Enabled {
 			if err := ensureFollowTargetWalletsMonitored(ctx, tx, chainID, normalized.TargetWallets); err != nil {
@@ -475,6 +540,12 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			if normalized.Enabled && (!existing.Enabled || triggerChanged) {
 				cursorID = latestID
 			}
+			executionWalletCursor := existing.ExecutionWalletCursor
+			if !uintSlicesEqual(configExecutionWalletIDs(&existing), normalized.ExecutionWalletIDs) ||
+				normalizeExecutionWalletMode(existing.ExecutionWalletMode) != normalized.ExecutionWalletMode {
+				executionWalletCursor = 0
+			}
+			executionWalletCursor = normalizeExecutionWalletCursor(executionWalletCursor, len(normalized.ExecutionWalletIDs))
 			updates := map[string]any{
 				"chain":                    chain,
 				"chain_id":                 chainID,
@@ -482,6 +553,9 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 				"target_wallet_addresses":  models.StringArray(normalized.TargetWallets),
 				"execution_wallet_id":      normalized.ExecutionWalletID,
 				"execution_wallet_address": normalized.ExecutionWalletAddr,
+				"execution_wallet_ids":     models.UintArray(normalized.ExecutionWalletIDs),
+				"execution_wallet_mode":    normalized.ExecutionWalletMode,
+				"execution_wallet_cursor":  executionWalletCursor,
 				"trigger_mode":             normalized.TriggerMode,
 				"trigger_min_wallets":      normalized.TriggerMinWallets,
 				"trigger_window_seconds":   normalized.TriggerWindowSeconds,
@@ -493,7 +567,16 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 				"delay_seconds":            normalized.DelaySeconds,
 				"follow_close":             normalized.FollowClose,
 				"range_shift_grids":        normalized.RangeShiftGrids,
+				"notify_enabled":           normalized.NotifyEnabled,
+				"notify_intensity":         normalized.NotifyIntensity,
+				"take_profit_usdt":         normalized.TakeProfitUSDT,
+				"stop_loss_usdt":           normalized.StopLossUSDT,
 				"cursor_event_id":          cursorID,
+			}
+			if normalized.Enabled {
+				updates["stop_triggered_at"] = nil
+				updates["stop_triggered_reason"] = ""
+				updates["stop_triggered_pnl_usdt"] = 0
 			}
 			if latestID > existing.LastSeenEventID {
 				updates["last_seen_event_id"] = latestID
@@ -509,26 +592,33 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			cursorID = latestID
 		}
 		row := models.SmartMoneyFollowConfig{
-			UserID:               userID,
-			Chain:                chain,
-			ChainID:              chainID,
-			TargetWalletAddress:  normalized.TargetWalletAddress,
-			TargetWallets:        models.StringArray(normalized.TargetWallets),
-			ExecutionWalletID:    normalized.ExecutionWalletID,
-			ExecutionWalletAddr:  normalized.ExecutionWalletAddr,
-			TriggerMode:          normalized.TriggerMode,
-			TriggerMinWallets:    normalized.TriggerMinWallets,
-			TriggerWindowSeconds: normalized.TriggerWindowSeconds,
-			Enabled:              normalized.Enabled,
-			AmountMode:           normalized.AmountMode,
-			FixedAmountUSDT:      normalized.FixedAmountUSDT,
-			Ratio:                normalized.Ratio,
-			DelayMode:            normalized.DelayMode,
-			DelaySeconds:         normalized.DelaySeconds,
-			FollowClose:          normalized.FollowClose,
-			RangeShiftGrids:      normalized.RangeShiftGrids,
-			CursorEventID:        cursorID,
-			LastSeenEventID:      latestID,
+			UserID:                userID,
+			Chain:                 chain,
+			ChainID:               chainID,
+			TargetWalletAddress:   normalized.TargetWalletAddress,
+			TargetWallets:         models.StringArray(normalized.TargetWallets),
+			ExecutionWalletID:     normalized.ExecutionWalletID,
+			ExecutionWalletAddr:   normalized.ExecutionWalletAddr,
+			ExecutionWalletIDs:    models.UintArray(normalized.ExecutionWalletIDs),
+			ExecutionWalletMode:   normalized.ExecutionWalletMode,
+			ExecutionWalletCursor: 0,
+			TriggerMode:           normalized.TriggerMode,
+			TriggerMinWallets:     normalized.TriggerMinWallets,
+			TriggerWindowSeconds:  normalized.TriggerWindowSeconds,
+			Enabled:               normalized.Enabled,
+			AmountMode:            normalized.AmountMode,
+			FixedAmountUSDT:       normalized.FixedAmountUSDT,
+			Ratio:                 normalized.Ratio,
+			DelayMode:             normalized.DelayMode,
+			DelaySeconds:          normalized.DelaySeconds,
+			FollowClose:           normalized.FollowClose,
+			RangeShiftGrids:       normalized.RangeShiftGrids,
+			NotifyEnabled:         normalized.NotifyEnabled,
+			NotifyIntensity:       normalized.NotifyIntensity,
+			TakeProfitUSDT:        normalized.TakeProfitUSDT,
+			StopLossUSDT:          normalized.StopLossUSDT,
+			CursorEventID:         cursorID,
+			LastSeenEventID:       latestID,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -621,9 +711,21 @@ func NormalizeSaveInput(input SaveConfigInput) (SaveConfigInput, error) {
 		}
 		input.ExecutionWalletAddr = executionAddr
 	}
+	input.ExecutionWalletIDs = normalizeExecutionWalletIDs(input.ExecutionWalletIDs, input.ExecutionWalletID)
+	input.ExecutionWalletMode = normalizeExecutionWalletMode(input.ExecutionWalletMode)
 	if input.RangeShiftGrids < 0 || input.RangeShiftGrids > maxFollowRangeShiftGrids {
 		return SaveConfigInput{}, fmt.Errorf("range shift grids must be between 0 and %d", maxFollowRangeShiftGrids)
 	}
+	if len(input.ExecutionWalletIDs) > maxFollowExecutionWallets {
+		return SaveConfigInput{}, fmt.Errorf("execution wallet count cannot exceed %d", maxFollowExecutionWallets)
+	}
+	if err := validateFollowRiskThreshold("take profit", input.TakeProfitUSDT); err != nil {
+		return SaveConfigInput{}, err
+	}
+	if err := validateFollowRiskThreshold("stop loss", input.StopLossUSDT); err != nil {
+		return SaveConfigInput{}, err
+	}
+	input.NotifyIntensity = smgd.NormalizeBarkIntensity(input.NotifyIntensity)
 
 	amountMode := strings.ToLower(strings.TrimSpace(input.AmountMode))
 	switch amountMode {
@@ -927,6 +1029,12 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 			return nil
 		}
 	}
+	executionWallet, walletErr := s.executionWalletForNewJob(ctx, cfg, action, positionRef)
+	if walletErr != nil {
+		status = models.SmartMoneyFollowJobStatusFailed
+		errorMessage = walletErr.Error()
+		executionWallet = fallbackExecutionWalletChoice(cfg)
+	}
 	now := time.Now()
 	scheduledAt := now
 	if cfg.DelayMode == models.SmartMoneyFollowDelayModeFixed {
@@ -943,8 +1051,8 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		Chain:               cfg.Chain,
 		ChainID:             cfg.ChainID,
 		TargetWalletAddress: normalizeWalletAddress(event.WalletAddress),
-		ExecutionWalletID:   cfg.ExecutionWalletID,
-		ExecutionWalletAddr: cfg.ExecutionWalletAddr,
+		ExecutionWalletID:   executionWallet.ID,
+		ExecutionWalletAddr: executionWallet.Address,
 		EventID:             trigger.PrimaryEventID,
 		TriggerMode:         trigger.Mode,
 		TriggerWallets:      models.StringArray(trigger.Wallets),
@@ -957,35 +1065,45 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		AmountUSDT:          amountUSDT,
 		ErrorMessage:        errorMessage,
 	}
-	recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusMatched, "matched follow config", nil)
+	recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusMatched, "matched follow config", nil, executionWallet)
 	result := database.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&job)
 	if result.Error != nil {
-		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusFailed, result.Error.Error(), nil)
+		recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusFailed, result.Error.Error(), nil, executionWallet)
 		return fmt.Errorf("create follow job failed: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		log.Printf("[SmartMoneyFollow] follow job already exists: config_id=%d event_id=%d action=%s", cfg.ID, trigger.PrimaryEventID, action)
 		existing, err := findExistingFollowJob(ctx, cfg.ID, trigger.PrimaryEventID, action)
 		if err != nil {
-			recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusFailed, err.Error(), nil)
+			recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusFailed, err.Error(), nil, executionWallet)
 			return err
 		}
 		if existing != nil {
-			recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, "", &existing.ID)
+			recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, "", &existing.ID, executionWalletChoice{
+				ID:      existing.ExecutionWalletID,
+				Address: normalizeWalletAddress(existing.ExecutionWalletAddr),
+			})
 			return nil
 		}
-		recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "follow job already exists but row not found", nil)
+		recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusSkipped, "follow job already exists but row not found", nil, executionWallet)
 		return nil
 	}
-	recordFollowAttempt(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, errorMessage, &job.ID)
+	recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, models.SmartMoneyFollowAttemptStatusCreated, errorMessage, &job.ID, executionWallet)
+	if status == models.SmartMoneyFollowJobStatusFailed || status == models.SmartMoneyFollowJobStatusSkipped {
+		s.notifyFollowJobFinished(ctx, job.ID)
+	}
 	log.Printf("[SmartMoneyFollow] follow job created: job_id=%d config_id=%d event_id=%d action=%s status=%s amount=%.8f error=%s",
 		job.ID, cfg.ID, trigger.PrimaryEventID, action, status, amountUSDT, errorMessage)
 	return nil
 }
 
 func recordFollowAttempt(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, action string, status string, message string, jobID *uint) {
+	recordFollowAttemptWithExecutionWallet(ctx, cfg, event, action, status, message, jobID, fallbackExecutionWalletChoice(cfg))
+}
+
+func recordFollowAttemptWithExecutionWallet(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, action string, status string, message string, jobID *uint, executionWallet executionWalletChoice) {
 	if cfg == nil || event == nil || database.DB == nil {
 		return
 	}
@@ -998,8 +1116,8 @@ func recordFollowAttempt(ctx context.Context, cfg *models.SmartMoneyFollowConfig
 		Chain:               cfg.Chain,
 		ChainID:             cfg.ChainID,
 		TargetWalletAddress: normalizeWalletAddress(event.WalletAddress),
-		ExecutionWalletID:   cfg.ExecutionWalletID,
-		ExecutionWalletAddr: cfg.ExecutionWalletAddr,
+		ExecutionWalletID:   executionWallet.ID,
+		ExecutionWalletAddr: executionWallet.Address,
 		EventID:             event.ID,
 		Action:              action,
 		Status:              status,
@@ -1309,11 +1427,19 @@ func (s *Service) executeJob(ctx context.Context, job *models.SmartMoneyFollowJo
 			return rescheduleJobRetry(ctx, job.ID, job.RetryCount+1, followRetryDelay(job.RetryCount+1), err.Error())
 		}
 		if errors.Is(err, errFollowJobSkipped) {
-			return markJobFinished(ctx, job.ID, models.SmartMoneyFollowJobStatusSkipped, taskID, err.Error())
+			return s.finishJob(ctx, job.ID, models.SmartMoneyFollowJobStatusSkipped, taskID, err.Error())
 		}
-		return markJobFinished(ctx, job.ID, models.SmartMoneyFollowJobStatusFailed, taskID, err.Error())
+		return s.finishJob(ctx, job.ID, models.SmartMoneyFollowJobStatusFailed, taskID, err.Error())
 	}
-	return markJobFinished(ctx, job.ID, models.SmartMoneyFollowJobStatusSuccess, taskID, "")
+	return s.finishJob(ctx, job.ID, models.SmartMoneyFollowJobStatusSuccess, taskID, "")
+}
+
+func (s *Service) finishJob(ctx context.Context, jobID uint, status string, taskID *uint, message string) error {
+	if err := markJobFinished(ctx, jobID, status, taskID, message); err != nil {
+		return err
+	}
+	s.notifyFollowJobFinished(ctx, jobID)
+	return nil
 }
 
 func markJobFinished(ctx context.Context, jobID uint, status string, taskID *uint, message string) error {
@@ -1354,6 +1480,171 @@ func rescheduleJobRetry(ctx context.Context, jobID uint, retryCount int, delay t
 		}).Error
 }
 
+func (s *Service) notifyFollowJobFinished(ctx context.Context, jobID uint) {
+	if jobID == 0 {
+		return
+	}
+	job, cfg, event, task, err := loadFollowJobNotificationContext(ctx, jobID)
+	if err != nil {
+		log.Printf("[SmartMoneyFollow] load follow job notification failed: job_id=%d err=%v", jobID, err)
+		return
+	}
+	if cfg == nil || !cfg.NotifyEnabled {
+		return
+	}
+	status, err := smgd.ResolveUserBarkStatus(ctx, cfg.UserID)
+	if err != nil {
+		log.Printf("[SmartMoneyFollow] load bark status failed: user=%d job_id=%d err=%v", cfg.UserID, jobID, err)
+		return
+	}
+	if !status.Ready {
+		log.Printf("[SmartMoneyFollow] bark notification skipped: user=%d job_id=%d enabled=%t configured=%t",
+			cfg.UserID, jobID, status.Enabled, status.Configured)
+		return
+	}
+	title := followJobNotificationTitle(job)
+	body := followJobNotificationBody(job, cfg, event, task)
+	barkCfg := smgd.BarkConfigForIntensity(status.Config, cfg.NotifyIntensity)
+	if event != nil && strings.TrimSpace(event.TxHash) != "" {
+		barkCfg.OpenURL = config.ExplorerTxURL(job.Chain, event.TxHash)
+	}
+	if err := notify.SendBarkWithConfig(title, body, barkCfg); err != nil {
+		log.Printf("[SmartMoneyFollow] bark notification failed: user=%d job_id=%d err=%v", cfg.UserID, jobID, err)
+	}
+}
+
+func loadFollowJobNotificationContext(ctx context.Context, jobID uint) (*models.SmartMoneyFollowJob, *models.SmartMoneyFollowConfig, *models.SmartMoneyLPEvent, *models.StrategyTask, error) {
+	var job models.SmartMoneyFollowJob
+	if err := database.DB.WithContext(ctx).Where("id = ?", jobID).First(&job).Error; err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("load follow job failed: %w", err)
+	}
+	var cfg models.SmartMoneyFollowConfig
+	if err := database.DB.WithContext(ctx).Where("id = ? AND user_id = ?", job.ConfigID, job.UserID).First(&cfg).Error; err != nil {
+		return &job, nil, nil, nil, fmt.Errorf("load follow config failed: %w", err)
+	}
+	var event models.SmartMoneyLPEvent
+	eventPtr := (*models.SmartMoneyLPEvent)(nil)
+	if err := database.DB.WithContext(ctx).Where("id = ?", job.EventID).First(&event).Error; err == nil {
+		eventPtr = &event
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return &job, &cfg, nil, nil, fmt.Errorf("load follow event failed: %w", err)
+	}
+	var task models.StrategyTask
+	taskPtr := (*models.StrategyTask)(nil)
+	if job.TaskID != nil && *job.TaskID > 0 {
+		if err := database.DB.WithContext(ctx).Where("id = ? AND user_id = ?", *job.TaskID, job.UserID).First(&task).Error; err == nil {
+			taskPtr = &task
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return &job, &cfg, eventPtr, nil, fmt.Errorf("load follow task failed: %w", err)
+		}
+	}
+	return &job, &cfg, eventPtr, taskPtr, nil
+}
+
+func followJobNotificationTitle(job *models.SmartMoneyFollowJob) string {
+	status := "跟单任务"
+	if job != nil {
+		switch job.Status {
+		case models.SmartMoneyFollowJobStatusSuccess:
+			status = "跟单成功"
+		case models.SmartMoneyFollowJobStatusFailed:
+			status = "跟单失败"
+		case models.SmartMoneyFollowJobStatusSkipped:
+			status = "跟单跳过"
+		}
+	}
+	return status
+}
+
+func followJobNotificationBody(job *models.SmartMoneyFollowJob, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, task *models.StrategyTask) string {
+	parts := make([]string, 0, 8)
+	if job != nil {
+		parts = append(parts, fmt.Sprintf("任务 #%d %s/%s", job.ID, followActionLabel(job.Action), followStatusLabel(job.Status)))
+		if job.AmountUSDT > 0 {
+			parts = append(parts, fmt.Sprintf("金额 %.2fU", job.AmountUSDT))
+		}
+		if strings.TrimSpace(job.ExecutionWalletAddr) != "" {
+			parts = append(parts, "执行 "+shortAddress(job.ExecutionWalletAddr))
+		}
+		if strings.TrimSpace(job.ErrorMessage) != "" {
+			parts = append(parts, "原因 "+strings.TrimSpace(job.ErrorMessage))
+		}
+	}
+	if task != nil {
+		parts = append(parts, fmt.Sprintf("仓位 #%d %s/%s", task.ID, strings.TrimSpace(task.Token0Symbol), strings.TrimSpace(task.Token1Symbol)))
+	}
+	if event != nil && strings.TrimSpace(event.WalletAddress) != "" {
+		parts = append(parts, "目标 "+shortAddress(event.WalletAddress))
+	}
+	if cfg != nil && strings.TrimSpace(cfg.TargetWalletAddress) != "" && event == nil {
+		parts = append(parts, "目标 "+shortAddress(cfg.TargetWalletAddress))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (s *Service) notifyFollowRiskStop(ctx context.Context, cfg *models.SmartMoneyFollowConfig, status FollowConfigStatus) {
+	if cfg == nil || !cfg.NotifyEnabled {
+		return
+	}
+	barkStatus, err := smgd.ResolveUserBarkStatus(ctx, cfg.UserID)
+	if err != nil {
+		log.Printf("[SmartMoneyFollow] load bark status failed for risk stop: user=%d config_id=%d err=%v", cfg.UserID, cfg.ID, err)
+		return
+	}
+	if !barkStatus.Ready {
+		log.Printf("[SmartMoneyFollow] bark risk stop skipped: user=%d config_id=%d enabled=%t configured=%t",
+			cfg.UserID, cfg.ID, barkStatus.Enabled, barkStatus.Configured)
+		return
+	}
+	reason := "止盈"
+	if cfg.StopTriggeredReason == models.SmartMoneyFollowStopReasonStopLoss {
+		reason = "止损"
+	}
+	body := fmt.Sprintf("配置 #%d 已%s停止跟单\n当前跟单盈亏 %.2fU\n止盈 %.2fU / 止损 %.2fU",
+		cfg.ID, reason, status.TotalPnLUSDT, cfg.TakeProfitUSDT, cfg.StopLossUSDT)
+	if err := notify.SendBarkWithConfig("跟单风控触发", body, smgd.BarkConfigForIntensity(barkStatus.Config, cfg.NotifyIntensity)); err != nil {
+		log.Printf("[SmartMoneyFollow] bark risk stop notification failed: user=%d config_id=%d err=%v", cfg.UserID, cfg.ID, err)
+	}
+}
+
+func followActionLabel(action string) string {
+	switch action {
+	case models.SmartMoneyFollowJobActionOpen:
+		return "开仓"
+	case models.SmartMoneyFollowJobActionAddLiquidity:
+		return "加仓"
+	case models.SmartMoneyFollowJobActionClose:
+		return "关仓"
+	default:
+		return strings.TrimSpace(action)
+	}
+}
+
+func followStatusLabel(status string) string {
+	switch status {
+	case models.SmartMoneyFollowJobStatusSuccess:
+		return "成功"
+	case models.SmartMoneyFollowJobStatusFailed:
+		return "失败"
+	case models.SmartMoneyFollowJobStatusSkipped:
+		return "跳过"
+	case models.SmartMoneyFollowJobStatusPending:
+		return "待执行"
+	case models.SmartMoneyFollowJobStatusRunning:
+		return "执行中"
+	default:
+		return strings.TrimSpace(status)
+	}
+}
+
+func shortAddress(value string) string {
+	addr := normalizeWalletAddress(value)
+	if len(addr) <= 12 {
+		return addr
+	}
+	return addr[:6] + "..." + addr[len(addr)-4:]
+}
+
 func (s *Service) executeOpenJob(ctx context.Context, job *models.SmartMoneyFollowJob) (*uint, error) {
 	cfg, event, err := loadJobConfigAndEvent(ctx, job)
 	if err != nil {
@@ -1374,7 +1665,11 @@ func (s *Service) executeOpenJob(ctx context.Context, job *models.SmartMoneyFoll
 		return &taskID, nil
 	}
 
-	task, err := buildFollowTask(ctx, cfg, event, job.AmountUSDT)
+	walletRow, err := resolveExecutionWalletForJob(ctx, cfg, job)
+	if err != nil {
+		return nil, err
+	}
+	task, err := buildFollowTask(ctx, cfg, event, job.AmountUSDT, walletRow)
 	if err != nil {
 		return nil, err
 	}
@@ -1641,6 +1936,198 @@ func openFollowJobInProgress(ctx context.Context, configID uint, positionRef str
 	return count > 0, nil
 }
 
+func (s *Service) buildFollowStatuses(ctx context.Context, configs []models.SmartMoneyFollowConfig) ([]FollowConfigStatus, error) {
+	statuses := make([]FollowConfigStatus, 0, len(configs))
+	pnlSvc := strategy.NewPnLService()
+	for i := range configs {
+		status, err := buildFollowStatus(ctx, &configs[i], pnlSvc)
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
+}
+
+func buildFollowStatus(ctx context.Context, cfg *models.SmartMoneyFollowConfig, pnlSvc *strategy.PnLService) (FollowConfigStatus, error) {
+	if cfg == nil {
+		return FollowConfigStatus{}, fmt.Errorf("follow config is nil")
+	}
+	if pnlSvc == nil {
+		pnlSvc = strategy.NewPnLService()
+	}
+	status := FollowConfigStatus{
+		ConfigID:             cfg.ID,
+		Enabled:              cfg.Enabled,
+		ExecutionWalletCount: len(configExecutionWalletIDs(cfg)),
+		ExecutionWalletMode:  normalizeExecutionWalletMode(cfg.ExecutionWalletMode),
+		TakeProfitUSDT:       cfg.TakeProfitUSDT,
+		StopLossUSDT:         cfg.StopLossUSDT,
+		StopTriggeredAt:      cfg.StopTriggeredAt,
+		StopTriggeredReason:  strings.TrimSpace(cfg.StopTriggeredReason),
+		StopTriggeredPnLUSDT: cfg.StopTriggeredPnLUSDT,
+	}
+	var mappings []models.SmartMoneyFollowTask
+	if err := database.DB.WithContext(ctx).
+		Where("config_id = ? AND user_id = ?", cfg.ID, cfg.UserID).
+		Order("id ASC").
+		Find(&mappings).Error; err != nil {
+		return status, fmt.Errorf("list follow task mappings failed: %w", err)
+	}
+	if len(mappings) == 0 {
+		return status, nil
+	}
+
+	taskIDs := make([]uint, 0, len(mappings))
+	for i := range mappings {
+		mapping := mappings[i]
+		if mapping.TaskID == 0 {
+			continue
+		}
+		taskIDs = append(taskIDs, mapping.TaskID)
+		if mapping.Status == models.SmartMoneyFollowTaskStatusOpen {
+			status.OpenTasks++
+		}
+		if mapping.Status == models.SmartMoneyFollowTaskStatusClosed {
+			status.ClosedTasks++
+		}
+		if status.LastFollowTaskAt == nil || mapping.UpdatedAt.After(*status.LastFollowTaskAt) {
+			t := mapping.UpdatedAt
+			status.LastFollowTaskAt = &t
+			status.LastFollowTaskID = mapping.TaskID
+		}
+	}
+	if len(taskIDs) == 0 {
+		return status, nil
+	}
+
+	realized, err := realizedFollowPnLUSDT(ctx, cfg.UserID, taskIDs)
+	if err != nil {
+		return status, err
+	}
+	status.RealizedPnLUSDT = roundFollowPnL(realized)
+
+	var openTasks []models.StrategyTask
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND id IN ? AND is_follow = ? AND status <> ?", cfg.UserID, taskIDs, true, models.StrategyStatusStopped).
+		Find(&openTasks).Error; err != nil {
+		return status, fmt.Errorf("list open follow strategy tasks failed: %w", err)
+	}
+	var pnlErrors []string
+	for i := range openTasks {
+		task := openTasks[i]
+		pnl, err := pnlSvc.GetTaskPnL(&task)
+		if err != nil {
+			pnlErrors = append(pnlErrors, fmt.Sprintf("task #%d: %v", task.ID, err))
+			continue
+		}
+		if math.IsNaN(pnl.AbsolutePnLUSDT) || math.IsInf(pnl.AbsolutePnLUSDT, 0) {
+			pnlErrors = append(pnlErrors, fmt.Sprintf("task #%d: invalid pnl", task.ID))
+			continue
+		}
+		status.UnrealizedPnLUSDT += pnl.AbsolutePnLUSDT
+	}
+	status.UnrealizedPnLUSDT = roundFollowPnL(status.UnrealizedPnLUSDT)
+	status.TotalPnLUSDT = roundFollowPnL(status.RealizedPnLUSDT + status.UnrealizedPnLUSDT)
+	if len(pnlErrors) > 0 {
+		status.PnLError = strings.Join(pnlErrors, "; ")
+	}
+	return status, nil
+}
+
+func realizedFollowPnLUSDT(ctx context.Context, userID uint, taskIDs []uint) (float64, error) {
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+	var records []models.TradeRecord
+	if err := database.DB.WithContext(ctx).
+		Select("id, user_id, task_id, profit_usdt, status").
+		Where("user_id = ? AND task_id IN ? AND status = ?", userID, taskIDs, models.TradeStatusClosed).
+		Find(&records).Error; err != nil {
+		return 0, fmt.Errorf("list follow trade records failed: %w", err)
+	}
+	totalWei := big.NewInt(0)
+	for _, record := range records {
+		profitWei, err := convert.ParseBigInt(record.ProfitUSDT)
+		if err != nil {
+			return 0, fmt.Errorf("invalid follow trade profit record_id=%d: %w", record.ID, err)
+		}
+		totalWei.Add(totalWei, profitWei)
+	}
+	return weiToUSDTFloat(totalWei), nil
+}
+
+func weiToUSDTFloat(value *big.Int) float64 {
+	if value == nil {
+		return 0
+	}
+	f := new(big.Float).SetPrec(256).SetInt(value)
+	denom := new(big.Float).SetFloat64(1e18)
+	f.Quo(f, denom)
+	out, _ := f.Float64()
+	return out
+}
+
+func roundFollowPnL(value float64) float64 {
+	return math.Round(value*10000) / 10000
+}
+
+func (s *Service) enforceFollowRiskStops(ctx context.Context) error {
+	var configs []models.SmartMoneyFollowConfig
+	if err := database.DB.WithContext(ctx).
+		Where("enabled = ? AND (take_profit_usdt > 0 OR stop_loss_usdt > 0)", true).
+		Order("id ASC").
+		Limit(100).
+		Find(&configs).Error; err != nil {
+		return fmt.Errorf("list follow risk configs failed: %w", err)
+	}
+	pnlSvc := strategy.NewPnLService()
+	for i := range configs {
+		cfg := configs[i]
+		status, err := buildFollowStatus(ctx, &cfg, pnlSvc)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(status.PnLError) != "" {
+			log.Printf("[SmartMoneyFollow] skip risk stop due pnl error config_id=%d err=%s", cfg.ID, status.PnLError)
+			continue
+		}
+		reason := ""
+		if cfg.TakeProfitUSDT > 0 && status.TotalPnLUSDT >= cfg.TakeProfitUSDT {
+			reason = models.SmartMoneyFollowStopReasonTakeProfit
+		}
+		if reason == "" && cfg.StopLossUSDT > 0 && status.TotalPnLUSDT <= -cfg.StopLossUSDT {
+			reason = models.SmartMoneyFollowStopReasonStopLoss
+		}
+		if reason == "" {
+			continue
+		}
+		now := time.Now()
+		updates := map[string]any{
+			"enabled":                 false,
+			"stop_triggered_at":       &now,
+			"stop_triggered_reason":   reason,
+			"stop_triggered_pnl_usdt": status.TotalPnLUSDT,
+		}
+		result := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowConfig{}).
+			Where("id = ? AND enabled = ?", cfg.ID, true).
+			Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("disable follow config after risk stop failed: %w", result.Error)
+		}
+		if result.RowsAffected > 0 {
+			cfg.Enabled = false
+			cfg.StopTriggeredAt = &now
+			cfg.StopTriggeredReason = reason
+			cfg.StopTriggeredPnLUSDT = status.TotalPnLUSDT
+			s.notifyFollowRiskStop(ctx, &cfg, status)
+			log.Printf("[SmartMoneyFollow] risk stop triggered config_id=%d reason=%s pnl=%.4f take_profit=%.4f stop_loss=%.4f",
+				cfg.ID, reason, status.TotalPnLUSDT, cfg.TakeProfitUSDT, cfg.StopLossUSDT)
+		}
+	}
+	return nil
+}
+
 func taskHasPositionToken(task *models.StrategyTask) bool {
 	if task == nil {
 		return false
@@ -1750,9 +2237,12 @@ func loadJobConfigAndEvent(ctx context.Context, job *models.SmartMoneyFollowJob)
 	return &cfg, &event, nil
 }
 
-func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, amountUSDT float64) (*models.StrategyTask, error) {
+func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, amountUSDT float64, walletRow *models.Wallet) (*models.StrategyTask, error) {
 	if cfg == nil || event == nil {
 		return nil, fmt.Errorf("config or event is nil")
+	}
+	if walletRow == nil || walletRow.ID == 0 || strings.TrimSpace(walletRow.Address) == "" {
+		return nil, fmt.Errorf("execution wallet is required")
 	}
 	if event.TickLower == nil || event.TickUpper == nil || *event.TickLower >= *event.TickUpper {
 		return nil, fmt.Errorf("event tick range is invalid")
@@ -1766,10 +2256,6 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		return nil, fmt.Errorf("unsupported protocol: %s", event.Protocol)
 	}
 
-	walletRow, err := resolveExecutionWalletForRun(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
 	globalCfg, err := userSvc.NewGlobalConfigService().GetOrCreate(cfg.UserID)
 	if err != nil {
 		return nil, err
@@ -2113,6 +2599,39 @@ func normalizeWalletAddresses(values []string, legacy string) ([]string, error) 
 	return wallets, nil
 }
 
+func resolveExecutionWalletsForSave(ctx context.Context, tx *gorm.DB, userID uint, walletIDs []uint, walletID uint, walletAddress string) ([]models.Wallet, error) {
+	if userID == 0 {
+		return nil, fmt.Errorf("invalid user_id")
+	}
+	ids := normalizeExecutionWalletIDs(walletIDs, walletID)
+	if len(ids) > 0 {
+		var rows []models.Wallet
+		if err := tx.WithContext(ctx).
+			Where("user_id = ? AND id IN ?", userID, ids).
+			Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("load execution wallet pool failed: %w", err)
+		}
+		byID := make(map[uint]models.Wallet, len(rows))
+		for _, row := range rows {
+			byID[row.ID] = row
+		}
+		out := make([]models.Wallet, 0, len(ids))
+		for _, id := range ids {
+			row, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("execution wallet not found: %d", id)
+			}
+			out = append(out, row)
+		}
+		return out, nil
+	}
+	row, err := resolveExecutionWalletForSave(ctx, tx, userID, walletID, walletAddress)
+	if err != nil {
+		return nil, err
+	}
+	return []models.Wallet{*row}, nil
+}
+
 func resolveExecutionWalletForSave(ctx context.Context, tx *gorm.DB, userID uint, walletID uint, walletAddress string) (*models.Wallet, error) {
 	if userID == 0 {
 		return nil, fmt.Errorf("invalid user_id")
@@ -2138,6 +2657,155 @@ func resolveExecutionWalletForSave(ctx context.Context, tx *gorm.DB, userID uint
 		return nil, fmt.Errorf("load execution wallet failed: %w", err)
 	}
 	return &row, nil
+}
+
+func (s *Service) executionWalletForNewJob(ctx context.Context, cfg *models.SmartMoneyFollowConfig, action string, positionRef string) (executionWalletChoice, error) {
+	if cfg == nil {
+		return executionWalletChoice{}, fmt.Errorf("follow config is nil")
+	}
+	if action == models.SmartMoneyFollowJobActionAddLiquidity || action == models.SmartMoneyFollowJobActionClose {
+		if mapping, err := findOpenFollowTaskMapping(ctx, cfg.ID, positionRef); err != nil {
+			return executionWalletChoice{}, err
+		} else if mapping != nil && mapping.ExecutionWalletID != 0 {
+			return executionWalletChoice{ID: mapping.ExecutionWalletID, Address: normalizeWalletAddress(mapping.ExecutionWalletAddr)}, nil
+		}
+		if job, err := findLatestOpenFollowJob(ctx, cfg.ID, positionRef); err != nil {
+			return executionWalletChoice{}, err
+		} else if job != nil && job.ExecutionWalletID != 0 {
+			return executionWalletChoice{ID: job.ExecutionWalletID, Address: normalizeWalletAddress(job.ExecutionWalletAddr)}, nil
+		}
+	}
+	return s.selectOpenExecutionWallet(ctx, cfg)
+}
+
+func (s *Service) selectOpenExecutionWallet(ctx context.Context, cfg *models.SmartMoneyFollowConfig) (executionWalletChoice, error) {
+	if cfg == nil {
+		return executionWalletChoice{}, fmt.Errorf("follow config is nil")
+	}
+	ids := configExecutionWalletIDs(cfg)
+	if len(ids) == 0 {
+		return executionWalletChoice{}, fmt.Errorf("execution wallet is required")
+	}
+	mode := normalizeExecutionWalletMode(cfg.ExecutionWalletMode)
+	selectedID := ids[0]
+	switch mode {
+	case models.SmartMoneyFollowExecutionWalletModeRandom:
+		idx, err := cryptoRandomIndex(len(ids))
+		if err != nil {
+			return executionWalletChoice{}, err
+		}
+		selectedID = ids[idx]
+	case models.SmartMoneyFollowExecutionWalletModeRoundRobin:
+		id, err := reserveRoundRobinExecutionWallet(ctx, cfg.ID, cfg.UserID)
+		if err != nil {
+			return executionWalletChoice{}, err
+		}
+		selectedID = id
+	}
+	walletRow, err := loadUserWalletByID(ctx, cfg.UserID, selectedID)
+	if err != nil {
+		return executionWalletChoice{}, err
+	}
+	return executionWalletChoice{ID: walletRow.ID, Address: normalizeWalletAddress(walletRow.Address)}, nil
+}
+
+func reserveRoundRobinExecutionWallet(ctx context.Context, configID uint, userID uint) (uint, error) {
+	if configID == 0 || userID == 0 {
+		return 0, fmt.Errorf("invalid follow config")
+	}
+	var selectedID uint
+	err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row models.SmartMoneyFollowConfig
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", configID, userID).
+			First(&row).Error; err != nil {
+			return fmt.Errorf("load follow config for wallet rotation failed: %w", err)
+		}
+		ids := configExecutionWalletIDs(&row)
+		if len(ids) == 0 {
+			return fmt.Errorf("execution wallet is required")
+		}
+		cursor := normalizeExecutionWalletCursor(row.ExecutionWalletCursor, len(ids))
+		selectedID = ids[cursor]
+		nextCursor := (cursor + 1) % len(ids)
+		if err := tx.Model(&row).Update("execution_wallet_cursor", nextCursor).Error; err != nil {
+			return fmt.Errorf("update execution wallet cursor failed: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return selectedID, nil
+}
+
+func cryptoRandomIndex(length int) (int, error) {
+	if length <= 0 {
+		return 0, fmt.Errorf("random selection length is invalid")
+	}
+	n, err := crand.Int(crand.Reader, big.NewInt(int64(length)))
+	if err != nil {
+		return 0, fmt.Errorf("select random execution wallet failed: %w", err)
+	}
+	return int(n.Int64()), nil
+}
+
+func resolveExecutionWalletForJob(ctx context.Context, cfg *models.SmartMoneyFollowConfig, job *models.SmartMoneyFollowJob) (*models.Wallet, error) {
+	if cfg == nil || job == nil {
+		return nil, fmt.Errorf("config or job is nil")
+	}
+	if job.ExecutionWalletID != 0 {
+		walletRow, err := loadUserWalletByID(ctx, cfg.UserID, job.ExecutionWalletID)
+		if err != nil {
+			return nil, err
+		}
+		return walletRow, nil
+	}
+	if strings.TrimSpace(job.ExecutionWalletAddr) != "" {
+		walletRow, err := wallet.NewWalletService().GetWalletByAddress(cfg.UserID, job.ExecutionWalletAddr)
+		if err != nil {
+			return nil, fmt.Errorf("load execution wallet failed: %w", err)
+		}
+		return walletRow, nil
+	}
+	return resolveExecutionWalletForRun(ctx, cfg)
+}
+
+func loadUserWalletByID(ctx context.Context, userID uint, id uint) (*models.Wallet, error) {
+	if userID == 0 || id == 0 {
+		return nil, fmt.Errorf("invalid execution wallet id")
+	}
+	var row models.Wallet
+	if err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND id = ?", userID, id).
+		First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("execution wallet not found: %d", id)
+		}
+		return nil, fmt.Errorf("load execution wallet failed: %w", err)
+	}
+	return &row, nil
+}
+
+func findLatestOpenFollowJob(ctx context.Context, configID uint, positionRef string) (*models.SmartMoneyFollowJob, error) {
+	if configID == 0 || strings.TrimSpace(positionRef) == "" {
+		return nil, nil
+	}
+	var job models.SmartMoneyFollowJob
+	if err := database.DB.WithContext(ctx).
+		Where("config_id = ? AND target_position_ref = ? AND action = ?",
+			configID,
+			positionRef,
+			models.SmartMoneyFollowJobActionOpen,
+		).
+		Order("id DESC").
+		First(&job).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load open follow job failed: %w", err)
+	}
+	return &job, nil
 }
 
 func resolveExecutionWalletForRun(ctx context.Context, cfg *models.SmartMoneyFollowConfig) (*models.Wallet, error) {
@@ -2231,17 +2899,24 @@ func fillConfigExecutionWallet(cfg *models.SmartMoneyFollowConfig, defaultWallet
 	}
 	if cfg.ExecutionWalletID != 0 && strings.TrimSpace(cfg.ExecutionWalletAddr) != "" {
 		cfg.ExecutionWalletAddr = normalizeWalletAddress(cfg.ExecutionWalletAddr)
-		return
+	} else if defaultWallet != nil {
+		if cfg.ExecutionWalletID == 0 {
+			cfg.ExecutionWalletID = defaultWallet.ID
+		}
+		if strings.TrimSpace(cfg.ExecutionWalletAddr) == "" {
+			cfg.ExecutionWalletAddr = normalizeWalletAddress(defaultWallet.Address)
+		}
 	}
-	if defaultWallet == nil {
-		return
-	}
-	if cfg.ExecutionWalletID == 0 {
+	if cfg.ExecutionWalletID == 0 && defaultWallet != nil {
 		cfg.ExecutionWalletID = defaultWallet.ID
 	}
-	if strings.TrimSpace(cfg.ExecutionWalletAddr) == "" {
+	if strings.TrimSpace(cfg.ExecutionWalletAddr) == "" && defaultWallet != nil {
 		cfg.ExecutionWalletAddr = normalizeWalletAddress(defaultWallet.Address)
 	}
+	cfg.ExecutionWalletIDs = models.UintArray(configExecutionWalletIDs(cfg))
+	cfg.ExecutionWalletMode = normalizeExecutionWalletMode(cfg.ExecutionWalletMode)
+	cfg.ExecutionWalletCursor = normalizeExecutionWalletCursor(cfg.ExecutionWalletCursor, len(cfg.ExecutionWalletIDs))
+	cfg.NotifyIntensity = smgd.NormalizeBarkIntensity(cfg.NotifyIntensity)
 }
 
 func fillJobExecutionWallet(job *models.SmartMoneyFollowJob, defaultWallet *models.Wallet) {
@@ -2330,6 +3005,18 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
+func uintSlicesEqual(a, b []uint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func stringSliceContains(values []string, value string) bool {
 	for _, item := range values {
 		if item == value {
@@ -2348,4 +3035,80 @@ func uintIDsToStringArray(ids []uint) models.StringArray {
 		out = append(out, strconv.FormatUint(uint64(id), 10))
 	}
 	return out
+}
+
+func normalizeExecutionWalletIDs(values []uint, legacy uint) []uint {
+	seen := make(map[uint]struct{}, len(values)+1)
+	out := make([]uint, 0, len(values)+1)
+	appendID := func(id uint) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range values {
+		appendID(id)
+	}
+	appendID(legacy)
+	return out
+}
+
+func walletIDsFromRows(rows []models.Wallet) []uint {
+	out := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		if row.ID == 0 {
+			continue
+		}
+		out = append(out, row.ID)
+	}
+	return out
+}
+
+func configExecutionWalletIDs(cfg *models.SmartMoneyFollowConfig) []uint {
+	if cfg == nil {
+		return nil
+	}
+	return normalizeExecutionWalletIDs([]uint(cfg.ExecutionWalletIDs), cfg.ExecutionWalletID)
+}
+
+func normalizeExecutionWalletMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case models.SmartMoneyFollowExecutionWalletModeRoundRobin:
+		return models.SmartMoneyFollowExecutionWalletModeRoundRobin
+	case models.SmartMoneyFollowExecutionWalletModeRandom:
+		return models.SmartMoneyFollowExecutionWalletModeRandom
+	default:
+		return models.SmartMoneyFollowExecutionWalletModeFixed
+	}
+}
+
+func normalizeExecutionWalletCursor(cursor int, walletCount int) int {
+	if walletCount <= 0 || cursor < 0 {
+		return 0
+	}
+	return cursor % walletCount
+}
+
+func fallbackExecutionWalletChoice(cfg *models.SmartMoneyFollowConfig) executionWalletChoice {
+	if cfg == nil {
+		return executionWalletChoice{}
+	}
+	return executionWalletChoice{
+		ID:      cfg.ExecutionWalletID,
+		Address: normalizeWalletAddress(cfg.ExecutionWalletAddr),
+	}
+}
+
+func validateFollowRiskThreshold(label string, value float64) error {
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("%s must be greater than or equal to 0", label)
+	}
+	if value > maxFollowRiskThresholdUSDT {
+		return fmt.Errorf("%s is too large", label)
+	}
+	return nil
 }

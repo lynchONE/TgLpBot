@@ -284,6 +284,46 @@ func buildUserLPStatsFromTrades(trades []userLPTradeRow, now time.Time) UserLPSt
 	}
 }
 
+func buildFollowProfitCurveFromTrades(trades []userLPTradeRow, now time.Time) []UserLPProfitCurvePoint {
+	startOfToday := dayStart(now)
+	historyStart := startOfToday.AddDate(0, 0, -30)
+	dailyBuckets := make(map[string]*userLPBucket)
+	todayBucket := &userLPBucket{}
+	for _, trade := range trades {
+		if trade.ClosedAt == nil || trade.ClosedAt.IsZero() {
+			continue
+		}
+		closedAt := trade.ClosedAt.In(timeutil.Location())
+		profitWei := parseTradeProfitWei(trade)
+		if !closedAt.Before(startOfToday) {
+			todayBucket.addProfit(profitWei)
+			continue
+		}
+		if closedAt.Before(historyStart) {
+			continue
+		}
+		dayKey := formatDay(closedAt)
+		bucket := dailyBuckets[dayKey]
+		if bucket == nil {
+			bucket = &userLPBucket{}
+			dailyBuckets[dayKey] = bucket
+		}
+		bucket.addProfit(profitWei)
+	}
+
+	history := make([]UserLPDailyPoint, 0, 31)
+	for cursor := historyStart; cursor.Before(startOfToday); cursor = cursor.AddDate(0, 0, 1) {
+		dayKey := formatDay(cursor)
+		pnl := 0.0
+		if bucket := dailyBuckets[dayKey]; bucket != nil {
+			pnl = profitWeiToUSD(bucket.ProfitWei)
+		}
+		history = append(history, pointWithPnL(dayKey, pnl))
+	}
+	todayPoint := pointWithPnL(formatDay(now), profitWeiToUSD(todayBucket.ProfitWei))
+	return buildUserProfitCurve(history, &todayPoint, nil)
+}
+
 func parseSnapshotDay(dayKey string) (time.Time, bool) {
 	dayKey = strings.TrimSpace(dayKey)
 	if dayKey == "" {
@@ -613,6 +653,23 @@ func (s *Service) loadUserLPTrades(ctx context.Context, userID uint, start, end 
 
 	var rows []userLPTradeRow
 	if err := query.Order("closed_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *Service) loadUserFollowLPTrades(ctx context.Context, userID uint, start, end time.Time) ([]userLPTradeRow, error) {
+	query := database.DB.WithContext(ctx).
+		Table("trade_records AS tr").
+		Joins("JOIN smart_money_follow_tasks AS ft ON ft.task_id = tr.task_id AND ft.user_id = tr.user_id").
+		Select("tr.id, tr.user_id, tr.pool_id, tr.token0_symbol, tr.token1_symbol, tr.chain, tr.profit_usdt, tr.closed_at").
+		Where("tr.status = ? AND tr.closed_at >= ? AND tr.closed_at < ?", models.TradeStatusClosed, start, end)
+	if userID > 0 {
+		query = query.Where("tr.user_id = ?", userID)
+	}
+
+	var rows []userLPTradeRow
+	if err := query.Order("tr.closed_at ASC, tr.id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -1202,6 +1259,11 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 		return nil, err
 	}
 	resp.ProfitCurve = buildUserProfitCurve(profitHistory, resp.TodayPoint, profitBaseline)
+	followTrades, err := s.loadUserFollowLPTrades(ctx, userID, start, now)
+	if err != nil {
+		return nil, err
+	}
+	resp.FollowProfitCurve = buildFollowProfitCurveFromTrades(followTrades, now)
 	if profitBaseline != nil {
 		resp.ProfitBaseline = &UserLPProfitBaselineResponse{
 			Day:        profitBaseline.Day,
