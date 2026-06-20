@@ -74,6 +74,30 @@ function formatDeltaNumber(value, mode = 'usd') {
   return formatUsdCompact(num).replace('$', '');
 }
 
+function splitUsdCompact(value) {
+  const text = formatUsdCompact(value);
+  if (text === '$--') return { symbol: '$', value: '--' };
+  if (text.startsWith('-$')) return { symbol: '-$', value: text.slice(2) };
+  if (text.startsWith('$')) return { symbol: '$', value: text.slice(1) };
+  return { symbol: '', value: text };
+}
+
+function HotPoolPrimaryMetric({ mode, value }) {
+  if (mode === 'rate') {
+    const num = Number(value);
+    const text = Number.isFinite(num) && num > 0 ? `${num.toFixed(3)}%` : '--';
+    return <span className="pool-main-number">{text}</span>;
+  }
+
+  const parts = splitUsdCompact(value);
+  return (
+    <span className="pool-main-amount">
+      {parts.symbol ? <span className="pool-main-symbol">{parts.symbol}</span> : null}
+      <span className="pool-main-number">{parts.value}</span>
+    </span>
+  );
+}
+
 function MetricDelta({ currentValue, previousValue, mode = 'usd' }) {
   const current = Number(currentValue);
   const previous = Number(previousValue);
@@ -595,9 +619,9 @@ function HotPoolRow({
 
       <div className="pool-values">
         <div className="pool-main-val">
-          <NumberFlowValue
+          <HotPoolPrimaryMetric
+            mode={hotSort === 'fee_rate' ? 'rate' : 'usd'}
             value={hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees}
-            formatter={(v) => hotSort === 'fee_rate' ? (Number(v) > 0 ? `${Number(v).toFixed(3)}%` : '--') : formatUsdCompact(v)}
           />
           <MetricDelta currentValue={mainDeltaCurrent} previousValue={mainDeltaPrevious} mode={mainDeltaMode} />
         </div>

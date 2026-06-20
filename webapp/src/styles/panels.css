@@ -2223,20 +2223,58 @@
 
 /* Values block */
 .pool-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   text-align: right;
   flex-shrink: 0;
-  min-width: 70px;
+  min-width: 82px;
+  max-width: 112px;
 }
 .pool-main-val {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 3px;
+  width: 100%;
+  min-height: 20px;
   font-size: 13px;
   font-weight: 700;
+  line-height: 20px;
   color: #f1f5f9;
   font-variant-numeric: tabular-nums;
 }
+.pool-main-amount,
+.pool-main-number {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 0;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+.pool-main-amount {
+  gap: 1px;
+  max-width: 100%;
+}
+.pool-main-symbol {
+  display: inline-flex;
+  align-items: baseline;
+  flex: 0 0 auto;
+  line-height: 20px;
+}
+.pool-main-number {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pool-sub-val {
+  width: 100%;
   font-size: 10px;
   font-weight: 600;
-  margin-top: 2px;
+  margin-top: 1px;
+  line-height: 13px;
   color: #64748b;
   font-variant-numeric: tabular-nums;
   max-width: 120px;

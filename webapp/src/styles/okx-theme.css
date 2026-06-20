@@ -1000,30 +1000,67 @@ body {
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
   grid-area: values;
-  width: 84px;
-  min-width: 84px;
-  max-width: 84px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 86px;
+  min-width: 86px;
+  max-width: 86px;
+  overflow: visible;
   align-self: start;
   text-align: right;
 }
 
 .module-hot_pools .pool-main-val {
   font-size: 13px;
-  line-height: 1.15;
+  line-height: 20px;
+  min-height: 20px;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: flex-end;
   gap: 3px;
+}
+
+.module-hot_pools .pool-main-amount,
+.module-hot_pools .pool-main-number {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 0;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.module-hot_pools .pool-main-amount {
+  gap: 1px;
+  max-width: 100%;
+}
+
+.module-hot_pools .pool-main-symbol {
+  display: inline-flex;
+  align-items: baseline;
+  flex: 0 0 auto;
+  line-height: 20px;
+}
+
+.module-hot_pools .pool-main-number {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .module-hot_pools .pool-sub-val,
 .workbench.layout-4 .module-hot_pools .pool-sub-val,
 .workbench.layout-work-4 .module-hot_pools .pool-sub-val {
-  max-width: 84px;
+  width: 100%;
+  max-width: 86px;
+  line-height: 13px;
+  margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1116,25 +1153,36 @@ body {
 
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
-  width: 84px;
-  min-width: 84px;
-  max-width: 84px;
+  width: 86px;
+  min-width: 86px;
+  max-width: 86px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-sub-val,
 .workbench.layout-work-4 .module-hot_pools .pool-sub-val {
-  max-width: 84px;
+  max-width: 86px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-main-val,
 .workbench.layout-work-4 .module-hot_pools .pool-main-val {
   font-size: 12px;
+  line-height: 19px;
+  min-height: 19px;
+}
+
+.workbench.layout-4 .module-hot_pools .pool-main-amount,
+.workbench.layout-4 .module-hot_pools .pool-main-number,
+.workbench.layout-4 .module-hot_pools .pool-main-symbol,
+.workbench.layout-work-4 .module-hot_pools .pool-main-amount,
+.workbench.layout-work-4 .module-hot_pools .pool-main-number,
+.workbench.layout-work-4 .module-hot_pools .pool-main-symbol {
+  line-height: 19px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-buy-btn,
 .workbench.layout-work-4 .module-hot_pools .pool-buy-btn {
-  width: 52px;
-  min-width: 52px;
+  width: 58px;
+  min-width: 58px;
   height: 26px;
   padding: 0 6px;
 }
@@ -2304,13 +2352,13 @@ body {
 
 .workbench.layout-3 .module-hot_pools .pool-buy-btn,
 .workbench.layout-work-3 .module-hot_pools .pool-buy-btn {
-  width: 52px;
-  min-width: 52px;
+  width: 56px;
+  min-width: 56px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-row,
 .workbench.layout-work-4 .module-hot_pools .pool-row {
-  grid-template-columns: 36px minmax(0, 1fr) 84px;
+  grid-template-columns: 36px minmax(0, 1fr) 86px;
   grid-template-areas:
     "avatar info values"
     "meta meta action";
@@ -2320,9 +2368,9 @@ body {
 
 .workbench.layout-4 .module-hot_pools .pool-values,
 .workbench.layout-work-4 .module-hot_pools .pool-values {
-  width: 84px;
-  min-width: 84px;
-  max-width: 84px;
+  width: 86px;
+  min-width: 86px;
+  max-width: 86px;
 }
 
 .workbench.layout-4 .module-hot_pools .pool-buy-btn,
