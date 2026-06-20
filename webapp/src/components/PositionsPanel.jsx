@@ -57,6 +57,12 @@ function formatFeeTierPercent(feeTier, tickSpacing) {
   return formatFixedFeePercent(bps / 10000);
 }
 
+function followCloseLabel(position) {
+  if (position?.follow_close_enabled === true) return '目标撤仓跟随';
+  if (position?.follow_close_enabled === false) return '目标撤仓未开启';
+  return '目标撤仓未确认';
+}
+
 function buildPositionPairTitle(position, token0, token1) {
   const left = String(token0?.symbol || '').trim();
   const right = String(token1?.symbol || '').trim();
@@ -320,19 +326,27 @@ function PositionCard({
 
       {taskId > 0 && (
         <div className="pos-action-bar">
-          {TASK_MODE_OPTIONS.map((option) => (
-            <button
-              type="button"
-              key={`${taskId}-${option.value}`}
-              className={`pos-action-btn mode ${currentTaskMode === option.value ? 'active' : ''}`}
-              title={option.description}
-              onClick={() => onUpdateTaskMode(taskId, option.value)}
-              disabled={statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}
-              aria-pressed={currentTaskMode === option.value}
-            >
-              <span>{option.shortLabel}</span>
-            </button>
-          ))}
+          {isFollowPosition ? (
+            <div className="pos-follow-policy" title={p?.follow_strategy_summary || '目标撤仓跟随 / 下破保底撤出 / 上破继续跟随'}>
+              <span className={p?.follow_close_enabled === false ? 'muted' : ''}>{followCloseLabel(p)}</span>
+              <span className="danger">下破保底撤出</span>
+              <span>上破继续跟随</span>
+            </div>
+          ) : (
+            TASK_MODE_OPTIONS.map((option) => (
+              <button
+                type="button"
+                key={`${taskId}-${option.value}`}
+                className={`pos-action-btn mode ${currentTaskMode === option.value ? 'active' : ''}`}
+                title={option.description}
+                onClick={() => onUpdateTaskMode(taskId, option.value)}
+                disabled={statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}
+                aria-pressed={currentTaskMode === option.value}
+              >
+                <span>{option.shortLabel}</span>
+              </button>
+            ))
+          )}
           <button type="button" className="pos-action-btn withdraw" title="取回流动性"
             onClick={() => onWithdrawLiquidity(taskId)}
             disabled={!p?.has_liquidity || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>

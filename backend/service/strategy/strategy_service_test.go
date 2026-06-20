@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"TgLpBot/base/models"
+	"TgLpBot/service/pricing"
 	"testing"
 	"time"
 )
@@ -19,6 +20,71 @@ func TestShouldDelayOutOfRangeHandling(t *testing.T) {
 
 	if ShouldDelayOutOfRangeHandling(&models.StrategyTask{RangeActivationPending: false}) {
 		t.Fatal("activated task should not delay out-of-range handling")
+	}
+}
+
+func TestShouldExitFollowDownside(t *testing.T) {
+	t.Parallel()
+
+	if ShouldExitFollowDownside(nil, true) {
+		t.Fatal("nil task should not trigger follow downside guard")
+	}
+	if ShouldExitFollowDownside(&models.StrategyTask{IsFollow: false}, true) {
+		t.Fatal("non-follow task should not use follow downside guard")
+	}
+	if ShouldExitFollowDownside(&models.StrategyTask{IsFollow: true}, false) {
+		t.Fatal("follow task should not exit when not below range")
+	}
+	if !ShouldExitFollowDownside(&models.StrategyTask{IsFollow: true}, true) {
+		t.Fatal("follow task should exit when price is below range")
+	}
+}
+
+func TestFollowDownsideGuardUsesDisplayPriceDirection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		task        *models.StrategyTask
+		currentTick int
+		wantExit    bool
+	}{
+		{
+			name:        "quote token1 below range exits",
+			task:        &models.StrategyTask{IsFollow: true, Token0Symbol: "SIREN", Token1Symbol: "USDT"},
+			currentTick: -1,
+			wantExit:    true,
+		},
+		{
+			name:        "quote token1 above range continues",
+			task:        &models.StrategyTask{IsFollow: true, Token0Symbol: "SIREN", Token1Symbol: "USDT"},
+			currentTick: 11,
+			wantExit:    false,
+		},
+		{
+			name:        "quote token0 raw above range exits as display price below range",
+			task:        &models.StrategyTask{IsFollow: true, Token0Symbol: "WBNB", Token1Symbol: "JELLY"},
+			currentTick: 11,
+			wantExit:    true,
+		},
+		{
+			name:        "quote token0 raw below range continues as display price above range",
+			task:        &models.StrategyTask{IsFollow: true, Token0Symbol: "WBNB", Token1Symbol: "JELLY"},
+			currentTick: -1,
+			wantExit:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, _, isDown := pricing.PriceDirectionFromTicks(tt.task, 0, 10, tt.currentTick)
+			if got := ShouldExitFollowDownside(tt.task, isDown); got != tt.wantExit {
+				t.Fatalf("ShouldExitFollowDownside() = %v, want %v", got, tt.wantExit)
+			}
+		})
 	}
 }
 

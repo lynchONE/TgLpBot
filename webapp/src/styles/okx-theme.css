@@ -1333,6 +1333,25 @@ body {
   color: var(--positive);
 }
 
+.pos-follow-policy {
+  border-color: rgba(var(--info-rgb), 0.2);
+  background: rgba(var(--info-rgb), 0.08);
+  color: var(--info);
+}
+
+.pos-follow-policy span {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.pos-follow-policy .danger {
+  color: var(--negative);
+  background: rgba(var(--negative-rgb), 0.1);
+}
+
+.pos-follow-policy .muted {
+  color: var(--text-muted);
+}
+
 .pos-token-table,
 .pos-price-range,
 .pos-range-info,

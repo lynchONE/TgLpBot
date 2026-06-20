@@ -312,7 +312,19 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	// Out of Range Logic
 	// Use the same "now" for out-of-range duration calculations.
-	if task.IsFollow || ShouldDelayOutOfRangeHandling(task) {
+	_, _, isUp, isDown := pricing.PriceDirectionFromTicks(task, task.TickLower, task.TickUpper, currentTick)
+	if !isUp && !isDown {
+		return
+	}
+
+	if task.IsFollow {
+		if ShouldExitFollowDownside(task, isDown) {
+			s.executeOutOfRangeStop(task, now, "跟单仓位下破区间：保底撤出并停止任务")
+		}
+		return
+	}
+
+	if ShouldDelayOutOfRangeHandling(task) {
 		return
 	}
 
@@ -323,20 +335,7 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		task.OutOfRangeSince = &now
 	}
 
-	// Follow tasks are copy-trading positions: keep the tick range consistent with the target wallet.
-	// Do not auto-rebalance or stop-loss based on out-of-range.
-	if task.IsFollow {
-		return
-	}
-
 	duration := time.Since(*task.OutOfRangeSince)
-
-	// Determine direction (use stable price when possible).
-	_, _, isUp, isDown := pricing.PriceDirectionFromTicks(task, task.TickLower, task.TickUpper, currentTick)
-
-	if !isUp && !isDown {
-		return
-	}
 
 	action := ResolveOutOfRangeAction(task, isUp, isDown)
 	if action == OutOfRangeActionNone {
@@ -386,6 +385,10 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 func ShouldDelayOutOfRangeHandling(task *models.StrategyTask) bool {
 	return task != nil && task.RangeActivationPending
+}
+
+func ShouldExitFollowDownside(task *models.StrategyTask, isDown bool) bool {
+	return task != nil && task.IsFollow && isDown
 }
 
 func shouldMonitorPausedDCA(task *models.StrategyTask) bool {

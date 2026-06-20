@@ -237,6 +237,12 @@ function normalizeDisplayStrategyMode(position, taskPaused) {
     return '';
 }
 
+function followCloseLabel(position) {
+    if (position?.follow_close_enabled === true) return '目标撤仓跟随';
+    if (position?.follow_close_enabled === false) return '目标撤仓未开启';
+    return '目标撤仓未确认';
+}
+
 export default function PositionCard({
     position,
     walletAddress,
@@ -768,24 +774,32 @@ export default function PositionCard({
                                 <span>{actionPending === 'withdraw' ? '...' : '撤仓'}</span>
                             </button>
                         )}
-                        {typeof onUpdateTaskMode === 'function' && (
-                            <>
-                                {TASK_MODE_OPTIONS.filter((option) => option.value !== 'pause').map((option) => {
-                                    const active = currentStrategyMode === option.value;
-                                    return (
-                                        <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
-                                            title={option.description}
-                                            data-active={active ? 'true' : 'false'}
-                                            aria-pressed={active}
-                                            className={`mini-position-mode-action inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${active
-                                                ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
-                                                : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
-                                                }`}>
-                                            <span>{option.shortLabel}</span>
-                                        </button>
-                                    );
-                                })}
-                            </>
+                        {isFollowPosition ? (
+                            <div className="mini-position-follow-policy" title={position?.follow_strategy_summary || '目标撤仓跟随 / 下破保底撤出 / 上破继续跟随'}>
+                                <span className={position?.follow_close_enabled === false ? 'muted' : ''}>{followCloseLabel(position)}</span>
+                                <span className="danger">下破保底撤出</span>
+                                <span>上破继续跟随</span>
+                            </div>
+                        ) : (
+                            typeof onUpdateTaskMode === 'function' && (
+                                <>
+                                    {TASK_MODE_OPTIONS.filter((option) => option.value !== 'pause').map((option) => {
+                                        const active = currentStrategyMode === option.value;
+                                        return (
+                                            <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
+                                                title={option.description}
+                                                data-active={active ? 'true' : 'false'}
+                                                aria-pressed={active}
+                                                className={`mini-position-mode-action inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${active
+                                                    ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
+                                                    : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
+                                                    }`}>
+                                                <span>{option.shortLabel}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </>
+                            )
                         )}
                     </div>
                 )}

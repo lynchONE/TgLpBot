@@ -12,6 +12,7 @@ import (
 	"TgLpBot/service/strategy"
 	"TgLpBot/service/wallet"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -29,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 )
 
 type RealtimePositionsService struct {
@@ -92,6 +94,8 @@ type RealtimePosition struct {
 	WalletAddress         string             `json:"wallet_address,omitempty"`
 	TaskID                uint               `json:"task_id,omitempty"`
 	IsFollow              bool               `json:"is_follow,omitempty"`
+	FollowCloseEnabled    *bool              `json:"follow_close_enabled,omitempty"`
+	FollowStrategySummary string             `json:"follow_strategy_summary,omitempty"`
 	TaskPaused            bool               `json:"task_paused"`
 	TaskRebalanceEnabled  bool               `json:"task_rebalance_enabled"`
 	TaskMode              string             `json:"task_mode,omitempty"`
@@ -1049,6 +1053,8 @@ func (s *RealtimePositionsService) buildV3Position(
 	taskRebalanceEnabled := true
 	taskMode := ""
 	taskStrategyMode := ""
+	var followCloseEnabled *bool
+	followStrategySummary := ""
 	initialCostUSD := 0.0
 	netInvestedUSD := 0.0
 	currentValueUSD := 0.0
@@ -1065,6 +1071,8 @@ func (s *RealtimePositionsService) buildV3Position(
 		taskRebalanceEnabled = models.RebalanceEnabledForOutOfRangeMode(outOfRangeMode)
 		taskMode = models.EffectiveStrategyTaskMode(task)
 		taskStrategyMode = string(outOfRangeMode)
+		followCloseEnabled = followCloseEnabledForTask(task)
+		followStrategySummary = followStrategySummaryForTask(task, followCloseEnabled)
 		pnlMetrics = s.getTaskPnLViewMetrics(task)
 		taskSlippageTolerance = task.SlippageTolerance
 		initialCostUSD = pnlMetrics.initialCost
@@ -1114,6 +1122,8 @@ func (s *RealtimePositionsService) buildV3Position(
 		}(),
 		TaskID:                taskID,
 		IsFollow:              task != nil && task.IsFollow,
+		FollowCloseEnabled:    followCloseEnabled,
+		FollowStrategySummary: followStrategySummary,
 		TaskPaused:            taskPaused,
 		TaskRebalanceEnabled:  taskRebalanceEnabled,
 		TaskMode:              taskMode,
@@ -1173,6 +1183,42 @@ func getTaskActualInvested(task *models.StrategyTask) (float64, bool) {
 		return 0, false
 	}
 	return val, true
+}
+
+func followCloseEnabledForTask(task *models.StrategyTask) *bool {
+	if task == nil || !task.IsFollow || task.ID == 0 || database.DB == nil {
+		return nil
+	}
+
+	var cfg models.SmartMoneyFollowConfig
+	err := database.DB.
+		Joins("JOIN smart_money_follow_tasks AS ft ON ft.config_id = smart_money_follow_configs.id").
+		Where("ft.user_id = ? AND ft.task_id = ?", task.UserID, task.ID).
+		Order("ft.id DESC").
+		First(&cfg).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("[Realtime] load follow close config failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+		}
+		return nil
+	}
+	value := cfg.FollowClose
+	return &value
+}
+
+func followStrategySummaryForTask(task *models.StrategyTask, followCloseEnabled *bool) string {
+	if task == nil || !task.IsFollow {
+		return ""
+	}
+	closeText := "目标撤仓未确认"
+	if followCloseEnabled != nil {
+		if *followCloseEnabled {
+			closeText = "目标撤仓跟随"
+		} else {
+			closeText = "目标撤仓未开启"
+		}
+	}
+	return closeText + " / 下破保底撤出 / 上破继续跟随"
 }
 
 func displayTaskAmountUSDT(task *models.StrategyTask) float64 {
@@ -1490,6 +1536,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	currentValueUSD := pnlMetrics.currentValue
 	absolutePnLUSD := pnlMetrics.absolutePnL
 	hasPnL := pnlMetrics.hasPnL
+	followCloseEnabled := followCloseEnabledForTask(task)
 	return &RealtimePosition{
 		Chain:      chain,
 		Version:    "v4",
@@ -1507,6 +1554,8 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		}(),
 		TaskID:                task.ID,
 		IsFollow:              task.IsFollow,
+		FollowCloseEnabled:    followCloseEnabled,
+		FollowStrategySummary: followStrategySummaryForTask(task, followCloseEnabled),
 		TaskPaused:            task.Paused,
 		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:              models.EffectiveStrategyTaskMode(task),
@@ -1737,6 +1786,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	currentValueUSD := pnlMetrics.currentValue
 	absolutePnLUSD := pnlMetrics.absolutePnL
 	hasPnL := pnlMetrics.hasPnL
+	followCloseEnabled := followCloseEnabledForTask(task)
 
 	return &RealtimePosition{
 		Chain:      chain,
@@ -1755,6 +1805,8 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		}(),
 		TaskID:                task.ID,
 		IsFollow:              task.IsFollow,
+		FollowCloseEnabled:    followCloseEnabled,
+		FollowStrategySummary: followStrategySummaryForTask(task, followCloseEnabled),
 		TaskPaused:            task.Paused,
 		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:              models.EffectiveStrategyTaskMode(task),

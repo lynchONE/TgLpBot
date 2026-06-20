@@ -1229,6 +1229,40 @@ body::before {
     border-color: var(--okx-line-strong) !important;
 }
 
+.miniapp-shell .mini-position-follow-policy {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    min-height: 36px;
+    padding: 3px;
+    border: 1px solid rgba(var(--okx-info-rgb), 0.24);
+    border-radius: 6px;
+    background: rgba(var(--okx-info-rgb), 0.08);
+    color: var(--okx-info);
+    font-size: 10.5px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.miniapp-shell .mini-position-follow-policy span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 7px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.055);
+}
+
+.miniapp-shell .mini-position-follow-policy .danger {
+    background: rgba(var(--okx-negative-rgb), 0.1);
+    color: var(--okx-negative);
+}
+
+.miniapp-shell .mini-position-follow-policy .muted {
+    color: var(--okx-subtle);
+}
+
 .miniapp-shell .mini-position-exit-panel {
     border-color: var(--okx-line) !important;
     border-radius: 8px !important;
