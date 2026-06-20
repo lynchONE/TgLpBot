@@ -3618,6 +3618,30 @@ img.swap-token-glyph {
   flex-direction: column;
   gap: 6px;
 }
+.af-job-stream-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.af-job-stream {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.af-stream-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.af-stream-title span {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-subtle);
+}
 .af-job-card {
   display: flex;
   border-radius: 10px;
@@ -3700,6 +3724,12 @@ img.swap-token-glyph {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 920px) {
+  .af-job-stream-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Responsive 鈥?4 鍒楀竷灞€ / 绉诲姩绔?*/
@@ -4220,4 +4250,3 @@ img.swap-token-glyph {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-

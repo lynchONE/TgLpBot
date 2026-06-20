@@ -315,6 +315,96 @@ func allowNullableLegacyUintColumn(tableName, columnName string) error {
 	return nil
 }
 
+func allowNullableLegacyStringColumn(tableName, columnName string, size int) error {
+	if DB == nil {
+		return nil
+	}
+	if size <= 0 {
+		return fmt.Errorf("invalid legacy column size for %s.%s", tableName, columnName)
+	}
+	if err := DB.Exec(fmt.Sprintf(
+		"ALTER TABLE %s MODIFY COLUMN %s VARCHAR(%d) NULL DEFAULT NULL",
+		quoteTableName(tableName),
+		quoteColumnName(columnName),
+		size,
+	)).Error; err != nil {
+		return fmt.Errorf("make legacy %s.%s nullable: %w", tableName, columnName, err)
+	}
+	log.Printf("[DB] made legacy %s.%s nullable", tableName, columnName)
+	return nil
+}
+
+func allowNullableLegacyIntColumn(tableName, columnName string) error {
+	if DB == nil {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(
+		"ALTER TABLE %s MODIFY COLUMN %s BIGINT NULL DEFAULT NULL",
+		quoteTableName(tableName),
+		quoteColumnName(columnName),
+	)).Error; err != nil {
+		return fmt.Errorf("make legacy %s.%s nullable: %w", tableName, columnName, err)
+	}
+	log.Printf("[DB] made legacy %s.%s nullable", tableName, columnName)
+	return nil
+}
+
+func allowNullableLegacyDateTimeColumn(tableName, columnName string) error {
+	if DB == nil {
+		return nil
+	}
+	if err := DB.Exec(fmt.Sprintf(
+		"ALTER TABLE %s MODIFY COLUMN %s DATETIME(3) NULL DEFAULT NULL",
+		quoteTableName(tableName),
+		quoteColumnName(columnName),
+	)).Error; err != nil {
+		return fmt.Errorf("make legacy %s.%s nullable: %w", tableName, columnName, err)
+	}
+	log.Printf("[DB] made legacy %s.%s nullable", tableName, columnName)
+	return nil
+}
+
+func allowNullableLegacyFollowColumns(tableName string) error {
+	legacyStrings := map[string]int{
+		"pool_version": 20,
+		"pool_id":      66,
+	}
+	for column, size := range legacyStrings {
+		exists, err := tableColumnExists(tableName, column)
+		if err != nil {
+			return fmt.Errorf("inspect %s.%s before legacy nullable repair: %w", tableName, column, err)
+		}
+		if exists {
+			if err := allowNullableLegacyStringColumn(tableName, column, size); err != nil {
+				return err
+			}
+		}
+	}
+	for _, column := range []string{"tick_lower", "tick_upper"} {
+		exists, err := tableColumnExists(tableName, column)
+		if err != nil {
+			return fmt.Errorf("inspect %s.%s before legacy nullable repair: %w", tableName, column, err)
+		}
+		if exists {
+			if err := allowNullableLegacyIntColumn(tableName, column); err != nil {
+				return err
+			}
+		}
+	}
+	for _, column := range []string{"execute_at"} {
+		exists, err := tableColumnExists(tableName, column)
+		if err != nil {
+			return fmt.Errorf("inspect %s.%s before legacy nullable repair: %w", tableName, column, err)
+		}
+		if exists {
+			if err := allowNullableLegacyDateTimeColumn(tableName, column); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func ensureIndex(table, indexName, columns string) {
 	if DB == nil {
 		return
@@ -1060,6 +1150,9 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 	if err := repairSmartMoneyFollowJobUniqueKeys(tableName); err != nil {
 		return err
 	}
+	if err := allowNullableLegacyFollowColumns(tableName); err != nil {
+		return err
+	}
 
 	if err := DB.Exec(fmt.Sprintf(
 		"ALTER TABLE %s MODIFY COLUMN `scheduled_at` DATETIME(3) NOT NULL",
@@ -1334,6 +1427,9 @@ func repairSmartMoneyFollowTaskRowsBeforeMigrate() error {
 		WHERE execution_wallet_address IS NULL
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("finalize %s.execution_wallet_address: %w", tableName, err)
+	}
+	if err := allowNullableLegacyFollowColumns(tableName); err != nil {
+		return err
 	}
 	return nil
 }

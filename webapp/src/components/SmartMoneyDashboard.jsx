@@ -5095,8 +5095,10 @@ function autoFollowStatusInfo(status) {
     const s = String(status || '').toLowerCase();
     switch (s) {
         case 'success': return { label: '成功', cls: 'af-status-success', Icon: CheckCircle2 };
+        case 'created': return { label: '已建任务', cls: 'af-status-success', Icon: CheckCircle2 };
         case 'failed': return { label: '失败', cls: 'af-status-failed', Icon: XCircle };
         case 'running': return { label: '执行中', cls: 'af-status-running', Icon: Activity };
+        case 'matched': return { label: '已匹配', cls: 'af-status-running', Icon: Activity };
         case 'skipped': return { label: '跳过', cls: 'af-status-skipped', Icon: AlertCircle };
         case 'pending': return { label: '等待', cls: 'af-status-pending', Icon: Clock };
         default: return { label: s || '未知', cls: 'af-status-pending', Icon: Clock };
@@ -5115,7 +5117,24 @@ function formatJobTime(value) {
     return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function aggregateAutoFollowStats(configs, jobs) {
+function formatAutoFollowEventAmount(event) {
+    const total = Number(event?.total_usd);
+    if (Number.isFinite(total) && total > 0) return formatUsd(total);
+    return '—';
+}
+
+function formatAutoFollowEventRange(event) {
+    if (event?.tick_lower === null || event?.tick_lower === undefined || event?.tick_upper === null || event?.tick_upper === undefined) {
+        return '';
+    }
+    return `${event.tick_lower} - ${event.tick_upper}`;
+}
+
+function autoFollowEventActionLabel(eventType) {
+    return String(eventType || '').toLowerCase() === 'remove' ? '撤 LP' : '加 LP';
+}
+
+function aggregateAutoFollowStats(configs, jobs, flowCount = jobs.length) {
     const total = configs.length;
     const running = configs.reduce((acc, c) => acc + (c?.enabled ? 1 : 0), 0);
     const finished = jobs.filter((j) => ['success', 'failed', 'skipped'].includes(String(j.status || '').toLowerCase()));
@@ -5124,7 +5143,7 @@ function aggregateAutoFollowStats(configs, jobs) {
     const totalUsdt = jobs.reduce((acc, j) => acc + (Number(j.amount_usdt) || 0), 0);
     const openCount = jobs.filter((j) => j.action === 'open').length;
     const closeCount = jobs.filter((j) => j.action === 'close').length;
-    return { total, running, successRate, totalUsdt, openCount, closeCount, finished: finished.length, jobs: jobs.length };
+    return { total, running, successRate, totalUsdt, openCount, closeCount, finished: finished.length, jobs: flowCount };
 }
 
 function AutoFollowSummaryBar({ stats }) {
@@ -5498,12 +5517,59 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
     );
 }
 
-function AutoFollowJobCard({ job, executionWallets }) {
-    const info = autoFollowStatusInfo(job.status);
+function AutoFollowTargetEventCard({ event, job, attempt }) {
+    const followStatus = job?.status || attempt?.status || '';
+    const info = followStatus ? autoFollowStatusInfo(followStatus) : null;
+    const StatusIcon = info?.Icon;
+    const rangeText = formatAutoFollowEventRange(event);
+    return (
+        <div className="af-job-card">
+            <div className={`af-job-stripe ${String(event?.event_type || '').toLowerCase() === 'remove' ? 'af-status-failed' : 'af-status-success'}`} />
+            <div className="af-job-body">
+                <div className="af-job-row1">
+                    <span className={`af-job-action${String(event?.event_type || '').toLowerCase() === 'remove' ? ' close' : ' open'}`}>
+                        {autoFollowEventActionLabel(event?.event_type)}
+                    </span>
+                    {info ? (
+                        <span className={`af-job-status ${info.cls}`}>
+                            <StatusIcon size={12} />
+                            跟单{info.label}
+                        </span>
+                    ) : (
+                        <span className="af-job-status af-status-skipped">
+                            <AlertCircle size={12} />
+                            未生成跟单
+                        </span>
+                    )}
+                    <span className="af-job-amount">{formatAutoFollowEventAmount(event)}</span>
+                </div>
+                <div className="af-job-row2">
+                    <span className="af-job-addr">{shortAddr(event?.wallet_address)}</span>
+                    <span className="af-job-time">{getPairLabel(event)}</span>
+                    <span className="af-job-time">{formatJobTime(event?.tx_timestamp)}</span>
+                    <span className="af-job-id">事件 #{event?.id}</span>
+                </div>
+                {rangeText ? <div className="af-job-error">Tick {rangeText}</div> : null}
+                {!job && attempt?.message ? (
+                    <div className="af-job-error" title={attempt.message}>{attempt.message}</div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+function AutoFollowJobCard({ item, executionWallets, event }) {
+    const job = item.job;
+    const attempt = item.attempt;
+    const row = job || attempt;
+    const status = job?.status || attempt?.status || '';
+    const info = autoFollowStatusInfo(status);
     const StatusIcon = info.Icon;
-    const isOpen = job.action === 'open';
-    const amount = Number(job.amount_usdt) > 0 ? formatUsd(job.amount_usdt) : '—';
-    const triggerWallets = Array.isArray(job.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
+    const action = job?.action || attempt?.action;
+    const isOpen = action === 'open';
+    const amount = Number(job?.amount_usdt) > 0 ? formatUsd(job.amount_usdt) : '—';
+    const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
+    const message = job?.error_message || attempt?.message || '';
     return (
         <div className="af-job-card">
             <div className={`af-job-stripe ${info.cls}`} />
@@ -5516,18 +5582,22 @@ function AutoFollowJobCard({ job, executionWallets }) {
                     <span className={`af-job-action${isOpen ? ' open' : ' close'}`}>
                         {isOpen ? '开仓' : '撤仓'}
                     </span>
+                    {item.kind === 'attempt' ? <span className="af-job-status af-status-failed">未建任务</span> : null}
                     <span className="af-job-amount">{amount}</span>
                 </div>
                 <div className="af-job-row2">
-                    <span className="af-job-addr">
-                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || job.target_wallet_address)}
-                    </span>
-                    <span className="af-job-time">{formatAutoFollowExecutionWallet(job, executionWallets)}</span>
-                    <span className="af-job-time">{formatJobTime(job.scheduled_at)}</span>
-                    <span className="af-job-id">#{job.id}</span>
+                    <span className="af-job-time">{event ? getPairLabel(event) : `事件 #${row?.event_id || '—'}`}</span>
                 </div>
-                {job.error_message ? (
-                    <div className="af-job-error" title={job.error_message}>{job.error_message}</div>
+                <div className="af-job-row2">
+                    <span className="af-job-addr">
+                        {triggerWallets.length > 1 ? `${triggerWallets.length} 钱包触发` : shortAddr(triggerWallets[0] || row?.target_wallet_address)}
+                    </span>
+                    <span className="af-job-time">{formatAutoFollowExecutionWallet(row, executionWallets)}</span>
+                    <span className="af-job-time">{formatJobTime(job?.scheduled_at || attempt?.created_at)}</span>
+                    <span className="af-job-id">{job ? `任务 #${job.id}` : `尝试 #${attempt?.id}`}</span>
+                </div>
+                {message ? (
+                    <div className="af-job-error" title={message}>{message}</div>
                 ) : null}
             </div>
         </div>
@@ -5538,6 +5608,9 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
     const hasInitData = Boolean(String(initData || '').trim());
     const [configs, setConfigs] = useState([]);
     const [jobs, setJobs] = useState([]);
+    const [attempts, setAttempts] = useState([]);
+    const [targetEvents, setTargetEvents] = useState([]);
+    const [jobEvents, setJobEvents] = useState([]);
     const [executionWallets, setExecutionWallets] = useState([]);
     const [draft, dispatch] = useReducer(autoFollowDraftReducer, undefined, () => createAutoFollowDraft());
     const [activeTab, setActiveTab] = useState('configure');
@@ -5557,6 +5630,9 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         if (!hasInitData) {
             setConfigs([]);
             setJobs([]);
+            setAttempts([]);
+            setTargetEvents([]);
+            setJobEvents([]);
             setExecutionWallets([]);
             return;
         }
@@ -5568,6 +5644,9 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             setExecutionWallets(wallets);
             setConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
             setJobs(Array.isArray(resp?.jobs) ? resp.jobs : []);
+            setAttempts(Array.isArray(resp?.attempts) ? resp.attempts : []);
+            setTargetEvents(Array.isArray(resp?.target_events) ? resp.target_events : []);
+            setJobEvents(Array.isArray(resp?.job_events) ? resp.job_events : []);
             dispatch({ type: 'ensureExecutionWallet', payload: wallets });
         } catch (err) {
             if (err?.name === 'AbortError') return;
@@ -5592,7 +5671,51 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         };
     }, [active, load, refreshMs]);
 
-    const stats = useMemo(() => aggregateAutoFollowStats(configs, jobs), [configs, jobs]);
+    const autoFollowEventByID = useMemo(() => {
+        const map = new Map();
+        [...targetEvents, ...jobEvents].forEach((event) => {
+            const id = Number(event?.id) || 0;
+            if (id > 0) map.set(id, event);
+        });
+        return map;
+    }, [jobEvents, targetEvents]);
+    const autoFollowJobByEventID = useMemo(() => {
+        const map = new Map();
+        jobs.forEach((job) => {
+            const put = (value) => {
+                const id = Number(value) || 0;
+                if (id > 0 && !map.has(id)) map.set(id, job);
+            };
+            put(job?.event_id);
+            if (Array.isArray(job?.trigger_event_ids)) job.trigger_event_ids.forEach(put);
+        });
+        return map;
+    }, [jobs]);
+    const autoFollowAttemptByEventID = useMemo(() => {
+        const map = new Map();
+        attempts.forEach((attempt) => {
+            const id = Number(attempt?.event_id) || 0;
+            if (id > 0 && !map.has(id)) map.set(id, attempt);
+        });
+        return map;
+    }, [attempts]);
+    const autoFollowFlowItems = useMemo(() => {
+        const items = [];
+        const seenAttempts = new Set();
+        jobs.forEach((job) => {
+            const attempt = attempts.find((item) => Number(item?.job_id) === Number(job?.id));
+            if (attempt?.id) seenAttempts.add(Number(attempt.id));
+            items.push({ kind: 'job', job, attempt, time: job?.created_at || job?.scheduled_at });
+        });
+        attempts.forEach((attempt) => {
+            const id = Number(attempt?.id) || 0;
+            if (id > 0 && seenAttempts.has(id)) return;
+            items.push({ kind: 'attempt', attempt, time: attempt?.updated_at || attempt?.created_at });
+        });
+        return items.sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
+    }, [attempts, jobs]);
+
+    const stats = useMemo(() => aggregateAutoFollowStats(configs, jobs, autoFollowFlowItems.length), [autoFollowFlowItems.length, configs, jobs]);
 
     const handleReset = useCallback(() => {
         dispatch({ type: 'reset', wallets: executionWallets });
@@ -5718,7 +5841,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                 {[
                     { key: 'configure', label: Number(draft.id) > 0 ? '编辑任务' : '配置任务', Icon: Settings },
                     { key: 'configs', label: '我的跟单', Icon: Users, count: configs.length },
-                    { key: 'jobs', label: '最近任务', Icon: Activity, count: jobs.length },
+                    { key: 'jobs', label: '最近任务', Icon: Activity, count: autoFollowFlowItems.length },
                 ].map(({ key, label, Icon, count }) => (
                     <button
                         key={key}
@@ -5790,15 +5913,49 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                 <section className="af-section">
                     <header className="af-section-head">
                         <h3 className="af-section-title">最近任务</h3>
-                        <span className="af-section-hint">近 {jobs.length} 条</span>
+                        <span className="af-section-hint">事件 {targetEvents.length} · 跟单 {autoFollowFlowItems.length}</span>
                     </header>
-                    {jobs.length === 0 ? (
-                        <div className="af-empty">还没有执行记录，跟单生效后会在这里出现。</div>
+                    {targetEvents.length === 0 && autoFollowFlowItems.length === 0 ? (
+                        <div className="af-empty">还没有目标事件和执行记录，跟单生效后会在这里出现。</div>
                     ) : (
-                        <div className="af-job-list">
-                            {jobs.slice(0, 12).map((j) => (
-                                <AutoFollowJobCard key={j.id} job={j} executionWallets={executionWallets} />
-                            ))}
+                        <div className="af-job-stream-grid">
+                            <div className="af-job-stream">
+                                <div className="af-stream-title">被跟单钱包事件流 <span>{targetEvents.length}</span></div>
+                                {targetEvents.length === 0 ? (
+                                    <div className="af-empty">暂无目标钱包 LP 事件</div>
+                                ) : (
+                                    <div className="af-job-list">
+                                        {targetEvents.slice(0, 12).map((event) => (
+                                            <AutoFollowTargetEventCard
+                                                key={event.id}
+                                                event={event}
+                                                job={autoFollowJobByEventID.get(Number(event.id) || 0)}
+                                                attempt={autoFollowAttemptByEventID.get(Number(event.id) || 0)}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="af-job-stream">
+                                <div className="af-stream-title">我们的跟单事件流 <span>{autoFollowFlowItems.length}</span></div>
+                                {autoFollowFlowItems.length === 0 ? (
+                                    <div className="af-empty">暂无跟单任务</div>
+                                ) : (
+                                    <div className="af-job-list">
+                                        {autoFollowFlowItems.slice(0, 12).map((item) => {
+                                            const row = item.job || item.attempt;
+                                            return (
+                                                <AutoFollowJobCard
+                                                    key={`${item.kind}:${row?.id || row?.event_id}`}
+                                                    item={item}
+                                                    event={autoFollowEventByID.get(Number(row?.event_id) || 0)}
+                                                    executionWallets={executionWallets}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </section>
