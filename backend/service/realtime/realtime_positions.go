@@ -91,6 +91,7 @@ type RealtimePosition struct {
 	WalletID              uint               `json:"wallet_id,omitempty"`
 	WalletAddress         string             `json:"wallet_address,omitempty"`
 	TaskID                uint               `json:"task_id,omitempty"`
+	IsFollow              bool               `json:"is_follow,omitempty"`
 	TaskPaused            bool               `json:"task_paused"`
 	TaskRebalanceEnabled  bool               `json:"task_rebalance_enabled"`
 	TaskMode              string             `json:"task_mode,omitempty"`
@@ -1108,6 +1109,7 @@ func (s *RealtimePositionsService) buildV3Position(
 			return walletAddr.Hex()
 		}(),
 		TaskID:                taskID,
+		IsFollow:              task != nil && task.IsFollow,
 		TaskPaused:            taskPaused,
 		TaskRebalanceEnabled:  taskRebalanceEnabled,
 		TaskMode:              taskMode,
@@ -1499,6 +1501,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 			return walletAddr.Hex()
 		}(),
 		TaskID:                task.ID,
+		IsFollow:              task.IsFollow,
 		TaskPaused:            task.Paused,
 		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:              models.EffectiveStrategyTaskMode(task),
@@ -1745,6 +1748,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 			return walletAddr.Hex()
 		}(),
 		TaskID:                task.ID,
+		IsFollow:              task.IsFollow,
 		TaskPaused:            task.Paused,
 		TaskRebalanceEnabled:  models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
 		TaskMode:              models.EffectiveStrategyTaskMode(task),

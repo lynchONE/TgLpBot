@@ -2,12 +2,14 @@ package smart_money_follow
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	sm "TgLpBot/service/smart_money"
 	"TgLpBot/service/strategy"
+	"TgLpBot/service/trade"
 	"TgLpBot/service/txexec"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
@@ -16,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +33,7 @@ const maxFollowDelaySeconds = 24 * 60 * 60
 const defaultFollowTriggerWindowSeconds = 5 * 60
 const maxFollowTriggerWindowSeconds = 24 * 60 * 60
 const monitoredWalletSourceAutoFollow = "auto_follow"
+const maxFollowJobRetryCount = 6
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -134,6 +138,9 @@ func (s *Service) ScanAndExecute(ctx context.Context) error {
 		return err
 	}
 	if err := s.executeDueJobs(ctx); err != nil {
+		return err
+	}
+	if err := backfillFollowTaskRangePercentages(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -863,6 +870,14 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 	if !ok {
 		return nil
 	}
+	positionRef := targetPositionRefForFollowJob(cfg, event)
+	if action == models.SmartMoneyFollowJobActionOpen && strings.TrimSpace(positionRef) != "" {
+		resolvedAction, err := s.resolveOpenEventJobAction(ctx, cfg, event, positionRef)
+		if err != nil {
+			return err
+		}
+		action = resolvedAction
+	}
 	trigger, ok, err := s.resolveJobTrigger(ctx, cfg, event, action)
 	if err != nil {
 		return err
@@ -876,7 +891,7 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 	status := models.SmartMoneyFollowJobStatusPending
 	errorMessage := ""
 	amountUSDT := float64(0)
-	if action == models.SmartMoneyFollowJobActionOpen {
+	if isFollowAmountAction(action) {
 		amount, err := CalculateFollowAmount(cfg, event)
 		if err != nil {
 			status = models.SmartMoneyFollowJobStatusFailed
@@ -889,13 +904,12 @@ func (s *Service) createJobForConfig(ctx context.Context, cfg *models.SmartMoney
 		status = models.SmartMoneyFollowJobStatusSkipped
 		errorMessage = "follow close disabled"
 	}
-	positionRef := targetPositionRefForFollowJob(cfg, event)
 	if strings.TrimSpace(positionRef) == "" {
 		status = models.SmartMoneyFollowJobStatusFailed
 		errorMessage = "target position ref is missing"
 	}
 	if action == models.SmartMoneyFollowJobActionOpen && normalizeConfigTriggerMode(cfg.TriggerMode) == models.SmartMoneyFollowTriggerModeThreshold {
-		exists, err := thresholdOpenJobExists(ctx, cfg.ID, positionRef)
+		exists, err := thresholdOpenJobExists(ctx, cfg.ID, positionRef, trigger.PrimaryEventID)
 		if err != nil {
 			return err
 		}
@@ -1033,6 +1047,62 @@ func followActionForEvent(eventType string) (string, bool) {
 	}
 }
 
+func isFollowAmountAction(action string) bool {
+	switch strings.TrimSpace(action) {
+	case models.SmartMoneyFollowJobActionOpen, models.SmartMoneyFollowJobActionAddLiquidity:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) resolveOpenEventJobAction(ctx context.Context, cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent, positionRef string) (string, error) {
+	if cfg == nil || event == nil {
+		return "", fmt.Errorf("config or event is nil")
+	}
+	if strings.TrimSpace(positionRef) == "" {
+		return models.SmartMoneyFollowJobActionOpen, nil
+	}
+	existing, err := findExistingFollowJob(ctx, cfg.ID, event.ID, models.SmartMoneyFollowJobActionOpen)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil {
+		return followOpenEventAction(true, false, false), nil
+	}
+
+	var openTasks int64
+	if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowTask{}).
+		Where("config_id = ? AND target_position_ref = ? AND status = ?", cfg.ID, positionRef, models.SmartMoneyFollowTaskStatusOpen).
+		Count(&openTasks).Error; err != nil {
+		return "", fmt.Errorf("check open follow task failed: %w", err)
+	}
+	var openingJobs int64
+	if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowJob{}).
+		Where("config_id = ? AND target_position_ref = ? AND action = ? AND status IN ?",
+			cfg.ID,
+			positionRef,
+			models.SmartMoneyFollowJobActionOpen,
+			[]string{
+				models.SmartMoneyFollowJobStatusPending,
+				models.SmartMoneyFollowJobStatusRunning,
+			}).
+		Count(&openingJobs).Error; err != nil {
+		return "", fmt.Errorf("check pending open follow job failed: %w", err)
+	}
+	return followOpenEventAction(false, openTasks > 0, openingJobs > 0), nil
+}
+
+func followOpenEventAction(existingSameEventOpen bool, hasOpenTask bool, hasOpeningJob bool) string {
+	if existingSameEventOpen {
+		return models.SmartMoneyFollowJobActionOpen
+	}
+	if hasOpenTask || hasOpeningJob {
+		return models.SmartMoneyFollowJobActionAddLiquidity
+	}
+	return models.SmartMoneyFollowJobActionOpen
+}
+
 func targetPositionRefForFollowJob(cfg *models.SmartMoneyFollowConfig, event *models.SmartMoneyLPEvent) string {
 	if cfg == nil || event == nil {
 		return ""
@@ -1053,12 +1123,12 @@ func targetPositionRefForFollowJob(cfg *models.SmartMoneyFollowConfig, event *mo
 	))
 }
 
-func thresholdOpenJobExists(ctx context.Context, configID uint, positionRef string) (bool, error) {
+func thresholdOpenJobExists(ctx context.Context, configID uint, positionRef string, eventID uint) (bool, error) {
 	if configID == 0 || strings.TrimSpace(positionRef) == "" {
 		return false, nil
 	}
 	var count int64
-	if err := database.DB.WithContext(ctx).
+	query := database.DB.WithContext(ctx).
 		Model(&models.SmartMoneyFollowJob{}).
 		Where("config_id = ? AND action = ? AND target_position_ref = ? AND status IN ?",
 			configID,
@@ -1068,8 +1138,11 @@ func thresholdOpenJobExists(ctx context.Context, configID uint, positionRef stri
 				models.SmartMoneyFollowJobStatusPending,
 				models.SmartMoneyFollowJobStatusRunning,
 				models.SmartMoneyFollowJobStatusSuccess,
-			}).
-		Count(&count).Error; err != nil {
+			})
+	if eventID > 0 {
+		query = query.Where("event_id <> ?", eventID)
+	}
+	if err := query.Count(&count).Error; err != nil {
 		return false, fmt.Errorf("check threshold open job exists failed: %w", err)
 	}
 	if count > 0 {
@@ -1214,6 +1287,8 @@ func (s *Service) executeJob(ctx context.Context, job *models.SmartMoneyFollowJo
 	switch job.Action {
 	case models.SmartMoneyFollowJobActionOpen:
 		taskID, err = s.executeOpenJob(ctx, job)
+	case models.SmartMoneyFollowJobActionAddLiquidity:
+		taskID, err = s.executeAddLiquidityJob(ctx, job)
 	case models.SmartMoneyFollowJobActionClose:
 		taskID, err = s.executeCloseJob(ctx, job)
 	default:
@@ -1222,6 +1297,9 @@ func (s *Service) executeJob(ctx context.Context, job *models.SmartMoneyFollowJo
 	if err != nil {
 		if errors.Is(err, errFollowJobRetry) {
 			return rescheduleJob(ctx, job.ID, 10*time.Second, err.Error())
+		}
+		if isRetryableFollowSlippageError(err) && job.RetryCount < maxFollowJobRetryCount {
+			return rescheduleJobRetry(ctx, job.ID, job.RetryCount+1, followRetryDelay(job.RetryCount+1), err.Error())
 		}
 		if errors.Is(err, errFollowJobSkipped) {
 			return markJobFinished(ctx, job.ID, models.SmartMoneyFollowJobStatusSkipped, taskID, err.Error())
@@ -1257,6 +1335,18 @@ func rescheduleJob(ctx context.Context, jobID uint, delay time.Duration, message
 		}).Error
 }
 
+func rescheduleJobRetry(ctx context.Context, jobID uint, retryCount int, delay time.Duration, message string) error {
+	nextAt := time.Now().Add(delay)
+	return database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowJob{}).
+		Where("id = ?", jobID).
+		Updates(map[string]any{
+			"status":        models.SmartMoneyFollowJobStatusPending,
+			"scheduled_at":  nextAt,
+			"retry_count":   retryCount,
+			"error_message": fmt.Sprintf("retry %d/%d: %s", retryCount, maxFollowJobRetryCount, message),
+		}).Error
+}
+
 func (s *Service) executeOpenJob(ctx context.Context, job *models.SmartMoneyFollowJob) (*uint, error) {
 	cfg, event, err := loadJobConfigAndEvent(ctx, job)
 	if err != nil {
@@ -1268,29 +1358,55 @@ func (s *Service) executeOpenJob(ctx context.Context, job *models.SmartMoneyFoll
 	if job.AmountUSDT <= 0 {
 		return nil, fmt.Errorf("follow amount must be greater than 0")
 	}
+	mapping, err := findOpenFollowTaskMapping(ctx, cfg.ID, job.TargetPositionRef)
+	if err != nil {
+		return nil, err
+	}
+	if mapping != nil {
+		taskID := mapping.TaskID
+		return &taskID, nil
+	}
+
 	task, err := buildFollowTask(ctx, cfg, event, job.AmountUSDT)
 	if err != nil {
 		return nil, err
 	}
-	taskID, err := runOpenTaskSync(ctx, cfg, job, task)
+	taskID, err := runOpenTaskSync(ctx, cfg, job, task, followJobTxOptions(job, task.SlippageTolerance))
 	if err != nil {
 		return taskID, err
 	}
 	return taskID, nil
 }
 
-func runOpenTaskSync(ctx context.Context, cfg *models.SmartMoneyFollowConfig, job *models.SmartMoneyFollowJob, task *models.StrategyTask) (*uint, error) {
+func runOpenTaskSync(ctx context.Context, cfg *models.SmartMoneyFollowConfig, job *models.SmartMoneyFollowJob, task *models.StrategyTask, opts liquidity.TxOptions) (*uint, error) {
 	if cfg == nil || job == nil || task == nil {
 		return nil, fmt.Errorf("config, job or task is nil")
 	}
 	var taskID uint
 	err := runTaskSync(cfg.UserID, task, func() error {
-		if err := strategy.CreateTaskRecord(task); err != nil {
-			return fmt.Errorf("create strategy task failed: %w", err)
+		if job.TaskID != nil && *job.TaskID > 0 {
+			taskID = *job.TaskID
+			existing, err := strategy.NewStrategyTaskService().GetByID(cfg.UserID, taskID)
+			if err != nil {
+				return err
+			}
+			if !existing.IsFollow {
+				return fmt.Errorf("task is not a follow task")
+			}
+			task = existing
+		} else {
+			if err := strategy.CreateTaskRecord(task); err != nil {
+				return fmt.Errorf("create strategy task failed: %w", err)
+			}
+			taskID = task.ID
+			if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowJob{}).
+				Where("id = ? AND task_id IS NULL", job.ID).
+				Update("task_id", taskID).Error; err != nil {
+				return fmt.Errorf("bind follow job task failed: %w", err)
+			}
 		}
-		taskID = task.ID
 
-		enterRes, err := liquidity.NewLiquidityService().EnterTaskFromUSDT(cfg.UserID, task)
+		enterRes, err := liquidity.NewLiquidityService().EnterTaskFromUSDTWithOptions(cfg.UserID, task, opts)
 		if err != nil {
 			_ = database.DB.WithContext(ctx).Model(task).Updates(map[string]any{
 				"status":        models.StrategyStatusError,
@@ -1327,6 +1443,61 @@ func runOpenTaskSync(ctx context.Context, cfg *models.SmartMoneyFollowConfig, jo
 		return &taskID, err
 	}
 	return nil, err
+}
+
+func (s *Service) executeAddLiquidityJob(ctx context.Context, job *models.SmartMoneyFollowJob) (*uint, error) {
+	cfg, _, err := loadJobConfigAndEvent(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled {
+		return nil, fmt.Errorf("%w: follow config disabled", errFollowJobSkipped)
+	}
+	if job.AmountUSDT <= 0 {
+		return nil, fmt.Errorf("follow add liquidity amount must be greater than 0")
+	}
+
+	mapping, err := findOpenFollowTaskMapping(ctx, cfg.ID, job.TargetPositionRef)
+	if err != nil {
+		return nil, err
+	}
+	if mapping == nil {
+		opening, err := openFollowJobInProgress(ctx, cfg.ID, job.TargetPositionRef)
+		if err != nil {
+			return nil, err
+		}
+		if opening {
+			return nil, fmt.Errorf("%w: open follow task is not ready", errFollowJobRetry)
+		}
+		return nil, fmt.Errorf("%w: open follow task not found", errFollowJobSkipped)
+	}
+	taskID := mapping.TaskID
+
+	task, err := strategy.NewStrategyTaskService().GetByID(cfg.UserID, taskID)
+	if err != nil {
+		return &taskID, err
+	}
+	if !task.IsFollow {
+		return &taskID, fmt.Errorf("task is not a follow task")
+	}
+	if task.Status == models.StrategyStatusStopped {
+		return &taskID, fmt.Errorf("%w: follow task already stopped", errFollowJobSkipped)
+	}
+	if !taskHasPositionToken(task) {
+		return &taskID, fmt.Errorf("%w: follow task has no on-chain position yet", errFollowJobRetry)
+	}
+
+	runErr := runTaskSync(cfg.UserID, task, func() error {
+		res, err := liquidity.NewLiquidityService().IncreaseLiquidityForTaskWithOptions(cfg.UserID, task, job.AmountUSDT, followJobTxOptions(job, task.SlippageTolerance))
+		if err != nil {
+			return err
+		}
+		return applyIncreaseLiquidityResult(ctx, task, job.AmountUSDT, res)
+	})
+	if runErr != nil {
+		return &taskID, runErr
+	}
+	return &taskID, nil
 }
 
 func (s *Service) executeCloseJob(ctx context.Context, job *models.SmartMoneyFollowJob) (*uint, error) {
@@ -1425,6 +1596,137 @@ func closeFollowMapping(ctx context.Context, mapping *models.SmartMoneyFollowTas
 	}).Error
 }
 
+func findOpenFollowTaskMapping(ctx context.Context, configID uint, positionRef string) (*models.SmartMoneyFollowTask, error) {
+	if configID == 0 || strings.TrimSpace(positionRef) == "" {
+		return nil, nil
+	}
+	var mapping models.SmartMoneyFollowTask
+	if err := database.DB.WithContext(ctx).
+		Where("config_id = ? AND target_position_ref = ? AND status = ?", configID, positionRef, models.SmartMoneyFollowTaskStatusOpen).
+		Order("id DESC").
+		First(&mapping).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &mapping, nil
+}
+
+func openFollowJobInProgress(ctx context.Context, configID uint, positionRef string) (bool, error) {
+	if configID == 0 || strings.TrimSpace(positionRef) == "" {
+		return false, nil
+	}
+	var count int64
+	if err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyFollowJob{}).
+		Where("config_id = ? AND target_position_ref = ? AND action = ? AND status IN ?",
+			configID,
+			positionRef,
+			models.SmartMoneyFollowJobActionOpen,
+			[]string{
+				models.SmartMoneyFollowJobStatusPending,
+				models.SmartMoneyFollowJobStatusRunning,
+			}).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func taskHasPositionToken(task *models.StrategyTask) bool {
+	if task == nil {
+		return false
+	}
+	if strings.TrimSpace(task.V3TokenID) != "" && strings.TrimSpace(task.V3TokenID) != "0" {
+		return true
+	}
+	return strings.TrimSpace(task.V4TokenID) != "" && strings.TrimSpace(task.V4TokenID) != "0"
+}
+
+func followJobTxOptions(job *models.SmartMoneyFollowJob, baseSlippage float64) liquidity.TxOptions {
+	opts := liquidity.TxOptions{}
+	if job == nil || job.RetryCount <= 0 {
+		return opts
+	}
+	slippage := followRetrySlippagePercent(baseSlippage, job.RetryCount)
+	opts.SlippageToleranceOverride = &slippage
+	opts.EntrySwapSlippageOverride = &slippage
+	opts.GasMultiplier = followRetryGasMultiplier(job.RetryCount)
+	return opts
+}
+
+func followRetryDelay(attempt int) time.Duration {
+	if attempt <= 1 {
+		return 500 * time.Millisecond
+	}
+	delays := []time.Duration{
+		500 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		3 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+	}
+	idx := attempt - 1
+	if idx >= len(delays) {
+		return delays[len(delays)-1]
+	}
+	return delays[idx]
+}
+
+func followRetrySlippagePercent(base float64, attempt int) float64 {
+	if base <= 0 {
+		base = 0.5
+	}
+	if attempt <= 0 {
+		return base
+	}
+	widened := base * math.Pow(2, float64(attempt))
+	if widened > 10 {
+		return 10
+	}
+	return widened
+}
+
+func followRetryGasMultiplier(attempt int) float64 {
+	if attempt <= 0 {
+		return 1
+	}
+	multiplier := 1.0 + 0.25*float64(attempt)
+	if multiplier > 3 {
+		return 3
+	}
+	return multiplier
+}
+
+func isRetryableFollowSlippageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"slippage",
+		"price move",
+		"price moved",
+		"too little received",
+		"insufficient_output_amount",
+		"minimum amount",
+		"maximum amount exceeded",
+		"maximumamountexceeded",
+		"0x31e30ad0",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func loadJobConfigAndEvent(ctx context.Context, job *models.SmartMoneyFollowJob) (*models.SmartMoneyFollowConfig, *models.SmartMoneyLPEvent, error) {
 	var cfg models.SmartMoneyFollowConfig
 	if err := database.DB.WithContext(ctx).
@@ -1501,7 +1803,7 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 	}
 	hooksAddr := normalizeHookAddress(poolInfo.HooksAddress)
 
-	return &models.StrategyTask{
+	task := &models.StrategyTask{
 		UserID:                 cfg.UserID,
 		Chain:                  cfg.Chain,
 		PoolId:                 poolID,
@@ -1530,7 +1832,69 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		RangeActivationPending: false,
 		Status:                 models.StrategyStatusRunning,
 		LastCheckTime:          time.Now(),
-	}, nil
+	}
+	if err := fillFollowTaskRangePercentages(task); err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
+func fillFollowTaskRangePercentages(task *models.StrategyTask) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	rangePct, err := followRangePercentFromTicks(task.TickLower, task.TickUpper)
+	if err != nil {
+		return err
+	}
+	task.RangeLowerPercentage = rangePct
+	task.RangeUpperPercentage = rangePct
+	task.RangePercentage = rangePct
+	return nil
+}
+
+func followRangePercentFromTicks(tickLower int, tickUpper int) (float64, error) {
+	if tickUpper <= tickLower {
+		return 0, fmt.Errorf("invalid tick range")
+	}
+	lowerPrice := math.Pow(1.0001, float64(tickLower))
+	upperPrice := math.Pow(1.0001, float64(tickUpper))
+	if lowerPrice <= 0 || upperPrice <= 0 || math.IsNaN(lowerPrice) || math.IsNaN(upperPrice) || math.IsInf(lowerPrice, 0) || math.IsInf(upperPrice, 0) {
+		return 0, fmt.Errorf("invalid tick price range")
+	}
+	rangePct := ((upperPrice - lowerPrice) / (upperPrice + lowerPrice)) * 100.0
+	if rangePct <= 0 {
+		return 0, fmt.Errorf("invalid range width")
+	}
+	return rangePct, nil
+}
+
+func backfillFollowTaskRangePercentages(ctx context.Context) error {
+	var tasks []models.StrategyTask
+	if err := database.DB.WithContext(ctx).
+		Where("is_follow = ? AND tick_lower < tick_upper", true).
+		Where("range_percentage <= 0 OR range_lower_percentage <= 0 OR range_upper_percentage <= 0").
+		Order("id DESC").
+		Limit(100).
+		Find(&tasks).Error; err != nil {
+		return fmt.Errorf("list follow tasks missing range width failed: %w", err)
+	}
+	for i := range tasks {
+		task := tasks[i]
+		if err := fillFollowTaskRangePercentages(&task); err != nil {
+			return fmt.Errorf("calculate follow task range width failed: task_id=%d err=%w", task.ID, err)
+		}
+		if err := database.DB.WithContext(ctx).Model(&models.StrategyTask{}).
+			Where("id = ?", task.ID).
+			Updates(map[string]any{
+				"range_percentage":       task.RangePercentage,
+				"range_lower_percentage": task.RangeLowerPercentage,
+				"range_upper_percentage": task.RangeUpperPercentage,
+			}).Error; err != nil {
+			return fmt.Errorf("backfill follow task range width failed: task_id=%d err=%w", task.ID, err)
+		}
+	}
+	return nil
 }
 
 func applyEnterResult(ctx context.Context, task *models.StrategyTask, enterRes *liquidity.EnterResult) error {
@@ -1551,6 +1915,55 @@ func applyEnterResult(ctx context.Context, task *models.StrategyTask, enterRes *
 		updates["v4_token_id"] = enterRes.V4TokenID
 	}
 	return database.DB.WithContext(ctx).Model(task).Updates(updates).Error
+}
+
+func applyIncreaseLiquidityResult(ctx context.Context, task *models.StrategyTask, requestedAmountUSDT float64, res *liquidity.IncreaseLiquidityResult) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	spent := requestedAmountUSDT
+	if res != nil && res.ActualStableSpent > 0 {
+		spent = res.ActualStableSpent
+	}
+
+	updates := map[string]any{
+		"amount_usdt":     task.AmountUSDT + spent,
+		"error_message":   "",
+		"status":          models.StrategyStatusRunning,
+		"last_check_time": time.Now(),
+	}
+	if res != nil && strings.TrimSpace(res.CurrentLiquidity) != "" {
+		updates["current_liquidity"] = res.CurrentLiquidity
+	}
+	if res != nil && res.TickLower != nil && res.TickUpper != nil && *res.TickLower < *res.TickUpper {
+		updates["tick_lower"] = *res.TickLower
+		updates["tick_upper"] = *res.TickUpper
+	}
+	if err := database.DB.WithContext(ctx).Model(task).Updates(updates).Error; err != nil {
+		return fmt.Errorf("update follow add liquidity task failed: %w", err)
+	}
+
+	var deltaWei *big.Int
+	if res != nil && res.ActualStableSpentWei != nil && res.ActualStableSpentWei.Sign() > 0 {
+		deltaWei = res.ActualStableSpentWei
+	} else if conv, convErr := convert.FloatUSDTToWei(spent); convErr == nil && conv != nil && conv.Sign() > 0 {
+		deltaWei = conv
+	}
+
+	extraDust := []models.TradeRecordDustAsset(nil)
+	var gasSpent *big.Int
+	var dust0 *big.Int
+	var dust1 *big.Int
+	if res != nil {
+		extraDust = res.ExtraDust
+		gasSpent = res.GasSpentWei
+		dust0 = res.Dust0Wei
+		dust1 = res.Dust1Wei
+	}
+	if tradeErr := trade.NewTradeRecordService().ApplyAddLiquidityDelta(task, deltaWei, gasSpent, dust0, dust1, extraDust...); tradeErr != nil {
+		log.Printf("[SmartMoneyFollow] add liquidity trade record update failed: task_id=%d err=%v", task.ID, tradeErr)
+	}
+	return nil
 }
 
 func poolVersionFromProtocol(protocol string) string {

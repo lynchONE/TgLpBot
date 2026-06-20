@@ -182,6 +182,7 @@ function PositionCard({
 }) {
   const p = position;
   const taskId = Number(p?.task_id || 0);
+  const isFollowPosition = Boolean(p?.is_follow);
   const statusLabel = String(p?.status_label || '运行中');
   const pnl = Number(p?.absolute_pnl_usd || 0);
   const hasPnl = Boolean(p?.has_pnl) || Number.isFinite(pnl) && pnl !== 0;
@@ -256,6 +257,7 @@ function PositionCard({
               </span>
             ) : null}
             <span className="pos-pair-name">{pairTitle || shortAddress(p?.pool_id || '')}</span>
+            {isFollowPosition ? <span className="badge pos-follow-badge">自动跟单</span> : null}
             {feeLabel ? <span className="badge badge-fee">{feeLabel}</span> : null}
           </div>
           <div className="pos-status-row">

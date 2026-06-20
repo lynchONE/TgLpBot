@@ -3,6 +3,7 @@ package smart_money_follow
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"errors"
 	"testing"
 	"time"
 )
@@ -190,5 +191,57 @@ func TestFollowJobEventIDsIncludesTriggerEvents(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("event ids = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestFollowOpenEventAction(t *testing.T) {
+	tests := []struct {
+		name                  string
+		existingSameEventOpen bool
+		hasOpenTask           bool
+		hasOpeningJob         bool
+		want                  string
+	}{
+		{name: "same event existing open remains open", existingSameEventOpen: true, hasOpenTask: true, want: models.SmartMoneyFollowJobActionOpen},
+		{name: "existing mapping becomes add liquidity", hasOpenTask: true, want: models.SmartMoneyFollowJobActionAddLiquidity},
+		{name: "pending open becomes add liquidity", hasOpeningJob: true, want: models.SmartMoneyFollowJobActionAddLiquidity},
+		{name: "first event opens", want: models.SmartMoneyFollowJobActionOpen},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := followOpenEventAction(tt.existingSameEventOpen, tt.hasOpenTask, tt.hasOpeningJob)
+			if got != tt.want {
+				t.Fatalf("action = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryableFollowSlippageError(t *testing.T) {
+	if !isRetryableFollowSlippageError(errors.New("swap failed: slippage exceeded")) {
+		t.Fatal("expected slippage error to be retryable")
+	}
+	if isRetryableFollowSlippageError(errors.New("insufficient USDT balance")) {
+		t.Fatal("expected balance error to be non-retryable")
+	}
+}
+
+func TestFollowRetrySlippagePercent(t *testing.T) {
+	if got := followRetrySlippagePercent(0, 0); got != 0.5 {
+		t.Fatalf("attempt 0 slippage = %v, want 0.5", got)
+	}
+	if got := followRetrySlippagePercent(2, 1); got != 4 {
+		t.Fatalf("base 2 attempt 1 slippage = %v, want 4", got)
+	}
+	prev := followRetrySlippagePercent(0.5, 0)
+	for attempt := 1; attempt <= maxFollowJobRetryCount+3; attempt++ {
+		got := followRetrySlippagePercent(0.5, attempt)
+		if got < prev {
+			t.Fatalf("slippage decreased at attempt %d: %v < %v", attempt, got, prev)
+		}
+		if got > 10 {
+			t.Fatalf("slippage exceeded cap at attempt %d: %v", attempt, got)
+		}
+		prev = got
 	}
 }

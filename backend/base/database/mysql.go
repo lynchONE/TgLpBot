@@ -125,6 +125,9 @@ func autoMigrate() error {
 	); err != nil {
 		return err
 	}
+	if err := ensureColumnExists((&models.SmartMoneyFollowJob{}).TableName(), "retry_count", "INT NOT NULL DEFAULT 0 AFTER task_id"); err != nil {
+		return err
+	}
 
 	if err := migrateSmartMoneyGoldenDogAlertStateTable(); err != nil {
 		return err
@@ -1013,6 +1016,7 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 		SET action = CASE LOWER(TRIM(action))
 			WHEN 'add' THEN '%s'
 			WHEN 'open' THEN '%s'
+			WHEN 'add_liquidity' THEN '%s'
 			WHEN 'remove' THEN '%s'
 			WHEN 'close' THEN '%s'
 			ELSE '%s'
@@ -1020,6 +1024,7 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 	`, quoteTableName(tableName),
 		models.SmartMoneyFollowJobActionOpen,
 		models.SmartMoneyFollowJobActionOpen,
+		models.SmartMoneyFollowJobActionAddLiquidity,
 		models.SmartMoneyFollowJobActionClose,
 		models.SmartMoneyFollowJobActionClose,
 		models.SmartMoneyFollowJobActionOpen,
@@ -1060,6 +1065,15 @@ func repairSmartMoneyFollowJobRowsBeforeMigrate() error {
 		WHERE amount_usdt IS NULL
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("backfill %s.amount_usdt: %w", tableName, err)
+	}
+	if DB.Migrator().HasColumn(&models.SmartMoneyFollowJob{}, "retry_count") {
+		if err := DB.Exec(fmt.Sprintf(`
+			UPDATE %s
+			SET retry_count = 0
+			WHERE retry_count IS NULL
+		`, quoteTableName(tableName))).Error; err != nil {
+			return fmt.Errorf("backfill %s.retry_count: %w", tableName, err)
+		}
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s

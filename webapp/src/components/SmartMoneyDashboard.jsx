@@ -5123,15 +5123,33 @@ function formatAutoFollowEventAmount(event) {
     return '—';
 }
 
-function formatAutoFollowEventRange(event) {
+function formatAutoFollowEventRangeWidth(event) {
     if (event?.tick_lower === null || event?.tick_lower === undefined || event?.tick_upper === null || event?.tick_upper === undefined) {
         return '';
     }
-    return `${event.tick_lower} - ${event.tick_upper}`;
+    const lower = Number(event.tick_lower);
+    const upper = Number(event.tick_upper);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper) || upper <= lower) return '';
+    const lowerPrice = Math.pow(1.0001, lower);
+    const upperPrice = Math.pow(1.0001, upper);
+    if (!Number.isFinite(lowerPrice) || !Number.isFinite(upperPrice) || lowerPrice <= 0 || upperPrice <= 0) return '';
+    const pct = ((upperPrice - lowerPrice) / (upperPrice + lowerPrice)) * 100;
+    return formatRangePercent(pct);
 }
 
 function autoFollowEventActionLabel(eventType) {
     return String(eventType || '').toLowerCase() === 'remove' ? '撤 LP' : '加 LP';
+}
+
+function autoFollowJobActionLabel(action) {
+    switch (String(action || '').toLowerCase()) {
+        case 'close':
+            return '撤仓';
+        case 'add_liquidity':
+            return '加仓';
+        default:
+            return '开仓';
+    }
 }
 
 function aggregateAutoFollowStats(configs, jobs, flowCount = jobs.length) {
@@ -5142,8 +5160,9 @@ function aggregateAutoFollowStats(configs, jobs, flowCount = jobs.length) {
     const successRate = finished.length > 0 ? Math.round((succeeded.length / finished.length) * 100) : 0;
     const totalUsdt = jobs.reduce((acc, j) => acc + (Number(j.amount_usdt) || 0), 0);
     const openCount = jobs.filter((j) => j.action === 'open').length;
+    const addCount = jobs.filter((j) => j.action === 'add_liquidity').length;
     const closeCount = jobs.filter((j) => j.action === 'close').length;
-    return { total, running, successRate, totalUsdt, openCount, closeCount, finished: finished.length, jobs: flowCount };
+    return { total, running, successRate, totalUsdt, openCount, addCount, closeCount, finished: finished.length, jobs: flowCount };
 }
 
 function AutoFollowSummaryBar({ stats }) {
@@ -5170,6 +5189,7 @@ function AutoFollowSummaryBar({ stats }) {
                 <div className="af-summary-label">动作分布</div>
                 <div className="af-summary-value af-summary-value--mini">
                     <span className="af-pill af-pill--open">开 {stats.openCount}</span>
+                    <span className="af-pill af-pill--open">加 {stats.addCount}</span>
                     <span className="af-pill af-pill--close">撤 {stats.closeCount}</span>
                 </div>
                 <div className="af-summary-sub">近 30 笔</div>
@@ -5528,7 +5548,7 @@ function AutoFollowTimelineCard({ item, executionWallets }) {
     const action = job?.action || attempt?.action || (String(event?.event_type || '').toLowerCase() === 'remove' ? 'close' : 'open');
     const isClose = action === 'close';
     const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
-    const rangeText = event ? formatAutoFollowEventRange(event) : '';
+    const rangeText = event ? formatAutoFollowEventRangeWidth(event) : '';
     const message = job?.error_message || (!job ? attempt?.message : '') || '';
     const amount = Number(job?.amount_usdt) > 0 ? formatUsd(job.amount_usdt) : formatAutoFollowEventAmount(event);
     const time = event?.tx_timestamp || job?.scheduled_at || attempt?.updated_at || attempt?.created_at;
@@ -5539,11 +5559,11 @@ function AutoFollowTimelineCard({ item, executionWallets }) {
                 <div className="af-job-row1">
                     {event ? (
                         <span className={`af-job-action${String(event?.event_type || '').toLowerCase() === 'remove' ? ' close' : ' open'}`}>
-                            {autoFollowEventActionLabel(event?.event_type)}
+                            {job || attempt ? autoFollowJobActionLabel(action) : autoFollowEventActionLabel(event?.event_type)}
                         </span>
                     ) : (
                         <span className={`af-job-action${isClose ? ' close' : ' open'}`}>
-                            {isClose ? '撤仓' : '开仓'}
+                            {autoFollowJobActionLabel(action)}
                         </span>
                     )}
                     {info ? (
@@ -5567,7 +5587,7 @@ function AutoFollowTimelineCard({ item, executionWallets }) {
                         {shortAddr(event?.wallet_address || triggerWallets[0] || row?.target_wallet_address)}
                     </span>
                     <span className="af-job-time">{formatJobTime(time)}</span>
-                    {rangeText ? <span className="af-job-time">Tick {rangeText}</span> : null}
+                    {rangeText ? <span className="af-job-time">区间宽度 {rangeText}</span> : null}
                     {row ? <span className="af-job-time">{formatAutoFollowExecutionWallet(row, executionWallets)}</span> : null}
                     <span className="af-job-id">{job ? `任务 #${job.id}` : attempt ? `尝试 #${attempt.id}` : `事件 #${event?.id || '—'}`}</span>
                 </div>

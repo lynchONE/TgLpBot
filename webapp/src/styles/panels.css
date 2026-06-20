@@ -2727,6 +2727,11 @@
   font-weight: 700;
   color: var(--text);
 }
+.pos-follow-badge {
+  color: #67e8f9;
+  background: rgba(34, 211, 238, 0.11);
+  border-color: rgba(34, 211, 238, 0.24);
+}
 .pos-status-row {
   margin-top: 4px;
   display: flex;

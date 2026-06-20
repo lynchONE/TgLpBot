@@ -1207,6 +1207,12 @@ body {
   border-color: var(--line);
 }
 
+.pos-follow-badge {
+  border-color: rgba(34, 211, 238, 0.26);
+  background: rgba(34, 211, 238, 0.1);
+  color: #67e8f9;
+}
+
 .status-pill.st-ok,
 .range-pill.in,
 .pos-action-btn.resume,

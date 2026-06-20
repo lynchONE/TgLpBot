@@ -734,6 +734,11 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
+	if opts.SlippageToleranceOverride != nil {
+		taskCopy := *task
+		taskCopy.SlippageTolerance = *opts.SlippageToleranceOverride
+		task = &taskCopy
+	}
 	task.Chain = config.NormalizeChain(task.Chain)
 	exec, err := chainexec.GetEVM(task.Chain)
 	if err != nil {

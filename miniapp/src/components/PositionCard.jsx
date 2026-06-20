@@ -371,6 +371,7 @@ export default function PositionCard({
         const raw = Number(position?.task_id);
         return Number.isFinite(raw) && raw > 0 ? raw : 0;
     }, [position?.task_id]);
+    const isFollowPosition = Boolean(position?.is_follow);
 
     const taskPaused = Boolean(position?.task_paused);
     const currentTaskMode = normalizeTaskMode(position?.task_mode, position?.task_paused);
@@ -475,6 +476,11 @@ export default function PositionCard({
                                 <span className="text-[15px] font-bold text-zinc-900 dark:text-white/95 leading-tight truncate max-w-full">
                                     {displayTitle}
                                 </span>
+                                {isFollowPosition && (
+                                    <span className="inline-flex items-center rounded bg-cyan-500/12 px-1.5 py-0.5 text-[10px] font-bold text-cyan-700 ring-1 ring-cyan-500/20 shrink-0 dark:bg-cyan-500/18 dark:text-cyan-300 dark:ring-cyan-400/25">
+                                        自动跟单
+                                    </span>
+                                )}
                                 {feeLabel && (
                                     <span className="inline-flex items-center rounded bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
                                         {feeLabel}

@@ -4721,6 +4721,17 @@ function autoFollowEventActionLabel(eventType) {
     return String(eventType || '').toLowerCase() === 'remove' ? '撤 LP' : '加 LP';
 }
 
+function autoFollowJobActionLabel(action) {
+    switch (String(action || '').toLowerCase()) {
+        case 'close':
+            return '撤仓';
+        case 'add_liquidity':
+            return '加仓';
+        default:
+            return '开仓';
+    }
+}
+
 function autoFollowEventActionClass(eventType) {
     return String(eventType || '').toLowerCase() === 'remove'
         ? 'border-red-400/20 bg-red-500/10 text-red-200'
@@ -4733,11 +4744,18 @@ function formatAutoFollowEventAmount(event) {
     return '--';
 }
 
-function formatAutoFollowEventRange(event) {
+function formatAutoFollowEventRangeWidth(event) {
     if (event?.tick_lower === null || event?.tick_lower === undefined || event?.tick_upper === null || event?.tick_upper === undefined) {
         return '';
     }
-    return `${event.tick_lower} - ${event.tick_upper}`;
+    const lower = Number(event.tick_lower);
+    const upper = Number(event.tick_upper);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper) || upper <= lower) return '';
+    const lowerPrice = Math.pow(1.0001, lower);
+    const upperPrice = Math.pow(1.0001, upper);
+    if (!Number.isFinite(lowerPrice) || !Number.isFinite(upperPrice) || lowerPrice <= 0 || upperPrice <= 0) return '';
+    const pct = ((upperPrice - lowerPrice) / (upperPrice + lowerPrice)) * 100;
+    return formatRangePercent(pct);
 }
 
 function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
@@ -5418,7 +5436,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             const action = job?.action || attempt?.action || (String(event?.event_type || '').toLowerCase() === 'remove' ? 'close' : 'open');
                             const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
                             const message = job?.error_message || (!job ? attempt?.message : '') || '';
-                            const rangeText = event ? formatAutoFollowEventRange(event) : '';
+                            const rangeText = event ? formatAutoFollowEventRangeWidth(event) : '';
                             return (
                                 <div key={item.key} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
                                     <div className="flex items-start justify-between gap-3">
@@ -5426,11 +5444,11 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                             <div className="flex flex-wrap items-center gap-1.5">
                                                 {event ? (
                                                     <Badge className={autoFollowEventActionClass(event.event_type)}>
-                                                        {autoFollowEventActionLabel(event.event_type)}
+                                                        {job || attempt ? autoFollowJobActionLabel(action) : autoFollowEventActionLabel(event.event_type)}
                                                     </Badge>
                                                 ) : (
                                                     <Badge className="border-white/10 bg-zinc-800/80 text-zinc-400">
-                                                        {action === 'close' ? '撤仓' : '开仓'}
+                                                        {autoFollowJobActionLabel(action)}
                                                     </Badge>
                                                 )}
                                                 {status ? (
@@ -5449,7 +5467,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-zinc-500">
                                                 <span>{shortAddr(event?.wallet_address || triggerWallets[0] || row?.target_wallet_address)}</span>
                                                 <span>{formatAutoFollowJobTime(event?.tx_timestamp || job?.scheduled_at || attempt?.updated_at || attempt?.created_at)}</span>
-                                                {rangeText ? <span>Tick {rangeText}</span> : null}
+                                                {rangeText ? <span>区间宽度 {rangeText}</span> : null}
                                                 {row ? <span>执行 {formatAutoFollowExecutionWallet(row, executionWallets)}</span> : null}
                                             </div>
                                             {message ? (

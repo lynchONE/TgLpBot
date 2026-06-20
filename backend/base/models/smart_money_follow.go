@@ -17,8 +17,9 @@ const (
 	SmartMoneyFollowTriggerModeAny       = "any"
 	SmartMoneyFollowTriggerModeThreshold = "threshold"
 
-	SmartMoneyFollowJobActionOpen  = "open"
-	SmartMoneyFollowJobActionClose = "close"
+	SmartMoneyFollowJobActionOpen         = "open"
+	SmartMoneyFollowJobActionAddLiquidity = "add_liquidity"
+	SmartMoneyFollowJobActionClose        = "close"
 
 	SmartMoneyFollowJobStatusPending = "pending"
 	SmartMoneyFollowJobStatusRunning = "running"
@@ -122,6 +123,7 @@ type SmartMoneyFollowJob struct {
 	FinishedAt          *time.Time  `json:"finished_at"`
 	AmountUSDT          float64     `gorm:"type:decimal(20,8);not null;default:0" json:"amount_usdt"`
 	TaskID              *uint       `gorm:"index" json:"task_id,omitempty"`
+	RetryCount          int         `gorm:"not null;default:0" json:"retry_count"`
 	ErrorMessage        string      `gorm:"type:text" json:"error_message"`
 	CreatedAt           time.Time   `gorm:"not null;autoCreateTime" json:"created_at"`
 	UpdatedAt           time.Time   `gorm:"not null;autoUpdateTime" json:"updated_at"`
