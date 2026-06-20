@@ -5302,11 +5302,8 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, executionWallets
     const updateExecutionWallet = (value) => {
         const walletID = Number(value) || 0;
         const wallet = findAutoFollowExecutionWallet(executionWallets, walletID, '');
-        const mode = String(draft.execution_wallet_mode || 'fixed').toLowerCase();
         let nextIDs;
-        if (mode === 'fixed') {
-            nextIDs = walletID > 0 ? [walletID] : [];
-        } else if (executionWalletIDs.includes(walletID)) {
+        if (executionWalletIDs.includes(walletID)) {
             nextIDs = executionWalletIDs.filter((id) => id !== walletID);
         } else {
             nextIDs = [...executionWalletIDs, walletID].filter((id) => id > 0);
@@ -5325,7 +5322,7 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, executionWallets
     const updateExecutionMode = (mode) => {
         const nextMode = ['round_robin', 'random'].includes(mode) ? mode : 'fixed';
         const ids = normalizeAutoFollowExecutionWalletIDs(draft);
-        const nextIDs = ids.length > 0 ? (nextMode === 'fixed' ? [ids[0]] : ids) : [];
+        const nextIDs = ids;
         dispatch({
             type: 'set',
             payload: {
@@ -5342,6 +5339,7 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, executionWallets
                     <label className="af-field-label">执行钱包池</label>
                     <span className="af-section-hint">{executionWalletIDs.length || 0} 个已选</span>
                 </div>
+                <div className="af-section-hint">固定模式使用第一个已选钱包；轮询/随机使用整个钱包池。</div>
                 {walletsLoading ? (
                     <div className="af-wallet-loading">加载钱包中…</div>
                 ) : (

@@ -5164,12 +5164,9 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         const walletID = Number(id) || 0;
         const wallet = findAutoFollowExecutionWallet(executionWallets, walletID, '');
         setDraft((prev) => {
-            const mode = String(prev.execution_wallet_mode || 'fixed').toLowerCase();
             const current = normalizeAutoFollowExecutionWalletIDs(prev);
             let nextIDs;
-            if (mode === 'fixed') {
-                nextIDs = walletID > 0 ? [walletID] : [];
-            } else if (current.includes(walletID)) {
+            if (current.includes(walletID)) {
                 nextIDs = current.filter((item) => item !== walletID);
             } else {
                 nextIDs = [...current, walletID].filter((item) => item > 0);
@@ -5188,7 +5185,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
         const nextMode = ['round_robin', 'random'].includes(mode) ? mode : 'fixed';
         setDraft((prev) => {
             const ids = normalizeAutoFollowExecutionWalletIDs(prev);
-            const nextIDs = ids.length > 0 ? (nextMode === 'fixed' ? [ids[0]] : ids) : [];
+            const nextIDs = ids;
             return {
                 ...prev,
                 execution_wallet_mode: nextMode,
@@ -5292,6 +5289,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             <div className="text-[11px] font-medium text-zinc-500">执行钱包池</div>
                             <div className="text-[10px] text-zinc-500">{draftExecutionWalletIDs.length} 个已选</div>
                         </div>
+                        <div className="text-[10px] text-zinc-500">固定模式使用第一个已选钱包；轮询/随机使用整个钱包池。</div>
                         {loading && executionWallets.length === 0 ? (
                             <div className="rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-3 text-xs text-zinc-500">
                                 加载钱包中...

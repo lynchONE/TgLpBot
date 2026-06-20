@@ -2,9 +2,9 @@ export const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter
 export const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
 
 export const SMART_MONEY_POOL_SOURCE_TABS = [
-    { key: 'all', label: '鍏ㄩ儴', source: '' },
-    { key: 'manual', label: '鎵嬪姩娣诲姞', source: 'manual' },
-    { key: 'contract', label: '鍚堢害鍙戠幇', source: 'contract_interaction' },
+    { key: 'all', label: '全部', source: '' },
+    { key: 'manual', label: '手动添加', source: 'manual' },
+    { key: 'contract', label: '合约发现', source: 'contract_interaction' },
 ];
 
 export const SMART_MONEY_POOL_SOURCE_BY_KEY = Object.fromEntries(
