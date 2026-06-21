@@ -981,8 +981,8 @@ func (s *RealtimePositionsService) buildV3Position(
 		outOfRangeText = formatOutOfRange(task, tickLower, tickUpper, currentTick)
 	}
 
-	// Prefer actual tick-based range so that rangePct reflects the CURRENT
-	// position, not the (possibly just-updated) rebalance target stored on the task.
+	// Prefer actual tick-based range so that rangePct reflects the position's own
+	// bounds, not the (possibly just-updated) rebalance target stored on the task.
 	if currentTick != 0 {
 		if estimated := estimateRangePercent(currentTick, tickLower, tickUpper); estimated > 0 {
 			rangePct = estimated
@@ -1491,8 +1491,8 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	totals.TotalUSD = totals.WalletUSD + totals.PositionUSD + totals.FeeUSD
 
 	inRange := currentTick >= tickLower && currentTick <= tickUpper
-	// Prefer actual tick-based range so that rangePct reflects the CURRENT
-	// position, not the (possibly just-updated) rebalance target stored on the task.
+	// Prefer actual tick-based range so that rangePct reflects the position's own
+	// bounds, not the (possibly just-updated) rebalance target stored on the task.
 	rangePct := estimateRangePercent(currentTick, tickLower, tickUpper)
 	if rangePct <= 0 {
 		if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
@@ -1654,8 +1654,8 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		inRange = currentTick >= tickLower && currentTick <= tickUpper
 	}
 
-	// Prefer actual tick-based range so that rangePct reflects the CURRENT
-	// position, not the (possibly just-updated) rebalance target stored on the task.
+	// Prefer actual tick-based range so that rangePct reflects the position's own
+	// bounds, not the (possibly just-updated) rebalance target stored on the task.
 	rangePct := 0.0
 	if gotTick && tickLower < tickUpper {
 		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
@@ -2624,24 +2624,21 @@ func formatUnits(v *big.Int, decimals int, displayDecimals int) string {
 	return fmt.Sprintf("%.*f", displayDecimals, f)
 }
 
-func estimateRangePercent(currentTick, tickLower, tickUpper int) float64 {
-	if currentTick == 0 || tickLower == 0 || tickUpper == 0 {
+func estimateRangePercent(_ int, tickLower, tickUpper int) float64 {
+	if tickLower == 0 || tickUpper == 0 || tickUpper <= tickLower {
 		return 0
 	}
-	price := math.Pow(1.0001, float64(currentTick))
 	low := math.Pow(1.0001, float64(tickLower))
 	high := math.Pow(1.0001, float64(tickUpper))
-	if price <= 0 || low <= 0 || high <= 0 {
+	if low <= 0 || high <= 0 {
 		return 0
 	}
-	up := (high/price - 1.0) * 100
-	down := (1.0 - low/price) * 100
-	pct := (up + down) / 2
+	pct := ((high - low) / (high + low)) * 100
 	if pct < 0 {
 		pct = 0
 	}
-	if pct > 999 {
-		pct = 999
+	if pct > 100 {
+		pct = 100
 	}
 	return math.Round(pct*10) / 10
 }

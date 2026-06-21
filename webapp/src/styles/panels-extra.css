@@ -3612,6 +3612,18 @@ img.swap-token-glyph {
   font-size: 11px;
   color: var(--text-muted);
 }
+.af-meta-button {
+  font-family: inherit;
+  cursor: pointer;
+}
+.af-meta-button:hover {
+  color: var(--text);
+  border-color: rgba(168, 231, 76, 0.35);
+}
+.af-meta-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .af-status-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

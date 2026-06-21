@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
-import { Wallet, Search, Plus, ExternalLink, X, Check, Activity, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal, Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings, Bell, Repeat2, Shuffle, TrendingUp } from 'lucide-react';
+import { Wallet, Search, Plus, ExternalLink, X, Check, Activity, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal, Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings, Bell, Repeat2, Shuffle, TrendingUp, RefreshCw } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet, fetchSMZombieWallets, deleteSMZombieWallets,
@@ -10,7 +10,7 @@ import {
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchActivity,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
-    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig, deleteSMAutoFollowLogs,
+    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig, deleteSMAutoFollowLogs, recalculateSMAutoFollowPnL,
 } from '../smartMoneyApi';
 import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
@@ -1769,6 +1769,13 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
         : Number(detail?.totals?.position_usd || 0) + Number(detail?.totals?.fee_usd || 0);
     const statusLabel = String(detail?.status_label || (detail?.has_liquidity ? 'Open' : 'Closed'));
     const priceRange = detail ? computePriceRange(detail) : null;
+    const detailRangePercent = Number(detail?.range_percent);
+    const selectedRangePercent = Number(position?.range_percent);
+    const priceRangeDisplayWidthPercent = Number.isFinite(detailRangePercent) && detailRangePercent > 0
+        ? detailRangePercent * 2
+        : (Number.isFinite(selectedRangePercent) && selectedRangePercent > 0
+            ? selectedRangePercent * 2
+            : priceRange?.widthPercent);
     const detailRangeStatus = buildRangeStatusSummary(
         priceRange || (detail?.in_range === undefined ? null : { inRange: Boolean(detail.in_range) })
     );
@@ -1864,8 +1871,8 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                         <div className="pos-price-range">
                             <div className="pos-price-range-header">
                                 <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
-                                {Number.isFinite(priceRange.widthPercent) && priceRange.widthPercent > 0 ? (
-                                    <span className="pos-price-range-dev">{priceRange.widthPercent.toFixed(2)}%</span>
+                                {Number.isFinite(priceRangeDisplayWidthPercent) && priceRangeDisplayWidthPercent > 0 ? (
+                                    <span className="pos-price-range-dev">{priceRangeDisplayWidthPercent.toFixed(2)}%</span>
                                 ) : null}
                             </div>
                             <div className="pos-price-range-bar-wrap">
@@ -5827,7 +5834,7 @@ function AutoFollowTimelineCard({ item, executionWallets }) {
     );
 }
 
-function AutoFollowStatusCard({ status, config, executionWallets }) {
+function AutoFollowStatusCard({ status, config, executionWallets, recalculating, onRecalculate }) {
     const pnl = Number(status?.total_pnl_usdt) || 0;
     const realized = Number(status?.realized_pnl_usdt) || 0;
     const unrealized = Number(status?.unrealized_pnl_usdt) || 0;
@@ -5869,6 +5876,15 @@ function AutoFollowStatusCard({ status, config, executionWallets }) {
                 <span className="af-meta-tag"><TrendingUp size={11} />止盈 {takeProfit || '--'}U / 止损 {stopLoss || '--'}U</span>
                 {status?.last_follow_task_id ? <span className="af-meta-tag"><Activity size={11} />最近任务 #{status.last_follow_task_id}</span> : null}
                 {stopReason ? <span className="af-meta-tag"><AlertCircle size={11} />{stopReason === 'stop_loss' ? '止损触发' : '止盈触发'} {formatUsd(status.stop_triggered_pnl_usdt)}</span> : null}
+                <button
+                    type="button"
+                    className="af-meta-tag af-meta-button"
+                    onClick={() => onRecalculate?.(status)}
+                    disabled={recalculating}
+                    title="重算盈亏"
+                >
+                    <RefreshCw size={11} className={recalculating ? 'spin' : ''} />重算盈亏
+                </button>
             </div>
             {status?.pnl_error ? <div className="af-job-error">{status.pnl_error}</div> : null}
         </div>
@@ -5891,6 +5907,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [confirmTarget, setConfirmTarget] = useState(null);
+    const [recalculatingConfigID, setRecalculatingConfigID] = useState(0);
 
     const refreshMs = useMemo(() => {
         const sec = Number(refreshInterval);
@@ -6153,6 +6170,24 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
         }
     }, [apiBaseUrl, chain, hasInitData, initData, load]);
 
+    const handleRecalculatePnL = useCallback(async (status) => {
+        const configID = Number(status?.config_id || 0);
+        if (!configID || !hasInitData) return;
+        setRecalculatingConfigID(configID);
+        setError('');
+        setNotice('');
+        try {
+            const resp = await recalculateSMAutoFollowPnL({ apiBaseUrl, initData, chain, id: configID });
+            setNotice(resp?.reenabled ? '盈亏已重算，风控限制已解除' : '盈亏已重算');
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '重算失败'));
+            throw err;
+        } finally {
+            setRecalculatingConfigID(0);
+        }
+    }, [apiBaseUrl, chain, hasInitData, initData, load]);
+
     return (
         <div className="af-panel">
             {!hasInitData && (
@@ -6298,6 +6333,8 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                                     status={status}
                                     config={configByID.get(Number(status.config_id))}
                                     executionWallets={executionWallets}
+                                    recalculating={recalculatingConfigID === Number(status.config_id)}
+                                    onRecalculate={handleRecalculatePnL}
                                 />
                             ))}
                         </div>

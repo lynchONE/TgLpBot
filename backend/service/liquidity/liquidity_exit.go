@@ -50,6 +50,7 @@ func (e *SwapToUSDTError) Unwrap() error { return e.Err }
 var (
 	erc20TransferEventID = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
 	reTxHash             = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
+	reTxHashAny          = regexp.MustCompile(`0x[0-9a-fA-F]{64}`)
 )
 
 const (
@@ -247,22 +248,31 @@ func (s *LiquidityService) shouldSkipExitSwapToUSDT(exec chainexec.EVMExecutor, 
 	return false, v
 }
 
-func firstTxHash(txHashes []string) (common.Hash, bool) {
-	if len(txHashes) == 0 {
-		return common.Hash{}, false
-	}
-	txInfo := strings.TrimSpace(txHashes[0])
+func txHashFromText(value string) (common.Hash, bool) {
+	txInfo := strings.TrimSpace(value)
 	if txInfo == "" {
 		return common.Hash{}, false
 	}
 	parts := strings.Split(txInfo, "|")
-	if len(parts) >= 2 {
-		txInfo = strings.TrimSpace(parts[1])
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.TrimSpace(parts[i])
+		if reTxHash.MatchString(part) {
+			return common.HexToHash(part), true
+		}
 	}
-	if !reTxHash.MatchString(txInfo) {
-		return common.Hash{}, false
+	if match := reTxHashAny.FindString(txInfo); match != "" {
+		return common.HexToHash(match), true
 	}
-	return common.HexToHash(txInfo), true
+	return common.Hash{}, false
+}
+
+func firstTxHash(txHashes []string) (common.Hash, bool) {
+	for _, item := range txHashes {
+		if h, ok := txHashFromText(item); ok {
+			return h, true
+		}
+	}
+	return common.Hash{}, false
 }
 
 func extractTxHashes(txHashes []string) []common.Hash {
@@ -272,18 +282,10 @@ func extractTxHashes(txHashes []string) []common.Hash {
 	seen := make(map[common.Hash]struct{}, len(txHashes))
 	out := make([]common.Hash, 0, len(txHashes))
 	for _, item := range txHashes {
-		s := strings.TrimSpace(item)
-		if s == "" {
+		h, ok := txHashFromText(item)
+		if !ok {
 			continue
 		}
-		parts := strings.Split(s, "|")
-		if len(parts) >= 2 {
-			s = strings.TrimSpace(parts[len(parts)-1])
-		}
-		if !reTxHash.MatchString(s) {
-			continue
-		}
-		h := common.HexToHash(s)
 		if _, ok := seen[h]; ok {
 			continue
 		}
@@ -777,6 +779,20 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		gasSpent = receiptGas
 	}
 
+	finalStableAfter := cloneBig(usdtAfter)
+	if receiptUSDT.Sign() > 0 {
+		minStableAfter := new(big.Int).Add(cloneBig(usdtBefore), receiptUSDT)
+		if finalStableAfter.Cmp(minStableAfter) < 0 {
+			if synced, werr := s.waitTokenBalanceAtLeast(client, usdtAddr, walletAddr, minStableAfter, "stable after exit swaps"); werr == nil && synced != nil {
+				finalStableAfter = synced
+			} else {
+				log.Printf("[Liquidity] Warning: stable balance not synced after exit; using receipt-proven minimum: have=%s want>=%s err=%v",
+					finalStableAfter.String(), minStableAfter.String(), werr)
+				finalStableAfter = minStableAfter
+			}
+		}
+	}
+
 	// Scale stablecoin units to internal USD(1e18) representation for records/PnL (Base USDT is often 6 decimals).
 	actualReceivedWei, cerr := convert.ScaleDecimals(actualReceived, cc.StableDecimals, 18)
 	if cerr != nil || actualReceivedWei == nil {
@@ -787,15 +803,14 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	if berr != nil || closeStableBeforeWei == nil {
 		closeStableBeforeWei = new(big.Int).Set(usdtBefore)
 	}
+	closeStableAfterWei, aerr := convert.ScaleDecimals(finalStableAfter, cc.StableDecimals, 18)
+	if aerr != nil || closeStableAfterWei == nil {
+		closeStableAfterWei = new(big.Int).Set(finalStableAfter)
+	}
 
 	mainHash := ""
-	if len(txHashes) > 0 {
-		parts := strings.Split(txHashes[0], "|")
-		if len(parts) >= 2 {
-			mainHash = strings.TrimSpace(parts[1])
-		} else {
-			mainHash = strings.TrimSpace(txHashes[0])
-		}
+	if h, ok := firstTxHash(txHashes); ok {
+		mainHash = h.Hex()
 	}
 
 	finalizeTradeRecord := exitErr == nil && sweepErr == nil && !partialExit
@@ -806,14 +821,15 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		actualReceivedCopy := cloneBig(actualReceivedWei)
 		gasSpentCopy := cloneBig(gasSpent)
 		closeStableBeforeCopy := cloneBig(closeStableBeforeWei)
+		closeStableAfterCopy := cloneBig(closeStableAfterWei)
 		nativePriceUSD := 0.0
 		if finalizeTradeRecord {
 			nativePriceUSD = pricing.GetNativePriceUSD(exec.Chain())
 		}
 		s.runAsync("exit_trade_record", func() error {
 			trSvc := trade.NewTradeRecordService()
-			if _, err := trSvc.ApplyExitDelta(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, finalizeTradeRecord, nativePriceUSD); err != nil && finalizeTradeRecord {
-				return trSvc.CloseLatestOpenRecord(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, nativePriceUSD)
+			if _, err := trSvc.ApplyExitDeltaWithStableAfter(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, closeStableAfterCopy, finalizeTradeRecord, nativePriceUSD); err != nil && finalizeTradeRecord {
+				return trSvc.CloseLatestOpenRecordWithStableAfter(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, closeStableAfterCopy, nativePriceUSD)
 			} else {
 				return err
 			}

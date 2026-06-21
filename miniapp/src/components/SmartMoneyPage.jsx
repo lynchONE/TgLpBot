@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil, SlidersHorizontal, Activity, RefreshCw,
     Clock, DollarSign, Percent, Users, Zap, Radar, Bell, Repeat2, Shuffle, TrendingUp,
 } from 'lucide-react';
 
@@ -17,7 +17,7 @@ import {
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
     fetchSMWatchWallets, fetchSMWatchActivity, saveSMWatchWallets,
     fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
-    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig, deleteSMAutoFollowLogs,
+    fetchSMAutoFollow, saveSMAutoFollowConfig, deleteSMAutoFollowConfig, deleteSMAutoFollowLogs, recalculateSMAutoFollowPnL,
     buildSMEventsWsUrl,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
@@ -4837,7 +4837,7 @@ function formatAutoFollowEventRangeWidth(event) {
     return formatRangePercent(pct);
 }
 
-function AutoFollowStatusMiniCard({ status, config, executionWallets }) {
+function AutoFollowStatusMiniCard({ status, config, executionWallets, recalculating, onRecalculate }) {
     const pnl = Number(status?.total_pnl_usdt) || 0;
     const realized = Number(status?.realized_pnl_usdt) || 0;
     const unrealized = Number(status?.unrealized_pnl_usdt) || 0;
@@ -4880,6 +4880,16 @@ function AutoFollowStatusMiniCard({ status, config, executionWallets }) {
                         {stopReason === 'stop_loss' ? '止损触发' : '止盈触发'} {formatUSDCompact(status?.stop_triggered_pnl_usdt)}
                     </Badge>
                 ) : null}
+                <button
+                    type="button"
+                    onClick={() => onRecalculate?.(status)}
+                    disabled={recalculating}
+                    className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-zinc-800/80 px-2 py-0.5 text-[10px] font-medium text-zinc-300 transition hover:border-lime-300/40 hover:text-lime-200 disabled:opacity-50"
+                    title="重算盈亏"
+                >
+                    <RefreshCw size={10} className={recalculating ? 'animate-spin' : ''} />
+                    重算盈亏
+                </button>
             </div>
             {status?.pnl_error ? <div className="mt-2 text-[11px] text-red-200 line-clamp-2">{status.pnl_error}</div> : null}
         </div>
@@ -4900,6 +4910,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
     const [activeTab, setActiveTab] = useState('configure');
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [recalculatingConfigID, setRecalculatingConfigID] = useState(0);
 
     const load = useCallback(async () => {
         if (!hasInitData) {
@@ -4998,6 +5009,23 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
             setError(String(err?.message || err || '清理失败'));
         } finally {
             setSaving(false);
+        }
+    }, [apiBaseUrl, hasInitData, initData, load]);
+
+    const recalculatePnL = useCallback(async (status) => {
+        const configID = Number(status?.config_id || 0);
+        if (!configID || !hasInitData) return;
+        setRecalculatingConfigID(configID);
+        setError('');
+        setNotice('');
+        try {
+            const resp = await recalculateSMAutoFollowPnL({ apiBaseUrl, initData, chain: 'bsc', id: configID });
+            setNotice(resp?.reenabled ? '盈亏已重算，风控限制已解除' : '盈亏已重算');
+            await load();
+        } catch (err) {
+            setError(String(err?.message || err || '重算失败'));
+        } finally {
+            setRecalculatingConfigID(0);
         }
     }, [apiBaseUrl, hasInitData, initData, load]);
 
@@ -5697,6 +5725,8 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             status={status}
                             config={configByID.get(Number(status.config_id))}
                             executionWallets={executionWallets}
+                            recalculating={recalculatingConfigID === Number(status.config_id)}
+                            onRecalculate={recalculatePnL}
                         />
                     ))
                 )}

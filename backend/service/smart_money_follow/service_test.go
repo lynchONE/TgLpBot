@@ -3,6 +3,7 @@ package smart_money_follow
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"TgLpBot/service/liquidity"
 	poolsvc "TgLpBot/service/pool"
 	"errors"
 	"testing"
@@ -44,6 +45,43 @@ func TestCalculateFollowAmountRatio(t *testing.T) {
 	}
 	if amount != 60.25 {
 		t.Fatalf("amount = %v, want 60.25", amount)
+	}
+}
+
+func TestActualStableSpentUSDTUsesActualEntrySpend(t *testing.T) {
+	got := actualStableSpentUSDT(1000, &liquidity.EnterResult{ActualStableSpent: 800})
+	if got != 800 {
+		t.Fatalf("actualStableSpentUSDT entry = %v, want 800", got)
+	}
+}
+
+func TestActualStableSpentUSDTUsesActualIncreaseSpend(t *testing.T) {
+	got := actualStableSpentUSDT(500, &liquidity.IncreaseLiquidityResult{ActualStableSpent: 320})
+	if got != 320 {
+		t.Fatalf("actualStableSpentUSDT increase = %v, want 320", got)
+	}
+}
+
+func TestActualStableSpentUSDTFallsBackToRequested(t *testing.T) {
+	got := actualStableSpentUSDT(1000, &liquidity.EnterResult{})
+	if got != 1000 {
+		t.Fatalf("actualStableSpentUSDT fallback = %v, want 1000", got)
+	}
+}
+
+func TestFollowRiskStopReason(t *testing.T) {
+	cfg := &models.SmartMoneyFollowConfig{
+		TakeProfitUSDT: 100,
+		StopLossUSDT:   50,
+	}
+	if got := followRiskStopReason(cfg, 120); got != models.SmartMoneyFollowStopReasonTakeProfit {
+		t.Fatalf("take profit reason = %s", got)
+	}
+	if got := followRiskStopReason(cfg, -60); got != models.SmartMoneyFollowStopReasonStopLoss {
+		t.Fatalf("stop loss reason = %s", got)
+	}
+	if got := followRiskStopReason(cfg, 10); got != "" {
+		t.Fatalf("neutral reason = %s, want empty", got)
 	}
 }
 

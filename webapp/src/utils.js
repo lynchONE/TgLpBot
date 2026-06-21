@@ -532,8 +532,9 @@ export function computePriceRange(p) {
   const deviation = currentPrice > 0 && rangeMin !== null && rangeMax !== null
     ? ((Math.max(0, (rangeMax / currentPrice) - 1) * 100) + (Math.max(0, 1 - (rangeMin / currentPrice)) * 100)) / 2
     : null;
-  const widthPercent = currentPrice > 0 && rangeMin !== null && rangeMax !== null
-    ? (Math.max(0, (rangeMax / currentPrice) - 1) * 100) + (Math.max(0, 1 - (rangeMin / currentPrice)) * 100)
+  const rangeMid = rangeMin !== null && rangeMax !== null ? (rangeMin + rangeMax) / 2 : null;
+  const widthPercent = Number.isFinite(rangeMid) && rangeMid > 0 && rangeMin !== null && rangeMax !== null
+    ? ((rangeMax - rangeMin) / rangeMid) * 100
     : null;
 
   let outOfRange = null;

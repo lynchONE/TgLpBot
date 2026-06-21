@@ -574,6 +574,16 @@ export async function deleteSMAutoFollowLogs({ apiBaseUrl, initData, chain = 'bs
     });
 }
 
+export async function recalculateSMAutoFollowPnL({ apiBaseUrl, initData, chain = 'bsc', id, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_auto_follow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, action: 'recalculate_pnl', id }),
+        signal,
+    });
+}
+
 export function buildSMEventsWsUrl(apiBaseUrl) {
     const base = normalizeBase(apiBaseUrl) || (typeof window !== 'undefined' ? window.location.origin : '');
     if (!base) return '';

@@ -327,6 +327,18 @@ func (s *TradeRecordService) CloseLatestOpenRecord(
 	closeStableBeforeWei *big.Int,
 	nativePriceUSD float64,
 ) error {
+	return s.CloseLatestOpenRecordWithStableAfter(task, closeTxHash, closeUSDTReceivedWei, closeGasSpentWei, closeStableBeforeWei, nil, nativePriceUSD)
+}
+
+func (s *TradeRecordService) CloseLatestOpenRecordWithStableAfter(
+	task *models.StrategyTask,
+	closeTxHash string,
+	closeUSDTReceivedWei *big.Int,
+	closeGasSpentWei *big.Int,
+	closeStableBeforeWei *big.Int,
+	closeStableAfterWei *big.Int,
+	nativePriceUSD float64,
+) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
@@ -349,10 +361,13 @@ func (s *TradeRecordService) CloseLatestOpenRecord(
 		}
 		totalGasWei := nonNilBigInt(closeGasSpentWei)
 		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
-		profit := tradeProfitUSDT(closeUSDTReceivedWei, openSpent, totalGasUSDT)
-		profitPct := calcProfitPct(profit, openSpent)
 		closeStableBefore := nonNilBigInt(closeStableBeforeWei)
-		closeStableAfter := balanceAfterReceive(closeStableBefore, closeUSDTReceivedWei)
+		closeStableAfter := closeStableAfterOrReceived(closeStableAfterWei, closeStableBefore, closeUSDTReceivedWei)
+		profit := tradeProfitUSDT(closeUSDTReceivedWei, openSpent, totalGasUSDT)
+		if snapshotProfit, ok := tradeProfitFromBalanceSnapshots(big.NewInt(0), closeStableAfter, totalGasUSDT); ok {
+			profit = snapshotProfit
+		}
+		profitPct := calcProfitPct(profit, openSpent)
 
 		closed := &models.TradeRecord{
 			UserID:            task.UserID,
@@ -403,10 +418,13 @@ func (s *TradeRecordService) CloseLatestOpenRecord(
 
 	totalGasWei := new(big.Int).Add(openGasWei, nonNilBigInt(closeGasSpentWei))
 	totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
-	profit := tradeProfitUSDT(closeUSDTReceivedWei, openSpent, totalGasUSDT)
-	profitPct := calcProfitPct(profit, openSpent)
 	closeStableBefore := nonNilBigInt(closeStableBeforeWei)
-	closeStableAfter := balanceAfterReceive(closeStableBefore, closeUSDTReceivedWei)
+	closeStableAfter := closeStableAfterOrReceived(closeStableAfterWei, closeStableBefore, closeUSDTReceivedWei)
+	profit := tradeProfitUSDT(closeUSDTReceivedWei, openSpent, totalGasUSDT)
+	if snapshotProfit, ok := tradeProfitFromBalanceSnapshots(openStableBefore, closeStableAfter, totalGasUSDT); ok {
+		profit = snapshotProfit
+	}
+	profitPct := calcProfitPct(profit, openSpent)
 
 	updates := map[string]interface{}{
 		"closed_at":           &now,
@@ -440,6 +458,19 @@ func (s *TradeRecordService) ApplyExitDelta(
 	closeUSDTReceivedDeltaWei *big.Int,
 	closeGasSpentDeltaWei *big.Int,
 	closeStableBeforeWei *big.Int,
+	finalize bool,
+	nativePriceUSD float64,
+) (*models.TradeRecord, error) {
+	return s.ApplyExitDeltaWithStableAfter(task, closeTxHash, closeUSDTReceivedDeltaWei, closeGasSpentDeltaWei, closeStableBeforeWei, nil, finalize, nativePriceUSD)
+}
+
+func (s *TradeRecordService) ApplyExitDeltaWithStableAfter(
+	task *models.StrategyTask,
+	closeTxHash string,
+	closeUSDTReceivedDeltaWei *big.Int,
+	closeGasSpentDeltaWei *big.Int,
+	closeStableBeforeWei *big.Int,
+	closeStableAfterWei *big.Int,
 	finalize bool,
 	nativePriceUSD float64,
 ) (*models.TradeRecord, error) {
@@ -532,7 +563,7 @@ func (s *TradeRecordService) ApplyExitDelta(
 	if existingCloseStableBefore.Sign() <= 0 && closeStableBeforeWei != nil && closeStableBeforeWei.Sign() > 0 {
 		existingCloseStableBefore = new(big.Int).Set(closeStableBeforeWei)
 	}
-	closeStableAfter := balanceAfterReceive(existingCloseStableBefore, newReceived)
+	closeStableAfter := closeStableAfterOrReceived(closeStableAfterWei, existingCloseStableBefore, newReceived)
 	updates["close_stable_before"] = safeBigIntString(existingCloseStableBefore)
 	updates["close_stable_after"] = safeBigIntString(closeStableAfter)
 
@@ -545,6 +576,9 @@ func (s *TradeRecordService) ApplyExitDelta(
 		totalGasWei := new(big.Int).Add(openGasWei, newGas)
 		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 		profit := tradeProfitUSDT(newReceived, openSpent, totalGasUSDT)
+		if snapshotProfit, ok := tradeProfitFromBalanceSnapshots(openStableBefore, closeStableAfter, totalGasUSDT); ok {
+			profit = snapshotProfit
+		}
 		profitPct := calcProfitPct(profit, openSpent)
 
 		now := time.Now()
@@ -590,6 +624,15 @@ func tradeProfitUSDT(closeReceived, openSpent, totalGasUSDT *big.Int) *big.Int {
 	return profit
 }
 
+func tradeProfitFromBalanceSnapshots(openStableBefore, closeStableAfter, totalGasUSDT *big.Int) (*big.Int, bool) {
+	if openStableBefore == nil || openStableBefore.Sign() <= 0 {
+		return nil, false
+	}
+	profit := new(big.Int).Sub(nonNilBigInt(closeStableAfter), openStableBefore)
+	profit.Sub(profit, nonNilBigInt(totalGasUSDT))
+	return profit, true
+}
+
 func RealizedProfitUSDTFromBalanceSnapshots(record *models.TradeRecord) (*big.Int, bool, error) {
 	if record == nil {
 		return nil, false, fmt.Errorf("trade record is nil")
@@ -612,8 +655,7 @@ func RealizedProfitUSDTFromBalanceSnapshots(record *models.TradeRecord) (*big.In
 	if err != nil {
 		return nil, false, fmt.Errorf("parse total gas usdt: %w", err)
 	}
-	profit := new(big.Int).Sub(nonNilBigInt(closeStableAfter), openStableBefore)
-	profit.Sub(profit, nonNilBigInt(totalGasUSDT))
+	profit, _ := tradeProfitFromBalanceSnapshots(openStableBefore, closeStableAfter, totalGasUSDT)
 	return profit, true, nil
 }
 
@@ -627,6 +669,13 @@ func balanceAfterSpend(before, spent *big.Int) *big.Int {
 
 func balanceAfterReceive(before, received *big.Int) *big.Int {
 	return new(big.Int).Add(nonNilBigInt(before), nonNilBigInt(received))
+}
+
+func closeStableAfterOrReceived(actualAfter, before, received *big.Int) *big.Int {
+	if actualAfter != nil && actualAfter.Sign() > 0 {
+		return new(big.Int).Set(actualAfter)
+	}
+	return balanceAfterReceive(before, received)
 }
 
 func safeBigIntString(v *big.Int) string {

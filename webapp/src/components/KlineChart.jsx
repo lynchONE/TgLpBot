@@ -127,6 +127,24 @@ function formatSignedPercent(value) {
   return `${num > 0 ? '+' : '-'}${Math.abs(num).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function finiteOptionalNumber(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function sumOptionalMarkerField(items, field) {
+  let total = 0;
+  let count = 0;
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const value = finiteOptionalNumber(item?.[field]);
+    if (value === null) return;
+    total += value;
+    count += 1;
+  });
+  return count > 0 ? { total, count } : null;
+}
+
 function formatRangePercent(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '';
@@ -1018,12 +1036,16 @@ export default function KlineChart({
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
-    const estimatedCostUsd = Number(primary.estimated_cost_usd);
-    const hasEstimatedCost = primary.estimated_cost_usd !== undefined && primary.estimated_cost_usd !== null && Number.isFinite(estimatedCostUsd);
-    const estimatedPnlUsd = Number(primary.estimated_realized_pnl_usd);
-    const hasEstimatedPnl = primary.estimated_realized_pnl_usd !== undefined && primary.estimated_realized_pnl_usd !== null && Number.isFinite(estimatedPnlUsd);
-    const estimatedPnlPct = Number(primary.estimated_realized_pnl_pct);
-    const hasEstimatedPnlPct = primary.estimated_realized_pnl_pct !== undefined && primary.estimated_realized_pnl_pct !== null && Number.isFinite(estimatedPnlPct);
+    const estimatedCostSum = sumOptionalMarkerField(c.items, 'estimated_cost_usd');
+    const estimatedPnlSum = sumOptionalMarkerField(c.items, 'estimated_realized_pnl_usd');
+    const estimatedCostUsd = estimatedCostSum?.total ?? 0;
+    const hasEstimatedCost = Boolean(estimatedCostSum);
+    const estimatedPnlUsd = estimatedPnlSum?.total ?? 0;
+    const hasEstimatedPnl = Boolean(estimatedPnlSum);
+    const estimatedPnlPct = hasEstimatedPnl && estimatedCostUsd > 0
+      ? (estimatedPnlUsd / estimatedCostUsd) * 100
+      : finiteOptionalNumber(primary.estimated_realized_pnl_pct);
+    const hasEstimatedPnlPct = Number.isFinite(estimatedPnlPct);
     const matchedOpenT = Number(primary.matched_open_t || 0);
     const nearestCandle = findNearestCandle(candleData, candleMap, primary.t || primary.bucket_t);
     const nearestChartPrice = Number(nearestCandle?.candle?.close || 0);

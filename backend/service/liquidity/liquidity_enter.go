@@ -40,6 +40,9 @@ type EnterResult struct {
 
 	CurrentLiquidity string
 
+	ActualStableSpent    float64
+	ActualStableSpentWei *big.Int
+
 	// Dust0/Dust1 are the leftover amounts returned to the wallet after minting (token0/token1 units).
 	// Best-effort: filled from Zap events when available.
 	Dust0 *big.Int
@@ -956,6 +959,9 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if err != nil {
 		return nil, err
 	}
+	if res == nil {
+		return nil, fmt.Errorf("enter result is nil")
+	}
 
 	// 等待 RPC 节点状态同步，避免读取到旧的余额值
 
@@ -1103,6 +1109,8 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if stableDeltaSpentForDust != nil {
 		extraDust = appendStableBudgetDustAsset(nil, cc, usdtAddr, usdtAmount, stableDeltaSpentForDust, recordedStableDust...)
 	}
+	res.ActualStableSpentWei = actualSpentWei
+	res.ActualStableSpent = amountToFloat(actualSpent, cc.StableDecimals)
 	_ = trade.NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpentWei, gasSpent, openStableBeforeWei, dust0, dust1, extraDust)
 
 	return res, nil

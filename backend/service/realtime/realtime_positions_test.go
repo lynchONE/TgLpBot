@@ -183,6 +183,19 @@ func TestSortRealtimePositionsKeepsMissingCreationTimeAfterCreatedPositions(t *t
 	}
 }
 
+func TestEstimateRangePercentIsIndependentOfCurrentTick(t *testing.T) {
+	t.Parallel()
+
+	inRange := estimateRangePercent(-36570, -37020, -36120)
+	belowRange := estimateRangePercent(-38500, -37020, -36120)
+	if inRange != 4.5 {
+		t.Fatalf("in-range estimateRangePercent() = %.1f, want 4.5", inRange)
+	}
+	if belowRange != inRange {
+		t.Fatalf("below-range estimateRangePercent() = %.1f, want %.1f", belowRange, inRange)
+	}
+}
+
 func TestV4TaskCurrenciesAllowNativeCurrency(t *testing.T) {
 	t.Parallel()
 

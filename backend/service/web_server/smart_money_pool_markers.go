@@ -7,6 +7,7 @@ import (
 	sm "TgLpBot/service/smart_money"
 	"context"
 	"math"
+	"math/big"
 	"net/http"
 	"sort"
 	"strconv"
@@ -62,8 +63,13 @@ type smartMoneyMarkerEstimate struct {
 }
 
 type smartMoneyMarkerReplayState struct {
-	OpenEvent *models.SmartMoneyLPEvent
-	Ambiguous bool
+	Liquidity         *big.Int
+	CostUSD           float64
+	CostReliable      bool
+	FirstOpenTxHash   string
+	FirstOpenT        int64
+	FallbackOpenEvent *models.SmartMoneyLPEvent
+	FallbackAmbiguous bool
 }
 
 const smartMoneyMarkerEstimateLookback = 14 * 24 * time.Hour
@@ -179,6 +185,43 @@ func smartMoneyMarkerRoundPercent(value float64) float64 {
 	return math.Round(sanitizeFloat(value)*100) / 100
 }
 
+func smartMoneyMarkerLiquidityDelta(event *models.SmartMoneyLPEvent) (*big.Int, bool) {
+	if event == nil {
+		return nil, false
+	}
+	raw := strings.TrimSpace(event.LiquidityDelta)
+	if raw == "" {
+		return nil, false
+	}
+	value, ok := new(big.Int).SetString(raw, 10)
+	if !ok || value.Sign() == 0 {
+		return nil, false
+	}
+	return value, true
+}
+
+func smartMoneyMarkerRatio(numerator *big.Int, denominator *big.Int) float64 {
+	if numerator == nil || denominator == nil || numerator.Sign() <= 0 || denominator.Sign() <= 0 {
+		return 0
+	}
+	if numerator.Cmp(denominator) >= 0 {
+		return 1
+	}
+	value, _ := new(big.Rat).SetFrac(numerator, denominator).Float64()
+	return sanitizeFloat(value)
+}
+
+func smartMoneyMarkerResetInventory(state *smartMoneyMarkerReplayState) {
+	if state == nil {
+		return
+	}
+	state.Liquidity = big.NewInt(0)
+	state.CostUSD = 0
+	state.CostReliable = true
+	state.FirstOpenTxHash = ""
+	state.FirstOpenT = 0
+}
+
 func replaySmartMoneyMarkerEstimates(
 	historyEvents []models.SmartMoneyLPEvent,
 	targetKeys map[string]struct{},
@@ -210,23 +253,42 @@ func replaySmartMoneyMarkerEstimates(
 
 		state := states[key]
 		if state == nil {
-			state = &smartMoneyMarkerReplayState{}
+			state = &smartMoneyMarkerReplayState{Liquidity: big.NewInt(0), CostReliable: true}
 			states[key] = state
 		}
 
 		action := strings.ToLower(strings.TrimSpace(event.EventType))
 		eventUSD := smartMoneyMarkerEventUSD(event)
+		liquidityDelta, hasLiquidityDelta := smartMoneyMarkerLiquidityDelta(event)
 
 		if action == "add" {
-			if state.OpenEvent != nil {
-				state.Ambiguous = true
-				appendWarning("smart money remove pnl unavailable for some positions because the same position has multiple add events before closing")
+			if hasLiquidityDelta && liquidityDelta.Sign() > 0 {
+				if state.Liquidity == nil {
+					state.Liquidity = big.NewInt(0)
+				}
+				state.Liquidity.Add(state.Liquidity, liquidityDelta)
+				if state.FirstOpenTxHash == "" {
+					state.FirstOpenTxHash = strings.TrimSpace(event.TxHash)
+					state.FirstOpenT = event.TxTimestamp.Unix()
+				}
+				if eventUSD <= 0 {
+					state.CostReliable = false
+					appendWarning("smart money remove pnl unavailable for some positions because add-event usd snapshots are missing")
+				} else {
+					state.CostUSD += eventUSD
+				}
+				continue
+			}
+
+			if state.FallbackOpenEvent != nil {
+				state.FallbackAmbiguous = true
+				appendWarning("smart money remove pnl unavailable for some positions because the same position has multiple add events before closing and liquidity deltas are missing")
 				continue
 			}
 			openEvent := *event
-			state.OpenEvent = &openEvent
+			state.FallbackOpenEvent = &openEvent
 			if eventUSD <= 0 {
-				state.Ambiguous = true
+				state.FallbackAmbiguous = true
 				appendWarning("smart money remove pnl unavailable for some positions because add-event usd snapshots are missing")
 			}
 			continue
@@ -235,13 +297,57 @@ func replaySmartMoneyMarkerEstimates(
 		if action != "remove" {
 			continue
 		}
-		if state.OpenEvent == nil {
-			state.Ambiguous = false
+
+		if hasLiquidityDelta && liquidityDelta.Sign() < 0 {
+			removeLiquidity := new(big.Int).Abs(liquidityDelta)
+			if state.Liquidity == nil || state.Liquidity.Sign() <= 0 {
+				appendWarning("smart money remove pnl unavailable for some positions because matched add liquidity is outside the loaded history window")
+				continue
+			}
+			beforeLiquidity := new(big.Int).Set(state.Liquidity)
+			ratio := smartMoneyMarkerRatio(removeLiquidity, beforeLiquidity)
+			removedCostUSD := state.CostUSD * ratio
+			if !state.CostReliable {
+				appendWarning("smart money remove pnl unavailable for some positions because earlier add-event usd snapshots are missing")
+			} else if eventUSD <= 0 {
+				appendWarning("smart money remove pnl unavailable for some positions because remove-event usd snapshots are missing")
+			} else if state.CostUSD <= 0 {
+				appendWarning("smart money remove pnl unavailable for some positions because matched add-event cost is missing")
+			} else {
+				costUSD := smartMoneyMarkerRoundUSD(removedCostUSD)
+				pnlUSD := smartMoneyMarkerRoundUSD(eventUSD - costUSD)
+				estimate := smartMoneyMarkerEstimate{
+					MatchedOpenTxHash:       state.FirstOpenTxHash,
+					MatchedOpenT:            state.FirstOpenT,
+					EstimatedCostUSD:        costUSD,
+					EstimatedRealizedPnlUSD: pnlUSD,
+				}
+				if costUSD > 0 {
+					pct := smartMoneyMarkerRoundPercent((pnlUSD / costUSD) * 100)
+					estimate.EstimatedRealizedPnlPct = &pct
+				}
+				estimates[smartMoneyMarkerEventID(event)] = estimate
+			}
+
+			if removeLiquidity.Cmp(beforeLiquidity) >= 0 {
+				smartMoneyMarkerResetInventory(state)
+			} else {
+				state.Liquidity.Sub(state.Liquidity, removeLiquidity)
+				state.CostUSD -= removedCostUSD
+				if state.CostUSD < 0 {
+					state.CostUSD = 0
+				}
+			}
 			continue
 		}
 
-		openUSD := smartMoneyMarkerEventUSD(state.OpenEvent)
-		if state.Ambiguous || openUSD <= 0 || eventUSD <= 0 {
+		if state.FallbackOpenEvent == nil {
+			state.FallbackAmbiguous = false
+			continue
+		}
+
+		openUSD := smartMoneyMarkerEventUSD(state.FallbackOpenEvent)
+		if state.FallbackAmbiguous || openUSD <= 0 || eventUSD <= 0 {
 			if eventUSD <= 0 {
 				appendWarning("smart money remove pnl unavailable for some positions because remove-event usd snapshots are missing")
 			}
@@ -252,8 +358,8 @@ func replaySmartMoneyMarkerEstimates(
 			costUSD := smartMoneyMarkerRoundUSD(openUSD)
 			pnlUSD := smartMoneyMarkerRoundUSD(eventUSD - openUSD)
 			estimate := smartMoneyMarkerEstimate{
-				MatchedOpenTxHash:       strings.TrimSpace(state.OpenEvent.TxHash),
-				MatchedOpenT:            state.OpenEvent.TxTimestamp.Unix(),
+				MatchedOpenTxHash:       strings.TrimSpace(state.FallbackOpenEvent.TxHash),
+				MatchedOpenT:            state.FallbackOpenEvent.TxTimestamp.Unix(),
 				EstimatedCostUSD:        costUSD,
 				EstimatedRealizedPnlUSD: pnlUSD,
 			}
@@ -264,8 +370,8 @@ func replaySmartMoneyMarkerEstimates(
 			estimates[smartMoneyMarkerEventID(event)] = estimate
 		}
 
-		state.OpenEvent = nil
-		state.Ambiguous = false
+		state.FallbackOpenEvent = nil
+		state.FallbackAmbiguous = false
 	}
 
 	warnings := make([]string, 0, len(warningSet))

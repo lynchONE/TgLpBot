@@ -104,6 +104,32 @@ func TestRealizedProfitUSDTFromBalanceSnapshotsFallsBackWhenBaselineMissing(t *t
 	}
 }
 
+func TestTradeProfitFromBalanceSnapshotsPrefersFinalStableBalance(t *testing.T) {
+	t.Parallel()
+
+	profit, ok := tradeProfitFromBalanceSnapshots(big.NewInt(1000), big.NewInt(1125), big.NewInt(5))
+	if !ok {
+		t.Fatal("expected snapshot profit to be available")
+	}
+	if profit == nil || profit.String() != "120" {
+		t.Fatalf("snapshot profit = %v, want 120", profit)
+	}
+}
+
+func TestCloseStableAfterOrReceivedUsesActualFinalBalance(t *testing.T) {
+	t.Parallel()
+
+	got := closeStableAfterOrReceived(big.NewInt(1125), big.NewInt(1000), big.NewInt(50))
+	if got == nil || got.String() != "1125" {
+		t.Fatalf("closeStableAfterOrReceived actual = %v, want 1125", got)
+	}
+
+	got = closeStableAfterOrReceived(nil, big.NewInt(1000), big.NewInt(50))
+	if got == nil || got.String() != "1050" {
+		t.Fatalf("closeStableAfterOrReceived fallback = %v, want 1050", got)
+	}
+}
+
 func TestStableAmountTo18(t *testing.T) {
 	previous := config.AppConfig
 	config.AppConfig = &config.Config{

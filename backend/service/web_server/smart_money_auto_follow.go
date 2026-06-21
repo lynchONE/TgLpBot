@@ -139,6 +139,23 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 			"deleted_jobs":     result.DeletedJobs,
 			"deleted_attempts": result.DeletedAttempts,
 		})
+	case "recalculate_pnl", "recalc_pnl":
+		id := req.ID
+		if id == 0 {
+			id = req.Config.ID
+		}
+		result, err := smartMoneyFollowService().RecalculateConfigPnL(r.Context(), user.ID, id, firstSmartMoneyAutoFollowChain(req.Chain, req.Config.Chain))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":        true,
+			"status":    result.Status,
+			"reason":    result.Reason,
+			"triggered": result.Triggered,
+			"reenabled": result.Reenabled,
+		})
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)
 	}

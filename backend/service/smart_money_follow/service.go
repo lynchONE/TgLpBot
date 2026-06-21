@@ -102,6 +102,13 @@ type DeleteLogsResult struct {
 	DeletedAttempts int64 `json:"deleted_attempts"`
 }
 
+type RecalculatePnLResult struct {
+	Status    FollowConfigStatus `json:"status"`
+	Reason    string             `json:"reason"`
+	Triggered bool               `json:"triggered"`
+	Reenabled bool               `json:"reenabled"`
+}
+
 type ExecutionWalletOption struct {
 	ID        uint   `json:"id"`
 	Address   string `json:"address"`
@@ -356,6 +363,76 @@ func (s *Service) DeleteLogs(ctx context.Context, userID uint, chain string) (*D
 	})
 	if err != nil {
 		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) RecalculateConfigPnL(ctx context.Context, userID uint, id uint, chain string) (*RecalculatePnLResult, error) {
+	if id == 0 {
+		return nil, fmt.Errorf("config id is required")
+	}
+	chain, _, err := ResolveChain(chain)
+	if err != nil {
+		return nil, err
+	}
+	var cfg models.SmartMoneyFollowConfig
+	if err := database.DB.WithContext(ctx).
+		Where("id = ? AND user_id = ? AND chain = ?", id, userID, chain).
+		First(&cfg).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("follow config not found")
+		}
+		return nil, fmt.Errorf("load follow config failed: %w", err)
+	}
+
+	status, err := buildFollowStatus(ctx, &cfg, strategy.NewPnLService())
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(status.PnLError) != "" {
+		return nil, fmt.Errorf("recalculate follow pnl failed: %s", status.PnLError)
+	}
+
+	reason := followRiskStopReason(&cfg, status.TotalPnLUSDT)
+	wasRiskStopped := cfg.StopTriggeredAt != nil || strings.TrimSpace(cfg.StopTriggeredReason) != ""
+	result := &RecalculatePnLResult{
+		Status:    status,
+		Reason:    reason,
+		Triggered: reason != "",
+	}
+
+	updates := map[string]any{}
+	if reason != "" {
+		now := time.Now()
+		updates["enabled"] = false
+		updates["stop_triggered_at"] = &now
+		updates["stop_triggered_reason"] = reason
+		updates["stop_triggered_pnl_usdt"] = status.TotalPnLUSDT
+		status.Enabled = false
+		status.StopTriggeredAt = &now
+		status.StopTriggeredReason = reason
+		status.StopTriggeredPnLUSDT = status.TotalPnLUSDT
+	} else if wasRiskStopped || cfg.StopTriggeredPnLUSDT != 0 {
+		updates["stop_triggered_at"] = nil
+		updates["stop_triggered_reason"] = ""
+		updates["stop_triggered_pnl_usdt"] = 0
+		if wasRiskStopped {
+			updates["enabled"] = true
+			result.Reenabled = !cfg.Enabled
+			status.Enabled = true
+		}
+		status.StopTriggeredAt = nil
+		status.StopTriggeredReason = ""
+		status.StopTriggeredPnLUSDT = 0
+	}
+
+	if len(updates) > 0 {
+		if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowConfig{}).
+			Where("id = ? AND user_id = ?", cfg.ID, userID).
+			Updates(updates).Error; err != nil {
+			return nil, fmt.Errorf("update recalculated follow pnl state failed: %w", err)
+		}
+		result.Status = status
 	}
 	return result, nil
 }
@@ -1736,6 +1813,9 @@ func runOpenTaskSync(ctx context.Context, cfg *models.SmartMoneyFollowConfig, jo
 		if err := applyEnterResult(ctx, task, enterRes); err != nil {
 			return fmt.Errorf("save enter result failed: %w", err)
 		}
+		if err := syncFollowJobActualAmount(ctx, job, actualStableSpentUSDT(job.AmountUSDT, enterRes)); err != nil {
+			return err
+		}
 
 		mapping := models.SmartMoneyFollowTask{
 			ConfigID:            cfg.ID,
@@ -1807,11 +1887,15 @@ func (s *Service) executeAddLiquidityJob(ctx context.Context, job *models.SmartM
 	}
 
 	runErr := runTaskSync(cfg.UserID, task, func() error {
-		res, err := liquidity.NewLiquidityService().IncreaseLiquidityForTaskWithOptions(cfg.UserID, task, job.AmountUSDT, followJobTxOptions(job, task.SlippageTolerance))
+		requestedAmountUSDT := job.AmountUSDT
+		res, err := liquidity.NewLiquidityService().IncreaseLiquidityForTaskWithOptions(cfg.UserID, task, requestedAmountUSDT, followJobTxOptions(job, task.SlippageTolerance))
 		if err != nil {
 			return err
 		}
-		return applyIncreaseLiquidityResult(ctx, task, job.AmountUSDT, res)
+		if err := syncFollowJobActualAmount(ctx, job, actualStableSpentUSDT(requestedAmountUSDT, res)); err != nil {
+			return err
+		}
+		return applyIncreaseLiquidityResult(ctx, task, requestedAmountUSDT, res)
 	})
 	if runErr != nil {
 		return &taskID, runErr
@@ -1855,7 +1939,7 @@ func (s *Service) executeCloseJob(ctx context.Context, job *models.SmartMoneyFol
 	}
 
 	runErr := runTaskSync(cfg.UserID, task, func() error {
-		_, err := liquidity.NewLiquidityService().ExitTaskToUSDTWithOptions(cfg.UserID, task, false, liquidity.TxOptions{})
+		_, err := liquidity.NewLiquidityService().ExitTaskToUSDTWithOptions(cfg.UserID, task, true, liquidity.TxOptions{})
 		return err
 	})
 	if runErr != nil {
@@ -2095,6 +2179,19 @@ func roundFollowPnL(value float64) float64 {
 	return math.Round(value*10000) / 10000
 }
 
+func followRiskStopReason(cfg *models.SmartMoneyFollowConfig, totalPnLUSDT float64) string {
+	if cfg == nil {
+		return ""
+	}
+	if cfg.TakeProfitUSDT > 0 && totalPnLUSDT >= cfg.TakeProfitUSDT {
+		return models.SmartMoneyFollowStopReasonTakeProfit
+	}
+	if cfg.StopLossUSDT > 0 && totalPnLUSDT <= -cfg.StopLossUSDT {
+		return models.SmartMoneyFollowStopReasonStopLoss
+	}
+	return ""
+}
+
 func (s *Service) enforceFollowRiskStops(ctx context.Context) error {
 	var configs []models.SmartMoneyFollowConfig
 	if err := database.DB.WithContext(ctx).
@@ -2115,13 +2212,7 @@ func (s *Service) enforceFollowRiskStops(ctx context.Context) error {
 			log.Printf("[SmartMoneyFollow] skip risk stop due pnl error config_id=%d err=%s", cfg.ID, status.PnLError)
 			continue
 		}
-		reason := ""
-		if cfg.TakeProfitUSDT > 0 && status.TotalPnLUSDT >= cfg.TakeProfitUSDT {
-			reason = models.SmartMoneyFollowStopReasonTakeProfit
-		}
-		if reason == "" && cfg.StopLossUSDT > 0 && status.TotalPnLUSDT <= -cfg.StopLossUSDT {
-			reason = models.SmartMoneyFollowStopReasonStopLoss
-		}
+		reason := followRiskStopReason(&cfg, status.TotalPnLUSDT)
 		if reason == "" {
 			continue
 		}
@@ -2479,6 +2570,40 @@ func backfillFollowTaskRangePercentages(ctx context.Context) error {
 	return nil
 }
 
+func actualStableSpentUSDT(requestedUSDT float64, result any) float64 {
+	switch v := result.(type) {
+	case *liquidity.EnterResult:
+		if v != nil && v.ActualStableSpent > 0 {
+			return v.ActualStableSpent
+		}
+	case *liquidity.IncreaseLiquidityResult:
+		if v != nil && v.ActualStableSpent > 0 {
+			return v.ActualStableSpent
+		}
+	}
+	return requestedUSDT
+}
+
+func syncFollowJobActualAmount(ctx context.Context, job *models.SmartMoneyFollowJob, actualUSDT float64) error {
+	if job == nil || job.ID == 0 {
+		return nil
+	}
+	if actualUSDT <= 0 || math.IsNaN(actualUSDT) || math.IsInf(actualUSDT, 0) {
+		return nil
+	}
+	if math.Abs(job.AmountUSDT-actualUSDT) < 0.00000001 {
+		return nil
+	}
+	if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowJob{}).
+		Where("id = ?", job.ID).
+		Update("amount_usdt", actualUSDT).Error; err != nil {
+		return fmt.Errorf("sync follow job actual amount failed: %w", err)
+	}
+	log.Printf("[SmartMoneyFollow] follow job actual amount synced: job_id=%d requested=%.8f actual=%.8f", job.ID, job.AmountUSDT, actualUSDT)
+	job.AmountUSDT = actualUSDT
+	return nil
+}
+
 func applyEnterResult(ctx context.Context, task *models.StrategyTask, enterRes *liquidity.EnterResult) error {
 	if task == nil || enterRes == nil {
 		return fmt.Errorf("task or enter result is nil")
@@ -2488,6 +2613,10 @@ func applyEnterResult(ctx context.Context, task *models.StrategyTask, enterRes *
 		"exit_liquidity_removed": false,
 		"error_message":          "",
 		"status":                 models.StrategyStatusRunning,
+	}
+	if enterRes.ActualStableSpent > 0 {
+		updates["amount_usdt"] = enterRes.ActualStableSpent
+		task.AmountUSDT = enterRes.ActualStableSpent
 	}
 	if v3TokenID := strings.TrimSpace(enterRes.V3TokenID); v3TokenID != "" && v3TokenID != "0" {
 		updates["v3_position_manager_address"] = enterRes.V3PositionManagerAddress

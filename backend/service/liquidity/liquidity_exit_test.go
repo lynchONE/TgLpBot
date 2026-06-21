@@ -4,6 +4,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"TgLpBot/service/pool"
 )
 
@@ -143,5 +145,20 @@ func TestExitMinAmounts_PriceAboveRangeIsToken1Only(t *testing.T) {
 	}
 	if min1.Sign() <= 0 {
 		t.Fatalf("price above range: amount1Min should be positive, got %s", min1)
+	}
+}
+
+func TestExtractTxHashesFindsHashInsideLabel(t *testing.T) {
+	want := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	got := extractTxHashes([]string{
+		"撤出流动性" + want.Hex(),
+		"兑换 Token0->USDT|" + want.Hex(),
+		"not-a-hash",
+	})
+	if len(got) != 1 {
+		t.Fatalf("extractTxHashes len=%d want 1 (%v)", len(got), got)
+	}
+	if got[0] != want {
+		t.Fatalf("extractTxHashes[0]=%s want %s", got[0].Hex(), want.Hex())
 	}
 }
