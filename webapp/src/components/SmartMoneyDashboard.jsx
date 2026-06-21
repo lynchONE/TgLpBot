@@ -1864,8 +1864,8 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                         <div className="pos-price-range">
                             <div className="pos-price-range-header">
                                 <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
-                                {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 ? (
-                                    <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
+                                {Number.isFinite(priceRange.widthPercent) && priceRange.widthPercent > 0 ? (
+                                    <span className="pos-price-range-dev">{priceRange.widthPercent.toFixed(2)}%</span>
                                 ) : null}
                             </div>
                             <div className="pos-price-range-bar-wrap">

@@ -532,6 +532,9 @@ export function computePriceRange(p) {
   const deviation = currentPrice > 0 && rangeMin !== null && rangeMax !== null
     ? ((Math.max(0, (rangeMax / currentPrice) - 1) * 100) + (Math.max(0, 1 - (rangeMin / currentPrice)) * 100)) / 2
     : null;
+  const widthPercent = currentPrice > 0 && rangeMin !== null && rangeMax !== null
+    ? (Math.max(0, (rangeMax / currentPrice) - 1) * 100) + (Math.max(0, 1 - (rangeMin / currentPrice)) * 100)
+    : null;
 
   let outOfRange = null;
   if (currentPrice > rangeMax) {
@@ -553,7 +556,7 @@ export function computePriceRange(p) {
     }
   }
 
-  return { currentPrice, rangeMin, rangeMax, pairLabel, percent: clamped, inRange: Boolean(p?.in_range), gridCount, deviation, outOfRange, visibleGridLines };
+  return { currentPrice, rangeMin, rangeMax, pairLabel, percent: clamped, inRange: Boolean(p?.in_range), gridCount, deviation, widthPercent, outOfRange, visibleGridLines };
 }
 
 export function formatDuration(isoString) {
