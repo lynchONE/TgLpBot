@@ -7,6 +7,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
+	poolmath "TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	userSvc "TgLpBot/service/user"
 	"encoding/json"
@@ -36,16 +37,21 @@ type OpenPositionRiskOptions struct {
 }
 
 type openPositionGuardState struct {
-	PoolID         string
-	Chain          string
-	Version        string
-	Token0         common.Address
-	Token1         common.Address
-	Token0Decimals int
-	Token1Decimals int
-	SqrtPriceX96   *big.Int
-	RawLiquidity   *big.Int
-	LiquidityUSD   float64
+	PoolID          string
+	Chain           string
+	Version         string
+	Token0          common.Address
+	Token1          common.Address
+	Token0Symbol    string
+	Token1Symbol    string
+	Token0Decimals  int
+	Token1Decimals  int
+	SqrtPriceX96    *big.Int
+	CurrentTick     int
+	TickSpacing     int
+	RawLiquidity    *big.Int
+	LiquidityUSD    float64
+	LiquiditySource string
 }
 
 type dexScreenerGuardLiquidity struct {
@@ -59,6 +65,7 @@ type dexScreenerGuardPair struct {
 
 type dexScreenerGuardResponse struct {
 	Pairs []dexScreenerGuardPair `json:"pairs"`
+	Pair  *dexScreenerGuardPair  `json:"pair"`
 }
 
 func firstPositiveLiquidityUSD(values ...float64) float64 {
@@ -83,6 +90,23 @@ func normalizeLiquidityGuardHex(raw string) string {
 		return ""
 	}
 	return "0x" + value
+}
+
+func isLiquidityGuardHexIdentifier(raw string) bool {
+	value := normalizeLiquidityGuardHex(raw)
+	if value == "" {
+		return false
+	}
+	hex := strings.TrimPrefix(value, "0x")
+	if len(hex) != 40 && len(hex) != 64 {
+		return false
+	}
+	for _, c := range hex {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func poolSnapshotLiquidityUSD(row *models.Pool) float64 {
@@ -134,7 +158,7 @@ func readPoolSnapshotLiquidityUSDWithSource(chain string, poolID string) (float6
 
 	var row models.Pool
 	err := database.DB.
-		Where("chain = ? AND address = ?", normalizedChain, strings.ToLower(normalizedPoolID)).
+		Where("chain = ? AND (address = ? OR id = ?)", normalizedChain, strings.ToLower(normalizedPoolID), strings.ToLower(normalizedPoolID)).
 		Order("updated_at DESC").
 		First(&row).Error
 	if err != nil {
@@ -150,7 +174,7 @@ func readPoolSnapshotLiquidityUSDWithSource(chain string, poolID string) (float6
 
 func fetchDexScreenerLiquidityUSD(chain string, poolID string) (float64, error) {
 	normalizedPoolID := normalizeLiquidityGuardHex(poolID)
-	if normalizedPoolID == "" || !common.IsHexAddress(normalizedPoolID) {
+	if normalizedPoolID == "" || !isLiquidityGuardHexIdentifier(normalizedPoolID) {
 		return 0, nil
 	}
 
@@ -183,6 +207,9 @@ func fetchDexScreenerLiquidityUSD(chain string, poolID string) (float64, error) 
 	var payload dexScreenerGuardResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return 0, err
+	}
+	if payload.Pair != nil {
+		payload.Pairs = append([]dexScreenerGuardPair{*payload.Pair}, payload.Pairs...)
 	}
 	for _, pair := range payload.Pairs {
 		if normalizeLiquidityGuardHex(pair.PairAddress) != normalizedPoolID {
@@ -219,6 +246,100 @@ func ResolvePoolLiquidityUSDWithSource(chain string, poolID string) (float64, st
 		return liquidityUSD, "dexscreener", nil
 	}
 	return 0, "", nil
+}
+
+func directTokenPriceUSD(chain string, token common.Address, symbol string, cc config.ChainConfig) (float64, bool) {
+	if token == (common.Address{}) {
+		price := pricing.GetNativePriceUSD(chain)
+		return price, price > 0
+	}
+	if isStableEntryToken(symbol, token, cc) {
+		return 1.0, true
+	}
+	if wrapped, ok := wrappedNativeAddress(cc); ok && token == wrapped {
+		price := pricing.GetNativePriceUSD(chain)
+		return price, price > 0
+	}
+	wrappedSymbol := strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+	if wrappedSymbol != "" && strings.EqualFold(strings.TrimSpace(symbol), wrappedSymbol) {
+		price := pricing.GetNativePriceUSD(chain)
+		return price, price > 0
+	}
+	return 0, false
+}
+
+func liquidityAmountsUSDValueFromPoolPrice(chain string, state *openPositionGuardState, cc config.ChainConfig, amount0 *big.Int, amount1 *big.Int) (float64, error) {
+	if state == nil {
+		return 0, fmt.Errorf("pool state is nil")
+	}
+	amount0Human := amountToFloat(amount0, state.Token0Decimals)
+	amount1Human := amountToFloat(amount1, state.Token1Decimals)
+	if amount0Human <= 0 && amount1Human <= 0 {
+		return 0, fmt.Errorf("pool liquidity amounts are empty")
+	}
+
+	priceToken1PerToken0, err := priceFromSqrtRatioX96(state.SqrtPriceX96, state.Token0Decimals, state.Token1Decimals)
+	if err != nil {
+		return 0, err
+	}
+
+	if token0Price, ok := directTokenPriceUSD(chain, state.Token0, state.Token0Symbol, cc); ok && priceToken1PerToken0 > 0 {
+		token1Price := token0Price / priceToken1PerToken0
+		return amount0Human*token0Price + amount1Human*token1Price, nil
+	}
+	if token1Price, ok := directTokenPriceUSD(chain, state.Token1, state.Token1Symbol, cc); ok && priceToken1PerToken0 > 0 {
+		token0Price := token1Price * priceToken1PerToken0
+		return amount0Human*token0Price + amount1Human*token1Price, nil
+	}
+
+	price0, err := tokenPriceUSD(chain, state.Token0, state.Token0Symbol, cc)
+	if err != nil {
+		return 0, fmt.Errorf("token0 price: %w", err)
+	}
+	price1, err := tokenPriceUSD(chain, state.Token1, state.Token1Symbol, cc)
+	if err != nil {
+		return 0, fmt.Errorf("token1 price: %w", err)
+	}
+	return amount0Human*price0 + amount1Human*price1, nil
+}
+
+func estimateActiveLiquidityUSDFromChainState(chain string, state *openPositionGuardState, cc config.ChainConfig) (float64, string, error) {
+	if state == nil {
+		return 0, "", fmt.Errorf("pool state is nil")
+	}
+	if state.RawLiquidity == nil || state.RawLiquidity.Sign() <= 0 {
+		return 0, "", fmt.Errorf("raw liquidity is empty")
+	}
+	if state.SqrtPriceX96 == nil || state.SqrtPriceX96.Sign() <= 0 {
+		return 0, "", fmt.Errorf("sqrtPriceX96 is empty")
+	}
+	if state.TickSpacing <= 0 {
+		return 0, "", fmt.Errorf("tick spacing is empty")
+	}
+
+	tickLower, err := poolmath.AlignTickDown(state.CurrentTick, state.TickSpacing)
+	if err != nil {
+		return 0, "", err
+	}
+	tickUpper := tickLower + state.TickSpacing
+	sqrtLower, err := poolmath.SqrtRatioAtTick(int32(tickLower))
+	if err != nil {
+		return 0, "", err
+	}
+	sqrtUpper, err := poolmath.SqrtRatioAtTick(int32(tickUpper))
+	if err != nil {
+		return 0, "", err
+	}
+
+	amount0, amount1 := poolmath.AmountsForLiquidity(state.SqrtPriceX96, sqrtLower, sqrtUpper, state.RawLiquidity)
+	liquidityUSD, err := liquidityAmountsUSDValueFromPoolPrice(chain, state, cc, amount0, amount1)
+	if err != nil {
+		return 0, "", err
+	}
+	if math.IsNaN(liquidityUSD) || math.IsInf(liquidityUSD, 0) || liquidityUSD <= 0 {
+		return 0, "", fmt.Errorf("estimated liquidity is invalid")
+	}
+	return liquidityUSD, "onchain.active_liquidity_tick_bin", nil
 }
 
 func tokenDecimalsWithFallback(client *ethclient.Client, token common.Address, fallback int) int {
@@ -461,16 +582,19 @@ func readOpenPositionGuardState(task *models.StrategyTask) (*openPositionGuardSt
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	poolID := strings.TrimSpace(task.PoolId)
 	state := &openPositionGuardState{
-		PoolID:  poolID,
-		Chain:   normalizedChain,
-		Version: version,
-		Token0:  token0,
-		Token1:  token1,
+		PoolID:       poolID,
+		Chain:        normalizedChain,
+		Version:      version,
+		Token0:       token0,
+		Token1:       token1,
+		Token0Symbol: task.Token0Symbol,
+		Token1Symbol: task.Token1Symbol,
+		TickSpacing:  task.TickSpacing,
 	}
 
 	switch version {
 	case "v4":
-		state.SqrtPriceX96, _, err = blockchain.GetUniswapV4PoolSlot0ViaStateView(
+		state.SqrtPriceX96, state.CurrentTick, err = blockchain.GetUniswapV4PoolSlot0ViaStateView(
 			common.HexToAddress(cc.UniswapV4StateViewAddress),
 			common.HexToAddress(cc.UniswapV4PoolManagerAddress),
 			poolID,
@@ -491,7 +615,7 @@ func readOpenPositionGuardState(task *models.StrategyTask) (*openPositionGuardSt
 			return nil, config.ChainConfig{}, nil, nil, fmt.Errorf("invalid V3 pool address")
 		}
 		poolAddr := common.HexToAddress(poolID)
-		state.SqrtPriceX96, _, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
+		state.SqrtPriceX96, state.CurrentTick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
 		if err != nil {
 			return nil, config.ChainConfig{}, nil, nil, fmt.Errorf("读取 V3 池子价格失败：%w", err)
 		}
@@ -503,9 +627,18 @@ func readOpenPositionGuardState(task *models.StrategyTask) (*openPositionGuardSt
 
 	state.Token0Decimals = tokenDecimalsWithFallback(client, token0, 18)
 	state.Token1Decimals = tokenDecimalsWithFallback(client, token1, 18)
-	state.LiquidityUSD, err = resolvePoolLiquidityUSD(normalizedChain, poolID)
+	state.LiquidityUSD, state.LiquiditySource, err = ResolvePoolLiquidityUSDWithSource(normalizedChain, poolID)
 	if err != nil {
 		log.Printf("[Liquidity] guard: resolve liquidity USD failed: chain=%s pool=%s err=%v", normalizedChain, poolID, err)
+	}
+	if state.LiquidityUSD <= 0 {
+		estimated, source, estimateErr := estimateActiveLiquidityUSDFromChainState(normalizedChain, state, cc)
+		if estimateErr != nil {
+			log.Printf("[Liquidity] guard: estimate liquidity USD failed: chain=%s pool=%s err=%v", normalizedChain, poolID, estimateErr)
+		} else if estimated > 0 {
+			state.LiquidityUSD = estimated
+			state.LiquiditySource = source
+		}
 	}
 	return state, cc, client, safety, nil
 }

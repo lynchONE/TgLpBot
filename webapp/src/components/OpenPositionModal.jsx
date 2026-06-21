@@ -286,6 +286,14 @@ function formatSignedPercentCompact(value) {
   return `${num > 0 ? '+' : '-'}${formatRangePercentCompact(Math.abs(num))}`;
 }
 
+function formatGridCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '--';
+  if (Number.isInteger(num)) return String(num);
+  if (num >= 10) return num.toFixed(1).replace(/\.0$/, '');
+  return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function formatPercentInputValue(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '';
@@ -1334,9 +1342,44 @@ export default function OpenPositionModal({
       token0Decimals,
       token1Decimals,
     );
+    const tickSpacing = Number(rangeEditor?.tick_spacing);
+    const coverageLowerTick = rangeInputMode === 'percentage'
+      && Number.isInteger(lowerTick)
+      && Number.isFinite(tickSpacing)
+      && tickSpacing > 0
+      ? roundDownToTickSpacing(lowerTick, tickSpacing)
+      : lowerTick;
+    const coverageUpperTick = rangeInputMode === 'percentage'
+      && Number.isInteger(upperTick)
+      && Number.isFinite(tickSpacing)
+      && tickSpacing > 0
+      ? roundUpToTickSpacing(upperTick, tickSpacing)
+      : upperTick;
+    const coverageLowerPrice = Number.isInteger(coverageLowerTick)
+      ? apply(tickToPoolPrice(coverageLowerTick, token0Decimals, token1Decimals))
+      : null;
+    const coverageUpperPrice = Number.isInteger(coverageUpperTick)
+      ? apply(tickToPoolPrice(coverageUpperTick, token0Decimals, token1Decimals))
+      : null;
+    const coverageLowerText = coverageLowerPrice !== null && coverageUpperPrice !== null ? Math.min(coverageLowerPrice, coverageUpperPrice) : null;
+    const coverageUpperText = coverageLowerPrice !== null && coverageUpperPrice !== null ? Math.max(coverageLowerPrice, coverageUpperPrice) : null;
+    const gridCount = Number.isInteger(coverageLowerTick)
+      && Number.isInteger(coverageUpperTick)
+      && Number.isFinite(tickSpacing)
+      && tickSpacing > 0
+      && coverageUpperTick > coverageLowerTick
+      ? (coverageUpperTick - coverageLowerTick) / tickSpacing
+      : null;
     // invert 情况下 tickLower 对应较大价格（现实"上限"），所以文字显示要互换
     const lowerText = lowerPrice !== null && upperPrice !== null ? Math.min(lowerPrice, upperPrice) : null;
     const upperText = lowerPrice !== null && upperPrice !== null ? Math.max(lowerPrice, upperPrice) : null;
+    const widthPct = Number.isFinite(currentPrice)
+      && currentPrice > 0
+      && Number.isFinite(coverageLowerText)
+      && Number.isFinite(coverageUpperText)
+      && coverageUpperText > coverageLowerText
+      ? ((coverageUpperText - coverageLowerText) / currentPrice) * 100
+      : null;
     // 计价代币单位：invert=true 时是 token0，否则是 token1
     const toPct = (value) => {
       if (!Number.isFinite(currentPrice) || currentPrice <= 0 || !Number.isFinite(value) || value <= 0) return null;
@@ -1353,7 +1396,9 @@ export default function OpenPositionModal({
       quoteSymbol,
       baseSymbol,
       gridStepPctText: Number.isFinite(gridStepPct) ? formatRangePercentCompact(gridStepPct) : '--',
-      tickSpacing: Number(rangeEditor?.tick_spacing),
+      gridCountText: Number.isFinite(gridCount) && gridCount > 0 ? `${formatGridCount(gridCount)} 格` : '--',
+      widthPctText: Number.isFinite(widthPct) && widthPct > 0 ? `总宽 ${formatRangePercentCompact(widthPct)}` : '--',
+      tickSpacing,
     };
   }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals, invertPrice, token0Symbol, token1Symbol]);
   const resolvedSelectionShape = useMemo(() => {
@@ -1725,16 +1770,29 @@ export default function OpenPositionModal({
                     <span className="modal-range-label">区间设置</span>
                   </div>
                   {priceRange?.gridStepPctText && priceRange.gridStepPctText !== '--' ? (
-                    <div style={{
-                      padding: '5px 10px',
-                      borderRadius: 999,
-                      border: '1px solid rgba(148, 163, 184, 0.18)',
-                      background: 'rgba(15, 23, 42, 0.22)',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: 'var(--text-muted)',
-                    }}>
-                      每格约 {priceRange.gridStepPctText}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <div style={{
+                        padding: '5px 10px',
+                        borderRadius: 999,
+                        border: '1px solid rgba(148, 163, 184, 0.18)',
+                        background: 'rgba(15, 23, 42, 0.22)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: 'var(--text-muted)',
+                      }}>
+                        每格约 {priceRange.gridStepPctText}
+                      </div>
+                      <div style={{
+                        padding: '5px 10px',
+                        borderRadius: 999,
+                        border: '1px solid rgba(188, 255, 47, 0.24)',
+                        background: 'rgba(188, 255, 47, 0.08)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: 'var(--text)',
+                      }}>
+                        已选 {priceRange.gridCountText} / {priceRange.widthPctText}
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -2414,6 +2472,12 @@ export default function OpenPositionModal({
                         <span>百分比映射</span>
                         <strong style={{ color: 'var(--text)' }}>
                           {formatRangePercentCompact(rangeEditor?.range_lower_pct)} / {formatRangePercentCompact(rangeEditor?.range_upper_pct)}
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>已选范围</span>
+                        <strong style={{ color: 'var(--text)' }}>
+                          {priceRange ? `${priceRange.gridCountText} / ${priceRange.widthPctText}` : '--'}
                         </strong>
                       </div>
                     </div>

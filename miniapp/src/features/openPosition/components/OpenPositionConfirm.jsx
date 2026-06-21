@@ -28,6 +28,10 @@ export function OpenPositionOrderSummary({
                     <span className="text-[13px] text-zinc-500 dark:text-white/45">区间偏移</span>
                     <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{priceRange ? `${priceRange.lowerPctText} / ${priceRange.upperPctText}` : '--'}</span>
                 </div>
+                <div className="flex items-center justify-between gap-3">
+                    <span className="text-[13px] text-zinc-500 dark:text-white/45">区间覆盖</span>
+                    <span className="text-[13px] font-semibold tabular-nums text-zinc-900 dark:text-white/90">{priceRange ? `${priceRange.gridCountText} / ${priceRange.widthPctText}` : '--'}</span>
+                </div>
             </div>
         </div>
     );

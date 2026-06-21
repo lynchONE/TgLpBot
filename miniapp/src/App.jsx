@@ -107,6 +107,8 @@ import {
     estimateDisplayGridStepPercent,
     normalizeDisplayPriceTickRange,
     nudgeDisplayPriceBoundary,
+    roundDownToTickSpacing,
+    roundUpToTickSpacing,
     tickToPoolPrice,
 } from './features/openPosition/tickMath';
 import {
@@ -138,6 +140,14 @@ const CHAIN_SELECT_OPTIONS = [
     { value: 'bsc', label: 'BSC' },
     { value: 'base', label: 'Base' },
 ];
+
+function formatGridCount(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '--';
+    if (Number.isInteger(num)) return String(num);
+    if (num >= 10) return num.toFixed(1).replace(/\.0$/, '');
+    return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
 
 const icons = {
     bot: Bot,
@@ -582,6 +592,43 @@ export default function App() {
             openPositionToken0Decimals,
             openPositionToken1Decimals,
         );
+        const tickSpacing = Number(openPositionEffectiveRangeEditor?.tick_spacing);
+        const coverageLowerTick = openPositionRangeInputMode === 'percentage'
+            && Number.isInteger(resolvedLowerTick)
+            && Number.isFinite(tickSpacing)
+            && tickSpacing > 0
+            ? roundDownToTickSpacing(resolvedLowerTick, tickSpacing)
+            : resolvedLowerTick;
+        const coverageUpperTick = openPositionRangeInputMode === 'percentage'
+            && Number.isInteger(resolvedUpperTick)
+            && Number.isFinite(tickSpacing)
+            && tickSpacing > 0
+            ? roundUpToTickSpacing(resolvedUpperTick, tickSpacing)
+            : resolvedUpperTick;
+        const coverageLowerPoolPrice = Number.isInteger(coverageLowerTick)
+            ? tickToPoolPrice(coverageLowerTick, openPositionToken0Decimals, openPositionToken1Decimals)
+            : null;
+        const coverageUpperPoolPrice = Number.isInteger(coverageUpperTick)
+            ? tickToPoolPrice(coverageUpperTick, openPositionToken0Decimals, openPositionToken1Decimals)
+            : null;
+        const coverageLowerDisplay = coverageLowerPoolPrice ? applyDisplay(coverageLowerPoolPrice) : null;
+        const coverageUpperDisplay = coverageUpperPoolPrice ? applyDisplay(coverageUpperPoolPrice) : null;
+        const coverageDisplayMin = coverageLowerDisplay !== null && coverageUpperDisplay !== null ? Math.min(coverageLowerDisplay, coverageUpperDisplay) : null;
+        const coverageDisplayMax = coverageLowerDisplay !== null && coverageUpperDisplay !== null ? Math.max(coverageLowerDisplay, coverageUpperDisplay) : null;
+        const gridCount = Number.isInteger(coverageLowerTick)
+            && Number.isInteger(coverageUpperTick)
+            && Number.isFinite(tickSpacing)
+            && tickSpacing > 0
+            && coverageUpperTick > coverageLowerTick
+            ? (coverageUpperTick - coverageLowerTick) / tickSpacing
+            : null;
+        const widthPct = Number.isFinite(currentDisplay)
+            && currentDisplay > 0
+            && Number.isFinite(coverageDisplayMin)
+            && Number.isFinite(coverageDisplayMax)
+            && coverageDisplayMax > coverageDisplayMin
+            ? ((coverageDisplayMax - coverageDisplayMin) / currentDisplay) * 100
+            : null;
         const toPct = (value) => {
             if (!Number.isFinite(currentDisplay) || currentDisplay <= 0 || !Number.isFinite(value) || value <= 0) return null;
             return ((value / currentDisplay) - 1) * 100;
@@ -595,7 +642,9 @@ export default function App() {
             baseSymbol: openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol,
             quoteSymbol: openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol,
             gridStepPctText: Number.isFinite(gridStepPct) ? formatRangePercentCompact(gridStepPct) : '--',
-            tickSpacing: Number(openPositionEffectiveRangeEditor?.tick_spacing),
+            gridCountText: Number.isFinite(gridCount) && gridCount > 0 ? `${formatGridCount(gridCount)} 格` : '--',
+            widthPctText: Number.isFinite(widthPct) && widthPct > 0 ? `总宽 ${formatRangePercentCompact(widthPct)}` : '--',
+            tickSpacing,
         };
     }, [
         openPositionLiqProfile,
@@ -3660,9 +3709,15 @@ export default function App() {
                                             </div>
                                         </div>
                                         {openPositionEffectiveRangeEditor ? (
-                                            <div className="mt-2 flex justify-between px-1 text-[10px] text-zinc-500 dark:text-white/50">
-                                                <span>现价：{openPositionPriceRange?.currentText || '--'}</span>
-                                                <span>目标：{formatPriceValue(openPositionEffectiveRangeEditor?.range_lower_price)} - {formatPriceValue(openPositionEffectiveRangeEditor?.range_upper_price)}</span>
+                                            <div className="mt-2 grid gap-1 px-1 text-[10px] text-zinc-500 dark:text-white/50">
+                                                <div className="flex justify-between gap-3">
+                                                    <span>现价：{openPositionPriceRange?.currentText || '--'}</span>
+                                                    <span>目标：{formatPriceValue(openPositionEffectiveRangeEditor?.range_lower_price)} - {formatPriceValue(openPositionEffectiveRangeEditor?.range_upper_price)}</span>
+                                                </div>
+                                                <div className="flex justify-between gap-3">
+                                                    <span>已选：{openPositionPriceRange ? openPositionPriceRange.gridCountText : '--'}</span>
+                                                    <span>{openPositionPriceRange ? openPositionPriceRange.widthPctText : '总宽 --'}</span>
+                                                </div>
                                             </div>
                                         ) : null}
                                     </div>
@@ -3787,6 +3842,12 @@ export default function App() {
                                                 <div className="flex items-center justify-between gap-3">
                                                     <span>当前价格</span>
                                                     <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <span>已选范围</span>
+                                                    <span className="font-semibold text-zinc-900 dark:text-white/90">
+                                                        {openPositionPriceRange ? `${openPositionPriceRange.gridCountText} / ${openPositionPriceRange.widthPctText}` : '--'}
+                                                    </span>
                                                 </div>
                                             </div>
                                         </div>
