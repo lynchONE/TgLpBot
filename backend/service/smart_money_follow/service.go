@@ -123,23 +123,27 @@ type FollowConfigEnvelopeBarkStatus struct {
 }
 
 type FollowConfigStatus struct {
-	ConfigID             uint       `json:"config_id"`
-	Enabled              bool       `json:"enabled"`
-	ExecutionWalletCount int        `json:"execution_wallet_count"`
-	ExecutionWalletMode  string     `json:"execution_wallet_mode"`
-	OpenTasks            int        `json:"open_tasks"`
-	ClosedTasks          int        `json:"closed_tasks"`
-	RealizedPnLUSDT      float64    `json:"realized_pnl_usdt"`
-	UnrealizedPnLUSDT    float64    `json:"unrealized_pnl_usdt"`
-	TotalPnLUSDT         float64    `json:"total_pnl_usdt"`
-	TakeProfitUSDT       float64    `json:"take_profit_usdt"`
-	StopLossUSDT         float64    `json:"stop_loss_usdt"`
-	StopTriggeredAt      *time.Time `json:"stop_triggered_at,omitempty"`
-	StopTriggeredReason  string     `json:"stop_triggered_reason"`
-	StopTriggeredPnLUSDT float64    `json:"stop_triggered_pnl_usdt"`
-	LastFollowTaskID     uint       `json:"last_follow_task_id,omitempty"`
-	LastFollowTaskAt     *time.Time `json:"last_follow_task_at,omitempty"`
-	PnLError             string     `json:"pnl_error,omitempty"`
+	ConfigID                  uint       `json:"config_id"`
+	Enabled                   bool       `json:"enabled"`
+	ExecutionWalletCount      int        `json:"execution_wallet_count"`
+	ExecutionWalletMode       string     `json:"execution_wallet_mode"`
+	OpenTasks                 int        `json:"open_tasks"`
+	ClosedTasks               int        `json:"closed_tasks"`
+	RealizedPnLUSDT           float64    `json:"realized_pnl_usdt"`
+	UnrealizedPnLUSDT         float64    `json:"unrealized_pnl_usdt"`
+	TotalPnLUSDT              float64    `json:"total_pnl_usdt"`
+	PnLBaselineUSDT           float64    `json:"pnl_baseline_usdt"`
+	PnLBaselineRealizedUSDT   float64    `json:"pnl_baseline_realized_usdt"`
+	PnLBaselineUnrealizedUSDT float64    `json:"pnl_baseline_unrealized_usdt"`
+	PnLBaselineAt             *time.Time `json:"pnl_baseline_at,omitempty"`
+	TakeProfitUSDT            float64    `json:"take_profit_usdt"`
+	StopLossUSDT              float64    `json:"stop_loss_usdt"`
+	StopTriggeredAt           *time.Time `json:"stop_triggered_at,omitempty"`
+	StopTriggeredReason       string     `json:"stop_triggered_reason"`
+	StopTriggeredPnLUSDT      float64    `json:"stop_triggered_pnl_usdt"`
+	LastFollowTaskID          uint       `json:"last_follow_task_id,omitempty"`
+	LastFollowTaskAt          *time.Time `json:"last_follow_task_at,omitempty"`
+	PnLError                  string     `json:"pnl_error,omitempty"`
 }
 
 type executionWalletChoice struct {
@@ -385,55 +389,57 @@ func (s *Service) RecalculateConfigPnL(ctx context.Context, userID uint, id uint
 		return nil, fmt.Errorf("load follow config failed: %w", err)
 	}
 
-	status, err := buildFollowStatus(ctx, &cfg, strategy.NewPnLService())
+	rawStatus, err := buildFollowStatusWithBaseline(ctx, &cfg, strategy.NewPnLService(), false)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(status.PnLError) != "" {
-		return nil, fmt.Errorf("recalculate follow pnl failed: %s", status.PnLError)
+	if strings.TrimSpace(rawStatus.PnLError) != "" {
+		return nil, fmt.Errorf("recalculate follow pnl failed: %s", rawStatus.PnLError)
 	}
 
-	reason := followRiskStopReason(&cfg, status.TotalPnLUSDT)
 	wasRiskStopped := cfg.StopTriggeredAt != nil || strings.TrimSpace(cfg.StopTriggeredReason) != ""
+	now := time.Now()
+	updates := map[string]any{
+		"pnl_baseline_usdt":            rawStatus.TotalPnLUSDT,
+		"pnl_baseline_realized_usdt":   rawStatus.RealizedPnLUSDT,
+		"pnl_baseline_unrealized_usdt": rawStatus.UnrealizedPnLUSDT,
+		"pnl_baseline_at":              &now,
+		"stop_triggered_at":            nil,
+		"stop_triggered_reason":        "",
+		"stop_triggered_pnl_usdt":      0,
+	}
 	result := &RecalculatePnLResult{
-		Status:    status,
-		Reason:    reason,
-		Triggered: reason != "",
+		Reason:    "",
+		Triggered: false,
+	}
+	if wasRiskStopped {
+		updates["enabled"] = true
+		result.Reenabled = !cfg.Enabled
 	}
 
-	updates := map[string]any{}
-	if reason != "" {
-		now := time.Now()
-		updates["enabled"] = false
-		updates["stop_triggered_at"] = &now
-		updates["stop_triggered_reason"] = reason
-		updates["stop_triggered_pnl_usdt"] = status.TotalPnLUSDT
-		status.Enabled = false
-		status.StopTriggeredAt = &now
-		status.StopTriggeredReason = reason
-		status.StopTriggeredPnLUSDT = status.TotalPnLUSDT
-	} else if wasRiskStopped || cfg.StopTriggeredPnLUSDT != 0 {
-		updates["stop_triggered_at"] = nil
-		updates["stop_triggered_reason"] = ""
-		updates["stop_triggered_pnl_usdt"] = 0
-		if wasRiskStopped {
-			updates["enabled"] = true
-			result.Reenabled = !cfg.Enabled
-			status.Enabled = true
-		}
-		status.StopTriggeredAt = nil
-		status.StopTriggeredReason = ""
-		status.StopTriggeredPnLUSDT = 0
+	if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowConfig{}).
+		Where("id = ? AND user_id = ?", cfg.ID, userID).
+		Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("update recalculated follow pnl baseline failed: %w", err)
 	}
 
-	if len(updates) > 0 {
-		if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyFollowConfig{}).
-			Where("id = ? AND user_id = ?", cfg.ID, userID).
-			Updates(updates).Error; err != nil {
-			return nil, fmt.Errorf("update recalculated follow pnl state failed: %w", err)
-		}
-		result.Status = status
+	cfg.PnLBaselineUSDT = rawStatus.TotalPnLUSDT
+	cfg.PnLBaselineRealizedUSDT = rawStatus.RealizedPnLUSDT
+	cfg.PnLBaselineUnrealizedUSDT = rawStatus.UnrealizedPnLUSDT
+	cfg.PnLBaselineAt = &now
+	cfg.StopTriggeredAt = nil
+	cfg.StopTriggeredReason = ""
+	cfg.StopTriggeredPnLUSDT = 0
+	if wasRiskStopped {
+		cfg.Enabled = true
 	}
+	status := rawStatus
+	status.Enabled = cfg.Enabled
+	status.StopTriggeredAt = nil
+	status.StopTriggeredReason = ""
+	status.StopTriggeredPnLUSDT = 0
+	applyFollowPnLBaseline(&status, &cfg)
+	result.Status = status
 	return result, nil
 }
 
@@ -2051,6 +2057,10 @@ func (s *Service) buildFollowStatuses(ctx context.Context, configs []models.Smar
 }
 
 func buildFollowStatus(ctx context.Context, cfg *models.SmartMoneyFollowConfig, pnlSvc *strategy.PnLService) (FollowConfigStatus, error) {
+	return buildFollowStatusWithBaseline(ctx, cfg, pnlSvc, true)
+}
+
+func buildFollowStatusWithBaseline(ctx context.Context, cfg *models.SmartMoneyFollowConfig, pnlSvc *strategy.PnLService, applyBaseline bool) (FollowConfigStatus, error) {
 	if cfg == nil {
 		return FollowConfigStatus{}, fmt.Errorf("follow config is nil")
 	}
@@ -2058,15 +2068,19 @@ func buildFollowStatus(ctx context.Context, cfg *models.SmartMoneyFollowConfig, 
 		pnlSvc = strategy.NewPnLService()
 	}
 	status := FollowConfigStatus{
-		ConfigID:             cfg.ID,
-		Enabled:              cfg.Enabled,
-		ExecutionWalletCount: len(configExecutionWalletIDs(cfg)),
-		ExecutionWalletMode:  normalizeExecutionWalletMode(cfg.ExecutionWalletMode),
-		TakeProfitUSDT:       cfg.TakeProfitUSDT,
-		StopLossUSDT:         cfg.StopLossUSDT,
-		StopTriggeredAt:      cfg.StopTriggeredAt,
-		StopTriggeredReason:  strings.TrimSpace(cfg.StopTriggeredReason),
-		StopTriggeredPnLUSDT: cfg.StopTriggeredPnLUSDT,
+		ConfigID:                  cfg.ID,
+		Enabled:                   cfg.Enabled,
+		ExecutionWalletCount:      len(configExecutionWalletIDs(cfg)),
+		ExecutionWalletMode:       normalizeExecutionWalletMode(cfg.ExecutionWalletMode),
+		PnLBaselineUSDT:           roundFollowPnL(cfg.PnLBaselineUSDT),
+		PnLBaselineRealizedUSDT:   roundFollowPnL(cfg.PnLBaselineRealizedUSDT),
+		PnLBaselineUnrealizedUSDT: roundFollowPnL(cfg.PnLBaselineUnrealizedUSDT),
+		PnLBaselineAt:             cfg.PnLBaselineAt,
+		TakeProfitUSDT:            cfg.TakeProfitUSDT,
+		StopLossUSDT:              cfg.StopLossUSDT,
+		StopTriggeredAt:           cfg.StopTriggeredAt,
+		StopTriggeredReason:       strings.TrimSpace(cfg.StopTriggeredReason),
+		StopTriggeredPnLUSDT:      cfg.StopTriggeredPnLUSDT,
 	}
 	var mappings []models.SmartMoneyFollowTask
 	if err := database.DB.WithContext(ctx).
@@ -2130,6 +2144,9 @@ func buildFollowStatus(ctx context.Context, cfg *models.SmartMoneyFollowConfig, 
 	}
 	status.UnrealizedPnLUSDT = roundFollowPnL(status.UnrealizedPnLUSDT)
 	status.TotalPnLUSDT = roundFollowPnL(status.RealizedPnLUSDT + status.UnrealizedPnLUSDT)
+	if applyBaseline {
+		applyFollowPnLBaseline(&status, cfg)
+	}
 	if len(pnlErrors) > 0 {
 		status.PnLError = strings.Join(pnlErrors, "; ")
 	}
@@ -2177,6 +2194,16 @@ func weiToUSDTFloat(value *big.Int) float64 {
 
 func roundFollowPnL(value float64) float64 {
 	return math.Round(value*10000) / 10000
+}
+
+func applyFollowPnLBaseline(status *FollowConfigStatus, cfg *models.SmartMoneyFollowConfig) {
+	status.PnLBaselineUSDT = roundFollowPnL(cfg.PnLBaselineUSDT)
+	status.PnLBaselineRealizedUSDT = roundFollowPnL(cfg.PnLBaselineRealizedUSDT)
+	status.PnLBaselineUnrealizedUSDT = roundFollowPnL(cfg.PnLBaselineUnrealizedUSDT)
+	status.PnLBaselineAt = cfg.PnLBaselineAt
+	status.RealizedPnLUSDT = roundFollowPnL(status.RealizedPnLUSDT - status.PnLBaselineRealizedUSDT)
+	status.UnrealizedPnLUSDT = roundFollowPnL(status.UnrealizedPnLUSDT - status.PnLBaselineUnrealizedUSDT)
+	status.TotalPnLUSDT = roundFollowPnL(status.TotalPnLUSDT - status.PnLBaselineUSDT)
 }
 
 func followRiskStopReason(cfg *models.SmartMoneyFollowConfig, totalPnLUSDT float64) string {

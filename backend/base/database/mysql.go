@@ -595,6 +595,18 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 	if err := ensureColumnExists(tableName, "stop_loss_usdt", "DECIMAL(20,8) NULL"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(tableName, "pnl_baseline_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "pnl_baseline_realized_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "pnl_baseline_unrealized_usdt", "DECIMAL(20,8) NULL"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(tableName, "pnl_baseline_at", "DATETIME(3) NULL"); err != nil {
+		return err
+	}
 	if err := ensureColumnExists(tableName, "stop_triggered_at", "DATETIME(3) NULL"); err != nil {
 		return err
 	}
@@ -860,6 +872,27 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		WHERE stop_loss_usdt IS NULL OR stop_loss_usdt < 0
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("backfill %s.stop_loss_usdt: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET pnl_baseline_usdt = 0
+		WHERE pnl_baseline_usdt IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.pnl_baseline_usdt: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET pnl_baseline_realized_usdt = 0
+		WHERE pnl_baseline_realized_usdt IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.pnl_baseline_realized_usdt: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET pnl_baseline_unrealized_usdt = 0
+		WHERE pnl_baseline_unrealized_usdt IS NULL
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("backfill %s.pnl_baseline_unrealized_usdt: %w", tableName, err)
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s

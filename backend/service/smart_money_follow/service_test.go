@@ -85,6 +85,55 @@ func TestFollowRiskStopReason(t *testing.T) {
 	}
 }
 
+func TestApplyFollowPnLBaselineClearsDisplayedPnL(t *testing.T) {
+	baselineAt := time.Now()
+	cfg := &models.SmartMoneyFollowConfig{
+		PnLBaselineRealizedUSDT:   120.5,
+		PnLBaselineUnrealizedUSDT: -20.25,
+		PnLBaselineUSDT:           100.25,
+		PnLBaselineAt:             &baselineAt,
+	}
+	status := FollowConfigStatus{
+		RealizedPnLUSDT:   120.5,
+		UnrealizedPnLUSDT: -20.25,
+		TotalPnLUSDT:      100.25,
+	}
+
+	applyFollowPnLBaseline(&status, cfg)
+
+	if status.RealizedPnLUSDT != 0 || status.UnrealizedPnLUSDT != 0 || status.TotalPnLUSDT != 0 {
+		t.Fatalf("display pnl = realized %v unrealized %v total %v, want all zero", status.RealizedPnLUSDT, status.UnrealizedPnLUSDT, status.TotalPnLUSDT)
+	}
+	if status.PnLBaselineAt == nil || !status.PnLBaselineAt.Equal(baselineAt) {
+		t.Fatal("expected baseline timestamp to be exposed")
+	}
+}
+
+func TestApplyFollowPnLBaselineOffsetsFuturePnL(t *testing.T) {
+	cfg := &models.SmartMoneyFollowConfig{
+		PnLBaselineRealizedUSDT:   120,
+		PnLBaselineUnrealizedUSDT: -20,
+		PnLBaselineUSDT:           100,
+	}
+	status := FollowConfigStatus{
+		RealizedPnLUSDT:   130,
+		UnrealizedPnLUSDT: -5,
+		TotalPnLUSDT:      125,
+	}
+
+	applyFollowPnLBaseline(&status, cfg)
+
+	if status.RealizedPnLUSDT != 10 {
+		t.Fatalf("realized pnl = %v, want 10", status.RealizedPnLUSDT)
+	}
+	if status.UnrealizedPnLUSDT != 15 {
+		t.Fatalf("unrealized pnl = %v, want 15", status.UnrealizedPnLUSDT)
+	}
+	if status.TotalPnLUSDT != 25 {
+		t.Fatalf("total pnl = %v, want 25", status.TotalPnLUSDT)
+	}
+}
+
 func TestCalculateFollowAmountRatioRequiresEventUSD(t *testing.T) {
 	cfg := &models.SmartMoneyFollowConfig{
 		AmountMode: models.SmartMoneyFollowAmountModeRatio,
