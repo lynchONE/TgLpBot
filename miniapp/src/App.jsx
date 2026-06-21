@@ -3381,8 +3381,11 @@ export default function App() {
                             onClick={() => setSettingsOpen(false)}
                             aria-label="关闭设置"
                         />
-                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none">
-                            <div className="flex items-center justify-between">
+                        <div
+                            className="absolute inset-x-0 bottom-0 flex flex-col overflow-hidden rounded-t-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#14171c] dark:shadow-none sm:left-1/2 sm:right-auto sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:rounded-2xl"
+                            style={{ maxHeight: 'calc(100vh - 0.75rem - env(safe-area-inset-top))' }}
+                        >
+                            <div className="flex shrink-0 items-center justify-between border-b border-zinc-200/70 px-4 py-3 dark:border-white/10">
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
                                 <button
                                     type="button"
@@ -3394,7 +3397,11 @@ export default function App() {
                                 </button>
                             </div>
 
-                            <div className="mt-4 space-y-4">
+                            <div
+                                className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4"
+                                style={{ WebkitOverflowScrolling: 'touch' }}
+                            >
+                                <div className="space-y-4">
                                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">主题配色</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">切换 Mini App 的强调色，只影响当前设备上的界面展示。</div>
@@ -3484,6 +3491,7 @@ export default function App() {
                                     >
                                         全部恢复默认
                                     </button>
+                                </div>
                                 </div>
                             </div>
                         </div>
