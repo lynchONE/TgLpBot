@@ -590,6 +590,33 @@ func tradeProfitUSDT(closeReceived, openSpent, totalGasUSDT *big.Int) *big.Int {
 	return profit
 }
 
+func RealizedProfitUSDTFromBalanceSnapshots(record *models.TradeRecord) (*big.Int, bool, error) {
+	if record == nil {
+		return nil, false, fmt.Errorf("trade record is nil")
+	}
+	if strings.TrimSpace(record.OpenStableBefore) == "" || strings.TrimSpace(record.CloseStableAfter) == "" {
+		return nil, false, nil
+	}
+	openStableBefore, err := parseBigInt(record.OpenStableBefore)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse open stable before: %w", err)
+	}
+	closeStableAfter, err := parseBigInt(record.CloseStableAfter)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse close stable after: %w", err)
+	}
+	if openStableBefore == nil || openStableBefore.Sign() <= 0 {
+		return nil, false, nil
+	}
+	totalGasUSDT, err := parseBigInt(record.TotalGasUSDT)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse total gas usdt: %w", err)
+	}
+	profit := new(big.Int).Sub(nonNilBigInt(closeStableAfter), openStableBefore)
+	profit.Sub(profit, nonNilBigInt(totalGasUSDT))
+	return profit, true, nil
+}
+
 func balanceAfterSpend(before, spent *big.Int) *big.Int {
 	after := new(big.Int).Sub(nonNilBigInt(before), nonNilBigInt(spent))
 	if after.Sign() < 0 {

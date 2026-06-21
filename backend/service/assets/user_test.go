@@ -164,6 +164,60 @@ func TestBuildUserLPStatsFromTrades(t *testing.T) {
 	}
 }
 
+func TestBuildFollowProfitCurveFromTradesUsesBalanceSnapshots(t *testing.T) {
+	timeutil.Init()
+	now := time.Date(2026, time.March, 21, 16, 20, 0, 0, timeutil.Location())
+
+	curve, err := buildFollowProfitCurveFromTrades([]userLPTradeRow{
+		{
+			ID:               1,
+			UserID:           7,
+			ProfitUSDT:       mustNegativeWeiString(t, 99),
+			OpenStableBefore: mustWeiString(t, 1000),
+			CloseStableAfter: mustWeiString(t, 1012),
+			TotalGasUSDT:     mustWeiString(t, 2),
+			ClosedAt:         locTime(2026, time.March, 21, 9, 0),
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("buildFollowProfitCurveFromTrades returned error: %v", err)
+	}
+	if len(curve) == 0 {
+		t.Fatal("expected follow profit curve")
+	}
+	got := curve[len(curve)-1]
+	if got.Day != "2026-03-21" {
+		t.Fatalf("curve latest day = %s, want 2026-03-21", got.Day)
+	}
+	if got.DailyPnLUSD != 10 || got.ValueUSD != 10 {
+		t.Fatalf("curve latest pnl = daily %.2f value %.2f, want 10/10", got.DailyPnLUSD, got.ValueUSD)
+	}
+}
+
+func TestBuildFollowProfitCurveFromTradesFallsBackToProfitUSDT(t *testing.T) {
+	timeutil.Init()
+	now := time.Date(2026, time.March, 21, 16, 20, 0, 0, timeutil.Location())
+
+	curve, err := buildFollowProfitCurveFromTrades([]userLPTradeRow{
+		{
+			ID:         1,
+			UserID:     7,
+			ProfitUSDT: mustWeiString(t, 3),
+			ClosedAt:   locTime(2026, time.March, 21, 9, 0),
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("buildFollowProfitCurveFromTrades returned error: %v", err)
+	}
+	if len(curve) == 0 {
+		t.Fatal("expected follow profit curve")
+	}
+	got := curve[len(curve)-1]
+	if got.DailyPnLUSD != 3 || got.ValueUSD != 3 {
+		t.Fatalf("curve latest pnl = daily %.2f value %.2f, want 3/3", got.DailyPnLUSD, got.ValueUSD)
+	}
+}
+
 func TestApplyUserSnapshotPnL(t *testing.T) {
 	timeutil.Init()
 	now := time.Date(2026, time.March, 21, 16, 20, 0, 0, timeutil.Location())

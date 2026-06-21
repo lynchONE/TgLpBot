@@ -2058,13 +2058,19 @@ func realizedFollowPnLUSDT(ctx context.Context, userID uint, taskIDs []uint) (fl
 	}
 	var records []models.TradeRecord
 	if err := database.DB.WithContext(ctx).
-		Select("id, user_id, task_id, profit_usdt, status").
+		Select("id, user_id, task_id, profit_usdt, open_stable_before, close_stable_after, total_gas_usdt, status").
 		Where("user_id = ? AND task_id IN ? AND status = ?", userID, taskIDs, models.TradeStatusClosed).
 		Find(&records).Error; err != nil {
 		return 0, fmt.Errorf("list follow trade records failed: %w", err)
 	}
 	totalWei := big.NewInt(0)
 	for _, record := range records {
+		if profitWei, ok, err := trade.RealizedProfitUSDTFromBalanceSnapshots(&record); err != nil {
+			return 0, fmt.Errorf("invalid follow trade balance snapshots record_id=%d: %w", record.ID, err)
+		} else if ok {
+			totalWei.Add(totalWei, profitWei)
+			continue
+		}
 		profitWei, err := convert.ParseBigInt(record.ProfitUSDT)
 		if err != nil {
 			return 0, fmt.Errorf("invalid follow trade profit record_id=%d: %w", record.ID, err)

@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/base/timeutil"
 	sm "TgLpBot/service/smart_money"
+	tradesvc "TgLpBot/service/trade"
 	"context"
 	"fmt"
 	"log"
@@ -30,14 +31,17 @@ func activeStrategyStatuses() []models.StrategyStatus {
 }
 
 type userLPTradeRow struct {
-	ID           uint
-	UserID       uint
-	PoolID       string
-	Token0Symbol string
-	Token1Symbol string
-	Chain        string
-	ProfitUSDT   string
-	ClosedAt     *time.Time
+	ID               uint
+	UserID           uint
+	PoolID           string
+	Token0Symbol     string
+	Token1Symbol     string
+	Chain            string
+	ProfitUSDT       string
+	OpenStableBefore string
+	CloseStableAfter string
+	TotalGasUSDT     string
+	ClosedAt         *time.Time
 }
 
 type userLPBucket struct {
@@ -162,6 +166,28 @@ func parseTradeProfitWei(record userLPTradeRow) *big.Int {
 	return value
 }
 
+func parseFollowTradeProfitWei(record userLPTradeRow) (*big.Int, error) {
+	tradeRecord := models.TradeRecord{
+		ID:               record.ID,
+		UserID:           record.UserID,
+		TaskID:           0,
+		ProfitUSDT:       record.ProfitUSDT,
+		OpenStableBefore: record.OpenStableBefore,
+		CloseStableAfter: record.CloseStableAfter,
+		TotalGasUSDT:     record.TotalGasUSDT,
+	}
+	if profitWei, ok, err := tradesvc.RealizedProfitUSDTFromBalanceSnapshots(&tradeRecord); err != nil {
+		return nil, err
+	} else if ok {
+		return profitWei, nil
+	}
+	value, err := convert.ParseBigInt(record.ProfitUSDT)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
 func pointWithPnL(day string, pnl float64) UserLPDailyPoint {
 	pnl = round2(pnl)
 	return UserLPDailyPoint{
@@ -284,7 +310,7 @@ func buildUserLPStatsFromTrades(trades []userLPTradeRow, now time.Time) UserLPSt
 	}
 }
 
-func buildFollowProfitCurveFromTrades(trades []userLPTradeRow, now time.Time) []UserLPProfitCurvePoint {
+func buildFollowProfitCurveFromTrades(trades []userLPTradeRow, now time.Time) ([]UserLPProfitCurvePoint, error) {
 	startOfToday := dayStart(now)
 	historyStart := startOfToday.AddDate(0, 0, -30)
 	dailyBuckets := make(map[string]*userLPBucket)
@@ -294,7 +320,10 @@ func buildFollowProfitCurveFromTrades(trades []userLPTradeRow, now time.Time) []
 			continue
 		}
 		closedAt := trade.ClosedAt.In(timeutil.Location())
-		profitWei := parseTradeProfitWei(trade)
+		profitWei, err := parseFollowTradeProfitWei(trade)
+		if err != nil {
+			return nil, fmt.Errorf("invalid follow trade profit record_id=%d user_id=%d: %w", trade.ID, trade.UserID, err)
+		}
 		if !closedAt.Before(startOfToday) {
 			todayBucket.addProfit(profitWei)
 			continue
@@ -321,7 +350,7 @@ func buildFollowProfitCurveFromTrades(trades []userLPTradeRow, now time.Time) []
 		history = append(history, pointWithPnL(dayKey, pnl))
 	}
 	todayPoint := pointWithPnL(formatDay(now), profitWeiToUSD(todayBucket.ProfitWei))
-	return buildUserProfitCurve(history, &todayPoint, nil)
+	return buildUserProfitCurve(history, &todayPoint, nil), nil
 }
 
 func parseSnapshotDay(dayKey string) (time.Time, bool) {
@@ -662,7 +691,7 @@ func (s *Service) loadUserFollowLPTrades(ctx context.Context, userID uint, start
 	query := database.DB.WithContext(ctx).
 		Table("trade_records AS tr").
 		Joins("JOIN smart_money_follow_tasks AS ft ON ft.task_id = tr.task_id AND ft.user_id = tr.user_id").
-		Select("tr.id, tr.user_id, tr.pool_id, tr.token0_symbol, tr.token1_symbol, tr.chain, tr.profit_usdt, tr.closed_at").
+		Select("tr.id, tr.user_id, tr.pool_id, tr.token0_symbol, tr.token1_symbol, tr.chain, tr.profit_usdt, tr.open_stable_before, tr.close_stable_after, tr.total_gas_usdt, tr.closed_at").
 		Where("tr.status = ? AND tr.closed_at >= ? AND tr.closed_at < ?", models.TradeStatusClosed, start, end)
 	if userID > 0 {
 		query = query.Where("tr.user_id = ?", userID)
@@ -1263,7 +1292,10 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 	if err != nil {
 		return nil, err
 	}
-	resp.FollowProfitCurve = buildFollowProfitCurveFromTrades(followTrades, now)
+	resp.FollowProfitCurve, err = buildFollowProfitCurveFromTrades(followTrades, now)
+	if err != nil {
+		return nil, err
+	}
 	if profitBaseline != nil {
 		resp.ProfitBaseline = &UserLPProfitBaselineResponse{
 			Day:        profitBaseline.Day,

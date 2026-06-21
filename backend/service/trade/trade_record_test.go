@@ -67,6 +67,43 @@ func TestTradeProfitUSDT(t *testing.T) {
 	}
 }
 
+func TestRealizedProfitUSDTFromBalanceSnapshots(t *testing.T) {
+	t.Parallel()
+
+	got, ok, err := RealizedProfitUSDTFromBalanceSnapshots(&models.TradeRecord{
+		OpenStableBefore: "1000",
+		CloseStableAfter: "1125",
+		TotalGasUSDT:     "5",
+		ProfitUSDT:       "-999",
+	})
+	if err != nil {
+		t.Fatalf("RealizedProfitUSDTFromBalanceSnapshots returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected balance snapshot profit to be available")
+	}
+	if got == nil || got.String() != "120" {
+		t.Fatalf("snapshot profit = %v, want 120", got)
+	}
+}
+
+func TestRealizedProfitUSDTFromBalanceSnapshotsFallsBackWhenBaselineMissing(t *testing.T) {
+	t.Parallel()
+
+	got, ok, err := RealizedProfitUSDTFromBalanceSnapshots(&models.TradeRecord{
+		OpenStableBefore: "0",
+		CloseStableAfter: "1125",
+		TotalGasUSDT:     "5",
+		ProfitUSDT:       "120",
+	})
+	if err != nil {
+		t.Fatalf("RealizedProfitUSDTFromBalanceSnapshots returned error: %v", err)
+	}
+	if ok {
+		t.Fatalf("snapshot profit available = true, value=%v; want unavailable", got)
+	}
+}
+
 func TestStableAmountTo18(t *testing.T) {
 	previous := config.AppConfig
 	config.AppConfig = &config.Config{
