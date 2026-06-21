@@ -207,6 +207,7 @@ func TestPauseBlocksExitAction(t *testing.T) {
 		{action: ExitActionRebalance, want: true},
 		{action: ExitActionStopLoss, want: true},
 		{action: ExitActionOutOfRangeStop, want: true},
+		{action: ExitActionFollowDownside, want: true},
 	}
 
 	for _, tt := range tests {
@@ -218,5 +219,32 @@ func TestPauseBlocksExitAction(t *testing.T) {
 				t.Fatalf("pauseBlocksExitAction(%q) = %v, want %v", tt.action, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFollowDownsideExitUpdatesKeepTaskWaiting(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	updates := followDownsideExitUpdates(now)
+
+	if got := updates["status"]; got != models.StrategyStatusWaiting {
+		t.Fatalf("status = %#v, want %q", got, models.StrategyStatusWaiting)
+	}
+	if got := updates["current_liquidity"]; got != "0" {
+		t.Fatalf("current_liquidity = %#v, want 0", got)
+	}
+	if got := updates["v3_token_id"]; got != "" {
+		t.Fatalf("v3_token_id = %#v, want empty", got)
+	}
+	if got := updates["v4_token_id"]; got != "" {
+		t.Fatalf("v4_token_id = %#v, want empty", got)
+	}
+	if got := updates["rebalance_pending"]; got != false {
+		t.Fatalf("rebalance_pending = %#v, want false", got)
+	}
+	lastExitAt, ok := updates["last_exit_time"].(*time.Time)
+	if !ok || lastExitAt == nil || !lastExitAt.Equal(now) {
+		t.Fatalf("last_exit_time = %#v, want %s", updates["last_exit_time"], now)
 	}
 }

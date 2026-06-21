@@ -16,6 +16,7 @@ const (
 	ExitActionManualStop     = "manual_stop"
 	ExitActionStopLoss       = "stoploss"
 	ExitActionOutOfRangeStop = "range_stop"
+	ExitActionFollowDownside = "follow_downside_exit"
 	ExitActionRebalance      = "rebalance"
 	ExitActionSwitch         = "switch"
 )
@@ -498,6 +499,8 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 		s.finishStopAfterExit(&task, now, reason, txHashes)
 	case ExitActionOutOfRangeStop:
 		s.finishStopAfterExit(&task, now, reason, txHashes)
+	case ExitActionFollowDownside:
+		s.finishFollowDownsideExitAfterExit(&task, now, reason, txHashes)
 	case ExitActionSwitch:
 		s.executeSwitchAfterExit(&task, now, reason)
 	case ExitActionManualStop:
@@ -1143,4 +1146,80 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 		}
 	}
 	s.notify(task.UserID, msg)
+}
+
+func followDownsideExitUpdates(now time.Time) map[string]interface{} {
+	return map[string]interface{}{
+		"status":                      models.StrategyStatusWaiting,
+		"last_exit_time":              &now,
+		"current_liquidity":           "0",
+		"exit_liquidity_removed":      false,
+		"v3_position_manager_address": "",
+		"v3_token_id":                 "",
+		"v4_token_id":                 "",
+		"out_of_range_since":          nil,
+		"range_activation_pending":    false,
+		"rebalance_pending":           false,
+		"rebalance_retry_count":       0,
+		"rebalance_next_retry_at":     nil,
+		"rebalance_last_error":        "",
+		"error_message":               "",
+	}
+}
+
+func (s *StrategyService) finishFollowDownsideExitAfterExit(task *models.StrategyTask, now time.Time, title string, txHashes []string) {
+	if task == nil {
+		return
+	}
+
+	updates := followDownsideExitUpdates(now)
+	if err := database.DB.Model(task).Updates(updates).Error; err != nil {
+		log.Printf("[Strategy] task #%d save follow downside exit state failed: %v", task.ID, err)
+		return
+	}
+
+	if err := closeOpenFollowMappingsForTask(task); err != nil {
+		log.Printf("[Strategy] task #%d close follow mapping after downside exit failed: %v", task.ID, err)
+	}
+
+	task.Status = models.StrategyStatusWaiting
+	task.LastExitTime = &now
+	task.CurrentLiquidity = "0"
+	task.ExitLiquidityRemoved = false
+	task.V3PositionManagerAddress = ""
+	task.V3TokenID = ""
+	task.V4TokenID = ""
+	task.OutOfRangeSince = nil
+	task.RangeActivationPending = false
+	task.RebalancePending = false
+	task.RebalanceRetryCount = 0
+	task.RebalanceNextRetryAt = nil
+	task.RebalanceLastError = ""
+	task.ErrorMessage = ""
+
+	msg := "✅ 跟单仓位下破保护已完成，本次仓位已撤出，跟单配置继续运行。"
+	if strings.TrimSpace(title) != "" {
+		msg = fmt.Sprintf("✅ %s 完成，本次仓位已撤出，跟单配置继续运行。", localizeExitReason(title))
+	}
+	if len(txHashes) > 0 {
+		msg += "\n📝 *交易记录：*\n"
+		for i, txInfo := range txHashes {
+			parts := strings.Split(txInfo, "|")
+			if len(parts) == 2 {
+				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](%s)\n", i+1, parts[0], explorerTxURL(task.Chain, parts[1]))
+			} else {
+				msg += fmt.Sprintf("%d. [查看交易](%s)\n", i+1, explorerTxURL(task.Chain, txInfo))
+			}
+		}
+	}
+	s.notify(task.UserID, msg)
+}
+
+func closeOpenFollowMappingsForTask(task *models.StrategyTask) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	return database.DB.Model(&models.SmartMoneyFollowTask{}).
+		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.SmartMoneyFollowTaskStatusOpen).
+		Update("status", models.SmartMoneyFollowTaskStatusClosed).Error
 }

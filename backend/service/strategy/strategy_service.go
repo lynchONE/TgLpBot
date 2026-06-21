@@ -319,7 +319,7 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	if task.IsFollow {
 		if ShouldExitFollowDownside(task, isDown) {
-			s.executeOutOfRangeStop(task, now, "跟单仓位下破区间：保底撤出并停止任务")
+			s.executeFollowDownsideExit(task, now, "跟单仓位下破区间：保底撤出本次仓位")
 		}
 		return
 	}
@@ -777,6 +777,15 @@ func (s *StrategyService) executeOutOfRangeStop(task *models.StrategyTask, now t
 
 	log.Printf("[Strategy] task #%d %s, execute exit and stop", task.ID, reason)
 	s.requestExitToUSDT(task, ExitActionOutOfRangeStop, reason)
+}
+
+func (s *StrategyService) executeFollowDownsideExit(task *models.StrategyTask, now time.Time, reason string) {
+	if task == nil || task.ExitGiveUpAt != nil {
+		return
+	}
+
+	log.Printf("[Strategy] task #%d %s, execute follow downside exit", task.ID, reason)
+	s.requestExitToUSDT(task, ExitActionFollowDownside, reason)
 }
 
 func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTick int, now time.Time, reason string) {
