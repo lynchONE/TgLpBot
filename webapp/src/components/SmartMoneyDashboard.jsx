@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
-import { Wallet, Search, Plus, ExternalLink, X, Check, Activity, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal, Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings, Bell, Repeat2, Shuffle, TrendingUp, RefreshCw } from 'lucide-react';
+import { Wallet, Search, Plus, ExternalLink, X, Check, Activity, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil, SlidersHorizontal, Users, Percent, DollarSign, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Radar, Settings, Bell, Repeat2, Shuffle, TrendingUp, RefreshCw, MapPin } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPoolFeeHeatmap, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet, fetchSMZombieWallets, deleteSMZombieWallets,
@@ -281,10 +281,14 @@ function normalizeStoredSmartMoneyPoolFilter(value) {
     if (!value || typeof value !== 'object') {
         return { ...EMPTY_SMART_MONEY_POOL_FILTER };
     }
+    const positiveOrEmpty = (raw) => {
+        const parsed = parseOptionalNumber(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
     return {
-        minSmartMoneyUsd: parseOptionalNumber(value.minSmartMoneyUsd),
-        maxFeeRate: parseOptionalNumber(value.maxFeeRate),
-        minMarketCapUsd: parseOptionalNumber(value.minMarketCapUsd),
+        minSmartMoneyUsd: positiveOrEmpty(value.minSmartMoneyUsd),
+        maxFeeRate: positiveOrEmpty(value.maxFeeRate),
+        minMarketCapUsd: positiveOrEmpty(value.minMarketCapUsd),
     };
 }
 
@@ -4910,8 +4914,10 @@ function GoldenDogPanelContent({
 //  自动跟单 Panel
 // ============================================================
 
+const AUTO_FOLLOW_TASK_NAME_MAX_LENGTH = 100;
 const AUTO_FOLLOW_DRAFT_INITIAL = Object.freeze({
     id: 0,
+    task_name: '',
     target_wallet_address: '',
     target_wallet_addresses: [''],
     execution_wallet_id: '',
@@ -4941,6 +4947,28 @@ function normalizeAutoFollowWalletList(config) {
         : [config?.target_wallet_address || ''];
     const wallets = source.map((value) => String(value || '').trim()).filter(Boolean);
     return wallets.length ? wallets : [''];
+}
+
+function normalizeAutoFollowTaskName(value) {
+    const taskName = String(value == null ? '' : value).trim();
+    if ([...taskName].length > AUTO_FOLLOW_TASK_NAME_MAX_LENGTH) {
+        throw new Error(`任务名称不能超过 ${AUTO_FOLLOW_TASK_NAME_MAX_LENGTH} 个字符`);
+    }
+    return taskName;
+}
+
+function autoFollowDisplayTaskName(config) {
+    return String(config?.task_name == null ? '' : config.task_name).trim();
+}
+
+function autoFollowWalletTitle(config) {
+    const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+    return wallets.length > 1 ? `${shortAddr(wallets[0])} +${wallets.length - 1}` : shortAddr(config?.target_wallet_address);
+}
+
+function autoFollowConfigTitle(config) {
+    const taskName = autoFollowDisplayTaskName(config);
+    return taskName || autoFollowWalletTitle(config);
 }
 
 function parseAutoFollowWalletInputs(values) {
@@ -5052,6 +5080,7 @@ function createAutoFollowDraft(config) {
     const wallets = normalizeAutoFollowWalletList(config);
     return {
         id: Number(config.id) || 0,
+        task_name: normalizeAutoFollowTaskName(config.task_name),
         target_wallet_address: String(config.target_wallet_address || ''),
         target_wallet_addresses: wallets,
         execution_wallet_id: config.execution_wallet_id ? String(config.execution_wallet_id) : '',
@@ -5095,6 +5124,7 @@ function autoFollowDraftReducer(state, action) {
 
 function normalizeAutoFollowDraft(draft) {
     const wallets = parseAutoFollowWalletInputs(draft.target_wallet_addresses);
+    const taskName = normalizeAutoFollowTaskName(draft.task_name);
     const executionWalletIDs = normalizeAutoFollowExecutionWalletIDs(draft);
     if (executionWalletIDs.length === 0) {
         throw new Error('请选择执行钱包');
@@ -5155,6 +5185,7 @@ function normalizeAutoFollowDraft(draft) {
     }
     return {
         id: Number(draft.id) || 0,
+        task_name: taskName,
         target_wallet_address: wallets[0],
         target_wallet_addresses: wallets,
         execution_wallet_id: executionWalletID,
@@ -5342,6 +5373,20 @@ function AutoFollowForm({ draft, dispatch, saving, hasInitData, executionWallets
     };
     return (
         <div className="af-form">
+            <div className="af-form-row">
+                <label className="af-field-label" htmlFor="auto-follow-task-name">任务名称</label>
+                <input
+                    id="auto-follow-task-name"
+                    type="text"
+                    className="af-input"
+                    maxLength={AUTO_FOLLOW_TASK_NAME_MAX_LENGTH}
+                    placeholder="例如：监控 0xAB... 聪明钱"
+                    value={draft.task_name}
+                    onChange={(e) => dispatch({ type: 'set', payload: { task_name: e.target.value } })}
+                    autoComplete="off"
+                />
+            </div>
+
             <div className="af-form-row">
                 <div className="af-wallet-head">
                     <label className="af-field-label">执行钱包池</label>
@@ -5714,7 +5759,8 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
         : `${formatUsd(config.fixed_amount_usdt)} 固定`;
     const delayText = config.delay_mode === 'fixed_delay' ? `延时 ${config.delay_seconds}s` : '立即跟单';
     const rangeShiftGrids = Number(config.range_shift_grids) || 0;
-    const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+    const taskName = autoFollowDisplayTaskName(config);
+    const walletTitle = autoFollowWalletTitle(config);
     const takeProfit = Number(config.take_profit_usdt) || 0;
     const stopLoss = Number(config.stop_loss_usdt) || 0;
     return (
@@ -5723,7 +5769,7 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
                 <div className="af-config-addr">
                     <span className="af-config-dot" />
                     <span className="af-config-addr-text">
-                        {wallets.length > 1 ? `${shortAddr(wallets[0])} +${wallets.length - 1}` : shortAddr(config.target_wallet_address)}
+                        {taskName || walletTitle}
                     </span>
                     <span className={`af-pill ${config.enabled ? 'af-pill--on' : 'af-pill--off'}`}>
                         {config.enabled ? '运行中' : '已暂停'}
@@ -5754,6 +5800,7 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
                 </div>
             </div>
             <div className="af-config-meta">
+                {taskName ? <span className="af-meta-tag"><MapPin size={11} />{walletTitle}</span> : null}
                 <span className="af-meta-tag"><Users size={11} />{autoFollowTriggerText(config)}</span>
                 <span className="af-meta-tag"><Wallet size={11} />{formatAutoFollowExecutionWallet(config, executionWallets)}</span>
                 <span className="af-meta-tag"><Repeat2 size={11} />{autoFollowExecutionWalletModeLabel(config.execution_wallet_mode)}</span>
@@ -5773,11 +5820,13 @@ function AutoFollowConfigCard({ config, executionWallets, busy, onEdit, onToggle
     );
 }
 
-function AutoFollowTimelineCard({ item, executionWallets }) {
+function AutoFollowTimelineCard({ item, executionWallets, configByID }) {
     const event = item.event;
     const job = item.job;
     const attempt = item.attempt;
     const row = job || attempt;
+    const config = row ? configByID.get(Number(row.config_id || 0)) : null;
+    const taskName = autoFollowDisplayTaskName(config);
     const status = job?.status || attempt?.status || '';
     const info = status ? autoFollowStatusInfo(status) : null;
     const StatusIcon = info?.Icon;
@@ -5817,6 +5866,7 @@ function AutoFollowTimelineCard({ item, executionWallets }) {
                 </div>
                 <div className="af-job-row2">
                     <span className="af-job-time">{event ? getPairLabel(event) : `事件 #${row?.event_id || '—'}`}</span>
+                    {taskName ? <span className="af-job-time">{taskName}</span> : null}
                 </div>
                 <div className="af-job-row2">
                     <span className="af-job-addr">
@@ -5842,7 +5892,8 @@ function AutoFollowStatusCard({ status, config, executionWallets, recalculating,
     const takeProfit = Number(status?.take_profit_usdt) || 0;
     const stopLoss = Number(status?.stop_loss_usdt) || 0;
     const stopReason = String(status?.stop_triggered_reason || '');
-    const titleWallet = config ? formatAutoFollowExecutionWallet(config, executionWallets) : `配置 #${status?.config_id || '--'}`;
+    const taskName = autoFollowDisplayTaskName(config);
+    const titleWallet = taskName || (config ? formatAutoFollowExecutionWallet(config, executionWallets) : `配置 #${status?.config_id || '--'}`);
     return (
         <div className={`af-config-card${status?.enabled ? ' active' : ''}`}>
             <div className="af-config-head">
@@ -6097,6 +6148,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                 config: {
                     id: config.id,
                     chain: config.chain,
+                    task_name: autoFollowDisplayTaskName(config),
                     target_wallet_address: config.target_wallet_address,
                     target_wallet_addresses: normalizeAutoFollowWalletList(config).filter(Boolean),
                     execution_wallet_id: Number(config.execution_wallet_id || 0),
@@ -6311,6 +6363,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
                                     key={item.key}
                                     item={item}
                                     executionWallets={executionWallets}
+                                    configByID={configByID}
                                 />
                             ))}
                         </div>
@@ -6346,7 +6399,7 @@ function AutoFollowPanelContent({ apiBaseUrl, initData, chain = 'bsc', refreshIn
             <ConfirmDialog
                 open={Boolean(confirmTarget)}
                 title="删除跟单配置"
-                description={confirmTarget ? `确认删除对钱包 ${shortAddr(confirmTarget.target_wallet_address)} 的跟单配置？删除后将不再跟单该钱包。` : ''}
+                description={confirmTarget ? `确认删除「${autoFollowConfigTitle(confirmTarget)}」的跟单配置？删除后将不再跟单该钱包。` : ''}
                 confirmLabel="删除"
                 busy={saving}
                 onConfirm={handleDelete}

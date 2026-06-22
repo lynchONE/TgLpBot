@@ -41,6 +41,7 @@ const maxFollowJobRetryCount = 6
 const maxFollowRangeShiftGrids = 20
 const maxFollowExecutionWallets = 20
 const maxFollowRiskThresholdUSDT = 1_000_000_000
+const maxFollowTaskNameLength = 100
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -53,6 +54,7 @@ type Service struct {
 type SaveConfigInput struct {
 	ID                   uint
 	Chain                string
+	TaskName             string
 	TargetWalletAddress  string
 	TargetWallets        []string
 	ExecutionWalletID    uint
@@ -636,6 +638,7 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			updates := map[string]any{
 				"chain":                    chain,
 				"chain_id":                 chainID,
+				"task_name":                normalized.TaskName,
 				"target_wallet_address":    normalized.TargetWalletAddress,
 				"target_wallet_addresses":  models.StringArray(normalized.TargetWallets),
 				"execution_wallet_id":      normalized.ExecutionWalletID,
@@ -682,6 +685,7 @@ func (s *Service) SaveConfig(ctx context.Context, userID uint, input SaveConfigI
 			UserID:                userID,
 			Chain:                 chain,
 			ChainID:               chainID,
+			TaskName:              normalized.TaskName,
 			TargetWalletAddress:   normalized.TargetWalletAddress,
 			TargetWallets:         models.StringArray(normalized.TargetWallets),
 			ExecutionWalletID:     normalized.ExecutionWalletID,
@@ -811,6 +815,10 @@ func NormalizeSaveInput(input SaveConfigInput) (SaveConfigInput, error) {
 	}
 	if err := validateFollowRiskThreshold("stop loss", input.StopLossUSDT); err != nil {
 		return SaveConfigInput{}, err
+	}
+	input.TaskName = strings.TrimSpace(input.TaskName)
+	if len([]rune(input.TaskName)) > maxFollowTaskNameLength {
+		return SaveConfigInput{}, fmt.Errorf("task name cannot exceed %d characters", maxFollowTaskNameLength)
 	}
 	input.NotifyIntensity = smgd.NormalizeBarkIntensity(input.NotifyIntensity)
 

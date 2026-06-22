@@ -6,6 +6,7 @@ import (
 	"TgLpBot/service/liquidity"
 	poolsvc "TgLpBot/service/pool"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -234,6 +235,57 @@ func TestNormalizeSaveInputNormalizesExecutionWalletAddress(t *testing.T) {
 	}
 	if got.ExecutionWalletAddr != "0x00000000000000000000000000000000000000aa" {
 		t.Fatalf("execution wallet address = %s", got.ExecutionWalletAddr)
+	}
+}
+
+func TestNormalizeSaveInputNormalizesTaskName(t *testing.T) {
+	ensureTestChainConfig(t)
+	got, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:               "bsc",
+		TaskName:            "  monitor whale A  ",
+		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+		AmountMode:          models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:     10,
+		DelayMode:           models.SmartMoneyFollowDelayModeImmediate,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSaveInput returned error: %v", err)
+	}
+	if got.TaskName != "monitor whale A" {
+		t.Fatalf("task name = %q", got.TaskName)
+	}
+}
+
+func TestNormalizeSaveInputClearsBlankTaskName(t *testing.T) {
+	ensureTestChainConfig(t)
+	got, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:               "bsc",
+		TaskName:            "   ",
+		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+		AmountMode:          models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:     10,
+		DelayMode:           models.SmartMoneyFollowDelayModeImmediate,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSaveInput returned error: %v", err)
+	}
+	if got.TaskName != "" {
+		t.Fatalf("task name = %q", got.TaskName)
+	}
+}
+
+func TestNormalizeSaveInputRejectsLongTaskName(t *testing.T) {
+	ensureTestChainConfig(t)
+	_, err := NormalizeSaveInput(SaveConfigInput{
+		Chain:               "bsc",
+		TaskName:            strings.Repeat("a", maxFollowTaskNameLength+1),
+		TargetWalletAddress: "0x0000000000000000000000000000000000000001",
+		AmountMode:          models.SmartMoneyFollowAmountModeFixed,
+		FixedAmountUSDT:     10,
+		DelayMode:           models.SmartMoneyFollowDelayModeImmediate,
+	})
+	if err == nil {
+		t.Fatal("expected long task name error")
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 type smartMoneyAutoFollowSaveRequest struct {
 	ID                   uint     `json:"id"`
 	Chain                string   `json:"chain"`
+	TaskName             string   `json:"task_name"`
 	TargetWalletAddress  string   `json:"target_wallet_address"`
 	TargetWallets        []string `json:"target_wallet_addresses"`
 	ExecutionWalletID    uint     `json:"execution_wallet_id"`
@@ -87,6 +88,7 @@ func (s *Server) handlePostSmartMoneyAutoFollow(w http.ResponseWriter, r *http.R
 		input := smfollow.SaveConfigInput{
 			ID:                   req.Config.ID,
 			Chain:                firstSmartMoneyAutoFollowChain(req.Config.Chain, req.Chain),
+			TaskName:             req.Config.TaskName,
 			TargetWalletAddress:  req.Config.TargetWalletAddress,
 			TargetWallets:        req.Config.TargetWallets,
 			ExecutionWalletID:    req.Config.ExecutionWalletID,

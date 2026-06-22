@@ -532,6 +532,9 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 	if err := ensureColumnExists(tableName, "target_wallet_address", "VARCHAR(42) NULL"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(tableName, "task_name", "VARCHAR(100) NULL"); err != nil {
+		return err
+	}
 	if err := ensureColumnExists(tableName, "target_wallet_addresses", "JSON NULL"); err != nil {
 		return err
 	}
@@ -651,6 +654,12 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 		SET target_wallet_address = LOWER(TRIM(target_wallet_address))
 	`, quoteTableName(tableName))).Error; err != nil {
 		return fmt.Errorf("normalize %s.target_wallet_address before migrate: %w", tableName, err)
+	}
+	if err := DB.Exec(fmt.Sprintf(`
+		UPDATE %s
+		SET task_name = COALESCE(TRIM(task_name), '')
+	`, quoteTableName(tableName))).Error; err != nil {
+		return fmt.Errorf("normalize %s.task_name before migrate: %w", tableName, err)
 	}
 	if err := DB.Exec(fmt.Sprintf(`
 		UPDATE %s

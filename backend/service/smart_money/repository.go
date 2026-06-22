@@ -62,11 +62,7 @@ type MonitoredWalletImportResult struct {
 	Invalid         []string `json:"invalid"`
 }
 
-const smartMoneyNetAmountOrderJoin = `
-LEFT JOIN sm_lp_active_positions ap
-	ON ap.chain_id = sm_lp_positions.chain_id
-	AND ap.protocol = sm_lp_positions.protocol
-	AND ap.nft_token_id = sm_lp_positions.nft_token_id
+var smartMoneyNetAmountOrderJoin = smartMoneyActivePositionJoinSQL(smartMoneyPositionTable) + `
 LEFT JOIN (
 	SELECT
 		chain_id,
@@ -92,6 +88,30 @@ const smartMoneyNetAmountOrderExpr = "COALESCE(ap.net_total_usd, evt_net.net_amo
 const smartMoneyPositionTable = "sm_lp_positions"
 const smartMoneyDisplayRecentWindow = 24 * time.Hour
 const smartMoneyPoolRecentOperationWindow = 2 * time.Hour
+
+func smartMoneyPositionRefSQL(tableAlias string) string {
+	return fmt.Sprintf(`
+LOWER(CONCAT(
+	CAST(%[1]s.chain_id AS CHAR), ':',
+	TRIM(%[1]s.protocol), ':',
+	TRIM(%[1]s.wallet_address), ':',
+	CASE
+		WHEN %[1]s.nft_token_id > 0 THEN CAST(%[1]s.nft_token_id AS CHAR)
+		ELSE CONCAT(
+			TRIM(%[1]s.pool_address), ':',
+			COALESCE(CAST(%[1]s.tick_lower AS CHAR), ''), ':',
+			COALESCE(CAST(%[1]s.tick_upper AS CHAR), '')
+		)
+	END
+))`, tableAlias)
+}
+
+func smartMoneyActivePositionJoinSQL(tableAlias string) string {
+	return fmt.Sprintf(`
+LEFT JOIN sm_lp_active_positions ap
+	ON ap.position_ref = %s
+`, smartMoneyPositionRefSQL(tableAlias))
+}
 
 func smartMoneyDisplayRecentCutoff() time.Time {
 	return time.Now().Add(-smartMoneyDisplayRecentWindow)
@@ -1571,10 +1591,7 @@ func (r *Repository) GetPositionOpenAmountsUSD(ctx context.Context, positions []
 			MAX(ap.fee_status) AS fee_status,
 			MAX(ap.fee_updated_at) AS fee_updated_at
 		`).
-		Joins(`
-			LEFT JOIN sm_lp_active_positions ap
-				ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
-		`).
+		Joins(smartMoneyActivePositionJoinSQL("p")).
 		Joins(`
 			LEFT JOIN (
 				SELECT
@@ -1643,9 +1660,8 @@ func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]flo
 			p.pool_address,
 			COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS total_amount_usd
 		FROM sm_lp_positions p
-		LEFT JOIN sm_lp_active_positions ap
-			ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
-			LEFT JOIN (
+`+smartMoneyActivePositionJoinSQL("p")+`
+		LEFT JOIN (
 				SELECT
 					chain_id,
 					protocol,
@@ -1696,9 +1712,7 @@ func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddre
 			COUNT(*) AS position_count,
 			COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS total_amount_usd
 		FROM sm_lp_positions p
-		LEFT JOIN sm_lp_active_positions ap
-			ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
-	`
+` + smartMoneyActivePositionJoinSQL("p")
 	args := []interface{}{}
 	if source != "" {
 		query += `
@@ -2119,9 +2133,7 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context, source string) 
 			)) AS latest_event_at,
 			COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS total_position_amount_usd
 		FROM sm_lp_positions p
-		LEFT JOIN sm_lp_active_positions ap
-			ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
-	`
+` + smartMoneyActivePositionJoinSQL("p")
 	args := []interface{}{}
 	if source != "" {
 		query += `
@@ -2244,8 +2256,7 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 			SUM(CASE WHEN p.status='closed' AND p.closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count,
 			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
 		FROM sm_lp_positions p
-		LEFT JOIN sm_lp_active_positions ap
-			ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id
+`+smartMoneyActivePositionJoinSQL("p")+`
 		LEFT JOIN (
 			SELECT
 				chain_id,
@@ -2301,7 +2312,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	var openCount int64
 	database.DB.WithContext(ctx).
 		Table("sm_lp_positions p").
-		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id").
+		Joins(smartMoneyActivePositionJoinSQL("p")).
 		Where("p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", recentCutoff).
 		Count(&openCount)
 	stats.OpenPositionCount = int(openCount)
@@ -2314,7 +2325,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	var poolCount int64
 	database.DB.WithContext(ctx).
 		Table("sm_lp_positions p").
-		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id").
+		Joins(smartMoneyActivePositionJoinSQL("p")).
 		Where("p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", recentCutoff).
 		Distinct("p.pool_address").
 		Count(&poolCount)
@@ -2419,7 +2430,7 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 			COUNT(DISTINCT p.pool_address) AS active_pool_count,
 			COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS total_position_amount_usd
 		`).
-		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.protocol = p.protocol AND ap.nft_token_id = p.nft_token_id").
+		Joins(smartMoneyActivePositionJoinSQL("p")).
 		Joins("LEFT JOIN (?) evt_net ON evt_net.chain_id = p.chain_id AND evt_net.protocol = p.protocol AND evt_net.nft_token_id = p.nft_token_id", eventNetSubQuery).
 		Where("p.status = ? AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", "open", recentCutoff).
 		Group("p.wallet_address, p.chain_id")

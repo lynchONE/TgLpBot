@@ -140,6 +140,7 @@ type SmartMoneyFollowConfig struct {
 	UserID                    uint        `gorm:"not null;index" json:"user_id"`
 	Chain                     string      `gorm:"size:16;not null;default:'bsc';index" json:"chain"`
 	ChainID                   int         `gorm:"not null;default:56;index" json:"chain_id"`
+	TaskName                  string      `gorm:"column:task_name;size:100;not null;default:''" json:"task_name"`
 	TargetWalletAddress       string      `gorm:"size:42;not null;index" json:"target_wallet_address"`
 	TargetWallets             StringArray `gorm:"column:target_wallet_addresses;type:json" json:"target_wallet_addresses"`
 	ExecutionWalletID         uint        `gorm:"not null;default:0;index" json:"execution_wallet_id"`

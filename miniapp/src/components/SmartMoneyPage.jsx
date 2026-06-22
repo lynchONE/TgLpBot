@@ -1033,10 +1033,14 @@ function normalizeStoredSmartMoneyPoolFilter(value) {
     if (!value || typeof value !== 'object') {
         return { ...EMPTY_SMART_MONEY_POOL_FILTER };
     }
+    const positiveOrEmpty = (raw) => {
+        const parsed = parseOptionalNumber(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
     return {
-        minSmartMoneyUsd: parseOptionalNumber(value.minSmartMoneyUsd),
-        maxFeeRate: parseOptionalNumber(value.maxFeeRate),
-        minMarketCapUsd: parseOptionalNumber(value.minMarketCapUsd),
+        minSmartMoneyUsd: positiveOrEmpty(value.minSmartMoneyUsd),
+        maxFeeRate: positiveOrEmpty(value.maxFeeRate),
+        minMarketCapUsd: positiveOrEmpty(value.minMarketCapUsd),
     };
 }
 
@@ -4535,8 +4539,10 @@ function GoldenDogPage({ apiBaseUrl, initData, brand, watchedWallets = [], watch
     );
 }
 
+const AUTO_FOLLOW_TASK_NAME_MAX_LENGTH = 100;
 const AUTO_FOLLOW_DEFAULT_DRAFT = {
     id: 0,
+    task_name: '',
     target_wallet_address: '',
     target_wallet_addresses: [''],
     execution_wallet_id: '',
@@ -4566,6 +4572,28 @@ function normalizeAutoFollowWalletList(config) {
         : [config?.target_wallet_address || ''];
     const wallets = source.map((value) => String(value || '').trim()).filter(Boolean);
     return wallets.length ? wallets : [''];
+}
+
+function normalizeAutoFollowTaskName(value) {
+    const taskName = String(value == null ? '' : value).trim();
+    if ([...taskName].length > AUTO_FOLLOW_TASK_NAME_MAX_LENGTH) {
+        throw new Error(`任务名称不能超过 ${AUTO_FOLLOW_TASK_NAME_MAX_LENGTH} 个字符`);
+    }
+    return taskName;
+}
+
+function autoFollowDisplayTaskName(config) {
+    return String(config?.task_name == null ? '' : config.task_name).trim();
+}
+
+function autoFollowWalletTitle(config) {
+    const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+    return wallets.length > 1 ? `${shortAddr(wallets[0])} +${wallets.length - 1}` : shortAddr(config?.target_wallet_address);
+}
+
+function autoFollowConfigTitle(config) {
+    const taskName = autoFollowDisplayTaskName(config);
+    return taskName || autoFollowWalletTitle(config);
 }
 
 function parseAutoFollowWalletInputs(values) {
@@ -4673,6 +4701,7 @@ function createAutoFollowDraft(config) {
     const wallets = normalizeAutoFollowWalletList(config);
     return {
         id: Number(config.id) || 0,
+        task_name: normalizeAutoFollowTaskName(config.task_name),
         target_wallet_address: String(config.target_wallet_address || ''),
         target_wallet_addresses: wallets,
         execution_wallet_id: config.execution_wallet_id ? String(config.execution_wallet_id) : '',
@@ -4699,6 +4728,7 @@ function createAutoFollowDraft(config) {
 
 function normalizeAutoFollowDraft(draft) {
     const wallets = parseAutoFollowWalletInputs(draft.target_wallet_addresses);
+    const taskName = normalizeAutoFollowTaskName(draft.task_name);
     const executionWalletIDs = normalizeAutoFollowExecutionWalletIDs(draft);
     const executionWalletID = executionWalletIDs[0] || 0;
     if (!Number.isFinite(executionWalletID) || executionWalletID <= 0) throw new Error('请选择执行钱包');
@@ -4748,6 +4778,7 @@ function normalizeAutoFollowDraft(draft) {
 
     return {
         id: Number(draft.id) || 0,
+        task_name: taskName,
         target_wallet_address: wallets[0],
         target_wallet_addresses: wallets,
         execution_wallet_id: executionWalletID,
@@ -4842,11 +4873,13 @@ function AutoFollowStatusMiniCard({ status, config, executionWallets, recalculat
     const realized = Number(status?.realized_pnl_usdt) || 0;
     const unrealized = Number(status?.unrealized_pnl_usdt) || 0;
     const stopReason = String(status?.stop_triggered_reason || '');
+    const taskName = autoFollowDisplayTaskName(config);
     return (
         <div className="rounded-2xl border border-white/[0.04] bg-zinc-900/60 p-3">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-zinc-100">
+                    {taskName ? <div className="truncate text-sm font-semibold text-zinc-100">{taskName}</div> : null}
+                    <div className={`truncate text-sm font-semibold text-zinc-100${taskName ? ' hidden' : ''}`}>
                         {config ? formatAutoFollowExecutionWallet(config, executionWallets) : `配置 #${status?.config_id || '--'}`}
                     </div>
                     <div className="mt-1 text-[11px] text-zinc-500">
@@ -5042,6 +5075,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 config: {
                     id: config.id,
                     chain: config.chain,
+                    task_name: autoFollowDisplayTaskName(config),
                     target_wallet_address: config.target_wallet_address,
                     target_wallet_addresses: normalizeAutoFollowWalletList(config).filter(Boolean),
                     execution_wallet_id: Number(config.execution_wallet_id || 0),
@@ -5312,6 +5346,21 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                 </div>
 
                 <div className="space-y-3">
+                    <div className="space-y-1.5">
+                        <label className="block text-[11px] font-medium text-zinc-500" htmlFor="mini-auto-follow-task-name">
+                            任务名称
+                        </label>
+                        <input
+                            id="mini-auto-follow-task-name"
+                            className={getInputClass(brand)}
+                            maxLength={AUTO_FOLLOW_TASK_NAME_MAX_LENGTH}
+                            placeholder="例如：监控某个聪明钱"
+                            value={draft.task_name}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, task_name: e.target.value }))}
+                            autoComplete="off"
+                        />
+                    </div>
+
                     <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
                             <div className="text-[11px] font-medium text-zinc-500">执行钱包池</div>
@@ -5643,14 +5692,15 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                     </div>
                 ) : (
                     configs.map((config) => {
-                        const wallets = normalizeAutoFollowWalletList(config).filter(Boolean);
+                        const taskName = autoFollowDisplayTaskName(config);
+                        const walletTitle = autoFollowWalletTitle(config);
                         return (
                             <div key={config.id} className="rounded-2xl border border-white/[0.04] bg-zinc-900/60 p-3">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <span className="truncate font-mono text-sm text-zinc-100">
-                                                {wallets.length > 1 ? `${shortAddr(wallets[0])} +${wallets.length - 1}` : shortAddr(config.target_wallet_address)}
+                                            <span className={`truncate text-sm text-zinc-100 ${taskName ? 'font-semibold' : 'font-mono'}`}>
+                                                {taskName || walletTitle}
                                             </span>
                                             <Badge className={config.enabled
                                                 ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
@@ -5659,6 +5709,11 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                             </Badge>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
+                                            {taskName ? (
+                                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                                    {walletTitle}
+                                                </Badge>
+                                            ) : null}
                                             <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
                                                 {autoFollowTriggerText(config)}
                                             </Badge>
@@ -5766,6 +5821,8 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                             const triggerWallets = Array.isArray(job?.trigger_wallet_addresses) ? job.trigger_wallet_addresses.filter(Boolean) : [];
                             const message = job?.error_message || (!job ? attempt?.message : '') || '';
                             const rangeText = event ? formatAutoFollowEventRangeWidth(event) : '';
+                            const rowConfig = row ? configByID.get(Number(row.config_id || 0)) : null;
+                            const taskName = autoFollowDisplayTaskName(rowConfig);
                             return (
                                 <div key={item.key} className="rounded-2xl border border-white/[0.04] bg-zinc-900/55 p-3">
                                     <div className="flex items-start justify-between gap-3">
@@ -5794,6 +5851,7 @@ function AutoFollowPage({ apiBaseUrl, initData, hasInitData, brand }) {
                                                 {event ? getPairLabel(event) : `事件 #${row?.event_id || '--'}`}
                                             </div>
                                             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-zinc-500">
+                                                {taskName ? <span className="text-zinc-300">{taskName}</span> : null}
                                                 <span>{shortAddr(event?.wallet_address || triggerWallets[0] || row?.target_wallet_address)}</span>
                                                 <span>{formatAutoFollowJobTime(event?.tx_timestamp || job?.scheduled_at || attempt?.updated_at || attempt?.created_at)}</span>
                                                 {rangeText ? <span>区间宽度 {rangeText}</span> : null}
