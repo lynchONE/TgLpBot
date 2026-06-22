@@ -226,7 +226,8 @@ function parseOptionalNumber(value) {
     if (!match) return null;
     const num = Number(match[0]);
     if (!Number.isFinite(num)) return null;
-    return Math.max(0, num);
+    if (num <= 0) return null;
+    return num;
 }
 
 function formatOptionalNumber(value) {
@@ -281,9 +282,9 @@ function normalizeStoredSmartMoneyPoolFilter(value) {
         return { ...EMPTY_SMART_MONEY_POOL_FILTER };
     }
     return {
-        minSmartMoneyUsd: Number.isFinite(Number(value.minSmartMoneyUsd)) ? Number(value.minSmartMoneyUsd) : null,
-        maxFeeRate: Number.isFinite(Number(value.maxFeeRate)) ? Number(value.maxFeeRate) : null,
-        minMarketCapUsd: Number.isFinite(Number(value.minMarketCapUsd)) ? Number(value.minMarketCapUsd) : null,
+        minSmartMoneyUsd: parseOptionalNumber(value.minSmartMoneyUsd),
+        maxFeeRate: parseOptionalNumber(value.maxFeeRate),
+        minMarketCapUsd: parseOptionalNumber(value.minMarketCapUsd),
     };
 }
 

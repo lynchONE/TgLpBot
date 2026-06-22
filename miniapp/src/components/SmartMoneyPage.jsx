@@ -1034,9 +1034,9 @@ function normalizeStoredSmartMoneyPoolFilter(value) {
         return { ...EMPTY_SMART_MONEY_POOL_FILTER };
     }
     return {
-        minSmartMoneyUsd: Number.isFinite(Number(value.minSmartMoneyUsd)) ? Number(value.minSmartMoneyUsd) : null,
-        maxFeeRate: Number.isFinite(Number(value.maxFeeRate)) ? Number(value.maxFeeRate) : null,
-        minMarketCapUsd: Number.isFinite(Number(value.minMarketCapUsd)) ? Number(value.minMarketCapUsd) : null,
+        minSmartMoneyUsd: parseOptionalNumber(value.minSmartMoneyUsd),
+        maxFeeRate: parseOptionalNumber(value.maxFeeRate),
+        minMarketCapUsd: parseOptionalNumber(value.minMarketCapUsd),
     };
 }
 

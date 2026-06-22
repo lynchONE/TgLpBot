@@ -26,3 +26,40 @@ func TestNormalizeSmartMoneyWalletSourceScope(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSmartMoneyPositiveFilter(t *testing.T) {
+	cases := []struct {
+		name       string
+		raw        string
+		wantValue  float64
+		wantActive bool
+		wantErr    bool
+	}{
+		{name: "empty", raw: "", wantValue: 0, wantActive: false},
+		{name: "spaces", raw: "   ", wantValue: 0, wantActive: false},
+		{name: "zero", raw: "0", wantValue: 0, wantActive: false},
+		{name: "positive", raw: "12.5", wantValue: 12.5, wantActive: true},
+		{name: "negative", raw: "-1", wantErr: true},
+		{name: "invalid", raw: "abc", wantErr: true},
+		{name: "nan", raw: "NaN", wantErr: true},
+		{name: "inf", raw: "+Inf", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotValue, gotActive, err := parseSmartMoneyPositiveFilter(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseSmartMoneyPositiveFilter(%q) error = nil; want error", tc.raw)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseSmartMoneyPositiveFilter(%q) error = %v; want nil", tc.raw, err)
+			}
+			if gotValue != tc.wantValue || gotActive != tc.wantActive {
+				t.Fatalf("parseSmartMoneyPositiveFilter(%q) = %v, %v; want %v, %v", tc.raw, gotValue, gotActive, tc.wantValue, tc.wantActive)
+			}
+		})
+	}
+}

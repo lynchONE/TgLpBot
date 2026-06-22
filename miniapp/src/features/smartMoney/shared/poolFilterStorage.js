@@ -1,5 +1,5 @@
 export const SMART_MONEY_POOL_FILTER_STORAGE_KEY = 'tglp_smart_money_pool_filter_v1';
-export const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null };
+export const EMPTY_SMART_MONEY_POOL_FILTER = { minSmartMoneyUsd: null, maxFeeRate: null, minMarketCapUsd: null };
 
 export const SMART_MONEY_POOL_SOURCE_TABS = [
     { key: 'all', label: '全部', source: '' },
@@ -18,7 +18,8 @@ export function parseOptionalNumber(value) {
     if (!match) return null;
     const num = Number(match[0]);
     if (!Number.isFinite(num)) return null;
-    return Math.max(0, num);
+    if (num <= 0) return null;
+    return num;
 }
 
 export function formatOptionalNumber(value) {
@@ -30,8 +31,9 @@ export function normalizeStoredSmartMoneyPoolFilter(value) {
         return { ...EMPTY_SMART_MONEY_POOL_FILTER };
     }
     return {
-        minSmartMoneyUsd: Number.isFinite(Number(value.minSmartMoneyUsd)) ? Number(value.minSmartMoneyUsd) : null,
-        maxFeeRate: Number.isFinite(Number(value.maxFeeRate)) ? Number(value.maxFeeRate) : null,
+        minSmartMoneyUsd: parseOptionalNumber(value.minSmartMoneyUsd),
+        maxFeeRate: parseOptionalNumber(value.maxFeeRate),
+        minMarketCapUsd: parseOptionalNumber(value.minMarketCapUsd),
     };
 }
 
@@ -54,7 +56,9 @@ export function writeStoredSmartMoneyPoolFilter(value) {
     }
     try {
         const normalized = normalizeStoredSmartMoneyPoolFilter(value);
-        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd) && !Number.isFinite(normalized.maxFeeRate);
+        const isEmpty = !Number.isFinite(normalized.minSmartMoneyUsd)
+            && !Number.isFinite(normalized.maxFeeRate)
+            && !Number.isFinite(normalized.minMarketCapUsd);
         if (isEmpty) {
             window.localStorage.removeItem(SMART_MONEY_POOL_FILTER_STORAGE_KEY);
             return;

@@ -1169,44 +1169,26 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid source", http.StatusBadRequest)
 		return
 	}
-	var minSmartMoneyUSD float64
-	hasMinSmartMoneyUSD := false
-	if raw := strings.TrimSpace(r.URL.Query().Get("min_smart_money_usd")); raw != "" {
-		value, err := strconv.ParseFloat(raw, 64)
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			jsonError(w, "invalid min_smart_money_usd", http.StatusBadRequest)
-			return
-		}
-		minSmartMoneyUSD = value
-		hasMinSmartMoneyUSD = true
+	minSmartMoneyUSD, hasMinSmartMoneyUSD, err := parseSmartMoneyPositiveFilter(r.URL.Query().Get("min_smart_money_usd"))
+	if err != nil {
+		jsonError(w, "invalid min_smart_money_usd", http.StatusBadRequest)
+		return
 	}
-	var maxFeeRate float64
-	hasMaxFeeRate := false
-	if raw := strings.TrimSpace(r.URL.Query().Get("max_fee_rate")); raw != "" {
-		value, err := strconv.ParseFloat(raw, 64)
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			jsonError(w, "invalid max_fee_rate", http.StatusBadRequest)
-			return
-		}
-		maxFeeRate = value
-		hasMaxFeeRate = true
+	maxFeeRate, hasMaxFeeRate, err := parseSmartMoneyPositiveFilter(r.URL.Query().Get("max_fee_rate"))
+	if err != nil {
+		jsonError(w, "invalid max_fee_rate", http.StatusBadRequest)
+		return
 	}
-	var minFDVUSD float64
-	hasMinFDVUSD := false
 	minFDVParam := "min_fdv_usd"
 	rawMinFDV := strings.TrimSpace(r.URL.Query().Get(minFDVParam))
 	if rawMinFDV == "" {
 		minFDVParam = "min_market_cap_usd"
 		rawMinFDV = strings.TrimSpace(r.URL.Query().Get(minFDVParam))
 	}
-	if rawMinFDV != "" {
-		value, err := strconv.ParseFloat(rawMinFDV, 64)
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			jsonError(w, "invalid "+minFDVParam, http.StatusBadRequest)
-			return
-		}
-		minFDVUSD = value
-		hasMinFDVUSD = true
+	minFDVUSD, hasMinFDVUSD, err := parseSmartMoneyPositiveFilter(rawMinFDV)
+	if err != nil {
+		jsonError(w, "invalid "+minFDVParam, http.StatusBadRequest)
+		return
 	}
 
 	sqlStarted := time.Now()
@@ -2042,6 +2024,21 @@ func normalizeSmartMoneyWalletSourceScope(raw string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func parseSmartMoneyPositiveFilter(raw string) (float64, bool, error) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return 0, false, nil
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, false, fmt.Errorf("invalid positive filter")
+	}
+	if value == 0 {
+		return 0, false, nil
+	}
+	return value, true, nil
 }
 
 func repairSmartMoneyPositions(ctx context.Context, repo *sm.Repository) {
