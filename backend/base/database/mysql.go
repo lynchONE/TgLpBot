@@ -1902,12 +1902,14 @@ func normalizeTradeRecordProfitFormula() {
 	openExpr := "COALESCE(CAST(NULLIF(TRIM(open_usdt_spent), '') AS DECIMAL(65,0)), 0)"
 	closeExpr := "COALESCE(CAST(NULLIF(TRIM(close_usdt_received), '') AS DECIMAL(65,0)), 0)"
 	gasExpr := "COALESCE(CAST(NULLIF(TRIM(total_gas_usdt), '') AS DECIMAL(65,0)), 0)"
+	currentProfitExpr := "COALESCE(CAST(NULLIF(TRIM(profit_usdt), '') AS DECIMAL(65,0)), 0)"
 	profitExpr := fmt.Sprintf("((%s) - (%s) - (%s))", closeExpr, openExpr, gasExpr)
 	profitPctExpr := fmt.Sprintf("CASE WHEN (%s) > 0 THEN ROUND(((%s) / (%s)) * 100, 4) ELSE 0 END", openExpr, profitExpr, openExpr)
 	query := fmt.Sprintf(
-		"UPDATE trade_records SET profit_usdt = CAST(%s AS CHAR), profit_pct = %s WHERE status = 'closed' AND (profit_usdt <> CAST(%s AS CHAR) OR ABS(COALESCE(profit_pct, 0) - (%s)) > 0.00005)",
+		"UPDATE trade_records SET profit_usdt = CAST(%s AS CHAR), profit_pct = %s WHERE status = 'closed' AND ((%s) <> (%s) OR ABS(COALESCE(profit_pct, 0) - (%s)) > 0.00005)",
 		profitExpr,
 		profitPctExpr,
+		currentProfitExpr,
 		profitExpr,
 		profitPctExpr,
 	)
