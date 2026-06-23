@@ -558,21 +558,42 @@ func TestRetryableFollowSlippageError(t *testing.T) {
 }
 
 func TestFollowRetrySlippagePercent(t *testing.T) {
-	if got := followRetrySlippagePercent(0, 0); got != 0.5 {
-		t.Fatalf("attempt 0 slippage = %v, want 0.5", got)
+	if got := followRetrySlippagePercent(0, 0); got != followRetryDefaultSlippagePercent {
+		t.Fatalf("attempt 0 slippage = %v, want %v", got, followRetryDefaultSlippagePercent)
 	}
-	if got := followRetrySlippagePercent(2, 1); got != 4 {
-		t.Fatalf("base 2 attempt 1 slippage = %v, want 4", got)
+	if got := followRetrySlippagePercent(2, 1); got != followRetryMaxSlippagePercent {
+		t.Fatalf("base 2 attempt 1 slippage = %v, want %v", got, followRetryMaxSlippagePercent)
 	}
-	prev := followRetrySlippagePercent(0.5, 0)
+	prev := followRetrySlippagePercent(followRetryDefaultSlippagePercent, 0)
 	for attempt := 1; attempt <= maxFollowJobRetryCount+3; attempt++ {
-		got := followRetrySlippagePercent(0.5, attempt)
+		got := followRetrySlippagePercent(followRetryDefaultSlippagePercent, attempt)
 		if got < prev {
 			t.Fatalf("slippage decreased at attempt %d: %v < %v", attempt, got, prev)
 		}
-		if got > 10 {
+		if got > followRetryMaxSlippagePercent {
 			t.Fatalf("slippage exceeded cap at attempt %d: %v", attempt, got)
 		}
 		prev = got
+	}
+	if got := followRetrySlippagePercent(followRetryDefaultSlippagePercent, maxFollowJobRetryCount); got != followRetryMaxSlippagePercent {
+		t.Fatalf("final retry slippage = %v, want %v", got, followRetryMaxSlippagePercent)
+	}
+}
+
+func TestFollowRetryDelay(t *testing.T) {
+	want := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		3 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+	}
+	if maxFollowJobRetryCount != len(want) {
+		t.Fatalf("max retry count = %d, want %d", maxFollowJobRetryCount, len(want))
+	}
+	for attempt, delay := range want {
+		if got := followRetryDelay(attempt + 1); got != delay {
+			t.Fatalf("attempt %d delay = %s, want %s", attempt+1, got, delay)
+		}
 	}
 }

@@ -109,8 +109,10 @@ LOWER(CONCAT(
 func smartMoneyActivePositionJoinSQL(tableAlias string) string {
 	return fmt.Sprintf(`
 LEFT JOIN sm_lp_active_positions ap
-	ON ap.position_ref COLLATE utf8mb4_unicode_ci = %s
-`, smartMoneyPositionRefSQL(tableAlias))
+	ON ap.chain_id = %[1]s.chain_id
+	AND ap.protocol = %[1]s.protocol
+	AND ap.nft_token_id = %[1]s.nft_token_id
+`, tableAlias)
 }
 
 func smartMoneyDisplayRecentCutoff() time.Time {

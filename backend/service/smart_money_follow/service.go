@@ -37,11 +37,21 @@ const maxFollowDelaySeconds = 24 * 60 * 60
 const defaultFollowTriggerWindowSeconds = 5 * 60
 const maxFollowTriggerWindowSeconds = 24 * 60 * 60
 const monitoredWalletSourceAutoFollow = "auto_follow"
-const maxFollowJobRetryCount = 6
+const maxFollowJobRetryCount = 5
+const followRetryDefaultSlippagePercent = 0.5
+const followRetryMaxSlippagePercent = 1.5
 const maxFollowRangeShiftGrids = 20
 const maxFollowExecutionWallets = 20
 const maxFollowRiskThresholdUSDT = 1_000_000_000
 const maxFollowTaskNameLength = 100
+
+var followRetrySchedule = []time.Duration{
+	1 * time.Second,
+	2 * time.Second,
+	3 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+}
 
 var errFollowJobSkipped = errors.New("follow job skipped")
 var errFollowJobRetry = errors.New("follow job retry")
@@ -2300,34 +2310,36 @@ func followJobTxOptions(job *models.SmartMoneyFollowJob, baseSlippage float64) l
 }
 
 func followRetryDelay(attempt int) time.Duration {
-	if attempt <= 1 {
-		return 500 * time.Millisecond
-	}
-	delays := []time.Duration{
-		500 * time.Millisecond,
-		1 * time.Second,
-		2 * time.Second,
-		3 * time.Second,
-		5 * time.Second,
-		10 * time.Second,
+	if attempt <= 0 {
+		attempt = 1
 	}
 	idx := attempt - 1
-	if idx >= len(delays) {
-		return delays[len(delays)-1]
+	if idx >= len(followRetrySchedule) {
+		return followRetrySchedule[len(followRetrySchedule)-1]
 	}
-	return delays[idx]
+	return followRetrySchedule[idx]
 }
 
 func followRetrySlippagePercent(base float64, attempt int) float64 {
-	if base <= 0 {
-		base = 0.5
+	if base <= 0 || math.IsNaN(base) || math.IsInf(base, 0) {
+		base = followRetryDefaultSlippagePercent
+	}
+	if base > followRetryMaxSlippagePercent {
+		base = followRetryMaxSlippagePercent
 	}
 	if attempt <= 0 {
 		return base
 	}
-	widened := base * math.Pow(2, float64(attempt))
-	if widened > 10 {
-		return 10
+	if base >= followRetryMaxSlippagePercent {
+		return followRetryMaxSlippagePercent
+	}
+	step := (followRetryMaxSlippagePercent - base) / float64(maxFollowJobRetryCount)
+	widened := base + step*float64(attempt)
+	if widened > followRetryMaxSlippagePercent {
+		return followRetryMaxSlippagePercent
+	}
+	if widened < base {
+		return base
 	}
 	return widened
 }
