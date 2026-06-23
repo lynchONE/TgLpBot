@@ -18,7 +18,7 @@ A Telegram bot for managing concentrated-liquidity positions on Binance Smart Ch
 ```
 TgLpBot/
 ├── blockchain/          # Blockchain interaction layer
-│   ├── client.go       # BSC client initialization
+│   ├── client.go       # BSC client  initialization
 │   ├── erc20.go        # ERC20 token interactions
 │   ├── okx.go          # OKX tx types
 │   ├── v3_pool.go      # V3 pool reads

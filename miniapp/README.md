@@ -15,7 +15,7 @@ VITE_API_BASE_URL=http://localhost:8080
 
 ## 部署
 
-1) 部署到 Vercel 后，将 *Production 域名*（建议用 `xxx.vercel.app` 或自定义域名，避免使用带随机后缀的单次 Deployment URL）填到后端的 `TELEGRAM_WEBAPP_URL`（`backend/.env`）。
+1) 部署到 Vercel 后，将 *Production 域名*（建议 用 `xxx.vercel.app` 或自定义域名，避免使用带随机后缀的单次 Deployment URL）填到后端的 `TELEGRAM_WEBAPP_URL`（`backend/.env`）。
 
 > 如果是把整个仓库导入 Vercel，请在 Project Settings 里把 Root Directory 设为 `miniapp/`。
 
