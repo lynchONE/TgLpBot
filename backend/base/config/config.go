@@ -948,7 +948,7 @@ func getEnvBool(key string, defaultValue bool) bool {
 }
 
 func (c *Config) GetMySQLDSN() string {
-	return c.MySQLUser + ":" + c.MySQLPassword + "@tcp(" + c.MySQLHost + ":" + c.MySQLPort + ")/" + c.MySQLDatabase + "?charset=utf8mb4&parseTime=True&loc=Local"
+	return c.MySQLUser + ":" + c.MySQLPassword + "@tcp(" + c.MySQLHost + ":" + c.MySQLPort + ")/" + c.MySQLDatabase + "?charset=utf8mb4&collation=utf8mb4_unicode_ci&parseTime=True&loc=Local"
 }
 
 func (c *Config) GetRedisAddr() string {

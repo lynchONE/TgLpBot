@@ -103,13 +103,13 @@ LOWER(CONCAT(
 			COALESCE(CAST(%[1]s.tick_upper AS CHAR), '')
 		)
 	END
-))`, tableAlias)
+)) COLLATE utf8mb4_unicode_ci`, tableAlias)
 }
 
 func smartMoneyActivePositionJoinSQL(tableAlias string) string {
 	return fmt.Sprintf(`
 LEFT JOIN sm_lp_active_positions ap
-	ON ap.position_ref = %s
+	ON ap.position_ref COLLATE utf8mb4_unicode_ci = %s
 `, smartMoneyPositionRefSQL(tableAlias))
 }
 
