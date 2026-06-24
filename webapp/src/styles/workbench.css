@@ -820,20 +820,19 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  padding-inline: 6px 0;
+  padding-inline: clamp(18px, 3vw, 52px) 0;
 }
 
 .alpha-ticker {
   width: min(1080px, 100%);
   min-height: 34px;
   display: grid;
-  grid-template-columns: minmax(380px, 1.08fr) 1px minmax(420px, 0.92fr);
+  grid-template-columns: minmax(0, 1.12fr) 1px minmax(0, 0.88fr);
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 0 6px;
   color: var(--text);
   overflow: visible;
-  transform: translateX(clamp(10px, 1.2vw, 22px));
 }
 
 .alpha-ticker-loading,
@@ -853,7 +852,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 24px;
 }
 
@@ -1084,7 +1083,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   overflow: visible;
 }
 
@@ -1099,7 +1098,7 @@
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 2px 0;
   font-size: 11px;
   font-weight: 700;
@@ -1130,23 +1129,34 @@
 }
 
 .alpha-name {
-  flex: 0 1 72px;
-  max-width: 72px;
+  flex: 0 1 64px;
+  max-width: 64px;
   color: #d8e4fb;
 }
 
 .alpha-meta {
   flex: 0 0 auto;
-  color: #b6c4dc;
-}
-
-.alpha-time {
-  flex: 1 1 auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  padding-inline: 2px;
+  color: #b6c4dc;
+}
+
+.alpha-meta + .alpha-meta {
+  margin-left: 4px;
+}
+
+.alpha-time {
+  flex: 0 0 auto;
+  min-width: max-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
   color: #8bd3ff;
   font-variant-numeric: tabular-nums;
+  overflow: visible;
 }
 
 .alpha-time svg {
