@@ -72,6 +72,10 @@ async function requestJson(url, options) {
   return resp.json();
 }
 
+export async function fetchAlphaOverview({ signal } = {}) {
+  return requestJson('/api/alpha', { method: 'GET', signal });
+}
+
 export async function fetchHotPools({
   apiBaseUrl,
   initData,

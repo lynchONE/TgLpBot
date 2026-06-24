@@ -2161,6 +2161,16 @@ body {
     border-radius: 0;
   }
 
+  .top-center {
+    width: 100%;
+    padding-inline: 0;
+  }
+
+  .alpha-ticker {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .config-panel {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -2184,6 +2194,60 @@ body {
 @media (max-width: 640px) {
   .top-bar {
     align-items: stretch;
+  }
+
+  .alpha-ticker {
+    min-height: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .alpha-section {
+    flex: 1 1 100%;
+  }
+
+  .alpha-divider {
+    display: none;
+  }
+
+  .alpha-airdrop-list,
+  .alpha-stability-list {
+    flex: 1 1 auto;
+  }
+
+  .alpha-airdrop-item {
+    max-width: 100%;
+  }
+
+  .alpha-airdrop-item .alpha-time {
+    display: none;
+  }
+
+  .alpha-stability-list {
+    display: none;
+  }
+
+  .alpha-mobile-time {
+    display: inline-flex;
+  }
+
+  .alpha-name,
+  .alpha-meta,
+  .alpha-soft-error {
+    display: none;
+  }
+
+  .alpha-label {
+    font-size: 10px;
+  }
+
+  .alpha-airdrop-item,
+  .alpha-stability-count,
+  .alpha-empty,
+  .alpha-mobile-time {
+    font-size: 10px;
   }
 
   .guest-shell {

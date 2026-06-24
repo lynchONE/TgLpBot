@@ -46,6 +46,7 @@ import WalletManagePanel from './components/WalletManagePanel';
 import SwapPanel from './components/SwapPanel';
 import TradeHistoryPanel from './components/TradeHistoryPanel';
 import GuestHotPoolsLanding from './components/GuestHotPoolsLanding';
+import AlphaTicker from './components/AlphaTicker';
 import { TopBar, WorkbenchConfigPanel, WorkModeBar } from './components/WorkbenchChrome';
 import WorkbenchLayout from './components/WorkbenchLayout';
 import PositionsPanel, { normalizePositionSmartMoneyGroups } from './components/PositionsPanel';
@@ -2695,6 +2696,7 @@ export default function App() {
             onStartLogin={startCodeLogin}
             onCancelLogin={() => { setLoginCode(''); setLoginError(''); }}
             onLogout={logout}
+            centerSlot={<AlphaTicker />}
             settings={{
               refreshModuleConfig: REFRESH_MODULE_CONFIG,
               maxRefreshIntervalSec: MAX_REFRESH_INTERVAL_SEC,

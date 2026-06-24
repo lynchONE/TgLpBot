@@ -112,6 +112,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/admin/okx_pool", s.handleAdminOKXPool)
 	mux.HandleFunc("/api/admin/private_zap", s.handleAdminPrivateZap)
 	mux.HandleFunc("/api/web_login", s.handleWebLogin)
+	mux.HandleFunc("/api/alpha", s.handleAlphaOverview)
 
 	// Smart Money routes
 	s.registerSmartMoneyRoutes(mux)

@@ -136,6 +136,7 @@ export function TopBar({
   onCancelLogin,
   onLogout,
   settings,
+  centerSlot,
 }) {
   const firstName = loginUser && typeof loginUser.first_name === 'string' ? loginUser.first_name.trim() : '';
   const username = loginUser && typeof loginUser.username === 'string' ? loginUser.username.trim() : '';
@@ -146,6 +147,8 @@ export function TopBar({
       <div className="title-block">
         <div className="eyebrow">lynch</div>
       </div>
+
+      {centerSlot ? <div className="top-center">{centerSlot}</div> : null}
 
       <div className="top-actions">
         {hasInitData && loginUser ? (
