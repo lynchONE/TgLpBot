@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/base/notify"
 	"TgLpBot/base/security"
 	"TgLpBot/service/strategy"
 	"fmt"
@@ -129,30 +130,11 @@ func (b *Bot) handleGlobalBarkKeyInput(messageChatID int64, user *models.User, t
 }
 
 func normalizeBarkServerInput(input string) (string, bool) {
-	s := strings.TrimSpace(input)
-	if s == "" {
+	server, ok := notify.NormalizeBarkServer(input)
+	if server == "" {
 		return "", false
 	}
-
-	// Accept bare host like api.day.app
-	candidate := s
-	if !strings.Contains(candidate, "://") {
-		candidate = "https://" + candidate
-	}
-	u, err := url.Parse(candidate)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", false
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", false
-	}
-
-	out := u.Scheme + "://" + u.Host
-	path := strings.TrimRight(u.Path, "/")
-	if path != "" && path != "/" {
-		out += path
-	}
-	return strings.TrimRight(out, "/"), true
+	return server, ok
 }
 
 func (b *Bot) handleGlobalBarkServerInput(messageChatID int64, user *models.User, text string) {

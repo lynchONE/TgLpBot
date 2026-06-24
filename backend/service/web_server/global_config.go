@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"TgLpBot/base/models"
+	"TgLpBot/base/notify"
 	"TgLpBot/service/strategy"
 	userSvc "TgLpBot/service/user"
 )
@@ -146,7 +147,14 @@ func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interfa
 	setString("default_chain", "default_chain")
 	setBool("multi_wallet_enabled", "multi_wallet_enabled")
 	setBool("bark_enabled", "bark_enabled")
-	setString("bark_server", "bark_server")
+	if v, ok := raw["bark_server"]; ok {
+		var server string
+		if json.Unmarshal(v, &server) == nil {
+			if normalized, valid := notify.NormalizeBarkServer(server); valid {
+				updates["bark_server"] = normalized
+			}
+		}
+	}
 	setString("bark_group", "bark_group")
 	setFloat("open_position_target_share_min", "open_position_target_share_min")
 	setFloat("open_position_target_share_max", "open_position_target_share_max")

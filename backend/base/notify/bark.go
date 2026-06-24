@@ -29,10 +29,7 @@ func barkEndpointWithConfig(title string, body string, cfg BarkConfig) (string, 
 		return "", false
 	}
 
-	server := strings.TrimRight(strings.TrimSpace(cfg.Server), "/")
-	if server == "" {
-		server = defaultBarkServer
-	}
+	server := barkServerBaseForKey(cfg.Server, key)
 
 	endpoint := server + "/" + url.PathEscape(key) + "/" + url.PathEscape(title) + "/" + url.PathEscape(body)
 
@@ -61,6 +58,65 @@ func barkEndpointWithConfig(title string, body string, cfg BarkConfig) (string, 
 	}
 
 	return endpoint, true
+}
+
+func NormalizeBarkServer(server string) (string, bool) {
+	s := strings.TrimSpace(server)
+	if s == "" {
+		return "", true
+	}
+
+	candidate := s
+	if !strings.Contains(candidate, "://") {
+		candidate = "https://" + candidate
+	}
+	u, err := url.Parse(candidate)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", false
+	}
+
+	out := u.Scheme + "://" + u.Host
+	path := strings.TrimRight(u.Path, "/")
+	if path != "" && path != "/" && !isOfficialBarkHost(u.Hostname()) {
+		out += path
+	}
+	return strings.TrimRight(out, "/"), true
+}
+
+func barkServerBaseForKey(server string, key string) string {
+	server = strings.TrimRight(strings.TrimSpace(server), "/")
+	if server == "" {
+		return defaultBarkServer
+	}
+
+	u, err := url.Parse(server)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return server
+	}
+
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i, segment := range segments {
+		if segment == key {
+			if i == 0 {
+				u.Path = ""
+			} else {
+				u.Path = "/" + strings.Join(segments[:i], "/")
+			}
+			u.RawPath = ""
+			u.RawQuery = ""
+			u.Fragment = ""
+			return strings.TrimRight(u.String(), "/")
+		}
+	}
+
+	return server
+}
+
+func isOfficialBarkHost(host string) bool {
+	return strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(host), "."), "api.day.app")
 }
 
 // SendBarkWithConfig sends a Bark push notification when cfg.Key is present.
