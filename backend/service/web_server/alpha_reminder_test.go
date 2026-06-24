@@ -58,3 +58,13 @@ func TestEncodeAlphaReminderSentKeysCapsHistory(t *testing.T) {
 		t.Fatalf("expected capped keys, got %d", len(keys))
 	}
 }
+
+func TestAlphaReminderCompletionUpdatesDisablesReminder(t *testing.T) {
+	updates := alphaReminderCompletionUpdates(map[string]bool{"NES|Nesa|2026-06-24T20:00": true})
+	if updates["alpha_airdrop_reminder_enabled"] != false {
+		t.Fatalf("expected reminder to be disabled after notification, got %+v", updates)
+	}
+	if updates["alpha_airdrop_reminder_sent_keys"] == "" {
+		t.Fatalf("expected sent keys to be persisted")
+	}
+}

@@ -885,11 +885,12 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  margin-left: -1px;
 }
 
 .alpha-reminder-btn {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -902,8 +903,8 @@
 }
 
 .alpha-reminder-btn:hover {
-  color: var(--text);
-  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-muted);
+  background: transparent;
 }
 
 .alpha-reminder-btn.active {
@@ -918,7 +919,7 @@
 .alpha-reminder-popover {
   position: absolute;
   top: calc(100% + 8px);
-  left: -70px;
+  right: 0;
   z-index: 80;
   width: 250px;
   padding: 10px;

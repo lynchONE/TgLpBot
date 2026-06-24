@@ -1,5 +1,5 @@
-import { AlertTriangle, Bell, Clock3, Gift, RadioTower, RefreshCw, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Bell, Clock3, Gift, RadioTower, RefreshCw, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchAlphaDataDirect,
   fetchAlphaOverview,
@@ -100,18 +100,6 @@ function buildStabilitySummary(items) {
   };
 }
 
-function hasAlphaErrors(payload) {
-  return Boolean(payload?.errors && Object.keys(payload.errors).length > 0);
-}
-
-function alphaErrorText(errors) {
-  if (!errors || typeof errors !== 'object') return '';
-  return Object.entries(errors)
-    .map(([key, value]) => `${key}: ${readString(value)}`)
-    .filter(Boolean)
-    .join(' / ');
-}
-
 function normalizeReminderConfig(payload) {
   if (!payload || typeof payload !== 'object') {
     return {
@@ -149,6 +137,7 @@ function normalizeReminderMinutes(value) {
 
 export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
   const [payload, setPayload] = useState(null);
+  const payloadRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reminderOpen, setReminderOpen] = useState(false);
@@ -192,11 +181,14 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
           data = { ...data, errors: { ...(data?.errors || {}), ...directErrors } };
         }
         if (!active) return;
+        payloadRef.current = data;
         setPayload(data);
-        setError(hasAlphaErrors(data) ? alphaErrorText(data.errors) || 'Alpha 部分更新失败' : '');
+        setError('');
       } catch (err) {
         if (!active || err?.name === 'AbortError') return;
-        setError(readString(err?.message) || 'Alpha 加载失败');
+        if (!payloadRef.current) {
+          setError(readString(err?.message) || 'Alpha 加载失败');
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -224,8 +216,12 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
       return undefined;
     }
     let active = true;
-    const controller = new AbortController();
+    let timer = null;
+    let controller = null;
     async function loadReminder() {
+      if (reminderOpen) return;
+      if (controller) controller.abort();
+      controller = new AbortController();
       try {
         setReminderLoading(true);
         setReminderError('');
@@ -246,11 +242,13 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
       }
     }
     loadReminder();
+    timer = window.setInterval(loadReminder, REFRESH_MS);
     return () => {
       active = false;
-      controller.abort();
+      if (controller) controller.abort();
+      if (timer) window.clearInterval(timer);
     };
-  }, [apiBaseUrl, hasInitData, initData]);
+  }, [apiBaseUrl, hasInitData, initData, reminderOpen]);
 
   async function saveReminder(nextDraft = reminderDraft) {
     if (!hasInitData || !initData) {
@@ -328,8 +326,7 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
   if (error && !payload) {
     return (
       <div className="alpha-ticker alpha-ticker-error" aria-live="polite">
-        <AlertTriangle size={13} />
-        <span>{error}</span>
+        <span>Alpha 暂无数据</span>
       </div>
     );
   }
@@ -341,6 +338,27 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
           <Gift size={13} />
           今日空投
         </span>
+        {visibleAirdrops.length ? (
+          <div className="alpha-airdrop-list">
+            {visibleAirdrops.map((item, index) => (
+              <span className="alpha-airdrop-item" key={`${item.token}:${item.name}:${index}`}>
+                <strong>{item.token || item.name}</strong>
+                {item.name && item.name !== item.token ? <span className="alpha-name">{item.name}</span> : null}
+                {item.amount ? <span className="alpha-meta">数量 {item.amount}</span> : null}
+                {item.points ? <span className="alpha-meta">积分 {item.points}</span> : null}
+                {item.dateTime ? (
+                  <span className="alpha-time">
+                    <Clock3 size={11} />
+                    {item.dateTime}
+                  </span>
+                ) : null}
+              </span>
+            ))}
+            {extraAirdropCount > 0 ? <span className="alpha-more">+{extraAirdropCount}</span> : null}
+          </div>
+        ) : (
+          <span className="alpha-empty">暂无</span>
+        )}
         <div className="alpha-reminder-wrap">
           <button
             type="button"
@@ -355,7 +373,7 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
             aria-pressed={reminder.enabled}
             disabled={reminderSaving}
           >
-            <Bell size={12} />
+            <Bell size={13} />
           </button>
           {reminderOpen ? (
             <div className="alpha-reminder-popover">
@@ -422,27 +440,6 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
             </div>
           ) : null}
         </div>
-        {visibleAirdrops.length ? (
-          <div className="alpha-airdrop-list">
-            {visibleAirdrops.map((item, index) => (
-              <span className="alpha-airdrop-item" key={`${item.token}:${item.name}:${index}`}>
-                <strong>{item.token || item.name}</strong>
-                {item.name && item.name !== item.token ? <span className="alpha-name">{item.name}</span> : null}
-                {item.amount ? <span className="alpha-meta">数量 {item.amount}</span> : null}
-                {item.points ? <span className="alpha-meta">积分 {item.points}</span> : null}
-                {item.dateTime ? (
-                  <span className="alpha-time">
-                    <Clock3 size={11} />
-                    {item.dateTime}
-                  </span>
-                ) : null}
-              </span>
-            ))}
-            {extraAirdropCount > 0 ? <span className="alpha-more">+{extraAirdropCount}</span> : null}
-          </div>
-        ) : (
-          <span className="alpha-empty">暂无</span>
-        )}
       </div>
 
       <div className="alpha-divider" />
@@ -469,7 +466,6 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
         )}
       </div>
 
-      {error ? <span className="alpha-soft-error" title={error}>更新失败</span> : null}
       {firstAirdrop?.dateTime ? <span className="alpha-mobile-time">{firstAirdrop.dateTime}</span> : null}
     </div>
   );

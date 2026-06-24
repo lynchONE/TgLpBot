@@ -209,15 +209,21 @@ func processAlphaReminderConfig(ctx context.Context, cfg models.GlobalConfig, ai
 		changed = true
 	}
 	if changed {
-		encoded := encodeAlphaReminderSentKeys(sent)
 		if err := database.DB.WithContext(ctx).
 			Model(&models.GlobalConfig{}).
 			Where("user_id = ?", cfg.UserID).
-			Update("alpha_airdrop_reminder_sent_keys", encoded).Error; err != nil {
+			Updates(alphaReminderCompletionUpdates(sent)).Error; err != nil {
 			return err
 		}
 	}
 	return firstSendErr
+}
+
+func alphaReminderCompletionUpdates(sent map[string]bool) map[string]interface{} {
+	return map[string]interface{}{
+		"alpha_airdrop_reminder_sent_keys": encodeAlphaReminderSentKeys(sent),
+		"alpha_airdrop_reminder_enabled":   false,
+	}
 }
 
 func parseAlphaAirdropTime(item alphaAirdropItem, loc *time.Location) (time.Time, error) {
