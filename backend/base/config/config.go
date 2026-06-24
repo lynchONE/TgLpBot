@@ -105,11 +105,14 @@ type Config struct {
 	BSCChainID  int64
 
 	// Database
-	MySQLHost     string
-	MySQLPort     string
-	MySQLUser     string
-	MySQLPassword string
-	MySQLDatabase string
+	MySQLHost                   string
+	MySQLPort                   string
+	MySQLUser                   string
+	MySQLPassword               string
+	MySQLDatabase               string
+	MySQLMaxOpenConns           int
+	MySQLMaxIdleConns           int
+	MySQLConnMaxLifetimeSeconds int
 
 	// Redis
 	RedisHost     string
@@ -341,11 +344,14 @@ func LoadConfig() error {
 		BSCChainID:  chainID,
 
 		// Database
-		MySQLHost:     getEnv("MYSQL_HOST", "localhost"),
-		MySQLPort:     getEnv("MYSQL_PORT", "3306"),
-		MySQLUser:     getEnv("MYSQL_USER", "root"),
-		MySQLPassword: getEnv("MYSQL_PASSWORD", ""),
-		MySQLDatabase: getEnv("MYSQL_DATABASE", "tglpbot"),
+		MySQLHost:                   getEnv("MYSQL_HOST", "localhost"),
+		MySQLPort:                   getEnv("MYSQL_PORT", "3306"),
+		MySQLUser:                   getEnv("MYSQL_USER", "root"),
+		MySQLPassword:               getEnv("MYSQL_PASSWORD", ""),
+		MySQLDatabase:               getEnv("MYSQL_DATABASE", "tglpbot"),
+		MySQLMaxOpenConns:           getEnvInt("MYSQL_MAX_OPEN_CONNS", 40),
+		MySQLMaxIdleConns:           getEnvInt("MYSQL_MAX_IDLE_CONNS", 10),
+		MySQLConnMaxLifetimeSeconds: getEnvInt("MYSQL_CONN_MAX_LIFETIME_SECONDS", 1800),
 
 		// Redis
 		RedisHost:     getEnv("REDIS_HOST", "localhost"),
@@ -528,6 +534,10 @@ func LoadConfig() error {
 		}
 	}
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
+	log.Printf("   - MySQL Pool Open/Idle/LifetimeSec: %d/%d/%d",
+		AppConfig.MySQLMaxOpenConns,
+		AppConfig.MySQLMaxIdleConns,
+		AppConfig.MySQLConnMaxLifetimeSeconds)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
 	log.Printf("   - Wallet Swap Limit Orders Enabled: %v", AppConfig.WalletSwapLimitOrdersEnabled)
 	log.Printf("   - Wallet Swap Limit Order Interval/Batch/Parallel: %d/%d/%d",

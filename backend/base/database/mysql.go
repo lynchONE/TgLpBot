@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -43,6 +44,9 @@ func InitMySQL() error {
 		log.Println("💡 提示: 请检查 MySQL 服务是否运行，以及 .env 文件中的配置是否正确")
 		return fmt.Errorf("failed to connect to MySQL: %w", err)
 	}
+	if err := configureConnectionPool(); err != nil {
+		return err
+	}
 
 	log.Println("✅ MySQL 连接成功")
 
@@ -55,6 +59,34 @@ func InitMySQL() error {
 	log.Println("✅ 数据库迁移完成")
 	log.Println("========================================")
 
+	return nil
+}
+
+func configureConnectionPool() error {
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("get MySQL sql db: %w", err)
+	}
+	maxOpen := config.AppConfig.MySQLMaxOpenConns
+	maxIdle := config.AppConfig.MySQLMaxIdleConns
+	lifetimeSeconds := config.AppConfig.MySQLConnMaxLifetimeSeconds
+	if maxOpen <= 0 {
+		maxOpen = 40
+	}
+	if maxIdle <= 0 {
+		maxIdle = 10
+	}
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	if lifetimeSeconds <= 0 {
+		lifetimeSeconds = 1800
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(time.Duration(lifetimeSeconds) * time.Second)
+	log.Printf("[DB] MySQL pool configured: max_open=%d max_idle=%d conn_max_lifetime=%s",
+		maxOpen, maxIdle, time.Duration(lifetimeSeconds)*time.Second)
 	return nil
 }
 
@@ -467,6 +499,8 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_type_time", "`chain_id`, `event_type`, `tx_timestamp`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_type_chain_protocol_nft", "`event_type`, `chain_id`, `protocol`, `nft_token_id`")
 	ensureIndex("sm_lp_events", "idx_sm_evt_chain_protocol_nft_time", "`chain_id`, `protocol`, `nft_token_id`, `tx_timestamp`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_wallet_chain_type_id", "`wallet_address`, `chain_id`, `event_type`, `id`")
+	ensureIndex("sm_lp_events", "idx_sm_evt_chain_protocol_nft_ts_id", "`chain_id`, `protocol`, `nft_token_id`, `tx_timestamp`, `id`")
 
 	ensureIndex("sm_lp_positions", "idx_sm_pos_wallet_chain_status_opened", "`wallet_address`, `chain_id`, `status`, `opened_at`")
 	ensureIndex("sm_lp_positions", "idx_sm_pos_pool_status_opened", "`pool_address`, `status`, `opened_at`")
@@ -481,6 +515,9 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("monitored_wallets", "idx_sm_wallet_active_address_chain", "`is_active`, `address`, `chain_id`")
 	ensureIndex("watch_contracts", "idx_sm_watch_contract_active", "`is_active`")
 	ensureIndex("smart_money_user_watch_wallets", "idx_sm_watch_wallet_chain_user_addr", "`chain`, `user_id`, `wallet_address`")
+
+	ensureIndex("sm_wallet_transfer_events", "idx_sm_wallet_transfer_time_wallet", "`tx_timestamp`, `wallet_address`, `chain_id`")
+	ensureIndex("sm_wallet_transfer_events", "idx_sm_wallet_transfer_wallet_chain_asset_time", "`wallet_address`, `chain_id`, `asset_type`, `tx_timestamp`")
 
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_total", "`snapshot_day`, `total_usd`")
 	ensureIndex("sm_wallet_daily_snapshots", "idx_sm_wallet_snapshot_day_wallet", "`snapshot_day`, `wallet_address`, `chain_id`")
@@ -499,6 +536,30 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("pools", "idx_pools_chain_address", "`chain`, `address`")
 	ensureIndex("pools", "idx_pools_chain_updated_at", "`chain`, `updated_at`")
 	ensureIndex("pools", "idx_pools_source_chain_updated_at", "`source_requested_chain`, `updated_at`")
+	ensureIndex("pools", "idx_pools_chain_dex_updated", "`chain`, `dex_id`, `updated_at`")
+	ensureIndex("pools", "idx_pools_chain_factory_updated", "`chain`, `factory_name`, `updated_at`")
+
+	ensureIndex("wallet_swap_limit_orders", "idx_wallet_swap_limit_due", "`status`, `next_check_at`, `created_at`, `id`")
+	ensureIndex("wallet_swap_limit_orders", "idx_wallet_swap_limit_user_chain_created", "`user_id`, `chain`, `created_at`, `id`")
+	ensureIndex("wallet_swap_limit_orders", "idx_wallet_swap_limit_user_chain_wallet_created", "`user_id`, `chain`, `wallet_id`, `created_at`, `id`")
+
+	ensureIndex("smart_money_follow_configs", "idx_sm_follow_cfg_chain_updated", "`chain_id`, `updated_at`, `id`")
+	ensureIndex("smart_money_follow_configs", "idx_sm_follow_cfg_enabled_id", "`enabled`, `id`")
+	ensureIndex("smart_money_follow_configs", "idx_sm_follow_cfg_user_chain_updated", "`user_id`, `chain`, `updated_at`, `id`")
+	ensureIndex("smart_money_follow_jobs", "idx_sm_follow_job_status_schedule", "`status`, `scheduled_at`, `id`")
+	ensureIndex("smart_money_follow_jobs", "idx_sm_follow_job_config_ref_status", "`config_id`, `target_position_ref`, `status`, `id`")
+	ensureIndex("smart_money_follow_tasks", "idx_sm_follow_task_config_user_id", "`config_id`, `user_id`, `id`")
+	ensureIndex("smart_money_follow_tasks", "idx_sm_follow_task_user_task", "`user_id`, `task_id`")
+	ensureIndex("smart_money_follow_tasks", "idx_sm_follow_task_config_ref_status", "`config_id`, `target_position_ref`, `status`, `id`")
+
+	ensureIndex("trade_records", "idx_trade_user_task_status_opened", "`user_id`, `task_id`, `status`, `opened_at`")
+	ensureIndex("trade_records", "idx_trade_user_chain_status_opened", "`user_id`, `chain`, `status`, `opened_at`")
+	ensureIndex("trade_records", "idx_trade_status_closed_id", "`status`, `closed_at`, `id`")
+	ensureIndex("trade_records", "idx_trade_user_status_task", "`user_id`, `status`, `task_id`")
+
+	ensureIndex("strategy_tasks", "idx_strategy_status_paused_dca", "`status`, `paused`, `dca_enabled`, `dca_next_batch_at`, `id`")
+	ensureIndex("strategy_tasks", "idx_strategy_follow_id", "`is_follow`, `id`")
+	ensureIndex("strategy_tasks", "idx_strategy_user_follow_status", "`user_id`, `is_follow`, `status`, `id`")
 }
 
 func migrateSmartMoneyFollowConfigTable() error {
@@ -679,7 +740,7 @@ func repairSmartMoneyFollowConfigRowsBeforeMigrate(tableName string) error {
 				OR (
 					(cfg.execution_wallet_id IS NULL OR cfg.execution_wallet_id = 0)
 					AND COALESCE(TRIM(cfg.execution_wallet_address), '') <> ''
-					AND LOWER(w.address) = LOWER(TRIM(cfg.execution_wallet_address))
+					AND w.address = TRIM(cfg.execution_wallet_address)
 				)
 			)
 		SET cfg.execution_wallet_id = w.id,

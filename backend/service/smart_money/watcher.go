@@ -1506,6 +1506,10 @@ func (w *Watcher) handleParsedLPEvent(ctx context.Context, event *models.SmartMo
 	// Compute USD amounts via OKX/Gecko real prices
 	ComputeEventAmountUSD(ctx, event)
 
+	liveLiquidity, err := w.repo.LiveLiquiditySnapshotForEvent(ctx, event)
+	if err != nil {
+		return err
+	}
 	inserted := false
 	if err := w.repo.WithTx(ctx, func(tx *gorm.DB) error {
 		var err error
@@ -1516,7 +1520,7 @@ func (w *Watcher) handleParsedLPEvent(ctx context.Context, event *models.SmartMo
 		if !inserted {
 			return nil
 		}
-		return w.repo.UpsertLPPosition(tx, event)
+		return w.repo.UpsertLPPosition(tx, event, liveLiquidity)
 	}); err != nil {
 		return err
 	}

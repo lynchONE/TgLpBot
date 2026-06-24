@@ -144,10 +144,10 @@ func configuredAdminWalletAddressForQuery() (string, bool) {
 	if admin == "" {
 		return "", false
 	}
-	if common.IsHexAddress(admin) {
-		admin = common.HexToAddress(admin).Hex()
+	if !common.IsHexAddress(admin) {
+		return "", false
 	}
-	return strings.ToLower(admin), true
+	return common.HexToAddress(admin).Hex(), true
 }
 
 func isConfiguredAdminWalletAddress(address string) bool {
@@ -162,12 +162,12 @@ func isConfiguredAdminWalletAddress(address string) bool {
 	if common.IsHexAddress(address) {
 		address = common.HexToAddress(address).Hex()
 	}
-	return strings.ToLower(address) == admin
+	return address == admin
 }
 
 func excludeConfiguredAdminWallet(db *gorm.DB) *gorm.DB {
 	if admin, ok := configuredAdminWalletAddressForQuery(); ok {
-		return db.Where("LOWER(address) <> ?", admin)
+		return db.Where("address <> ?", admin)
 	}
 	return db
 }

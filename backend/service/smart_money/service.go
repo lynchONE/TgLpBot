@@ -102,6 +102,10 @@ func (s *Service) Status() MonitorStatus {
 }
 
 func (s *Service) WriteEventInTx(ctx context.Context, event *models.SmartMoneyLPEvent) error {
+	liveLiquidity, err := s.repo.LiveLiquiditySnapshotForEvent(ctx, event)
+	if err != nil {
+		return err
+	}
 	return s.repo.WithTx(ctx, func(tx *gorm.DB) error {
 		inserted, err := s.repo.InsertLPEvent(tx, event)
 		if err != nil {
@@ -110,7 +114,7 @@ func (s *Service) WriteEventInTx(ctx context.Context, event *models.SmartMoneyLP
 		if !inserted {
 			return nil
 		}
-		return s.repo.UpsertLPPosition(tx, event)
+		return s.repo.UpsertLPPosition(tx, event, liveLiquidity)
 	})
 }
 

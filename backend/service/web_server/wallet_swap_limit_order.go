@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -587,14 +588,48 @@ func (w *WalletSwapLimitOrderWorker) runOnce() {
 }
 
 func (w *WalletSwapLimitOrderWorker) loadDueOrders(ctx context.Context, limit int) ([]models.WalletSwapLimitOrder, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
 	now := time.Now()
-	var orders []models.WalletSwapLimitOrder
-	err := database.DB.WithContext(ctx).
-		Where("status = ? AND (next_check_at IS NULL OR next_check_at <= ?)", models.WalletSwapLimitOrderStatusOpen, now).
-		Order("COALESCE(next_check_at, created_at) ASC").
+	var unscheduled []models.WalletSwapLimitOrder
+	if err := database.DB.WithContext(ctx).
+		Where("status = ? AND next_check_at IS NULL", models.WalletSwapLimitOrderStatusOpen).
+		Order("created_at ASC").
 		Limit(limit).
-		Find(&orders).Error
-	return orders, err
+		Find(&unscheduled).Error; err != nil {
+		return nil, err
+	}
+	var scheduled []models.WalletSwapLimitOrder
+	err := database.DB.WithContext(ctx).
+		Where("status = ? AND next_check_at <= ?", models.WalletSwapLimitOrderStatusOpen, now).
+		Order("next_check_at ASC").
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&scheduled).Error
+	if err != nil {
+		return nil, err
+	}
+	orders := append(unscheduled, scheduled...)
+	sort.SliceStable(orders, func(i, j int) bool {
+		left := limitOrderDueTime(orders[i])
+		right := limitOrderDueTime(orders[j])
+		if left.Equal(right) {
+			return orders[i].ID < orders[j].ID
+		}
+		return left.Before(right)
+	})
+	if len(orders) > limit {
+		orders = orders[:limit]
+	}
+	return orders, nil
+}
+
+func limitOrderDueTime(order models.WalletSwapLimitOrder) time.Time {
+	if order.NextCheckAt != nil {
+		return *order.NextCheckAt
+	}
+	return order.CreatedAt
 }
 
 func (w *WalletSwapLimitOrderWorker) processOrder(ctx context.Context, orderID uint) error {

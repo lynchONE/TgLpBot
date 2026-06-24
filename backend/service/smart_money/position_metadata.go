@@ -189,7 +189,7 @@ func repairOpenPositionState(ctx context.Context, repo *Repository, pos *models.
 	}
 
 	applyManagerSnapshotToActive(active)
-	liveLiquidity, liveErr := repo.loadCurrentLiquiditySnapshot(nil, active)
+	liveLiquidity, liveErr := repo.loadCurrentLiquiditySnapshot(ctx, nil, active)
 	if liveErr != nil {
 		if isInvalidTokenIDError(liveErr) || isV4PoolKeyNotSetError(liveErr) {
 			return closeSmartMoneyPosition(ctx, repo, active, pos, now)

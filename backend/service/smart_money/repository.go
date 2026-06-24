@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -695,8 +697,8 @@ func (r *Repository) ListWatchLPEvents(ctx context.Context, query WatchActivityQ
 
 // --- SmartMoneyLPPosition ---
 
-func (r *Repository) UpsertLPPosition(tx *gorm.DB, event *models.SmartMoneyLPEvent) error {
-	active, err := r.UpsertActivePosition(tx, event)
+func (r *Repository) UpsertLPPosition(tx *gorm.DB, event *models.SmartMoneyLPEvent, liveLiquidity *big.Int) error {
+	active, err := r.UpsertActivePosition(tx, event, liveLiquidity)
 	if err != nil || active == nil {
 		return err
 	}
@@ -795,7 +797,7 @@ func (r *Repository) UpsertLPPosition(tx *gorm.DB, event *models.SmartMoneyLPEve
 	return tx.Create(&pos).Error
 }
 
-func (r *Repository) UpsertActivePosition(tx *gorm.DB, event *models.SmartMoneyLPEvent) (*models.SmartMoneyActivePosition, error) {
+func (r *Repository) UpsertActivePosition(tx *gorm.DB, event *models.SmartMoneyLPEvent, liveLiquidity *big.Int) (*models.SmartMoneyActivePosition, error) {
 	if event == nil {
 		return nil, nil
 	}
@@ -868,8 +870,8 @@ func (r *Repository) UpsertActivePosition(tx *gorm.DB, event *models.SmartMoneyL
 	liquidityDelta := parseSignedBigInt(event.LiquidityDelta)
 	currentLiquidity := parseSignedBigInt(active.CurrentLiquidity)
 	if !exists {
-		if liveLiquidity, _ := r.loadCurrentLiquiditySnapshot(event, &active); liveLiquidity != nil {
-			currentLiquidity = liveLiquidity
+		if liveLiquidity != nil {
+			currentLiquidity = new(big.Int).Set(liveLiquidity)
 		} else {
 			currentLiquidity.Add(currentLiquidity, liquidityDelta)
 		}
@@ -923,6 +925,50 @@ func (r *Repository) UpsertActivePosition(tx *gorm.DB, event *models.SmartMoneyL
 		return nil, err
 	}
 	return &active, nil
+}
+
+func (r *Repository) LiveLiquiditySnapshotForEvent(ctx context.Context, event *models.SmartMoneyLPEvent) (*big.Int, error) {
+	if ctx == nil || database.DB == nil || event == nil || event.NftTokenID == nil || *event.NftTokenID == 0 {
+		return nil, nil
+	}
+	positionRef := BuildPositionRefFromEvent(event)
+	if positionRef == "" {
+		return nil, nil
+	}
+	var existing models.SmartMoneyActivePosition
+	err := database.DB.WithContext(ctx).
+		Select("id").
+		Where("position_ref = ?", positionRef).
+		First(&existing).Error
+	if err == nil {
+		return nil, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	active := &models.SmartMoneyActivePosition{
+		PositionRef:   positionRef,
+		WalletAddress: strings.ToLower(event.WalletAddress),
+		ChainID:       event.ChainID,
+		Protocol:      strings.TrimSpace(event.Protocol),
+		NftTokenID:    *event.NftTokenID,
+		PoolAddress:   strings.ToLower(strings.TrimSpace(event.PoolAddress)),
+	}
+	if event.FeeTier != nil {
+		active.FeeTier = cloneIntPtr(event.FeeTier)
+	}
+	if event.TickLower != nil {
+		active.TickLower = cloneIntPtr(event.TickLower)
+	}
+	if event.TickUpper != nil {
+		active.TickUpper = cloneIntPtr(event.TickUpper)
+	}
+	applyManagerSnapshotToActive(active)
+	liquidity, err := r.loadCurrentLiquiditySnapshot(ctx, event, active)
+	if err != nil {
+		return nil, nil
+	}
+	return liquidity, nil
 }
 
 func (r *Repository) WithTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
@@ -1145,22 +1191,16 @@ func (r *Repository) EnsureActivePositionFromPosition(ctx context.Context, pos *
 	if active.OpenedAt.IsZero() {
 		active.OpenedAt = time.Now()
 	}
+	applyManagerSnapshotToActive(active)
+	var liveLiquidity *big.Int
+	if active.IsActive {
+		liveLiquidity, _ = r.loadCurrentLiquiditySnapshot(ctx, nil, active)
+	}
 	if err := database.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		r.applyPoolSnapshotToActive(tx, active)
 		applyManagerSnapshotToActive(active)
 		r.hydrateActivePositionFromHistory(tx, active)
-		if active.IsActive {
-			if liveLiquidity, _ := r.loadCurrentLiquiditySnapshot(nil, active); liveLiquidity != nil {
-				active.CurrentLiquidity = liveLiquidity.String()
-				active.IsActive = liveLiquidity.Sign() > 0
-				if active.IsActive {
-					active.ClosedAt = nil
-				} else if active.ClosedAt == nil {
-					closedAt := time.Now()
-					active.ClosedAt = &closedAt
-				}
-			}
-		}
+		applyLiveLiquiditySnapshot(active, liveLiquidity)
 		return tx.Create(active).Error
 	}); err != nil {
 		return nil, err
@@ -1329,9 +1369,28 @@ func applyManagerSnapshotToActive(active *models.SmartMoneyActivePosition) {
 	}
 }
 
-func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEvent, active *models.SmartMoneyActivePosition) (*big.Int, error) {
+func applyLiveLiquiditySnapshot(active *models.SmartMoneyActivePosition, liveLiquidity *big.Int) {
+	if active == nil || liveLiquidity == nil {
+		return
+	}
+	active.CurrentLiquidity = liveLiquidity.String()
+	active.IsActive = liveLiquidity.Sign() > 0
+	if active.IsActive {
+		active.ClosedAt = nil
+		return
+	}
+	if active.ClosedAt == nil {
+		closedAt := time.Now()
+		active.ClosedAt = &closedAt
+	}
+}
+
+func (r *Repository) loadCurrentLiquiditySnapshot(ctx context.Context, event *models.SmartMoneyLPEvent, active *models.SmartMoneyActivePosition) (*big.Int, error) {
 	if active == nil || active.NftTokenID == 0 {
 		return nil, nil
+	}
+	if ctx == nil {
+		return nil, fmt.Errorf("context is nil")
 	}
 
 	chainID := active.ChainID
@@ -1355,7 +1414,7 @@ func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEven
 		if err != nil {
 			return nil, err
 		}
-		info, err := pm.Positions(nil, tokenID)
+		info, err := pm.Positions(&bind.CallOpts{Context: ctx}, tokenID)
 		if err != nil || info == nil || info.Liquidity == nil {
 			return nil, err
 		}
@@ -1682,7 +1741,7 @@ func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]flo
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.protocol = p.protocol
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
+		WHERE p.status = 'open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1)
 		GROUP BY p.pool_address
 	`, recentCutoff).Scan(&rows).Error
 	if err != nil {
@@ -1745,7 +1804,7 @@ func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddre
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.protocol = p.protocol
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
+		WHERE p.status = 'open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1)
 	`
 	args = append(args, recentCutoff)
 	if len(normalizedPools) > 0 {
@@ -2167,7 +2226,7 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context, source string) 
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.protocol = p.protocol
 			AND evt_net.nft_token_id = p.nft_token_id
-		WHERE p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1
+		WHERE p.status = 'open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1)
 		GROUP BY p.pool_address, p.token0_symbol, p.token1_symbol, p.token0_address, p.token1_address, p.fee_tier, p.protocol, p.chain_id
 		ORDER BY total_position_amount_usd DESC, latest_event_at DESC
 	`
@@ -2253,10 +2312,10 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 			MAX(p.fee_tier) AS fee_tier,
 			MAX(p.protocol) AS protocol,
 			MAX(p.chain_id) AS chain_id,
-			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN p.wallet_address END) AS wallet_count,
+			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1) THEN 1 ELSE 0 END) AS open_position_count,
+			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1) THEN p.wallet_address END) AS wallet_count,
 			SUM(CASE WHEN p.status='closed' AND p.closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count,
-			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1 THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
+			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1) THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
 		FROM sm_lp_positions p
 `+smartMoneyActivePositionJoinSQL("p")+`
 		LEFT JOIN (
@@ -2315,7 +2374,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	database.DB.WithContext(ctx).
 		Table("sm_lp_positions p").
 		Joins(smartMoneyActivePositionJoinSQL("p")).
-		Where("p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", recentCutoff).
+		Where("p.status = 'open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1)", recentCutoff).
 		Count(&openCount)
 	stats.OpenPositionCount = int(openCount)
 
@@ -2328,7 +2387,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	database.DB.WithContext(ctx).
 		Table("sm_lp_positions p").
 		Joins(smartMoneyActivePositionJoinSQL("p")).
-		Where("p.status = 'open' AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", recentCutoff).
+		Where("p.status = 'open' AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1)", recentCutoff).
 		Distinct("p.pool_address").
 		Count(&poolCount)
 	stats.ActivePoolCount = int(poolCount)
@@ -2390,8 +2449,8 @@ type ZombieWalletCandidate struct {
 func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, keyword, source string, activeOnly *bool) ([]WalletStatsRow, int64, error) {
 	countDB := database.DB.WithContext(ctx).Model(&models.MonitoredWallet{})
 	if keyword != "" {
-		kw := "%" + strings.ToLower(strings.TrimSpace(keyword)) + "%"
-		countDB = countDB.Where("LOWER(address) LIKE ? OR LOWER(COALESCE(label, '')) LIKE ?", kw, kw)
+		kw := "%" + strings.TrimSpace(keyword) + "%"
+		countDB = countDB.Where("address LIKE ? OR label LIKE ?", kw, kw)
 	}
 	if source != "" {
 		countDB = countDB.Where("source = ?", source)
@@ -2434,7 +2493,7 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 		`).
 		Joins(smartMoneyActivePositionJoinSQL("p")).
 		Joins("LEFT JOIN (?) evt_net ON evt_net.chain_id = p.chain_id AND evt_net.protocol = p.protocol AND evt_net.nft_token_id = p.nft_token_id", eventNetSubQuery).
-		Where("p.status = ? AND p.opened_at >= ? AND COALESCE(ap.is_active, 1) = 1", "open", recentCutoff).
+		Where("p.status = ? AND p.opened_at >= ? AND (ap.id IS NULL OR ap.is_active = 1)", "open", recentCutoff).
 		Group("p.wallet_address, p.chain_id")
 
 	walletEventSubQuery := database.DB.WithContext(ctx).
@@ -2470,8 +2529,8 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 		Joins("LEFT JOIN (?) we ON we.wallet_address = w.address AND we.chain_id = w.chain_id", walletEventSubQuery)
 
 	if keyword != "" {
-		kw := "%" + strings.ToLower(strings.TrimSpace(keyword)) + "%"
-		query = query.Where("LOWER(w.address) LIKE ? OR LOWER(COALESCE(w.label, '')) LIKE ?", kw, kw)
+		kw := "%" + strings.TrimSpace(keyword) + "%"
+		query = query.Where("w.address LIKE ? OR w.label LIKE ?", kw, kw)
 	}
 	if source != "" {
 		query = query.Where("w.source = ?", source)

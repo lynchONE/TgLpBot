@@ -191,7 +191,7 @@ func buildPoolCatalogBaseQuery(ctx context.Context, opts poolCatalogOptions) *go
 		)
 	}
 	if len(opts.Dexes) > 0 {
-		query = query.Where("(LOWER(factory_name) IN ? OR LOWER(dex_id) IN ?)", opts.Dexes, opts.Dexes)
+		query = query.Where("(factory_name IN ? OR dex_id IN ?)", opts.Dexes, opts.Dexes)
 	}
 	return query
 }

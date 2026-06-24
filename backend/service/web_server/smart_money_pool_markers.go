@@ -121,14 +121,14 @@ func decimalStringToFloat(value *string) float64 {
 	return sanitizeFloat(num)
 }
 
-func poolVersionProtocolFilter(version string) string {
+func poolVersionProtocols(version string) []string {
 	switch strings.ToLower(strings.TrimSpace(version)) {
 	case "v3":
-		return "%v3%"
+		return []string{"pancake_v3", "uniswap_v3"}
 	case "v4":
-		return "%v4%"
+		return []string{"uniswap_v4"}
 	default:
-		return ""
+		return nil
 	}
 }
 
@@ -427,8 +427,8 @@ func buildSmartMoneyMarkerEstimates(
 		Where("tx_timestamp BETWEEN ? AND ?", historyStart, queryEnd).
 		Where("wallet_address IN ?", wallets).
 		Where("event_type IN ?", []string{"add", "remove"})
-	if protocolFilter := poolVersionProtocolFilter(poolVersion); protocolFilter != "" {
-		db = db.Where("LOWER(protocol) LIKE ?", protocolFilter)
+	if protocols := poolVersionProtocols(poolVersion); len(protocols) > 0 {
+		db = db.Where("protocol IN ?", protocols)
 	}
 	if err := db.
 		Order("tx_timestamp ASC").
@@ -575,8 +575,8 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		Model(&models.SmartMoneyLPEvent{}).
 		Where("chain_id = ? AND pool_address = ?", cc.ChainID, poolID).
 		Where("tx_timestamp BETWEEN ? AND ?", queryStart, queryEnd)
-	if protocolFilter := poolVersionProtocolFilter(poolVersion); protocolFilter != "" {
-		db = db.Where("LOWER(protocol) LIKE ?", protocolFilter)
+	if protocols := poolVersionProtocols(poolVersion); len(protocols) > 0 {
+		db = db.Where("protocol IN ?", protocols)
 	}
 	if err := db.
 		Order("tx_timestamp DESC").

@@ -1711,8 +1711,8 @@ func (s *Service) loadPagedSmartMoneyWallets(ctx context.Context, page int, size
 		Model(&models.MonitoredWallet{}).
 		Where("monitored_wallets.is_active = ?", true)
 	if keyword != "" {
-		kw := "%" + strings.ToLower(keyword) + "%"
-		db = db.Where("LOWER(monitored_wallets.address) LIKE ? OR LOWER(COALESCE(monitored_wallets.label, '')) LIKE ?", kw, kw)
+		kw := "%" + keyword + "%"
+		db = db.Where("monitored_wallets.address LIKE ? OR monitored_wallets.label LIKE ?", kw, kw)
 	}
 
 	var total int64

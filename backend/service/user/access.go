@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,7 +39,11 @@ type UserAccessAdminRow struct {
 }
 
 func normalizeHexAddress(addr string) string {
-	return strings.ToLower(strings.TrimSpace(addr))
+	addr = strings.TrimSpace(addr)
+	if addr == "" || !common.IsHexAddress(addr) {
+		return ""
+	}
+	return common.HexToAddress(addr).Hex()
 }
 
 func (s *AccessService) IsAdminWalletAddress(addr string) bool {
@@ -56,7 +61,7 @@ func (s *AccessService) IsAdminUser(userID uint) bool {
 	}
 	var count int64
 	_ = database.DB.Model(&models.Wallet{}).
-		Where("user_id = ? AND LOWER(address) = ?", userID, admin).
+		Where("user_id = ? AND address = ?", userID, admin).
 		Count(&count).Error
 	return count > 0
 }
@@ -382,7 +387,7 @@ func (s *AccessService) CountUserWallets(userID uint) (int64, error) {
 	if config.AppConfig != nil {
 		admin := normalizeHexAddress(config.AppConfig.AdminWalletAddress)
 		if admin != "" {
-			db = db.Where("LOWER(address) <> ?", admin)
+			db = db.Where("address <> ?", admin)
 		}
 	}
 	if err := db.Count(&count).Error; err != nil {

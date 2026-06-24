@@ -2864,7 +2864,7 @@ func resolveExecutionWalletForSave(ctx context.Context, tx *gorm.DB, userID uint
 		if addr == "" {
 			return nil, fmt.Errorf("invalid execution wallet address")
 		}
-		db = db.Where("LOWER(address) = ?", addr)
+		db = db.Where("address = ?", common.HexToAddress(addr).Hex())
 	}
 	var row models.Wallet
 	if err := db.First(&row).Error; err != nil {
