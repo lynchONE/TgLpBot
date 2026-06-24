@@ -2696,7 +2696,7 @@ export default function App() {
             onStartLogin={startCodeLogin}
             onCancelLogin={() => { setLoginCode(''); setLoginError(''); }}
             onLogout={logout}
-            centerSlot={<AlphaTicker />}
+            centerSlot={<AlphaTicker apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} />}
             settings={{
               refreshModuleConfig: REFRESH_MODULE_CONFIG,
               maxRefreshIntervalSec: MAX_REFRESH_INTERVAL_SEC,

@@ -84,6 +84,39 @@ export async function fetchAlphaStabilityDirect({ signal } = {}) {
   return requestJson('https://alpha123.uk/stability/stability_feed_v3.json', { method: 'GET', signal });
 }
 
+export async function fetchAlphaReminderConfig({ apiBaseUrl, initData, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  return requestJson(`${base}/api/alpha_reminder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData }),
+    signal,
+  });
+}
+
+export async function saveAlphaReminderConfig({
+  apiBaseUrl,
+  initData,
+  enabled,
+  reminderMinutes,
+  intensity,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  return requestJson(`${base}/api/alpha_reminder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      initData,
+      action: 'save',
+      enabled,
+      reminder_minutes: reminderMinutes,
+      intensity,
+    }),
+    signal,
+  });
+}
+
 export async function fetchHotPools({
   apiBaseUrl,
   initData,

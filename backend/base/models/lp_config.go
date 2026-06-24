@@ -36,6 +36,12 @@ type GlobalConfig struct {
 	// Notifications
 	ExtraNotificationsEnabled bool `gorm:"not null;default:true" json:"extra_notifications_enabled"`
 
+	// Alpha airdrop Bark reminder
+	AlphaAirdropReminderEnabled   bool   `gorm:"not null;default:false" json:"alpha_airdrop_reminder_enabled"`
+	AlphaAirdropReminderMinutes   int    `gorm:"not null;default:3" json:"alpha_airdrop_reminder_minutes"`
+	AlphaAirdropReminderIntensity string `gorm:"size:32;not null;default:'ring'" json:"alpha_airdrop_reminder_intensity"`
+	AlphaAirdropReminderSentKeys  string `gorm:"type:text" json:"alpha_airdrop_reminder_sent_keys"`
+
 	// Token filters
 	FilterChineseTokens bool `gorm:"not null;default:false" json:"filter_chinese_tokens"`
 

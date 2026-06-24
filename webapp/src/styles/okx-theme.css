@@ -2170,6 +2170,7 @@ body {
     width: 100%;
     grid-template-columns: 1fr;
     justify-content: flex-start;
+    overflow: visible;
   }
 
   .config-panel {
@@ -2237,6 +2238,11 @@ body {
 
   .alpha-label {
     font-size: 10px;
+  }
+
+  .alpha-reminder-popover {
+    left: -92px;
+    width: min(250px, calc(100vw - 28px));
   }
 
   .alpha-airdrop-item,

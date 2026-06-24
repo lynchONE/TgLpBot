@@ -26,20 +26,24 @@ func (s *GlobalConfigService) GetOrCreate(userID uint) (*models.GlobalConfig, er
 	}
 
 	cfg = models.GlobalConfig{
-		UserID:                    userID,
-		MultiChainEnabled:         true,
-		DefaultChain:              "bsc",
-		MultiWalletEnabled:        false,
-		RebalanceTimeout:          10,
-		SlippageTolerance:         0.5,
-		AutoReinvest:              false,
-		ExtraNotificationsEnabled: true,
-		FilterChineseTokens:       false,
-		BarkEnabled:               false,
-		BarkKeyEncrypted:          "",
-		BarkServer:                "",
-		BarkGroup:                 "",
-		DCAMinSplitAmountUSDT:     0,
+		UserID:                        userID,
+		MultiChainEnabled:             true,
+		DefaultChain:                  "bsc",
+		MultiWalletEnabled:            false,
+		RebalanceTimeout:              10,
+		SlippageTolerance:             0.5,
+		AutoReinvest:                  false,
+		ExtraNotificationsEnabled:     true,
+		AlphaAirdropReminderEnabled:   false,
+		AlphaAirdropReminderMinutes:   3,
+		AlphaAirdropReminderIntensity: "ring",
+		AlphaAirdropReminderSentKeys:  "",
+		FilterChineseTokens:           false,
+		BarkEnabled:                   false,
+		BarkKeyEncrypted:              "",
+		BarkServer:                    "",
+		BarkGroup:                     "",
+		DCAMinSplitAmountUSDT:         0,
 	}
 	if err := database.DB.Create(&cfg).Error; err != nil {
 		return nil, fmt.Errorf("create global config failed: %w", err)

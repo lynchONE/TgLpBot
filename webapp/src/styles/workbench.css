@@ -827,12 +827,12 @@
   width: min(940px, 100%);
   min-height: 34px;
   display: grid;
-  grid-template-columns: minmax(230px, 0.72fr) 1px minmax(460px, 1.28fr);
+  grid-template-columns: minmax(300px, 0.82fr) 1px minmax(430px, 1.18fr);
   align-items: center;
   gap: 10px;
   padding: 0 6px;
   color: var(--text);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .alpha-ticker-loading,
@@ -848,10 +848,12 @@
 }
 
 .alpha-section {
+  position: relative;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 7px;
+  min-height: 24px;
 }
 
 .alpha-airdrops {
@@ -870,7 +872,209 @@
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 800;
+  line-height: 18px;
   white-space: nowrap;
+}
+
+.alpha-label svg {
+  flex: 0 0 auto;
+}
+
+.alpha-reminder-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.alpha-reminder-btn {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.alpha-reminder-btn:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.alpha-reminder-btn.active {
+  color: var(--accent-text);
+}
+
+.alpha-reminder-btn:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.alpha-reminder-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -70px;
+  z-index: 80;
+  width: 250px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(5, 9, 15, 0.98);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+  color: var(--text);
+}
+
+.alpha-reminder-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.alpha-reminder-head > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.alpha-reminder-head strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.alpha-reminder-head span,
+.alpha-reminder-actions span {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.alpha-reminder-head button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.alpha-reminder-head button:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text);
+}
+
+.alpha-reminder-toggle,
+.alpha-reminder-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  color: #d8e4fb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.alpha-reminder-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: rgb(var(--accent-rgb));
+}
+
+.alpha-reminder-field > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.alpha-reminder-field input {
+  width: 58px;
+  height: 26px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  padding: 0 7px;
+  background: rgba(10, 15, 24, 0.9);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+  outline: none;
+}
+
+.alpha-reminder-field em {
+  color: var(--text-muted);
+  font-style: normal;
+  font-size: 10px;
+}
+
+.alpha-reminder-intensity {
+  align-items: flex-start;
+  padding-top: 5px;
+}
+
+.alpha-reminder-intensity > div {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.alpha-reminder-intensity button,
+.alpha-reminder-actions button {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  background: rgba(10, 15, 24, 0.8);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.alpha-reminder-intensity button {
+  min-height: 24px;
+  padding: 0 7px;
+}
+
+.alpha-reminder-intensity button.active {
+  border-color: rgba(var(--accent-rgb), 0.42);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-text);
+}
+
+.alpha-reminder-error {
+  margin-top: 8px;
+  color: #fcd34d;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.alpha-reminder-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.alpha-reminder-actions button {
+  min-height: 26px;
+  padding: 0 10px;
+  color: var(--accent-text);
+}
+
+.alpha-reminder-actions button:disabled,
+.alpha-reminder-intensity button:disabled,
+.alpha-reminder-field input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .alpha-airdrop-list,
@@ -897,7 +1101,7 @@
   padding: 2px 0;
   font-size: 11px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 18px;
   white-space: nowrap;
 }
 
@@ -928,7 +1132,11 @@
 }
 
 .alpha-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: #8bd3ff;
+  font-variant-numeric: tabular-nums;
 }
 
 .alpha-time svg {

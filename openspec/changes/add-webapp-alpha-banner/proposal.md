@@ -8,7 +8,8 @@
 - 从 `https://alpha123.uk/api/data?fresh=1` 读取 `airdrops`，展示今日空投的项目名称、数量、积分、Token 与 `date time` 拼接时间。
 - 从 `https://alpha123.uk/stability/stability_feed_v3.json` 读取稳定度数据，展示紧凑稳定度摘要，优先呈现异常/不稳定项目。
 - 顶部空间有限时只展示摘要与少量条目，避免挤压登录区和工作台布局。
+- 为今日空投增加铃铛提醒入口，默认在空投时间前 3 分钟通过 Bark 推送，支持在小弹框内设置提前时间与提醒强度。
 
 ## Impact
 - Affected specs: `web-workbench`
-- Affected code: `webapp/src/App.jsx`、`webapp/src/api.js`、`webapp/src/components/*`、`webapp/src/styles/*`、`webapp/api/alpha.js`、`backend/service/web_server/alpha_proxy.go`
+- Affected code: `webapp/src/App.jsx`、`webapp/src/api.js`、`webapp/src/components/*`、`webapp/src/styles/*`、`webapp/api/alpha.js`、`backend/service/web_server/alpha_proxy.go`、`backend/service/web_server/alpha_reminder.go`、`backend/base/models/lp_config.go`

@@ -5,8 +5,12 @@
 - [x] 1.4 补充样式，确保桌面和移动端不会挤压登录区或工作台配置。
 - [x] 1.5 如浏览器直连接口受限，补充 webapp API 代理。
 - [x] 1.6 补充后端 `/api/alpha` 代理，兼容 nginx 静态部署路径。
+- [x] 1.7 新增 Alpha 空投 Bark 提醒配置 API 与后端定时触发。
+- [x] 1.8 在顶部 Alpha 条加入铃铛按钮、提醒弹框、默认提前 3 分钟和强度设置。
+- [x] 1.9 调整 Alpha 条图标、日期时间、文字的垂直对齐。
 
 ## 2. Validation
 - [x] 2.1 运行 `npm run build`。
 - [x] 2.2 做针对性 diff 检查，确认顶部栏、登录入口、访客页和工作台布局没有回归。
 - [x] 2.3 运行 `go test ./service/web_server`。
+- [x] 2.4 重新运行 `npm run build`、`go test ./service/web_server` 并做提醒相关 diff 检查。

@@ -1,10 +1,23 @@
-import { AlertTriangle, Clock3, Gift, RadioTower, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Bell, Clock3, Gift, RadioTower, RefreshCw, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { fetchAlphaDataDirect, fetchAlphaOverview, fetchAlphaStabilityDirect } from '../api';
+import {
+  fetchAlphaDataDirect,
+  fetchAlphaOverview,
+  fetchAlphaReminderConfig,
+  fetchAlphaStabilityDirect,
+  saveAlphaReminderConfig,
+} from '../api';
 
 const REFRESH_MS = 60_000;
 const AIRDROP_LIMIT = 2;
 const STABILITY_LIMIT = 3;
+const DEFAULT_REMINDER_MINUTES = 3;
+const DEFAULT_REMINDER_INTENSITY = 'ring';
+const INTENSITY_OPTIONS = [
+  { value: 'ring', label: '响铃' },
+  { value: 'persistent_ring', label: '持续响铃' },
+  { value: 'critical_ring', label: '强提醒' },
+];
 
 function readString(value) {
   if (value === undefined || value === null) return '';
@@ -99,10 +112,55 @@ function alphaErrorText(errors) {
     .join(' / ');
 }
 
-export default function AlphaTicker() {
+function normalizeReminderConfig(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      enabled: false,
+      reminderMinutes: DEFAULT_REMINDER_MINUTES,
+      intensity: DEFAULT_REMINDER_INTENSITY,
+      barkReady: false,
+      barkConfigured: false,
+      barkEnabled: false,
+    };
+  }
+  const minutes = Number(payload.reminder_minutes);
+  return {
+    enabled: Boolean(payload.enabled),
+    reminderMinutes: Number.isFinite(minutes) ? minutes : DEFAULT_REMINDER_MINUTES,
+    intensity: readString(payload.intensity) || DEFAULT_REMINDER_INTENSITY,
+    barkReady: Boolean(payload.bark_ready),
+    barkConfigured: Boolean(payload.bark_configured),
+    barkEnabled: Boolean(payload.bark_enabled),
+  };
+}
+
+function reminderStatusText(config) {
+  if (!config.barkConfigured) return 'Bark 未配置';
+  if (!config.barkEnabled) return 'Bark 未开启';
+  if (!config.barkReady) return 'Bark 未就绪';
+  return 'Bark 已就绪';
+}
+
+function normalizeReminderMinutes(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return DEFAULT_REMINDER_MINUTES;
+  return Math.min(120, Math.max(1, n));
+}
+
+export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [reminder, setReminder] = useState(() => normalizeReminderConfig(null));
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderError, setReminderError] = useState('');
+  const [reminderDraft, setReminderDraft] = useState({
+    enabled: false,
+    reminderMinutes: DEFAULT_REMINDER_MINUTES,
+    intensity: DEFAULT_REMINDER_INTENSITY,
+  });
 
   useEffect(() => {
     let active = true;
@@ -154,6 +212,101 @@ export default function AlphaTicker() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!hasInitData || !initData) {
+      const empty = normalizeReminderConfig(null);
+      setReminder(empty);
+      setReminderDraft({
+        enabled: empty.enabled,
+        reminderMinutes: empty.reminderMinutes,
+        intensity: empty.intensity,
+      });
+      return undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    async function loadReminder() {
+      try {
+        setReminderLoading(true);
+        setReminderError('');
+        const data = await fetchAlphaReminderConfig({ apiBaseUrl, initData, signal: controller.signal });
+        if (!active) return;
+        const normalized = normalizeReminderConfig(data);
+        setReminder(normalized);
+        setReminderDraft({
+          enabled: normalized.enabled,
+          reminderMinutes: normalized.reminderMinutes,
+          intensity: normalized.intensity,
+        });
+      } catch (err) {
+        if (!active || err?.name === 'AbortError') return;
+        setReminderError(readString(err?.message) || '提醒配置加载失败');
+      } finally {
+        if (active) setReminderLoading(false);
+      }
+    }
+    loadReminder();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [apiBaseUrl, hasInitData, initData]);
+
+  async function saveReminder(nextDraft = reminderDraft) {
+    if (!hasInitData || !initData) {
+      setReminderError('登录后可设置 Bark 提醒');
+      setReminderOpen(true);
+      return;
+    }
+    try {
+      setReminderSaving(true);
+      setReminderError('');
+      const data = await saveAlphaReminderConfig({
+        apiBaseUrl,
+        initData,
+        enabled: Boolean(nextDraft.enabled),
+        reminderMinutes: normalizeReminderMinutes(nextDraft.reminderMinutes),
+        intensity: nextDraft.intensity,
+      });
+      const normalized = normalizeReminderConfig(data);
+      setReminder(normalized);
+      setReminderDraft({
+        enabled: normalized.enabled,
+        reminderMinutes: normalized.reminderMinutes,
+        intensity: normalized.intensity,
+      });
+    } catch (err) {
+      setReminderError(readString(err?.message) || '提醒配置保存失败');
+    } finally {
+      setReminderSaving(false);
+    }
+  }
+
+  function toggleReminder() {
+    if (!hasInitData || !initData) {
+      setReminderOpen(true);
+      setReminderError('登录后可设置 Bark 提醒');
+      return;
+    }
+    setReminderOpen(true);
+    if (reminder.enabled) {
+      setReminderDraft({
+        enabled: reminder.enabled,
+        reminderMinutes: reminder.reminderMinutes,
+        intensity: reminder.intensity,
+      });
+      return;
+    }
+    const nextDraft = {
+      ...reminderDraft,
+      enabled: true,
+      reminderMinutes: normalizeReminderMinutes(reminderDraft.reminderMinutes),
+      intensity: reminderDraft.intensity || DEFAULT_REMINDER_INTENSITY,
+    };
+    setReminderDraft(nextDraft);
+    saveReminder(nextDraft);
+  }
+
   const airdrops = useMemo(() => normalizeAirdrops(payload?.data?.airdrops), [payload]);
   const stability = useMemo(
     () => buildStabilitySummary(normalizeStabilityItems(payload?.stability?.items)),
@@ -188,6 +341,87 @@ export default function AlphaTicker() {
           <Gift size={13} />
           今日空投
         </span>
+        <div className="alpha-reminder-wrap">
+          <button
+            type="button"
+            className={`alpha-reminder-btn ${reminder.enabled ? 'active' : ''}`}
+            onClick={toggleReminder}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setReminderOpen(true);
+            }}
+            title={reminder.enabled ? `已开启：提前 ${reminder.reminderMinutes} 分钟提醒` : '开启空投提醒'}
+            aria-label="空投提醒"
+            aria-pressed={reminder.enabled}
+            disabled={reminderSaving}
+          >
+            <Bell size={12} />
+          </button>
+          {reminderOpen ? (
+            <div className="alpha-reminder-popover">
+              <div className="alpha-reminder-head">
+                <div>
+                  <strong>空投提醒</strong>
+                  <span>{hasInitData ? reminderStatusText(reminder) : '登录后可设置'}</span>
+                </div>
+                <button type="button" onClick={() => setReminderOpen(false)} aria-label="关闭提醒设置">
+                  <X size={13} />
+                </button>
+              </div>
+              <label className="alpha-reminder-toggle">
+                <span>开启 Bark 提醒</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(reminderDraft.enabled)}
+                  onChange={(e) => setReminderDraft((prev) => ({ ...prev, enabled: e.target.checked }))}
+                  disabled={!hasInitData || reminderSaving}
+                />
+              </label>
+              <label className="alpha-reminder-field">
+                <span>提前时间</span>
+                <div>
+                  <input
+                    type="number"
+                    min="1"
+                    max="120"
+                    step="1"
+                    value={reminderDraft.reminderMinutes}
+                    onChange={(e) => setReminderDraft((prev) => ({ ...prev, reminderMinutes: e.target.value }))}
+                    disabled={!hasInitData || reminderSaving}
+                  />
+                  <em>分钟</em>
+                </div>
+              </label>
+              <div className="alpha-reminder-field alpha-reminder-intensity">
+                <span>提醒强度</span>
+                <div>
+                  {INTENSITY_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={reminderDraft.intensity === option.value ? 'active' : ''}
+                      onClick={() => setReminderDraft((prev) => ({ ...prev, intensity: option.value }))}
+                      disabled={!hasInitData || reminderSaving}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {reminderError ? <div className="alpha-reminder-error">{reminderError}</div> : null}
+              <div className="alpha-reminder-actions">
+                <span>{reminderLoading ? '加载中' : `默认提前 ${DEFAULT_REMINDER_MINUTES} 分钟`}</span>
+                <button
+                  type="button"
+                  onClick={() => saveReminder()}
+                  disabled={!hasInitData || reminderSaving}
+                >
+                  {reminderSaving ? '保存中' : '保存'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
         {visibleAirdrops.length ? (
           <div className="alpha-airdrop-list">
             {visibleAirdrops.map((item, index) => (

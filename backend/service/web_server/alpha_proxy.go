@@ -165,6 +165,10 @@ func loadAlphaOverview(ctx context.Context, client *http.Client, sources []alpha
 	return out
 }
 
+func loadAlphaData(ctx context.Context, client *http.Client) (json.RawMessage, error) {
+	return fetchAlphaOverviewSource(ctx, client, alphaOverviewSource{Name: "data", URL: alphaOverviewDataURL})
+}
+
 func (s *Server) handleAlphaOverview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
