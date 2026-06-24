@@ -18,6 +18,7 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

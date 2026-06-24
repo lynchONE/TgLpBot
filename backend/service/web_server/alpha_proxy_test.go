@@ -1,6 +1,7 @@
 package web_server
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -63,6 +64,70 @@ func TestLoadAlphaOverviewKeepsPartialSuccess(t *testing.T) {
 	}
 	if got.Errors["stability"] == "" {
 		t.Fatalf("expected stability error, got %+v", got.Errors)
+	}
+}
+
+func TestFetchAlphaOverviewSourceUsesBrowserHeadersByDefault(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != alphaOverviewBrowserUA {
+			t.Fatalf("unexpected user-agent: %q", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json, text/plain, */*" {
+			t.Fatalf("unexpected accept: %q", got)
+		}
+		if got := r.Header.Get("Accept-Encoding"); got != "gzip, deflate, br" {
+			t.Fatalf("unexpected accept-encoding: %q", got)
+		}
+		if got := r.Header.Get("Sec-Fetch-Site"); got != "same-origin" {
+			t.Fatalf("unexpected sec-fetch-site: %q", got)
+		}
+
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		_, _ = gz.Write([]byte(`{"airdrops":[{"token":"NES"}]}`))
+	}))
+	defer upstream.Close()
+
+	t.Setenv("ALPHA_FETCH_PROFILE", "")
+	got, err := fetchAlphaOverviewSource(context.Background(), upstream.Client(), alphaOverviewSource{
+		Name: "data",
+		URL:  upstream.URL,
+	})
+	if err != nil {
+		t.Fatalf("fetch alpha source: %v", err)
+	}
+	if string(got) != `{"airdrops":[{"token":"NES"}]}` {
+		t.Fatalf("unexpected payload: %s", string(got))
+	}
+}
+
+func TestFetchAlphaOverviewSourceCanUsePostmanHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != "PostmanRuntime/7.51.1" {
+			t.Fatalf("unexpected user-agent: %q", got)
+		}
+		if got := r.Header.Get("Accept"); got != "*/*" {
+			t.Fatalf("unexpected accept: %q", got)
+		}
+		if got := r.Header.Get("Postman-Token"); got == "" {
+			t.Fatalf("expected postman token header")
+		}
+
+		_, _ = w.Write([]byte(`{"airdrops":[{"token":"NES"}]}`))
+	}))
+	defer upstream.Close()
+
+	t.Setenv("ALPHA_FETCH_PROFILE", "postman")
+	got, err := fetchAlphaOverviewSource(context.Background(), upstream.Client(), alphaOverviewSource{
+		Name: "data",
+		URL:  upstream.URL,
+	})
+	if err != nil {
+		t.Fatalf("fetch alpha source: %v", err)
+	}
+	if string(got) != `{"airdrops":[{"token":"NES"}]}` {
+		t.Fatalf("unexpected payload: %s", string(got))
 	}
 }
 

@@ -1,6 +1,6 @@
 import { AlertTriangle, Clock3, Gift, RadioTower, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { fetchAlphaOverview } from '../api';
+import { fetchAlphaDataDirect, fetchAlphaOverview, fetchAlphaStabilityDirect } from '../api';
 
 const REFRESH_MS = 60_000;
 const AIRDROP_LIMIT = 2;
@@ -91,6 +91,14 @@ function hasAlphaErrors(payload) {
   return Boolean(payload?.errors && Object.keys(payload.errors).length > 0);
 }
 
+function alphaErrorText(errors) {
+  if (!errors || typeof errors !== 'object') return '';
+  return Object.entries(errors)
+    .map(([key, value]) => `${key}: ${readString(value)}`)
+    .filter(Boolean)
+    .join(' / ');
+}
+
 export default function AlphaTicker() {
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -106,10 +114,28 @@ export default function AlphaTicker() {
       controller = new AbortController();
       try {
         setError('');
-        const data = await fetchAlphaOverview({ signal: controller.signal });
+        let data = await fetchAlphaOverview({ signal: controller.signal });
+        const directErrors = {};
+        if (!data?.data?.airdrops && data?.errors?.data) {
+          try {
+            data = { ...data, data: await fetchAlphaDataDirect({ signal: controller.signal }) };
+          } catch (err) {
+            directErrors.data = readString(err?.message) || 'direct fetch failed';
+          }
+        }
+        if (!data?.stability?.items && data?.errors?.stability) {
+          try {
+            data = { ...data, stability: await fetchAlphaStabilityDirect({ signal: controller.signal }) };
+          } catch (err) {
+            directErrors.stability = readString(err?.message) || 'direct fetch failed';
+          }
+        }
+        if (Object.keys(directErrors).length > 0) {
+          data = { ...data, errors: { ...(data?.errors || {}), ...directErrors } };
+        }
         if (!active) return;
         setPayload(data);
-        setError(hasAlphaErrors(data) ? 'Alpha 部分更新失败' : '');
+        setError(hasAlphaErrors(data) ? alphaErrorText(data.errors) || 'Alpha 部分更新失败' : '');
       } catch (err) {
         if (!active || err?.name === 'AbortError') return;
         setError(readString(err?.message) || 'Alpha 加载失败');
@@ -209,7 +235,7 @@ export default function AlphaTicker() {
         )}
       </div>
 
-      {error ? <span className="alpha-soft-error">更新失败</span> : null}
+      {error ? <span className="alpha-soft-error" title={error}>更新失败</span> : null}
       {firstAirdrop?.dateTime ? <span className="alpha-mobile-time">{firstAirdrop.dateTime}</span> : null}
     </div>
   );

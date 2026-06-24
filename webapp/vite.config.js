@@ -1,12 +1,48 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { randomUUID } from 'node:crypto';
 
 const ALPHA_DATA_URL = 'https://alpha123.uk/api/data?fresh=1';
 const ALPHA_STABILITY_URL = 'https://alpha123.uk/stability/stability_feed_v3.json';
 
+function alphaRequestHeaders() {
+  const profile = process.env.ALPHA_FETCH_PROFILE;
+  if (!profile || profile === 'browser') {
+    return {
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+      Referer: 'https://alpha123.uk/',
+      'Sec-CH-UA': '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+      'Sec-CH-UA-Mobile': '?0',
+      'Sec-CH-UA-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+      'Accept-Encoding': 'gzip, deflate, br',
+      Connection: 'keep-alive',
+    };
+  }
+
+  if (profile === 'postman') {
+    return {
+      Accept: '*/*',
+      'User-Agent': 'PostmanRuntime/7.51.1',
+      'Accept-Encoding': 'gzip, deflate, br',
+      Connection: 'keep-alive',
+      'Postman-Token': randomUUID(),
+    };
+  }
+
+  throw new Error(`Unsupported ALPHA_FETCH_PROFILE: ${profile}`);
+}
+
 async function fetchAlphaSource(name, url) {
   try {
-    const response = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'curl/8.0.1' } });
+    const response = await fetch(url, { headers: alphaRequestHeaders() });
     if (!response.ok) throw new Error(`Alpha ${name} HTTP ${response.status}`);
     return { name, payload: await response.json(), error: '' };
   } catch (err) {

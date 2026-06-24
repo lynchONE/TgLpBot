@@ -76,6 +76,14 @@ export async function fetchAlphaOverview({ signal } = {}) {
   return requestJson('/api/alpha', { method: 'GET', signal });
 }
 
+export async function fetchAlphaDataDirect({ signal } = {}) {
+  return requestJson('https://alpha123.uk/api/data?fresh=1', { method: 'GET', signal });
+}
+
+export async function fetchAlphaStabilityDirect({ signal } = {}) {
+  return requestJson('https://alpha123.uk/stability/stability_feed_v3.json', { method: 'GET', signal });
+}
+
 export async function fetchHotPools({
   apiBaseUrl,
   initData,
