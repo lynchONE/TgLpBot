@@ -820,19 +820,20 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  padding-inline: 8px;
+  padding-inline: 6px 0;
 }
 
 .alpha-ticker {
-  width: min(940px, 100%);
+  width: min(1080px, 100%);
   min-height: 34px;
   display: grid;
-  grid-template-columns: minmax(300px, 0.82fr) 1px minmax(430px, 1.18fr);
+  grid-template-columns: minmax(380px, 1.08fr) 1px minmax(420px, 0.92fr);
   align-items: center;
   gap: 10px;
   padding: 0 6px;
   color: var(--text);
   overflow: visible;
+  transform: translateX(clamp(10px, 1.2vw, 22px));
 }
 
 .alpha-ticker-loading,
@@ -1107,7 +1108,8 @@
 }
 
 .alpha-airdrop-item {
-  max-width: 260px;
+  flex: 1 1 auto;
+  max-width: 100%;
 }
 
 .alpha-airdrop-item > *,
@@ -1123,16 +1125,23 @@
   font-family: var(--font-mono);
 }
 
+.alpha-airdrop-item strong {
+  flex: 0 0 auto;
+}
+
 .alpha-name {
-  max-width: 80px;
+  flex: 0 1 72px;
+  max-width: 72px;
   color: #d8e4fb;
 }
 
 .alpha-meta {
+  flex: 0 0 auto;
   color: #b6c4dc;
 }
 
 .alpha-time {
+  flex: 1 1 auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;

@@ -9,7 +9,7 @@ import {
 } from '../api';
 
 const REFRESH_MS = 60_000;
-const AIRDROP_LIMIT = 2;
+const AIRDROP_LIMIT = 1;
 const STABILITY_LIMIT = 3;
 const DEFAULT_REMINDER_MINUTES = 3;
 const DEFAULT_REMINDER_INTENSITY = 'ring';

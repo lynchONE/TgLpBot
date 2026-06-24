@@ -2171,6 +2171,7 @@ body {
     grid-template-columns: 1fr;
     justify-content: flex-start;
     overflow: visible;
+    transform: none;
   }
 
   .config-panel {
