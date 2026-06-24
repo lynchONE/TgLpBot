@@ -6,7 +6,7 @@ const ALPHA_STABILITY_URL = 'https://alpha123.uk/stability/stability_feed_v3.jso
 
 async function fetchAlphaSource(name, url) {
   try {
-    const response = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' } });
+    const response = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'curl/8.0.1' } });
     if (!response.ok) throw new Error(`Alpha ${name} HTTP ${response.status}`);
     return { name, payload: await response.json(), error: '' };
   } catch (err) {

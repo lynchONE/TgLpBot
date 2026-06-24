@@ -78,8 +78,8 @@ function formatSpread(value) {
 }
 
 function buildStabilitySummary(items) {
-  const unstableItems = items.filter((item) => !isStableStatus(item.rawStatus));
-  const selected = (unstableItems.length ? unstableItems : items).slice(0, STABILITY_LIMIT);
+  const selected = items.slice(0, STABILITY_LIMIT);
+  const unstableItems = selected.filter((item) => !isStableStatus(item.rawStatus));
   return {
     total: items.length,
     unstableCount: unstableItems.length,
@@ -194,13 +194,10 @@ export default function AlphaTicker() {
         </span>
         {stability.total > 0 ? (
           <>
-            <span className={`alpha-stability-count ${stability.unstableCount > 0 ? 'warn' : 'ok'}`}>
-              {stability.unstableCount > 0 ? `${stability.unstableCount} 异常` : '全稳定'}
-            </span>
             <div className="alpha-stability-list">
               {stability.selected.map((item) => (
                 <span className="alpha-stability-item" key={`${item.name}:${item.rawStatus}`}>
-                  <strong>{item.name.replace('/USDT', '')}</strong>
+                  <strong>{item.name}</strong>
                   {item.status ? <span>{item.status}</span> : null}
                   {formatSpread(item.spread) ? <span>{formatSpread(item.spread)}</span> : null}
                 </span>

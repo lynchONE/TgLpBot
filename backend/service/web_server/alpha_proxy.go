@@ -37,7 +37,7 @@ func fetchAlphaOverviewSource(ctx context.Context, client *http.Client, source a
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("User-Agent", "curl/8.0.1")
 
 	resp, err := client.Do(req)
 	if err != nil {

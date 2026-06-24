@@ -2168,6 +2168,7 @@ body {
 
   .alpha-ticker {
     width: 100%;
+    grid-template-columns: 1fr;
     justify-content: flex-start;
   }
 
@@ -2198,8 +2199,7 @@ body {
 
   .alpha-ticker {
     min-height: 0;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    grid-template-columns: 1fr;
     gap: 6px;
     padding: 8px;
   }
@@ -2212,11 +2212,6 @@ body {
     display: none;
   }
 
-  .alpha-airdrop-list,
-  .alpha-stability-list {
-    flex: 1 1 auto;
-  }
-
   .alpha-airdrop-item {
     max-width: 100%;
   }
@@ -2226,7 +2221,8 @@ body {
   }
 
   .alpha-stability-list {
-    display: none;
+    width: 100%;
+    overflow-x: auto;
   }
 
   .alpha-mobile-time {
@@ -2244,10 +2240,20 @@ body {
   }
 
   .alpha-airdrop-item,
+  .alpha-stability-item,
   .alpha-stability-count,
   .alpha-empty,
   .alpha-mobile-time {
     font-size: 10px;
+  }
+
+  .alpha-stability-item {
+    min-width: 106px;
+    max-width: 140px;
+  }
+
+  .alpha-stability-item strong {
+    max-width: 62px;
   }
 
   .guest-shell {

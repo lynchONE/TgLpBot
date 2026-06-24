@@ -6,7 +6,7 @@ async function fetchAlphaJson(url) {
     method: 'GET',
     headers: {
       Accept: 'application/json',
-      'User-Agent': 'Mozilla/5.0',
+      'User-Agent': 'curl/8.0.1',
     },
   });
   if (!response.ok) {
