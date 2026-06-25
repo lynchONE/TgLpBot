@@ -1833,6 +1833,7 @@ type PoolAggRow struct {
 	Token0Address          string           `json:"token0_address"`
 	Token1Address          string           `json:"token1_address"`
 	FeeTier                *int             `json:"fee_tier"`
+	FeeDynamic             bool             `json:"fee_dynamic,omitempty"`
 	Protocol               string           `json:"protocol"`
 	ChainID                int              `json:"chain_id"`
 	OpenPositionCount      int              `json:"open_position_count"`
@@ -1865,6 +1866,7 @@ type PoolFeeHeatmapRow struct {
 	Token0Address             string    `json:"token0_address"`
 	Token1Address             string    `json:"token1_address"`
 	FeeTier                   *int      `json:"fee_tier"`
+	FeeDynamic                bool      `json:"fee_dynamic,omitempty"`
 	Protocol                  string    `json:"protocol"`
 	ChainID                   int       `json:"chain_id"`
 	OpenPositionCount         int       `json:"open_position_count"`
@@ -1979,6 +1981,7 @@ func buildPoolFeeHeatmapRows(positions []models.SmartMoneyActivePosition, opts P
 					Token0Address:       strings.TrimSpace(pos.Token0Address),
 					Token1Address:       strings.TrimSpace(pos.Token1Address),
 					FeeTier:             pos.FeeTier,
+					FeeDynamic:          IsDynamicFeeTier(pos.Protocol, pos.FeeTier),
 					Protocol:            strings.TrimSpace(pos.Protocol),
 					ChainID:             pos.ChainID,
 					LatestEventAt:       pos.OpenedAt,
@@ -1989,6 +1992,9 @@ func buildPoolFeeHeatmapRows(positions []models.SmartMoneyActivePosition, opts P
 				positionRefs: make(map[string]struct{}),
 			}
 			byPool[poolAddress] = agg
+		}
+		if IsDynamicFeeTier(pos.Protocol, pos.FeeTier) {
+			agg.row.FeeDynamic = true
 		}
 
 		wallet := strings.ToLower(strings.TrimSpace(pos.WalletAddress))
@@ -2235,6 +2241,9 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context, source string) 
 	if err != nil {
 		return nil, err
 	}
+	for i := range rows {
+		rows[i].FeeDynamic = IsDynamicFeeTier(rows[i].Protocol, rows[i].FeeTier)
+	}
 	sortPoolAggRows(rows, time.Now())
 	return rows, nil
 }
@@ -2276,6 +2285,7 @@ type PoolStats struct {
 	Token0Address          string           `json:"token0_address"`
 	Token1Address          string           `json:"token1_address"`
 	FeeTier                *int             `json:"fee_tier"`
+	FeeDynamic             bool             `json:"fee_dynamic,omitempty"`
 	Protocol               string           `json:"protocol"`
 	ChainID                int              `json:"chain_id"`
 	OpenPositionCount      int              `json:"open_position_count"`
@@ -2343,6 +2353,7 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 	if err != nil {
 		return nil, err
 	}
+	stats.FeeDynamic = IsDynamicFeeTier(stats.Protocol, stats.FeeTier)
 	return &stats, nil
 }
 

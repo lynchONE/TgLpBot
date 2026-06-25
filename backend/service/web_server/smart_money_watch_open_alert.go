@@ -76,6 +76,7 @@ type smartMoneyWatchActivityItem struct {
 	WalletSourceContract string  `json:"wallet_source_contract,omitempty"`
 	WalletColor          string  `json:"wallet_color"`
 	ExplorerURL          string  `json:"explorer_url,omitempty"`
+	FeeDynamic           bool    `json:"fee_dynamic,omitempty"`
 }
 
 type smartMoneyWatchActivityEnvelope struct {
@@ -318,6 +319,7 @@ func (s *Server) buildSmartMoneyWatchActivityItems(r *http.Request, events []mod
 			TradingPair:       buildSmartMoneyTradingPair(event.Token0Symbol, event.Token1Symbol),
 			WalletColor:       sm.WalletColor(event.WalletAddress),
 			ExplorerURL:       smartMoneyExplorerTxURL(smartMoneyChainSlug(event.ChainID), event.TxHash),
+			FeeDynamic:        sm.IsDynamicFeeTier(event.Protocol, event.FeeTier),
 		}
 		item.DisplayTokenAddress, item.DisplayTokenSymbol = smartMoneyPickDisplayToken(
 			event.Token0Address,

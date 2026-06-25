@@ -124,6 +124,11 @@ export function formatFeeTier(fee) {
     return `${(n / 10000).toFixed(4)}%`;
 }
 
+export function isDynamicFeeTier(fee) {
+    const n = Number(fee);
+    return Number.isInteger(n) && (n & 0x800000) !== 0;
+}
+
 export function formatWalletBalance(value, { fallback = '--' } = {}) {
     const num = Number(value);
     if (!Number.isFinite(num)) return fallback;

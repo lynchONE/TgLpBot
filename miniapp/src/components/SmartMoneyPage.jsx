@@ -26,6 +26,7 @@ import {
     formatFeeTier,
     formatUSDCompact,
     formatWalletBalance,
+    isDynamicFeeTier,
 } from '../lib/format';
 import FlashIcon from './FlashIcon.jsx';
 import PositionCard from './PositionCard.jsx';
@@ -1407,9 +1408,13 @@ function ProtocolBadge({ protocol }) {
     );
 }
 
-function FeeBadge({ fee }) {
-    if (!fee) return null;
-    return <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{formatFeeTier(fee)}</Badge>;
+function FeeBadge({ fee, dynamic }) {
+    if (dynamic || isDynamicFeeTier(fee)) {
+        return <Badge className="border-cyan-400/20 bg-cyan-400/10 text-cyan-200">动态费率</Badge>;
+    }
+    const text = formatFeeTier(fee);
+    if (!text) return null;
+    return <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">{text}</Badge>;
 }
 
 function PairAvatar({ item, size = 'md' }) {
@@ -2463,6 +2468,7 @@ function buildPoolFromWatchActivity(event) {
         display_token_symbol: event.display_token_symbol,
         display_token_logo_url: event.display_token_logo_url,
         fee_tier: event.fee_tier,
+        fee_dynamic: event.fee_dynamic,
     };
 }
 
@@ -2489,7 +2495,7 @@ function WatchActivityCard({ event, brand, onSelectWallet, onSelectPool }) {
                             {formatWatchActivityAction(event?.event_type)}
                         </Badge>
                         <ProtocolBadge protocol={event?.protocol} />
-                        <FeeBadge fee={event?.fee_tier} />
+                        <FeeBadge fee={event?.fee_tier} dynamic={event?.fee_dynamic} />
                     </div>
                     <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{pairLabel}</div>
                     <div className="mt-2">
@@ -3068,7 +3074,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                                         <div className="flex flex-wrap items-center gap-1.5">
                                             <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(pool)}</span>
                                             <ProtocolBadge protocol={pool.protocol} />
-                                            <FeeBadge fee={pool.fee_tier} />
+                                            <FeeBadge fee={pool.fee_tier} dynamic={pool.fee_dynamic} />
                                         </div>
                                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                             <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
@@ -3372,7 +3378,7 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
                     <div className="flex flex-wrap items-center gap-1.5">
                         <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(row)}</span>
                         <ProtocolBadge protocol={row.protocol} />
-                        <FeeBadge fee={row.fee_tier} />
+                        <FeeBadge fee={row.fee_tier} dynamic={row.fee_dynamic} />
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                         <div className="rounded-2xl border border-white/[0.05] bg-black/20 px-3 py-2">
@@ -3500,7 +3506,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                         <div className="flex flex-wrap items-center gap-1.5">
                             <span className="truncate text-lg font-semibold text-zinc-100">{getPairLabel(pool)}</span>
                             <ProtocolBadge protocol={pool.protocol} />
-                            <FeeBadge fee={pool.fee_tier} />
+                            <FeeBadge fee={pool.fee_tier} dynamic={pool.fee_dynamic || poolStats?.fee_dynamic} />
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
@@ -4047,11 +4053,13 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     display_token_symbol: p.display_token_symbol,
                     display_token_logo_url: p.display_token_logo_url,
                     fee_tier: p.fee_tier,
+                    fee_dynamic: p.fee_dynamic,
                     protocol: p.protocol,
                     positions: [],
                     hasOpen: false,
                 };
             }
+            if (p.fee_dynamic) groups[p.pool_address].fee_dynamic = true;
             groups[p.pool_address].positions.push(p);
             if (p.status === 'open') groups[p.pool_address].hasOpen = true;
         });
@@ -4174,6 +4182,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                                 display_token_symbol: group.display_token_symbol,
                                 display_token_logo_url: group.display_token_logo_url,
                                 fee_tier: group.fee_tier,
+                                fee_dynamic: group.fee_dynamic,
                                 protocol: group.protocol,
                             })}
                         />
@@ -4205,7 +4214,7 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, posit
                     <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-6">
                         <CompactIdentifier value={group.pool_address} label="池子" />
                         <ProtocolBadge protocol={group.protocol} />
-                        <FeeBadge fee={group.fee_tier} />
+                        <FeeBadge fee={group.fee_tier} dynamic={group.fee_dynamic} />
                     </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1 text-right">

@@ -68,6 +68,7 @@ type WSLPEventData struct {
 	Token0Symbol         string  `json:"token0_symbol"`
 	Token1Symbol         string  `json:"token1_symbol"`
 	FeeTier              *int    `json:"fee_tier"`
+	FeeDynamic           bool    `json:"fee_dynamic,omitempty"`
 	NftTokenID           *uint64 `json:"nft_token_id"`
 	TxHash               string  `json:"tx_hash"`
 	TxTimestamp          string  `json:"tx_timestamp"`
@@ -87,6 +88,7 @@ func (h *WSHub) BroadcastLPEvent(event *models.SmartMoneyLPEvent, walletLabel *s
 		Token0Symbol:         event.Token0Symbol,
 		Token1Symbol:         event.Token1Symbol,
 		FeeTier:              event.FeeTier,
+		FeeDynamic:           IsDynamicFeeTier(event.Protocol, event.FeeTier),
 		NftTokenID:           event.NftTokenID,
 		TxHash:               event.TxHash,
 		TxTimestamp:          event.TxTimestamp.Format("2006-01-02T15:04:05Z"),

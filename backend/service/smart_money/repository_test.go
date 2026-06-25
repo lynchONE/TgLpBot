@@ -52,6 +52,18 @@ func TestChainSlugForID(t *testing.T) {
 	}
 }
 
+func TestIsDynamicFeeTierValueOnlyMarksV4DynamicFlag(t *testing.T) {
+	if !IsDynamicFeeTierValue("uniswap_v4", 0x800000) {
+		t.Fatal("expected uniswap v4 dynamic fee flag to be marked dynamic")
+	}
+	if IsDynamicFeeTierValue("uniswap_v4", 3000) {
+		t.Fatal("expected uniswap v4 static fee tier to stay static")
+	}
+	if IsDynamicFeeTierValue("pancake_v3", 0x800000) {
+		t.Fatal("expected non-v4 fee tier to stay static")
+	}
+}
+
 func TestSortPoolAggRowsPrioritizesRecentOperations(t *testing.T) {
 	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
 	rows := []PoolAggRow{
@@ -86,6 +98,39 @@ func TestSortPoolAggRowsFallsBackToAmountOutsideRecentWindow(t *testing.T) {
 		if row.PoolAddress != want[i] {
 			t.Fatalf("row %d = %s, want %s; rows=%v", i, row.PoolAddress, want[i], rows)
 		}
+	}
+}
+
+func TestBuildPoolFeeHeatmapRowsMarksV4DynamicFee(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	fee := "1"
+	amount := "1000"
+	dynamicFee := 0x800000
+
+	rows := buildPoolFeeHeatmapRows([]models.SmartMoneyActivePosition{
+		{
+			PositionRef:   "dynamic",
+			PoolAddress:   "0xdynamic",
+			WalletAddress: "0x0000000000000000000000000000000000000001",
+			FeeTier:       &dynamicFee,
+			FeeUSD:        &fee,
+			NetTotalUSD:   &amount,
+			OpenedAt:      now.Add(-time.Hour),
+			Token0Symbol:  "A",
+			Token1Symbol:  "B",
+			Token0Address: "0xa",
+			Token1Address: "0xb",
+			Protocol:      "uniswap_v4",
+			ChainID:       56,
+			IsActive:      true,
+		},
+	}, PoolFeeHeatmapOptions{WindowSeconds: 60, Sort: "rate", Now: now})
+
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if !rows[0].FeeDynamic {
+		t.Fatal("expected heatmap row to expose dynamic fee")
 	}
 }
 
