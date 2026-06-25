@@ -209,7 +209,7 @@ function inferFeeTierFromTickSpacing(tickSpacing) {
 
 function formatFeeTierPercent(feeTier) {
     const n = Number(feeTier || 0);
-    if (!Number.isFinite(n) || n <= 0) return null;
+    if (!Number.isFinite(n) || n <= 0 || n > 1000000) return null;
     return `${(n / 10000).toFixed(4)}%`;
 }
 

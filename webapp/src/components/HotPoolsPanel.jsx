@@ -51,8 +51,13 @@ function resolveHotPoolMarketCapLabel(pool) {
 
 function formatFixedFeePercent(value) {
   const num = Number(value || 0);
-  if (!Number.isFinite(num) || num <= 0) return '';
+  if (!Number.isFinite(num) || num <= 0 || num > 100) return '';
   return `${num.toFixed(4)}%`;
+}
+
+function formatPoolTradingFee(pool) {
+  if (pool?.fee_dynamic) return '动态';
+  return formatFixedFeePercent(pool?.fee_percentage);
 }
 
 function formatCompactCount(value) {
@@ -386,7 +391,7 @@ function HotPoolRow({
 }) {
   const addr = normalizePoolAddress(pool?.pool_address || '');
   const selected = selectedPoolAddress && addr === selectedPoolAddress;
-  const feePct = Number(pool?.fee_percentage || 0);
+  const feePctText = formatPoolTradingFee(pool);
   const feeRate = Number(pool?.fee_rate || 0);
   const volume = Number(pool?.total_volume || 0);
   const totalFees = Number(pool?.total_fees || 0);
@@ -465,7 +470,7 @@ function HotPoolRow({
           <button type="button" className="copy-tiny" onClick={(e) => { e.stopPropagation(); onCopyAddress(addr); }} title="复制地址">
             <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
           </button>
-          {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => formatFixedFeePercent(v)} /></span>}
+          {feePctText && <span className="tag tag-blue"><NumberFlowValue value={feePctText} formatter={() => feePctText} /></span>}
           {protocolTagText && (
             <span className="tag tag-dex tag-dex-inline">
               {dex?.src ? <img src={dex.src} alt="" /> : null}

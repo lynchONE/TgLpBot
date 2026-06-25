@@ -79,3 +79,28 @@ func TestPoolCatalogFDVUSDUsesFDVBeforeCurrentTokenFDV(t *testing.T) {
 		t.Fatalf("fdv metric = %.0f, want 4000", got)
 	}
 }
+
+func TestBuildPoolCatalogItemMarksV4DynamicFee(t *testing.T) {
+	t.Parallel()
+
+	item := buildPoolCatalogItem(models.Pool{
+		Chain:             "bsc",
+		ProtocolVersion:   "v4",
+		Address:           "0x7b1818047437a598480e552a60a6edd374a5ff6b8afd58aab9d07aff9dd90b31",
+		Name:              "USDT/ARX",
+		PoolMFeeRate:      0x800000,
+		PoolFeePercentage: 838.8608,
+		TotalFees:         42,
+		CurrentPoolValue:  1000,
+	}, poolCatalogOptions{Chain: "bsc", TimeframeMinutes: 5})
+
+	if !item.FeeDynamic {
+		t.Fatal("expected v4 dynamic fee flag to be marked dynamic")
+	}
+	if item.FeeTier != 0 || item.FeePercentage != 0 {
+		t.Fatalf("dynamic fee output = tier %d pct %.4f, want zeros", item.FeeTier, item.FeePercentage)
+	}
+	if item.FeeRate != 4.2 {
+		t.Fatalf("fee_rate = %.4f, want yield metric untouched", item.FeeRate)
+	}
+}

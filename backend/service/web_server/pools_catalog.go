@@ -109,7 +109,7 @@ func buildPoolCatalogCacheKey(opts poolCatalogOptions) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"pools:catalog:v6:chain=%s:sort=%s:tf=%d:limit=%d",
+		"pools:catalog:v7:chain=%s:sort=%s:tf=%d:limit=%d",
 		opts.Chain,
 		opts.Sort,
 		opts.TimeframeMinutes,
@@ -348,6 +348,7 @@ func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolRespo
 	}
 
 	protocolVersion := inferPoolCatalogProtocolVersion(row)
+	feeTier, feePercentage, feeDynamic := normalizeHotPoolFee(protocolVersion, row.PoolMFeeRate, row.PoolFeePercentage, row.FeeDynamic)
 	priceDisplay := strings.TrimSpace(row.PriceDisplay)
 	if priceDisplay == "" {
 		priceDisplay = formatPoolCatalogPrice(firstPositiveFloat(row.CurrentTokenPrice, row.BaseTokenPriceUSD))
@@ -364,9 +365,10 @@ func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolRespo
 		FactoryName:             inferPoolCatalogFactoryName(row, protocolVersion),
 		FactoryAddress:          normalizeCatalogHex(row.FactoryAddress),
 		TradingPair:             sanitizePoolCatalogName(row.Name),
-		FeePercentage:           sanitizeFloat(row.PoolFeePercentage),
+		FeePercentage:           feePercentage,
+		FeeDynamic:              feeDynamic,
 		FeeRate:                 sanitizeFloat(feeRate),
-		FeeTier:                 row.PoolMFeeRate,
+		FeeTier:                 feeTier,
 		TransactionCount:        uint32(txCount),
 		TotalFees:               sanitizeFloat(totalFees),
 		TotalVolume:             sanitizeFloat(totalVolume),

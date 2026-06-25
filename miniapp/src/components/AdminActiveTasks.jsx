@@ -22,7 +22,7 @@ function formatTradingPair(task) {
 }
 
 function formatFee(fee) {
-    if (!Number.isFinite(fee) || fee <= 0) return '';
+    if (!Number.isFinite(fee) || fee <= 0 || fee > 1000000) return '';
     return `${(fee / 10000).toFixed(4)}%`;
 }
 

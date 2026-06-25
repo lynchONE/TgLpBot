@@ -160,8 +160,13 @@ const TokenRiskBadge = ({ risk }) => {
 
 function formatFeePercent(v) {
     const n = Number(v || 0);
-    if (!Number.isFinite(n) || n <= 0) return '';
+    if (!Number.isFinite(n) || n <= 0 || n > 100) return '';
     return `${n.toFixed(4)}%`;
+}
+
+function formatPoolTradingFee(pool) {
+    if (pool?.fee_dynamic) return '动态';
+    return formatFeePercent(pool?.fee_percentage);
 }
 
 function formatRatePct(v) {
@@ -506,6 +511,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const tvlValue = useMemo(() => Number(pool?.current_pool_value ?? 0), [pool?.current_pool_value]);
     const feeRateValue = useMemo(() => Number(pool?.fee_rate ?? 0), [pool?.fee_rate]);
     const totalFeesValue = useMemo(() => Number(pool?.total_fees ?? 0), [pool?.total_fees]);
+    const tradingFeeText = useMemo(() => formatPoolTradingFee(pool), [pool?.fee_dynamic, pool?.fee_percentage]);
     const marketCapValue = useMemo(() => resolveHotPoolMarketCapDisplay(pool), [pool]);
     const marketCapLabel = resolveHotPoolMarketCapLabel();
     const activeLiquidityFeeRateValue = useMemo(
@@ -569,9 +575,9 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         >
                             {formatPairLabel(pool?.trading_pair)}
                         </div>
-                        {pool?.fee_percentage ? (
+                        {tradingFeeText ? (
                             <div className="mini-pool-fee rounded-lg bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/30">
-                                <NumberFlowValue value={pool.fee_percentage} formatter={(v) => formatFeePercent(v)} />
+                                <NumberFlowValue value={tradingFeeText} formatter={() => tradingFeeText} />
                             </div>
                         ) : null}
                         <button

@@ -175,6 +175,7 @@ func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, pool
 
 	factoryName := strings.TrimSpace(pair.DexID)
 	feePct := 0.0
+	feeTier := 0
 	if poolInfo != nil {
 		tradingPair = strings.TrimSpace(poolInfo.Token0Symbol) + "/" + strings.TrimSpace(poolInfo.Token1Symbol)
 		token0Addr = strings.TrimSpace(poolInfo.Token0)
@@ -183,9 +184,11 @@ func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, pool
 			factoryName = strings.TrimSpace(poolInfo.Exchange)
 		}
 		if poolInfo.Fee > 0 {
-			feePct = float64(poolInfo.Fee) / 10000.0
+			feeTier = poolInfo.Fee
+			feePct = float64(feeTier) / 10000.0
 		}
 	}
+	feeTier, feePct, feeDynamic := normalizeHotPoolFee(poolVersion, feeTier, feePct, false)
 
 	volume24h := pair.Volume.H24
 	tvl := pair.Liquidity.USD
@@ -218,7 +221,8 @@ func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, pool
 		FactoryName:      factoryName,
 		TradingPair:      tradingPair,
 		FeePercentage:    feePct,
-		FeeTier:          0,
+		FeeDynamic:       feeDynamic,
+		FeeTier:          feeTier,
 		TransactionCount: uint32(txCount),
 		TotalFees:        totalFees,
 		TotalVolume:      volume24h,

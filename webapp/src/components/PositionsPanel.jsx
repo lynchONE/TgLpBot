@@ -47,13 +47,13 @@ function formatPositionSmartMoneyRangePercent(value) {
 
 function formatFixedFeePercent(value) {
   const num = Number(value || 0);
-  if (!Number.isFinite(num) || num <= 0) return '';
+  if (!Number.isFinite(num) || num <= 0 || num > 100) return '';
   return `${num.toFixed(4)}%`;
 }
 
 function formatFeeTierPercent(feeTier, tickSpacing) {
   const bps = Number(feeTier || 0) || FEE_TIER_BY_TICK_SPACING[Number(tickSpacing)] || 0;
-  if (!Number.isFinite(bps) || bps <= 0) return '';
+  if (!Number.isFinite(bps) || bps <= 0 || bps > 1000000) return '';
   return formatFixedFeePercent(bps / 10000);
 }
 

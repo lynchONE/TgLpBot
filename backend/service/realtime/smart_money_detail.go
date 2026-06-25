@@ -826,6 +826,9 @@ func smartMoneyFeeLabel(feeTier *int) string {
 	case 20000:
 		return "2%"
 	default:
+		if *feeTier <= 0 || *feeTier > 1000000 {
+			return ""
+		}
 		return fmt.Sprintf("%.2f%%", float64(*feeTier)/10000.0)
 	}
 }

@@ -14,11 +14,17 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
     const poolAddress = useMemo(() => normalizeHexPrefixed(poolAddressRaw), [poolAddressRaw]);
     const title = useMemo(() => {
         const pair = String(pool?.trading_pair || '').trim() || 'K线图';
+        if (pool?.fee_dynamic) {
+            return `${pair} (动态)`;
+        }
         if (pool?.fee_percentage !== undefined && pool?.fee_percentage !== null) {
-            return `${pair} (${Number(pool.fee_percentage).toFixed(4)}%)`;
+            const fee = Number(pool.fee_percentage);
+            if (Number.isFinite(fee) && fee > 0 && fee <= 100) {
+                return `${pair} (${fee.toFixed(4)}%)`;
+            }
         }
         return pair;
-    }, [pool?.trading_pair, pool?.fee_percentage]);
+    }, [pool?.trading_pair, pool?.fee_percentage, pool?.fee_dynamic]);
 
     // Chain slug for DexScreener (uses 'bsc')
     const dexScreenerChain = useMemo(() => {

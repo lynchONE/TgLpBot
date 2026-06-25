@@ -224,6 +224,7 @@ func (s *Service) buildRow(snapshot *PoolMTopFeesResponse, item PoolMFeePool, up
 	if protocolVersion == "" {
 		return nil, fmt.Errorf("unknown protocol version for pool %s", addr)
 	}
+	feeTier, feePercentage, feeDynamic := normalizePoolSyncFee(protocolVersion, item.FeeRate, item.FeePercentage)
 
 	sourceRequestedLimit := snapshot.RequestedLimit
 	if sourceRequestedLimit <= 0 {
@@ -253,7 +254,7 @@ func (s *Service) buildRow(snapshot *PoolMTopFeesResponse, item PoolMFeePool, up
 		MarketCapUSD:      item.CurrentTokenFDVUSD,
 		ReserveInUSD:      item.CurrentPoolValue,
 		PriceChangeM5:     priceChange,
-		PoolFeePercentage: item.FeePercentage,
+		PoolFeePercentage: feePercentage,
 		VolumeM5:          item.TotalVolume,
 		FeeUSDM5:          item.TotalFees,
 		FeeAPRM5:          calcFeeAPR(item.TotalFees, item.CurrentPoolValue, 5*time.Minute),
@@ -269,7 +270,8 @@ func (s *Service) buildRow(snapshot *PoolMTopFeesResponse, item PoolMFeePool, up
 		Token0Decimals:              item.Token0Decimals,
 		Token1Decimals:              item.Token1Decimals,
 		StableCoinSymbol:            strings.TrimSpace(item.StableCoinSymbol),
-		PoolMFeeRate:                item.FeeRate,
+		PoolMFeeRate:                feeTier,
+		FeeDynamic:                  feeDynamic,
 		HookAddress:                 normalizePairAddress(item.HookAddress),
 		TransactionCount:            uint32(nonNegativeInt(item.TransactionCount)),
 		TotalFees:                   item.TotalFees,

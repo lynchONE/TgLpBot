@@ -16,6 +16,7 @@ type HotPoolResponse struct {
 	FactoryAddress          string          `json:"factory_address,omitempty"`
 	TradingPair             string          `json:"trading_pair"`
 	FeePercentage           float64         `json:"fee_percentage"`
+	FeeDynamic              bool            `json:"fee_dynamic,omitempty"`
 	FeeRate                 float64         `json:"fee_rate"`
 	FeeTier                 int             `json:"fee_tier,omitempty"`
 	TransactionCount        uint32          `json:"transaction_count"`

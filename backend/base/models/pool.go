@@ -60,6 +60,7 @@ type Pool struct {
 	Token1Decimals              int        `gorm:"column:token1_decimals;type:int;not null;default:0" json:"token1_decimals"`
 	StableCoinSymbol            string     `gorm:"column:stable_coin_symbol;type:varchar(64);not null;default:''" json:"stable_coin_symbol"`
 	PoolMFeeRate                int        `gorm:"column:poolm_fee_rate;type:int;not null;default:0" json:"poolm_fee_rate"`
+	FeeDynamic                  bool       `gorm:"column:fee_dynamic;type:boolean;not null;default:false" json:"fee_dynamic"`
 	HookAddress                 string     `gorm:"column:hook_address;type:varchar(128);not null;default:''" json:"hook_address"`
 	TransactionCount            uint32     `gorm:"column:transaction_count;type:int unsigned;not null;default:0" json:"transaction_count"`
 	TotalFees                   float64    `gorm:"column:total_fees;type:double;not null;default:0;index:idx_pools_total_fees"`

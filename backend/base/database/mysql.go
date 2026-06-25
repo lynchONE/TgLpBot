@@ -542,6 +542,7 @@ func ensureSmartMoneyQueryIndexes() {
 	ensureIndex("pools", "idx_pools_source_chain_updated_at", "`source_requested_chain`, `updated_at`")
 	ensureIndex("pools", "idx_pools_chain_dex_updated", "`chain`, `dex_id`, `updated_at`")
 	ensureIndex("pools", "idx_pools_chain_factory_updated", "`chain`, `factory_name`, `updated_at`")
+	ensureColumn("pools", "fee_dynamic", "TINYINT(1) NOT NULL DEFAULT 0 AFTER poolm_fee_rate")
 
 	ensureIndex("wallet_swap_limit_orders", "idx_wallet_swap_limit_due", "`status`, `next_check_at`, `created_at`, `id`")
 	ensureIndex("wallet_swap_limit_orders", "idx_wallet_swap_limit_user_chain_created", "`user_id`, `chain`, `created_at`, `id`")

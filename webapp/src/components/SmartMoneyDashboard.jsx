@@ -195,8 +195,9 @@ function getPairInitials(value) {
 }
 
 function formatFeeTier(fee) {
-    if (!fee) return '';
-    return `${(Number(fee) / 10000).toFixed(4)}%`;
+    const n = Number(fee || 0);
+    if (!Number.isFinite(n) || n <= 0 || n > 1000000) return '';
+    return `${(n / 10000).toFixed(4)}%`;
 }
 
 function formatUSDCompact(value) {
