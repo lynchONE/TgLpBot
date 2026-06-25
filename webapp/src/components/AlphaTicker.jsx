@@ -11,6 +11,7 @@ import {
 const REFRESH_MS = 60_000;
 const AIRDROP_LIMIT = 1;
 const STABILITY_LIMIT = 3;
+const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const DEFAULT_REMINDER_MINUTES = 3;
 const DEFAULT_REMINDER_INTENSITY = 'ring';
 const INTENSITY_OPTIONS = [
@@ -24,27 +25,61 @@ function readString(value) {
   return String(value).trim();
 }
 
+function chinaDateParts(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CHINA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const map = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  });
+  if (!map.year || !map.month || !map.day) return null;
+  return map;
+}
+
+function formatChinaDay(value = new Date()) {
+  const parts = chinaDateParts(value);
+  if (!parts) return '';
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function normalizeAirdropDay(value) {
+  const raw = readString(value);
+  const match = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (!match) return '';
+  const [, year, month, day] = match;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+
 function formatAirdropDateTime(item) {
   const date = readString(item?.date);
   const time = readString(item?.time);
   return [date, time].filter(Boolean).join(' ');
 }
 
-function normalizeAirdrops(value) {
-  if (!Array.isArray(value)) return [];
+function normalizeAirdrops(value, todayDay) {
+  const currentDay = readString(todayDay);
+  if (!currentDay || !Array.isArray(value)) return [];
   return value
     .map((item) => {
       const token = readString(item?.token).toUpperCase();
       const name = readString(item?.name);
+      const day = normalizeAirdropDay(item?.date);
       return {
         token,
         name,
+        day,
         amount: readString(item?.amount),
         points: readString(item?.points),
         dateTime: formatAirdropDateTime(item),
       };
     })
-    .filter((item) => item.token || item.name);
+    .filter((item) => item.day === currentDay && (item.token || item.name));
 }
 
 function isStableStatus(status) {
@@ -138,6 +173,7 @@ function normalizeReminderMinutes(value) {
 export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
   const [payload, setPayload] = useState(null);
   const payloadRef = useRef(null);
+  const [todayDay, setTodayDay] = useState(() => formatChinaDay());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reminderOpen, setReminderOpen] = useState(false);
@@ -159,6 +195,10 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
     async function load() {
       if (controller) controller.abort();
       controller = new AbortController();
+      const nextTodayDay = formatChinaDay();
+      if (nextTodayDay) {
+        setTodayDay((prev) => (prev === nextTodayDay ? prev : nextTodayDay));
+      }
       try {
         setError('');
         let data = await fetchAlphaOverview({ signal: controller.signal });
@@ -305,7 +345,7 @@ export default function AlphaTicker({ apiBaseUrl, initData, hasInitData }) {
     saveReminder(nextDraft);
   }
 
-  const airdrops = useMemo(() => normalizeAirdrops(payload?.data?.airdrops), [payload]);
+  const airdrops = useMemo(() => normalizeAirdrops(payload?.data?.airdrops, todayDay), [payload, todayDay]);
   const stability = useMemo(
     () => buildStabilitySummary(normalizeStabilityItems(payload?.stability?.items)),
     [payload],
