@@ -17,9 +17,10 @@ func TestNormalizeLimitOrderProvider(t *testing.T) {
 		{name: "empty uses best", input: "", expected: models.WalletSwapLimitOrderProviderBest},
 		{name: "best", input: " BEST ", expected: models.WalletSwapLimitOrderProviderBest},
 		{name: "okx", input: "OKX", expected: "okx"},
-		{name: "zero x", input: "0x", expected: "0x"},
-		{name: "lifi alias", input: "lifi", expected: "li.fi"},
-		{name: "li fi", input: "LI.FI", expected: "li.fi"},
+		{name: "binance", input: "Binance", expected: "binance"},
+		{name: "zero x removed", input: "0x", wantErr: true},
+		{name: "lifi removed", input: "lifi", wantErr: true},
+		{name: "li fi removed", input: "LI.FI", wantErr: true},
 		{name: "unsupported", input: "abc", wantErr: true},
 	}
 

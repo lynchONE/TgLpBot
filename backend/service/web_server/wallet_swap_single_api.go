@@ -35,6 +35,7 @@ type walletSwapSingleRequest struct {
 	SlippagePercent float64 `json:"slippage_percent,omitempty"`
 	Action          string  `json:"action"`
 	Provider        string  `json:"provider,omitempty"`
+	QuoteID         string  `json:"quote_id,omitempty"`
 }
 
 type swapQuoteResponse struct {
@@ -47,6 +48,7 @@ type swapQuoteResponse struct {
 	ProviderLabel      string              `json:"provider_label,omitempty"`
 	BestProvider       string              `json:"best_provider,omitempty"`
 	BestProviderLabel  string              `json:"best_provider_label,omitempty"`
+	BestQuoteID        string              `json:"best_quote_id,omitempty"`
 	ToAmount           string              `json:"to_amount,omitempty"`
 	ToAmountFloat      string              `json:"to_amount_float,omitempty"`
 	MinToAmount        string              `json:"min_to_amount,omitempty"`
@@ -65,6 +67,7 @@ type swapExecuteResponse struct {
 	Chain         string `json:"chain"`
 	Provider      string `json:"provider,omitempty"`
 	ProviderLabel string `json:"provider_label,omitempty"`
+	QuoteID       string `json:"quote_id,omitempty"`
 	TxHash        string `json:"tx_hash"`
 	TxURL         string `json:"tx_url,omitempty"`
 	FromToken     string `json:"from_token"`
@@ -206,24 +209,22 @@ func aggregateSwapProviderQuotes(
 	toDecimals int,
 ) []swapProviderQuote {
 	type result struct {
-		quote swapProviderQuote
+		quotes []swapProviderQuote
 	}
 
-	outCh := make(chan result, 3)
+	outCh := make(chan result, 2)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		outCh <- result{quote: buildOKXProviderQuote(chain, cc, client, walletAddr, fromTokenRaw, toTokenRaw, fromToken, toToken, amount, slippageDecimal, slippagePercent, toDecimals)}
+		outCh <- result{quotes: []swapProviderQuote{
+			buildOKXProviderQuote(chain, cc, client, walletAddr, fromTokenRaw, toTokenRaw, fromToken, toToken, amount, slippageDecimal, slippagePercent, toDecimals),
+		}}
 	}()
 	go func() {
 		defer wg.Done()
-		outCh <- result{quote: buildZeroXProviderQuote(chain, cc, client, walletAddr, fromToken, toToken, amount, slippagePercent, toDecimals)}
-	}()
-	go func() {
-		defer wg.Done()
-		outCh <- result{quote: buildLIFIProviderQuote(chain, cc, walletAddr, fromToken, toToken, amount, slippagePercent, toDecimals)}
+		outCh <- result{quotes: buildBinanceProviderQuotes(chain, cc, walletAddr, fromToken, toToken, amount, slippagePercent, toDecimals)}
 	}()
 
 	go func() {
@@ -231,9 +232,9 @@ func aggregateSwapProviderQuotes(
 		close(outCh)
 	}()
 
-	quotes := make([]swapProviderQuote, 0, 3)
+	quotes := make([]swapProviderQuote, 0, 4)
 	for item := range outCh {
-		quotes = append(quotes, item.quote)
+		quotes = append(quotes, item.quotes...)
 	}
 	return quotes
 }
@@ -246,6 +247,7 @@ func applyBestQuote(resp *swapQuoteResponse, best *swapProviderQuote) {
 	resp.ProviderLabel = best.ProviderLabel
 	resp.BestProvider = best.Provider
 	resp.BestProviderLabel = best.ProviderLabel
+	resp.BestQuoteID = best.QuoteID
 	resp.ToAmount = best.NetToAmount
 	resp.ToAmountFloat = best.NetToAmountFloat
 	resp.MinToAmount = best.MinToAmount
@@ -427,30 +429,25 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 		if provider == "lifi" {
 			provider = "li.fi"
 		}
-		if provider == "" {
-			quotes := aggregateSwapProviderQuotes(
-				chain,
-				cc,
-				client,
-				walletAddr,
-				fromTokenStr,
-				toTokenStr,
-				fromToken,
-				toToken,
-				amount,
-				slippageDecimal,
-				slippage,
-				int(toDecimals),
-			)
-			_, best := normalizeProviderQuotes(quotes)
-			if best == nil || best.Status != "available" || strings.TrimSpace(best.Provider) == "" {
-				http.Error(w, "swap failed: no executable swap provider available", http.StatusBadRequest)
-				return
-			}
-			provider = strings.ToLower(strings.TrimSpace(best.Provider))
-			if provider == "lifi" {
-				provider = "li.fi"
-			}
+		switch provider {
+		case "":
+			http.Error(w, "swap failed: provider is required", http.StatusBadRequest)
+			return
+		case "binance":
+			provider = "binance"
+		case "okx":
+			provider = "okx"
+		case "0x", "li.fi":
+			http.Error(w, fmt.Sprintf("swap provider %s is no longer supported", provider), http.StatusBadRequest)
+			return
+		default:
+			http.Error(w, "unsupported swap provider: "+provider, http.StatusBadRequest)
+			return
+		}
+		quoteID := strings.TrimSpace(req.QuoteID)
+		if provider == "binance" && quoteID == "" {
+			http.Error(w, "swap failed: quote_id is required for Binance route execution", http.StatusBadRequest)
+			return
 		}
 
 		pkHex, err := walletService.GetPrivateKey(wlt)
@@ -465,7 +462,7 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 		}
 
 		lpService := liquidity.NewLiquidityService()
-		swapResult, err := lpService.SwapSingleTokenDetailedByProvider(provider, exec, privateKey, walletAddr, fromToken, toToken, amount, slippage)
+		swapResult, err := lpService.SwapSingleTokenDetailedByProviderQuote(provider, quoteID, exec, privateKey, walletAddr, fromToken, toToken, amount, slippage)
 		if err != nil {
 			http.Error(w, "swap failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -492,6 +489,7 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 			Chain:         chain,
 			Provider:      provider,
 			ProviderLabel: swapProviderLabel(provider),
+			QuoteID:       quoteID,
 			TxHash:        txHash,
 			TxURL:         explorerTxURLHelper(chain, txHash),
 			FromToken:     fromTokenStr,

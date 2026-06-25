@@ -28,6 +28,25 @@ const SWAP_MODES = [
     { key: 'limit', label: '限价单' },
 ];
 
+function quoteSelectionKey(entry) {
+    return String(entry?.quote_id || entry?.provider || '').trim();
+}
+
+function quoteRouteList(quote) {
+    if (Array.isArray(quote?.quotes) && quote.quotes.length > 0) return quote.quotes;
+    return quote ? [quote] : [];
+}
+
+function pickQuoteSelectionKey(quote, current = '') {
+    const routes = quoteRouteList(quote);
+    if (!routes.length) return '';
+    if (current && routes.some((entry) => quoteSelectionKey(entry) === current)) return current;
+    const bestQuoteID = String(quote?.best_quote_id || '').trim();
+    if (bestQuoteID && routes.some((entry) => String(entry?.quote_id || '').trim() === bestQuoteID)) return bestQuoteID;
+    const available = routes.find((entry) => entry?.status === 'available') || routes[0];
+    return quoteSelectionKey(available);
+}
+
 function TokenChip({ token, onClick, placeholder = '选择代币' }) {
     const [imgFailed, setImgFailed] = useState(false);
     const logo = String(token?.logoUrl || '').trim();
@@ -156,6 +175,7 @@ export default function SwapModule({
 
     /* quote state */
     const [quote, setQuote] = useState(null);
+    const [selectedQuoteKey, setSelectedQuoteKey] = useState('');
     const [quoting, setQuoting] = useState(false);
     const [quoteError, setQuoteError] = useState('');
     const [lastQuoteAt, setLastQuoteAt] = useState(0);
@@ -197,6 +217,7 @@ export default function SwapModule({
         setToToken(stable || null);
         setAmount('');
         setQuote(null);
+        setSelectedQuoteKey('');
         setQuoteError('');
         setExecError('');
         setSelectedWalletId('');
@@ -422,6 +443,7 @@ export default function SwapModule({
         const amtNum = Number(amt);
         if (!amt || !Number.isFinite(amtNum) || amtNum <= 0) {
             setQuote(null);
+            setSelectedQuoteKey('');
             setQuoteError('');
             return;
         }
@@ -431,6 +453,7 @@ export default function SwapModule({
         if (normalizeHex(fromToken.address) === normalizeHex(toToken.address)) {
             setQuoteError('支付与接收代币相同');
             setQuote(null);
+            setSelectedQuoteKey('');
             return;
         }
         setQuoting(true);
@@ -447,10 +470,12 @@ export default function SwapModule({
                 slippagePercent: Number(slippage),
             });
             setQuote(resp);
+            setSelectedQuoteKey((current) => pickQuoteSelectionKey(resp, current));
             setLastQuoteAt(Date.now());
         } catch (e) {
             setQuoteError(String(e?.message || e));
             setQuote(null);
+            setSelectedQuoteKey('');
         } finally {
             setQuoting(false);
         }
@@ -479,6 +504,7 @@ export default function SwapModule({
         setToToken(a);
         setAmount('');
         setQuote(null);
+        setSelectedQuoteKey('');
     };
 
     const handleSelectToken = (side, token) => {
@@ -497,6 +523,7 @@ export default function SwapModule({
         pushRecentToken(chain, token);
         setAmount('');
         setQuote(null);
+        setSelectedQuoteKey('');
     };
 
     const handleSelectWallet = (wallet) => {
@@ -507,6 +534,7 @@ export default function SwapModule({
         setWalletTokensKey('');
         setAmount('');
         setQuote(null);
+        setSelectedQuoteKey('');
         setQuoteError('');
         setExecError('');
         setLastQuoteAt(0);
@@ -536,6 +564,20 @@ export default function SwapModule({
             ? String(limitTargetPrice || '').trim() !== ''
             : String(limitTargetAmount || '').trim() !== '')
         : true;
+    const quoteRoutes = useMemo(() => quoteRouteList(quote), [quote]);
+    const selectedRoute = useMemo(() => {
+        if (!quoteRoutes.length) return null;
+        if (selectedQuoteKey) {
+            const hit = quoteRoutes.find((entry) => quoteSelectionKey(entry) === selectedQuoteKey);
+            if (hit) return hit;
+        }
+        const picked = pickQuoteSelectionKey(quote);
+        return quoteRoutes.find((entry) => quoteSelectionKey(entry) === picked) || quoteRoutes[0] || null;
+    }, [quote, quoteRoutes, selectedQuoteKey]);
+    const selectedRouteAmountText = selectedRoute?.net_to_amount_float || quote?.to_amount_float || '0.0';
+    const canExecuteSelectedRoute = mode === 'limit'
+        ? true
+        : selectedRoute?.status === 'available' && selectedRoute?.can_execute !== false;
 
     const canSubmit =
         hasInitData &&
@@ -546,6 +588,7 @@ export default function SwapModule({
         validAmount &&
         !!quote &&
         validLimit &&
+        canExecuteSelectedRoute &&
         !executing &&
         !quoting;
 
@@ -566,7 +609,7 @@ export default function SwapModule({
                     targetToAmount: limitMode === 'to_amount' ? limitTargetAmount : '',
                     targetPrice: limitMode === 'price' ? limitTargetPrice : '',
                     slippagePercent: Number(slippage),
-                    provider: quote?.best_provider || quote?.provider || '',
+                    provider: selectedRoute?.provider || quote?.best_provider || quote?.provider || '',
                 });
                 onNotice?.('限价单已创建', 'success');
                 setLimitTargetAmount('');
@@ -581,7 +624,8 @@ export default function SwapModule({
                     toToken: toToken.address,
                     amount: String(amount).trim(),
                     slippagePercent: Number(slippage),
-                    provider: quote?.best_provider || quote?.provider || '',
+                    provider: selectedRoute?.provider || quote?.best_provider || quote?.provider || '',
+                    quoteId: selectedRoute?.quote_id || quote?.best_quote_id || quote?.quote_id || '',
                 });
                 const tx = resp?.tx_hash || '已提交';
                 onNotice?.(`兑换已提交 ${tx.slice(0, 10)}…`, 'success');
@@ -589,6 +633,7 @@ export default function SwapModule({
             setConfirmOpen(false);
             setAmount('');
             setQuote(null);
+            setSelectedQuoteKey('');
             // refresh balances after a moment
             setTimeout(loadWalletTokens, 1500);
         } catch (e) {
@@ -609,6 +654,7 @@ export default function SwapModule({
         amount,
         slippage,
         quote,
+        selectedRoute,
         limitMode,
         limitTargetAmount,
         limitTargetPrice,
@@ -641,7 +687,7 @@ export default function SwapModule({
 
     const toAmountText = quoting && !quote
         ? '…'
-        : quote?.to_amount_float || '0.0';
+        : selectedRouteAmountText || '0.0';
 
     return (
         <div className="mini-swap-module space-y-3">
@@ -841,11 +887,11 @@ export default function SwapModule({
                         <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/45">
                             <span>
                                 via <span className="font-semibold text-zinc-700 dark:text-white/75">
-                                    {String(quote?.best_provider || quote?.provider || '--').toUpperCase()}
+                                    {String(selectedRoute?.vendor_name || selectedRoute?.provider_label || quote?.best_provider || quote?.provider || '--').toUpperCase()}
                                 </span>
-                                {quote?.estimated_gas_usd ? (
+                                {selectedRoute?.estimated_gas_native || selectedRoute?.estimated_gas_usd ? (
                                     <span className="ml-2 tabular-nums">
-                                        gas {formatQuoteGasCostSummary(quote, nativeSymbol)}
+                                        gas {formatQuoteGasCostSummary(selectedRoute, nativeSymbol)}
                                     </span>
                                 ) : null}
                             </span>
@@ -976,6 +1022,8 @@ export default function SwapModule({
                 open={quoteDetailsOpen}
                 onClose={() => setQuoteDetailsOpen(false)}
                 quote={quote}
+                selectedQuoteKey={selectedQuoteKey}
+                onSelectQuote={setSelectedQuoteKey}
                 fromToken={fromToken}
                 toToken={toToken}
                 nativeSymbol={nativeSymbol}
@@ -1000,9 +1048,9 @@ export default function SwapModule({
                             ? (limitMode === 'price'
                                 ? `${limitTargetPrice} ${toToken?.symbol || ''}/${fromToken?.symbol || ''}`
                                 : `${limitTargetAmount} ${toToken?.symbol || ''}`)
-                            : `≈ ${quote?.to_amount_float || 0} ${toToken?.symbol || ''}`
+                            : `≈ ${selectedRouteAmountText || 0} ${toToken?.symbol || ''}`
                     }`,
-                    `路由：${String(quote?.best_provider || quote?.provider || '--').toUpperCase()}`,
+                    `路由：${String(selectedRoute?.vendor_name || selectedRoute?.provider_label || quote?.best_provider || quote?.provider || '--').toUpperCase()}`,
                     `滑点：${slippage}%`,
                     `钱包：${shortAddress(selectedWallet?.address || '', 6, 4)}`,
                     mode === 'limit'

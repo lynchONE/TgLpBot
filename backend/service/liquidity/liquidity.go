@@ -23,6 +23,7 @@ import (
 type LiquidityService struct {
 	walletService      *wallet.WalletService
 	okxService         *exchange.OKXDexService
+	binanceService     *exchange.BinanceSwapService
 	tradeRecordService *trade.TradeRecordService
 }
 
@@ -54,6 +55,7 @@ func NewLiquidityService() *LiquidityService {
 	return &LiquidityService{
 		walletService:      wallet.NewWalletService(),
 		okxService:         exchange.NewOKXDexService(),
+		binanceService:     exchange.NewBinanceSwapService(),
 		tradeRecordService: trade.NewTradeRecordService(),
 	}
 }

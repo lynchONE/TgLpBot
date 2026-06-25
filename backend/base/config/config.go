@@ -143,18 +143,13 @@ type Config struct {
 	OKXSwapGasLimitMin        uint64
 	OKXSwapGasLimitMax        uint64
 
-	// 0x Swap API
-	ZeroXAPIURL           string
-	ZeroXAPIKey           string
-	ZeroXAPIVersion       string
-	ZeroXSwapFeeRecipient string
-	ZeroXSwapFeeBps       int
-
-	// LI.FI API
-	LIFIAPIURL     string
-	LIFIAPIKey     string
-	LIFIIntegrator string
-	LIFIFeePercent float64
+	// Binance Web3 Wallet Trading API
+	BinanceWeb3APIURL      string
+	BinanceWeb3APIKey      string
+	BinanceWeb3SecretKey   string
+	BinanceWeb3QuotePath   string
+	BinanceWeb3BuildTxPath string
+	BinanceWeb3RecvWindow  int64
 
 	// Zap (V3/V4): GasLimit safety buffer (avoid out of gas / reentrancy sentry)
 	ZapGasLimitMultiplier       float64
@@ -276,8 +271,10 @@ func LoadConfig() error {
 	okxSwapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
 	okxSwapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MIN", "0")), 10, 64)
 	okxSwapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MAX", "0")), 10, 64)
-	zeroXSwapFeeBps, _ := strconv.Atoi(strings.TrimSpace(getEnv("ZEROX_SWAP_FEE_BPS", "15")))
-	lifiFeePercent, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("LIFI_FEE_PERCENT", "0.0025")), 64)
+	binanceWeb3RecvWindow, err := strconv.ParseInt(strings.TrimSpace(getEnv("BINANCE_WEB3_RECV_WINDOW", "5000")), 10, 64)
+	if err != nil || binanceWeb3RecvWindow <= 0 || binanceWeb3RecvWindow > 60000 {
+		return fmt.Errorf("invalid BINANCE_WEB3_RECV_WINDOW: must be an integer between 1 and 60000")
+	}
 	zapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
 	zapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MIN", "0")), 10, 64)
 	zapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MAX", "0")), 10, 64)
@@ -382,18 +379,13 @@ func LoadConfig() error {
 		OKXSwapGasLimitMin:        okxSwapGasLimitMin,
 		OKXSwapGasLimitMax:        okxSwapGasLimitMax,
 
-		// 0x Swap API
-		ZeroXAPIURL:           strings.TrimSpace(getEnv("ZEROX_API_URL", "https://api.0x.org")),
-		ZeroXAPIKey:           strings.TrimSpace(getEnv("ZEROX_API_KEY", "")),
-		ZeroXAPIVersion:       strings.TrimSpace(getEnv("ZEROX_API_VERSION", "v2")),
-		ZeroXSwapFeeRecipient: strings.TrimSpace(getEnv("ZEROX_SWAP_FEE_RECIPIENT", "")),
-		ZeroXSwapFeeBps:       zeroXSwapFeeBps,
-
-		// LI.FI API
-		LIFIAPIURL:     strings.TrimSpace(getEnv("LIFI_API_URL", "https://li.quest")),
-		LIFIAPIKey:     strings.TrimSpace(getEnv("LIFI_API_KEY", "")),
-		LIFIIntegrator: strings.TrimSpace(getEnv("LIFI_INTEGRATOR", "tg-lp-bot")),
-		LIFIFeePercent: lifiFeePercent,
+		// Binance Web3 Wallet Trading API
+		BinanceWeb3APIURL:      strings.TrimRight(strings.TrimSpace(getEnv("BINANCE_WEB3_API_URL", "https://web3.binance.com")), "/"),
+		BinanceWeb3APIKey:      strings.TrimSpace(getEnv("BINANCE_WEB3_API_KEY", "")),
+		BinanceWeb3SecretKey:   strings.TrimSpace(getEnv("BINANCE_WEB3_SECRET_KEY", "")),
+		BinanceWeb3QuotePath:   strings.TrimSpace(getEnv("BINANCE_WEB3_AGGREGATED_QUOTE_PATH", "/build/api/v1/dex/aggregator/quote")),
+		BinanceWeb3BuildTxPath: strings.TrimSpace(getEnv("BINANCE_WEB3_BUILD_SWAP_TX_PATH", "/build/api/v1/dex/aggregator/swap")),
+		BinanceWeb3RecvWindow:  binanceWeb3RecvWindow,
 
 		// Zap (V3/V4): GasLimit safety buffer
 		ZapGasLimitMultiplier:       zapGasLimitMult,
@@ -501,15 +493,12 @@ func LoadConfig() error {
 	log.Printf("   - OKX Swap Fee Token: %s", AppConfig.OKXSwapFeeToken)
 	log.Printf("   - OKX Swap GasLimit Multiplier: %.4f", AppConfig.OKXSwapGasLimitMultiplier)
 	log.Printf("   - OKX Swap GasLimit Min/Max: %d/%d", AppConfig.OKXSwapGasLimitMin, AppConfig.OKXSwapGasLimitMax)
-	log.Printf("   - 0x API URL: %s", maskURL(AppConfig.ZeroXAPIURL))
-	log.Printf("   - 0x API Key: %s", maskString(AppConfig.ZeroXAPIKey))
-	log.Printf("   - 0x API Version: %s", AppConfig.ZeroXAPIVersion)
-	log.Printf("   - 0x Fee Recipient: %s", AppConfig.ZeroXSwapFeeRecipient)
-	log.Printf("   - 0x Fee Bps: %d", AppConfig.ZeroXSwapFeeBps)
-	log.Printf("   - LI.FI API URL: %s", maskURL(AppConfig.LIFIAPIURL))
-	log.Printf("   - LI.FI API Key: %s", maskString(AppConfig.LIFIAPIKey))
-	log.Printf("   - LI.FI Integrator: %s", AppConfig.LIFIIntegrator)
-	log.Printf("   - LI.FI Fee Percent: %.6f", AppConfig.LIFIFeePercent)
+	log.Printf("   - Binance Web3 API URL: %s", maskURL(AppConfig.BinanceWeb3APIURL))
+	log.Printf("   - Binance Web3 API Key: %s", maskString(AppConfig.BinanceWeb3APIKey))
+	log.Printf("   - Binance Web3 Secret Key: %s", maskString(AppConfig.BinanceWeb3SecretKey))
+	log.Printf("   - Binance Web3 Quote Path: %s", AppConfig.BinanceWeb3QuotePath)
+	log.Printf("   - Binance Web3 Build Tx Path: %s", AppConfig.BinanceWeb3BuildTxPath)
+	log.Printf("   - Binance Web3 Recv Window: %d", AppConfig.BinanceWeb3RecvWindow)
 	log.Printf("   - Zap GasLimit Multiplier: %.4f", AppConfig.ZapGasLimitMultiplier)
 	log.Printf("   - Zap GasLimit Min/Max: %d/%d", AppConfig.ZapGasLimitMin, AppConfig.ZapGasLimitMax)
 	log.Printf("   - Zap Price Deviation Max Percent: %.4f", AppConfig.ZapPriceDeviationMaxPercent)

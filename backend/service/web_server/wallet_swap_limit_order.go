@@ -117,10 +117,10 @@ func normalizeLimitOrderProvider(provider string) (string, error) {
 		return models.WalletSwapLimitOrderProviderBest, nil
 	case "okx":
 		return "okx", nil
-	case "0x":
-		return "0x", nil
-	case "li.fi", "lifi":
-		return "li.fi", nil
+	case "binance":
+		return "binance", nil
+	case "0x", "li.fi", "lifi":
+		return "", fmt.Errorf("provider %s is no longer supported", provider)
 	default:
 		return "", fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -889,6 +889,20 @@ func (w *WalletSwapLimitOrderWorker) executeOrder(ctx context.Context, order *mo
 	walletAddr := common.HexToAddress(order.WalletAddress)
 	fromToken := common.HexToAddress(order.FromTokenAddress)
 	toToken := common.HexToAddress(order.ToTokenAddress)
+	var quoteID string
+	if strings.EqualFold(provider, "binance") {
+		quote, qerr := w.quoteOrder(ctx, order)
+		if qerr != nil {
+			w.markFailed(ctx, order.ID, qerr)
+			return qerr
+		}
+		if quote == nil || quote.Status != "available" || !strings.EqualFold(quote.Provider, "binance") || strings.TrimSpace(quote.QuoteID) == "" {
+			err = fmt.Errorf("no executable Binance route available")
+			w.markFailed(ctx, order.ID, err)
+			return err
+		}
+		quoteID = strings.TrimSpace(quote.QuoteID)
+	}
 	balance, err := walletSwapAssetBalance(exec.Client(), fromToken, walletAddr)
 	if err != nil {
 		w.markFailed(ctx, order.ID, fmt.Errorf("check balance failed: %w", err))
@@ -899,7 +913,7 @@ func (w *WalletSwapLimitOrderWorker) executeOrder(ctx context.Context, order *mo
 		w.markFailed(ctx, order.ID, err)
 		return err
 	}
-	swapResult, err := lpService.SwapSingleTokenDetailedByProvider(provider, exec, privateKey, walletAddr, fromToken, toToken, amount, order.SlippagePercent)
+	swapResult, err := lpService.SwapSingleTokenDetailedByProviderQuote(provider, quoteID, exec, privateKey, walletAddr, fromToken, toToken, amount, order.SlippagePercent)
 	if err != nil {
 		w.markFailed(ctx, order.ID, err)
 		return err

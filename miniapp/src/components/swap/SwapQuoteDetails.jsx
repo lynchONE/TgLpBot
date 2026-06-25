@@ -16,15 +16,31 @@ function Row({ label, value, accent = false }) {
     );
 }
 
-function ProviderCard({ entry, isBest, toSymbol, nativeSymbol }) {
-    const provider = entry?.provider || entry?.source || '--';
+function quoteSelectionKey(entry) {
+    return String(entry?.quote_id || entry?.provider || '').trim();
+}
+
+function quoteRouteList(quote) {
+    if (Array.isArray(quote?.quotes) && quote.quotes.length > 0) return quote.quotes;
+    return quote ? [quote] : [];
+}
+
+function ProviderCard({ entry, isBest, isSelected, toSymbol, nativeSymbol, onSelect }) {
+    const provider = entry?.vendor_name
+        ? `${entry?.provider_label || entry?.provider || '--'} · ${entry.vendor_name}`
+        : (entry?.provider_label || entry?.provider || entry?.source || '--');
     const status = entry?.status || (entry?.error ? 'error' : 'available');
-    const toAmount = entry?.to_amount_float || formatTokenAmount(entry?.to_amount_human || 0);
+    const toAmount = entry?.net_to_amount_float || entry?.to_amount_float || formatTokenAmount(entry?.to_amount_human || 0);
     const minReceived = entry?.min_to_amount_float || entry?.min_received_float;
+    const priceImpact = String(entry?.price_impact_percent ?? '').trim();
+    const routeKey = quoteSelectionKey(entry);
     return (
-        <div
-            className={`rounded-2xl border p-3 ${
-                isBest
+        <button
+            type="button"
+            onClick={() => (routeKey ? onSelect?.(routeKey) : null)}
+            disabled={!routeKey}
+            className={`w-full rounded-2xl border p-3 text-left transition active:scale-[0.99] ${
+                isSelected
                     ? 'border-zinc-900 bg-zinc-50 dark:border-white dark:bg-white/5'
                     : 'border-zinc-200 bg-white dark:border-white/10 dark:bg-white/[0.02]'
             }`}
@@ -32,7 +48,11 @@ function ProviderCard({ entry, isBest, toSymbol, nativeSymbol }) {
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                     <span className="text-[13px] font-bold uppercase text-zinc-900 dark:text-white/90">{provider}</span>
-                    {isBest ? (
+                    {isSelected ? (
+                        <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-[9px] font-bold text-white dark:bg-white dark:text-zinc-900">
+                            SELECTED
+                        </span>
+                    ) : isBest ? (
                         <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-[9px] font-bold text-white dark:bg-white dark:text-zinc-900">
                             BEST
                         </span>
@@ -58,10 +78,13 @@ function ProviderCard({ entry, isBest, toSymbol, nativeSymbol }) {
                 {entry?.estimated_gas_native || entry?.estimated_gas_usd ? (
                     <Row label="Gas" value={formatQuoteGasCostSummary(entry, nativeSymbol)} />
                 ) : null}
-                {entry?.price_impact_percent !== undefined ? (
+                {entry?.route_summary ? (
+                    <Row label="路径" value={entry.route_summary} />
+                ) : null}
+                {priceImpact ? (
                     <Row
                         label="价格冲击"
-                        value={`${Number(entry.price_impact_percent).toFixed(2)}%`}
+                        value={`${Number(priceImpact).toFixed(2)}%`}
                     />
                 ) : null}
                 {entry?.error ? (
@@ -70,7 +93,7 @@ function ProviderCard({ entry, isBest, toSymbol, nativeSymbol }) {
                     </div>
                 ) : null}
             </div>
-        </div>
+        </button>
     );
 }
 
@@ -78,16 +101,17 @@ export default function SwapQuoteDetails({
     open,
     onClose,
     quote,
+    selectedQuoteKey,
+    onSelectQuote,
     fromToken,
     toToken,
     nativeSymbol,
 }) {
-    const providers = Array.isArray(quote?.providers) && quote.providers.length > 0
-        ? quote.providers
-        : quote
-            ? [quote]
-            : [];
-    const bestProvider = String(quote?.best_provider || quote?.provider || '').toLowerCase();
+    const providers = quoteRouteList(quote);
+    const bestQuoteID = String(quote?.best_quote_id || '').trim();
+    const selectedKey = selectedQuoteKey || bestQuoteID || quoteSelectionKey(providers.find((entry) => entry?.status === 'available') || providers[0]);
+    const selected = providers.find((entry) => quoteSelectionKey(entry) === selectedKey) || providers[0] || quote;
+    const priceImpact = String(selected?.price_impact_percent ?? '').trim();
 
     return (
         <BottomSheet open={open} onClose={onClose} title="报价详情" maxHeightClass="max-h-[88vh]">
@@ -97,17 +121,17 @@ export default function SwapQuoteDetails({
                     {quote?.from_amount_float ? (
                         <Row label="支付" value={`${quote.from_amount_float} ${fromToken?.symbol || ''}`} />
                     ) : null}
-                    {quote?.to_amount_float ? (
-                        <Row label="到账估算" value={`${quote.to_amount_float} ${toToken?.symbol || ''}`} accent />
+                    {selected?.net_to_amount_float || quote?.to_amount_float ? (
+                        <Row label="到账估算" value={`${selected?.net_to_amount_float || quote.to_amount_float} ${toToken?.symbol || ''}`} accent />
                     ) : null}
-                    {quote?.min_to_amount_float ? (
-                        <Row label="最少收到" value={`${quote.min_to_amount_float} ${toToken?.symbol || ''}`} />
+                    {selected?.min_to_amount_float || quote?.min_to_amount_float ? (
+                        <Row label="最少收到" value={`${selected?.min_to_amount_float || quote.min_to_amount_float} ${toToken?.symbol || ''}`} />
                     ) : null}
-                    {quote?.price_impact_percent !== undefined ? (
-                        <Row label="价格冲击" value={`${Number(quote.price_impact_percent).toFixed(2)}%`} />
+                    {priceImpact ? (
+                        <Row label="价格冲击" value={`${Number(priceImpact).toFixed(2)}%`} />
                     ) : null}
-                    {quote?.estimated_gas_native || quote?.estimated_gas_usd ? (
-                        <Row label="Gas 估算" value={formatQuoteGasCostSummary(quote, nativeSymbol)} />
+                    {selected?.estimated_gas_native || selected?.estimated_gas_usd || quote?.estimated_gas_native || quote?.estimated_gas_usd ? (
+                        <Row label="Gas 估算" value={formatQuoteGasCostSummary(selected || quote, nativeSymbol)} />
                     ) : null}
                     {quote?.exchange_rate ? (
                         <Row
@@ -124,13 +148,15 @@ export default function SwapQuoteDetails({
                         </div>
                         {providers.map((entry, idx) => (
                             <ProviderCard
-                                key={`${entry?.provider || idx}`}
+                                key={quoteSelectionKey(entry) || `${entry?.provider || idx}`}
                                 entry={entry}
                                 isBest={
-                                    bestProvider
-                                        ? String(entry?.provider || '').toLowerCase() === bestProvider
-                                        : idx === 0
+                                    bestQuoteID
+                                        ? String(entry?.quote_id || '').trim() === bestQuoteID
+                                        : Boolean(entry?.recommended) || idx === 0
                                 }
+                                isSelected={quoteSelectionKey(entry) === selectedKey}
+                                onSelect={onSelectQuote}
                                 fromSymbol={fromToken?.symbol}
                                 toSymbol={toToken?.symbol}
                                 nativeSymbol={nativeSymbol}

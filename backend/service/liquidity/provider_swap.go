@@ -5,9 +5,9 @@ import (
 	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"math/big"
 	"strings"
 
@@ -53,20 +53,6 @@ func parseProviderUint64(raw string) uint64 {
 		return 0
 	}
 	return v.Uint64()
-}
-
-func clampSlippageBps(slippagePercent float64) int {
-	if slippagePercent <= 0 {
-		return 100
-	}
-	bps := int(math.Round(slippagePercent * 100))
-	if bps < 1 {
-		return 1
-	}
-	if bps > 10000 {
-		return 10000
-	}
-	return bps
 }
 
 func (s *LiquidityService) executeProviderSwapTx(req providerSwapExecutionRequest) (*okxSwapExecutionResult, error) {
@@ -198,79 +184,43 @@ func (s *LiquidityService) executeProviderSwapTx(req providerSwapExecutionReques
 	return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: delta, To: req.TxTo}, nil
 }
 
-func (s *LiquidityService) executeZeroXSwapExactIn(
-	exec chainexec.EVMExecutor,
-	privateKey *ecdsa.PrivateKey,
-	walletAddr common.Address,
-	tokenIn common.Address,
-	tokenOut common.Address,
-	amountIn *big.Int,
-	slippagePercent float64,
-) (*okxSwapExecutionResult, error) {
-	if exec == nil {
-		return nil, fmt.Errorf("executor is nil")
+func slippagePercentParam(slippagePercent float64) string {
+	if slippagePercent <= 0 {
+		slippagePercent = 1
 	}
-	if amountIn == nil || amountIn.Sign() <= 0 {
-		return &okxSwapExecutionResult{DeltaOut: big.NewInt(0)}, nil
+	out := fmt.Sprintf("%.4f", slippagePercent)
+	out = strings.TrimRight(out, "0")
+	out = strings.TrimRight(out, ".")
+	if out == "" {
+		return "1"
 	}
-	if tokenIn == tokenOut {
-		return &okxSwapExecutionResult{DeltaOut: new(big.Int).Set(amountIn)}, nil
-	}
-
-	quote, err := exchange.NewZeroXSwapService().GetAllowanceHolderQuote(exchange.ZeroXQuoteRequest{
-		ChainID:     fmt.Sprintf("%d", exec.Config().ChainID),
-		SellToken:   okxTokenAddressParam(tokenIn),
-		BuyToken:    okxTokenAddressParam(tokenOut),
-		SellAmount:  amountIn.String(),
-		Taker:       walletAddr.Hex(),
-		SlippageBps: clampSlippageBps(slippagePercent),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if quote == nil {
-		return nil, fmt.Errorf("0x quote response empty")
-	}
-	if !common.IsHexAddress(strings.TrimSpace(quote.Transaction.To)) {
-		return nil, fmt.Errorf("0x tx.to invalid: %s", quote.Transaction.To)
-	}
-	txTo := common.HexToAddress(strings.TrimSpace(quote.Transaction.To))
-	txData := common.FromHex(strings.TrimSpace(quote.Transaction.Data))
-	txValue, ok := parseProviderBigInt(quote.Transaction.Value)
-	if !ok {
-		return nil, fmt.Errorf("0x tx.value invalid: %s", quote.Transaction.Value)
-	}
-	suggestedGasPrice, _ := parseProviderBigInt(quote.Transaction.GasPrice)
-	var approveSpender common.Address
-	if !isOKXNativeToken(tokenIn) {
-		spender := strings.TrimSpace(quote.AllowanceTarget)
-		if quote.Issues.Allowance != nil && strings.TrimSpace(quote.Issues.Allowance.Spender) != "" {
-			spender = strings.TrimSpace(quote.Issues.Allowance.Spender)
-		}
-		if !common.IsHexAddress(spender) {
-			return nil, fmt.Errorf("0x approve spender invalid: %s", spender)
-		}
-		approveSpender = common.HexToAddress(spender)
-	}
-	return s.executeProviderSwapTx(providerSwapExecutionRequest{
-		Provider:          "0x",
-		Exec:              exec,
-		PrivateKey:        privateKey,
-		WalletAddr:        walletAddr,
-		TokenIn:           tokenIn,
-		TokenOut:          tokenOut,
-		AmountIn:          amountIn,
-		ApproveSpender:    approveSpender,
-		TxTo:              txTo,
-		TxData:            txData,
-		TxValue:           txValue,
-		SuggestedGasLimit: parseProviderUint64(quote.Transaction.Gas),
-		SuggestedGasPrice: suggestedGasPrice,
-		ExpectedOut:       strings.TrimSpace(quote.BuyAmount),
-	})
+	return out
 }
 
-func (s *LiquidityService) executeLIFISwapExactIn(
+func binanceApproveSpenderFromSignatureData(values []string) (common.Address, bool) {
+	for _, raw := range values {
+		item := strings.TrimSpace(raw)
+		if common.IsHexAddress(item) {
+			return common.HexToAddress(item), true
+		}
+		var parsed struct {
+			ApproveContract string `json:"approveContract"`
+			Spender         string `json:"spender"`
+			To              string `json:"to"`
+		}
+		if err := json.Unmarshal([]byte(item), &parsed); err != nil {
+			continue
+		}
+		for _, candidate := range []string{parsed.ApproveContract, parsed.Spender, parsed.To} {
+			if common.IsHexAddress(strings.TrimSpace(candidate)) {
+				return common.HexToAddress(strings.TrimSpace(candidate)), true
+			}
+		}
+	}
+	return common.Address{}, false
+}
+
+func (s *LiquidityService) executeBinanceSwapExactIn(
 	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
@@ -278,6 +228,7 @@ func (s *LiquidityService) executeLIFISwapExactIn(
 	tokenOut common.Address,
 	amountIn *big.Int,
 	slippagePercent float64,
+	quoteID string,
 ) (*okxSwapExecutionResult, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("executor is nil")
@@ -288,43 +239,81 @@ func (s *LiquidityService) executeLIFISwapExactIn(
 	if tokenIn == tokenOut {
 		return &okxSwapExecutionResult{DeltaOut: new(big.Int).Set(amountIn)}, nil
 	}
+	if s.binanceService == nil {
+		s.binanceService = exchange.NewBinanceSwapService()
+	}
+	quoteID = strings.TrimSpace(quoteID)
+	if quoteID == "" {
+		quoteResp, err := s.binanceService.GetAggregatedQuote(exchange.BinanceQuoteRequest{
+			BinanceChainID:    fmt.Sprintf("%d", exec.Config().ChainID),
+			Amount:            amountIn.String(),
+			FromTokenAddress:  okxTokenAddressParam(tokenIn),
+			ToTokenAddress:    okxTokenAddressParam(tokenOut),
+			UserWalletAddress: walletAddr.Hex(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, route := range quoteResp.Data {
+			if strings.EqualFold(strings.TrimSpace(route.ExecutionMode), "SWAP") && strings.TrimSpace(route.QuoteID) != "" {
+				quoteID = strings.TrimSpace(route.QuoteID)
+				break
+			}
+		}
+		if quoteID == "" {
+			return nil, fmt.Errorf("Binance Web3 quote response has no executable SWAP route")
+		}
+	}
 
-	quote, err := exchange.NewLIFISwapService().GetQuote(exchange.LIFIQuoteRequest{
-		FromChainID: fmt.Sprintf("%d", exec.Config().ChainID),
-		ToChainID:   fmt.Sprintf("%d", exec.Config().ChainID),
-		FromToken:   exchange.LIFINormalizeTokenAddress(okxTokenAddressParam(tokenIn)),
-		ToToken:     exchange.LIFINormalizeTokenAddress(okxTokenAddressParam(tokenOut)),
-		FromAmount:  amountIn.String(),
-		FromAddress: walletAddr.Hex(),
-		ToAddress:   walletAddr.Hex(),
-		Slippage:    slippagePercent / 100,
+	resp, err := s.binanceService.BuildSwapTransaction(exchange.BinanceBuildSwapRequest{
+		BinanceChainID:     fmt.Sprintf("%d", exec.Config().ChainID),
+		Amount:             amountIn.String(),
+		FromTokenAddress:   okxTokenAddressParam(tokenIn),
+		ToTokenAddress:     okxTokenAddressParam(tokenOut),
+		UserWalletAddress:  walletAddr.Hex(),
+		QuoteID:            quoteID,
+		SlippagePercent:    slippagePercentParam(slippagePercent),
+		ApproveTransaction: "true",
+		ApproveAmount:      amountIn.String(),
 	})
 	if err != nil {
 		return nil, err
 	}
-	if quote == nil {
-		return nil, fmt.Errorf("LI.FI quote response empty")
+	if resp == nil {
+		return nil, fmt.Errorf("Binance Web3 swap response empty")
 	}
-	if !common.IsHexAddress(strings.TrimSpace(quote.TransactionRequest.To)) {
-		return nil, fmt.Errorf("LI.FI tx.to invalid: %s", quote.TransactionRequest.To)
+	mode := strings.TrimSpace(resp.Data.ExecutionMode)
+	if mode != "" && !strings.EqualFold(mode, "SWAP") {
+		return nil, fmt.Errorf("Binance Web3 executionMode %s is not supported", mode)
 	}
-	txTo := common.HexToAddress(strings.TrimSpace(quote.TransactionRequest.To))
-	txData := common.FromHex(strings.TrimSpace(quote.TransactionRequest.Data))
-	txValue, ok := parseProviderBigInt(quote.TransactionRequest.Value)
+	tx := resp.Data.Tx
+	if strings.TrimSpace(tx.From) != "" && !strings.EqualFold(strings.TrimSpace(tx.From), walletAddr.Hex()) {
+		return nil, fmt.Errorf("Binance Web3 tx.from mismatch: %s", tx.From)
+	}
+	if !common.IsHexAddress(strings.TrimSpace(tx.To)) {
+		return nil, fmt.Errorf("Binance Web3 tx.to invalid: %s", tx.To)
+	}
+	txTo := common.HexToAddress(strings.TrimSpace(tx.To))
+	txData := common.FromHex(strings.TrimSpace(tx.Data))
+	if len(txData) == 0 {
+		return nil, fmt.Errorf("Binance Web3 tx.data is empty")
+	}
+	txValue, ok := parseProviderBigInt(tx.Value)
 	if !ok {
-		return nil, fmt.Errorf("LI.FI tx.value invalid: %s", quote.TransactionRequest.Value)
+		return nil, fmt.Errorf("Binance Web3 tx.value invalid: %s", tx.Value)
 	}
-	suggestedGasPrice, _ := parseProviderBigInt(quote.TransactionRequest.GasPrice)
+	suggestedGasPrice, _ := parseProviderBigInt(tx.GasPrice)
+
 	var approveSpender common.Address
 	if !isOKXNativeToken(tokenIn) {
-		spender := strings.TrimSpace(quote.Estimate.ApprovalAddress)
-		if !common.IsHexAddress(spender) {
-			return nil, fmt.Errorf("LI.FI approvalAddress invalid: %s", spender)
+		spender, ok := binanceApproveSpenderFromSignatureData(tx.SignatureData)
+		if !ok {
+			return nil, fmt.Errorf("Binance Web3 approve spender missing from signatureData")
 		}
-		approveSpender = common.HexToAddress(spender)
+		approveSpender = spender
 	}
 	return s.executeProviderSwapTx(providerSwapExecutionRequest{
-		Provider:          "li.fi",
+		Provider:          "binance",
 		Exec:              exec,
 		PrivateKey:        privateKey,
 		WalletAddr:        walletAddr,
@@ -335,14 +324,28 @@ func (s *LiquidityService) executeLIFISwapExactIn(
 		TxTo:              txTo,
 		TxData:            txData,
 		TxValue:           txValue,
-		SuggestedGasLimit: parseProviderUint64(quote.TransactionRequest.GasLimit),
+		SuggestedGasLimit: parseProviderUint64(tx.Gas),
 		SuggestedGasPrice: suggestedGasPrice,
-		ExpectedOut:       strings.TrimSpace(quote.Estimate.ToAmount),
+		ExpectedOut:       strings.TrimSpace(resp.Data.RouterResult.ToTokenAmount),
 	})
 }
 
 func (s *LiquidityService) SwapSingleTokenDetailedByProvider(
 	provider string,
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	tokenOut common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+) (*SwapSingleTokenResult, error) {
+	return s.SwapSingleTokenDetailedByProviderQuote(provider, "", exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+}
+
+func (s *LiquidityService) SwapSingleTokenDetailedByProviderQuote(
+	provider string,
+	quoteID string,
 	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
@@ -362,11 +365,12 @@ func (s *LiquidityService) SwapSingleTokenDetailedByProvider(
 	case "", "okx":
 		provider = "okx"
 		r, err = s.executeOKXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+	case "binance":
+		r, err = s.executeBinanceSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent, quoteID)
 	case "0x":
-		r, err = s.executeZeroXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+		return nil, fmt.Errorf("swap provider 0x is no longer supported")
 	case "li.fi", "lifi":
-		provider = "li.fi"
-		r, err = s.executeLIFISwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+		return nil, fmt.Errorf("swap provider li.fi is no longer supported")
 	default:
 		return nil, fmt.Errorf("unsupported swap provider: %s", provider)
 	}

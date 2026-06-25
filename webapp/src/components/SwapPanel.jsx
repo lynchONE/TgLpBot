@@ -19,8 +19,6 @@ import baseLogo from '../img/base.svg';
 import pancakeLogo from '../img/pancake.svg';
 import uniswapLogo from '../img/uniswap.svg';
 import okxLogo from '../img/okx.svg';
-import zeroxLogo from '../img/zerox.svg';
-import lifiLogo from '../img/lifi.svg';
 
 const CHAIN_META = {
   bsc: {
@@ -380,9 +378,7 @@ const DEX_ICON_MAP = [
 
 const PROVIDER_ICON_MAP = {
   okx: { src: okxLogo, color: '#000' },
-  '0x': { src: zeroxLogo, color: '#7B3FE4' },
-  'li.fi': { src: lifiLogo, color: '#9747FF' },
-  lifi: { src: lifiLogo, color: '#9747FF' },
+  binance: { src: bnbLogo, color: '#f0b90b' },
 };
 
 function getDexIconInfo(name) {
@@ -401,8 +397,11 @@ function getProviderIcon(provider) {
 }
 
 function shouldShowSwapRoute(provider) {
-  const key = String(provider || '').toLowerCase().trim();
-  return key !== '0x' && key !== 'li.fi' && key !== 'lifi';
+  return Boolean(String(provider || '').trim());
+}
+
+function quoteSelectionKey(quote) {
+  return String(quote?.quote_id || quote?.provider || '').trim();
 }
 
 function DexIconBadge({ name, size = 16 }) {
@@ -591,11 +590,15 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const selectedQuote = useMemo(() => {
     if (!providerQuotes.length) return null;
     if (selectedProvider) {
-      const hit = providerQuotes.find((item) => item?.provider === selectedProvider);
+      const hit = providerQuotes.find((item) => quoteSelectionKey(item) === selectedProvider);
       if (hit) return hit;
     }
-    if (quoteInfo?.best_provider) {
-      const best = providerQuotes.find((item) => item?.provider === quoteInfo.best_provider);
+    if (quoteInfo?.best_quote_id || quoteInfo?.best_provider) {
+      const best = providerQuotes.find((item) => {
+        const bestQuoteID = String(quoteInfo?.best_quote_id || '').trim();
+        if (bestQuoteID && String(item?.quote_id || '').trim() === bestQuoteID) return true;
+        return !bestQuoteID && item?.provider === quoteInfo.best_provider;
+      });
       if (best) return best;
     }
     return providerQuotes[0] || null;
@@ -1070,9 +1073,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       if (selectedProvider) setSelectedProvider('');
       return;
     }
-    const currentExists = selectedProvider && providerQuotes.some((item) => item?.provider === selectedProvider);
+    const currentExists = selectedProvider && providerQuotes.some((item) => quoteSelectionKey(item) === selectedProvider);
     if (currentExists) return;
-    const nextProvider = quoteInfo?.best_provider || providerQuotes.find((item) => item?.status === 'available')?.provider || providerQuotes[0]?.provider || '';
+    const preferred = quoteInfo?.best_quote_id
+      ? providerQuotes.find((item) => String(item?.quote_id || '').trim() === String(quoteInfo.best_quote_id).trim())
+      : null;
+    const nextQuote = preferred || providerQuotes.find((item) => item?.status === 'available') || providerQuotes[0];
+    const nextProvider = quoteSelectionKey(nextQuote);
     if (nextProvider && nextProvider !== selectedProvider) {
       setSelectedProvider(nextProvider);
     }
@@ -1275,6 +1282,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         amount,
         slippagePercent: Number.parseFloat(slippage),
         provider: selectedQuote.provider,
+        quoteId: selectedQuote.quote_id,
       });
       setExecSuccess(resp?.message || '\\u5151\\u6362\\u5df2\\u5b8c\\u6210');
       setExecResult(resp || null);
@@ -1621,19 +1629,23 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
                 <div className="swap-providers">
                   {providerQuotes.map((quote, index) => {
-                    const active = selectedQuote?.provider === quote?.provider;
+                    const key = quoteSelectionKey(quote) || `provider-${index}`;
+                    const active = quoteSelectionKey(selectedQuote) === quoteSelectionKey(quote);
                     const gasCostText = formatQuoteGasCostSummary(quote, chainConfig.nativeSymbol);
+                    const quoteName = quote?.vendor_name
+                      ? `${quote?.provider_label || quote?.provider || '--'} · ${quote.vendor_name}`
+                      : (quote?.provider_label || quote?.provider || '--');
                     return (
                       <button
-                        key={quote?.provider || `provider-${index}`}
+                        key={key}
                         type="button"
                         className={`swap-prov-card${active ? ' active' : ''}${quote?.status !== 'available' ? ' unavailable' : ''}`}
-                        onClick={() => setSelectedProvider(quote?.provider || '')}
+                        onClick={() => setSelectedProvider(quoteSelectionKey(quote))}
                       >
                         <div className="swap-prov-row-top">
                           <div className="swap-prov-identity">
                             <ProviderIcon provider={quote?.provider} size={18} />
-                            <strong className="swap-prov-name">{quote?.provider_label || quote?.provider || '--'}</strong>
+                            <strong className="swap-prov-name">{quoteName}</strong>
                             <span className="swap-prov-tag">{quote?.recommended ? '\u63a8\u8350' : (quote?.status === 'available' ? '\u53ef\u7528' : '\u4e0d\u53ef\u7528')}</span>
                           </div>
                           {quote?.status === 'available' ? (
@@ -1663,6 +1675,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   selectedQuote?.status === 'available' ? (
                     <div className="swap-detail-list">
                       <DetailRow label={'\u5f53\u524d Provider'} value={selectedQuote?.provider_label || '--'} />
+                      {selectedQuote?.vendor_name ? <DetailRow label={'Binance Vendor'} value={selectedQuote.vendor_name} /> : null}
                       <DetailRow label={'\u9884\u4f30\u5230\u8d26'} value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()} emphasis />
                       <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
                       <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeDisplay} />
@@ -1929,6 +1942,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
               <div className="swap-confirm-details">
                 <DetailRow label={'Provider'} value={selectedQuote?.provider_label || '--'} />
+                {selectedQuote?.vendor_name ? <DetailRow label={'Binance Vendor'} value={selectedQuote.vendor_name} /> : null}
                 <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
                 <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeDisplay} />
                 <DetailRow label={'\u6ed1\u70b9\u5bb9\u5fcd'} value={`${slippage || '1.0'}%`} />
