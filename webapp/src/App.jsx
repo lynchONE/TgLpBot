@@ -867,7 +867,8 @@ export default function App() {
 
         const fees = parseMetricNumber(row?.total_fees);
         const feeRate = parseMetricNumber(row?.fee_rate);
-        if (Number.isFinite(maxFeeRate) && (!Number.isFinite(feeRate) || feeRate > maxFeeRate)) return false;
+        const isDynamicFeePool = Boolean(row?.fee_dynamic);
+        if (!isDynamicFeePool && Number.isFinite(maxFeeRate) && (!Number.isFinite(feeRate) || feeRate > maxFeeRate)) return false;
 
         const activeFeeRate = computeHotPoolActiveFeeRate(row);
         const tvl = parseMetricNumber(row?.current_pool_value);
@@ -875,8 +876,8 @@ export default function App() {
         const volume = parseMetricNumber(row?.total_volume);
         const txCount = parseMetricNumber(row?.transaction_count);
         if (Number.isFinite(minFees) && fees < minFees) return false;
-        if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
-        if (Number.isFinite(minActiveFeeRate) && (!Number.isFinite(activeFeeRate) || activeFeeRate < minActiveFeeRate)) return false;
+        if (!isDynamicFeePool && Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
+        if (!isDynamicFeePool && Number.isFinite(minActiveFeeRate) && (!Number.isFinite(activeFeeRate) || activeFeeRate < minActiveFeeRate)) return false;
         if (Number.isFinite(minTvl) && tvl < minTvl) return false;
         if (Number.isFinite(minMarketCap) && (!Number.isFinite(marketCap) || marketCap < minMarketCap)) return false;
         if (Number.isFinite(minVolume) && volume < minVolume) return false;

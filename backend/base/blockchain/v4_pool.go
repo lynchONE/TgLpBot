@@ -682,31 +682,40 @@ func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager com
 }
 
 func GetUniswapV4PoolSlot0ViaStateViewWithClient(client *ethclient.Client, stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, error) {
+	sqrtPriceX96, tick, _, _, err := GetUniswapV4PoolSlot0FullViaStateViewWithClient(client, stateView, poolManager, poolID)
+	return sqrtPriceX96, tick, err
+}
+
+func GetUniswapV4PoolSlot0FullViaStateView(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, uint64, uint64, error) {
+	return GetUniswapV4PoolSlot0FullViaStateViewWithClient(Client, stateView, poolManager, poolID)
+}
+
+func GetUniswapV4PoolSlot0FullViaStateViewWithClient(client *ethclient.Client, stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, uint64, uint64, error) {
 	if client == nil {
-		return nil, 0, fmt.Errorf("blockchain client not initialized")
+		return nil, 0, 0, 0, fmt.Errorf("blockchain client not initialized")
 	}
 	if (stateView == common.Address{}) {
-		return nil, 0, fmt.Errorf("uniswap v4 state view address not configured")
+		return nil, 0, 0, 0, fmt.Errorf("uniswap v4 state view address not configured")
 	}
 	if (poolManager == common.Address{}) {
-		return nil, 0, fmt.Errorf("uniswap v4 pool manager address not configured")
+		return nil, 0, 0, 0, fmt.Errorf("uniswap v4 pool manager address not configured")
 	}
 
 	id, err := normalizePoolID(poolID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
 	}
 
 	v4Debugf("stateview slot0: StateView=%s PoolManager=%s PoolId=%s", stateView.Hex(), poolManager.Hex(), poolID)
 
 	parsedABI, err := abi.JSON(strings.NewReader(uniswapV4StateViewABISingleArg))
 	if err != nil {
-		return nil, 0, fmt.Errorf("parse state view ABI failed: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("parse state view ABI failed: %w", err)
 	}
 
 	data, err := parsedABI.Pack("getSlot0", id)
 	if err != nil {
-		return nil, 0, fmt.Errorf("pack state view getSlot0 failed: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("pack state view getSlot0 failed: %w", err)
 	}
 
 	v4Debugf("stateview slot0: calling getSlot0(bytes32) calldata=%s", common.Bytes2Hex(data))
@@ -715,26 +724,28 @@ func GetUniswapV4PoolSlot0ViaStateViewWithClient(client *ethclient.Client, state
 	defer cancel()
 	raw, err := callContractWithRetry(client, ctx, msg)
 	if err != nil {
-		return nil, 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}
 
 	out, err := parsedABI.Unpack("getSlot0", raw)
 	if err != nil {
-		return nil, 0, fmt.Errorf("unpack state view getSlot0 failed: %w", err)
+		return nil, 0, 0, 0, fmt.Errorf("unpack state view getSlot0 failed: %w", err)
 	}
-	if len(out) < 2 {
-		return nil, 0, fmt.Errorf("unexpected state view getSlot0 return length: %d", len(out))
+	if len(out) < 4 {
+		return nil, 0, 0, 0, fmt.Errorf("unexpected state view getSlot0 return length: %d", len(out))
 	}
 
 	sqrtPriceX96, ok0 := out[0].(*big.Int)
 	tickBig, ok1 := out[1].(*big.Int)
-	if !ok0 || sqrtPriceX96 == nil || !ok1 || tickBig == nil {
-		return nil, 0, fmt.Errorf("unexpected state view slot0 return types: sqrt=%T tick=%T", out[0], out[1])
+	protocolFeeBig, ok2 := out[2].(*big.Int)
+	lpFeeBig, ok3 := out[3].(*big.Int)
+	if !ok0 || sqrtPriceX96 == nil || !ok1 || tickBig == nil || !ok2 || protocolFeeBig == nil || !ok3 || lpFeeBig == nil {
+		return nil, 0, 0, 0, fmt.Errorf("unexpected state view slot0 return types: sqrt=%T tick=%T protocolFee=%T lpFee=%T", out[0], out[1], out[2], out[3])
 	}
 	if sqrtPriceX96.Sign() == 0 {
-		return nil, 0, fmt.Errorf("pool not initialized (sqrtPriceX96=0)")
+		return nil, 0, 0, 0, fmt.Errorf("pool not initialized (sqrtPriceX96=0)")
 	}
-	return sqrtPriceX96, int(tickBig.Int64()), nil
+	return sqrtPriceX96, int(tickBig.Int64()), protocolFeeBig.Uint64(), lpFeeBig.Uint64(), nil
 }
 
 // GetUniswapV4PoolLiquidityViaStateView reads the current in-range liquidity using StateView.getLiquidity(poolId).

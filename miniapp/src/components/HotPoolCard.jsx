@@ -165,8 +165,9 @@ function formatFeePercent(v) {
 }
 
 function formatPoolTradingFee(pool) {
-    if (pool?.fee_dynamic) return '动态';
-    return formatFeePercent(pool?.fee_percentage);
+    const feeText = formatFeePercent(pool?.fee_percentage);
+    if (pool?.fee_dynamic) return feeText ? `${feeText} 动态` : '动态';
+    return feeText;
 }
 
 function formatRatePct(v) {

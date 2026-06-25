@@ -255,7 +255,7 @@ func (s *Server) buildPoolCatalogResponse(ctx context.Context, rows []models.Poo
 		if item.PoolAddress == "" {
 			continue
 		}
-		if opts.MaxFeeRate != nil && (!isFinitePositiveOrZero(item.FeeRate) || item.FeeRate > *opts.MaxFeeRate) {
+		if opts.MaxFeeRate != nil && !item.FeeDynamic && (!isFinitePositiveOrZero(item.FeeRate) || item.FeeRate > *opts.MaxFeeRate) {
 			continue
 		}
 		items = append(items, item)
@@ -298,6 +298,7 @@ func (s *Server) buildPoolCatalogResponse(ctx context.Context, rows []models.Poo
 	if len(items) > limit {
 		items = items[:limit]
 	}
+	s.enrichHotPoolDynamicFeePercentage(items)
 
 	if updatedAt.IsZero() {
 		updatedAt = time.Now()
@@ -305,6 +306,31 @@ func (s *Server) buildPoolCatalogResponse(ctx context.Context, rows []models.Poo
 	meta.UpdatedAt = updatedAt
 	meta.Data = items
 	return meta
+}
+
+func (s *Server) enrichHotPoolDynamicFeePercentage(items []HotPoolResponse) {
+	for i := range items {
+		if !items[i].FeeDynamic || items[i].FeePercentage > 0 {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(items[i].ProtocolVersion), "v4") {
+			continue
+		}
+		items[i].FeePercentage = s.loadSmartMoneyV4DynamicFeePercentage(
+			poolCatalogChainID(items[i].Chain),
+			"uniswap_v4",
+			items[i].PoolAddress,
+		)
+	}
+}
+
+func poolCatalogChainID(chain string) int {
+	switch strings.ToLower(strings.TrimSpace(chain)) {
+	case "base":
+		return 8453
+	default:
+		return 56
+	}
 }
 
 func poolCatalogLiquidityUSD(row models.Pool) float64 {

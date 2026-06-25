@@ -12,15 +12,12 @@ const (
 
 func normalizeHotPoolFee(protocolVersion string, feeTier int, feePercentage float64, dynamic bool) (int, float64, bool) {
 	if dynamic || isHotPoolDynamicFee(protocolVersion, feeTier, feePercentage) {
-		return 0, 0, true
+		return 0, normalizeHotPoolFeePercentage(feePercentage), true
 	}
 	if feeTier < 0 || feeTier > hotPoolMaxStaticFeeTier {
 		feeTier = 0
 	}
-	if math.IsNaN(feePercentage) || math.IsInf(feePercentage, 0) || feePercentage < 0 || feePercentage > 100 {
-		feePercentage = 0
-	}
-	return feeTier, feePercentage, false
+	return feeTier, normalizeHotPoolFeePercentage(feePercentage), false
 }
 
 func isHotPoolDynamicFee(protocolVersion string, feeTier int, feePercentage float64) bool {
@@ -31,4 +28,11 @@ func isHotPoolDynamicFee(protocolVersion string, feeTier int, feePercentage floa
 		return true
 	}
 	return feePercentage > 100
+}
+
+func normalizeHotPoolFeePercentage(feePercentage float64) float64 {
+	if math.IsNaN(feePercentage) || math.IsInf(feePercentage, 0) || feePercentage < 0 || feePercentage > 100 {
+		return 0
+	}
+	return feePercentage
 }

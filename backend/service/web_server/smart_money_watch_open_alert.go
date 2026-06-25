@@ -77,6 +77,7 @@ type smartMoneyWatchActivityItem struct {
 	WalletColor          string  `json:"wallet_color"`
 	ExplorerURL          string  `json:"explorer_url,omitempty"`
 	FeeDynamic           bool    `json:"fee_dynamic,omitempty"`
+	FeePercentage        float64 `json:"fee_percentage,omitempty"`
 }
 
 type smartMoneyWatchActivityEnvelope struct {
@@ -299,7 +300,9 @@ func (s *Server) buildSmartMoneyWatchActivityItems(r *http.Request, events []mod
 	addressesByChain := make(map[string][]string)
 	walletCache := make(map[string]*models.MonitoredWallet)
 	smRepo := sm.NewRepository()
+	poolAddresses := make([]string, 0, len(events))
 	for _, event := range events {
+		poolAddresses = append(poolAddresses, event.PoolAddress)
 		displayAddress, _ := smartMoneyPickDisplayToken(
 			event.Token0Address,
 			event.Token1Address,
@@ -312,14 +315,20 @@ func (s *Server) buildSmartMoneyWatchActivityItems(r *http.Request, events []mod
 		}
 	}
 	metaByChain := s.loadSmartMoneyTokenMetadataByChain(r.Context(), addressesByChain)
+	poolFeeInfo, err := smartMoneyLoadPoolFeeInfoByAddress(r.Context(), poolAddresses)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, event := range events {
+		feeInfo := poolFeeInfo[strings.ToLower(strings.TrimSpace(event.PoolAddress))]
 		item := smartMoneyWatchActivityItem{
 			SmartMoneyLPEvent: event,
 			TradingPair:       buildSmartMoneyTradingPair(event.Token0Symbol, event.Token1Symbol),
 			WalletColor:       sm.WalletColor(event.WalletAddress),
 			ExplorerURL:       smartMoneyExplorerTxURL(smartMoneyChainSlug(event.ChainID), event.TxHash),
-			FeeDynamic:        sm.IsDynamicFeeTier(event.Protocol, event.FeeTier),
+			FeeDynamic:        sm.IsDynamicFeeTier(event.Protocol, event.FeeTier) || feeInfo.Dynamic,
+			FeePercentage:     feeInfo.Percentage,
 		}
 		item.DisplayTokenAddress, item.DisplayTokenSymbol = smartMoneyPickDisplayToken(
 			event.Token0Address,

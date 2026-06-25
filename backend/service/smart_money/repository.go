@@ -1834,6 +1834,7 @@ type PoolAggRow struct {
 	Token1Address          string           `json:"token1_address"`
 	FeeTier                *int             `json:"fee_tier"`
 	FeeDynamic             bool             `json:"fee_dynamic,omitempty"`
+	FeePercentage          float64          `json:"fee_percentage,omitempty"`
 	Protocol               string           `json:"protocol"`
 	ChainID                int              `json:"chain_id"`
 	OpenPositionCount      int              `json:"open_position_count"`
@@ -1867,6 +1868,7 @@ type PoolFeeHeatmapRow struct {
 	Token1Address             string    `json:"token1_address"`
 	FeeTier                   *int      `json:"fee_tier"`
 	FeeDynamic                bool      `json:"fee_dynamic,omitempty"`
+	FeePercentage             float64   `json:"fee_percentage,omitempty"`
 	Protocol                  string    `json:"protocol"`
 	ChainID                   int       `json:"chain_id"`
 	OpenPositionCount         int       `json:"open_position_count"`
@@ -2286,6 +2288,7 @@ type PoolStats struct {
 	Token1Address          string           `json:"token1_address"`
 	FeeTier                *int             `json:"fee_tier"`
 	FeeDynamic             bool             `json:"fee_dynamic,omitempty"`
+	FeePercentage          float64          `json:"fee_percentage,omitempty"`
 	Protocol               string           `json:"protocol"`
 	ChainID                int              `json:"chain_id"`
 	OpenPositionCount      int              `json:"open_position_count"`

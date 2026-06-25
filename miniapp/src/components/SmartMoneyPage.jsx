@@ -23,6 +23,7 @@ import {
 import { getBrandTheme } from '../lib/brand';
 import { formatDurationFrom } from '../lib/time';
 import {
+    formatFeePercentage,
     formatFeeTier,
     formatUSDCompact,
     formatWalletBalance,
@@ -1408,9 +1409,14 @@ function ProtocolBadge({ protocol }) {
     );
 }
 
-function FeeBadge({ fee, dynamic }) {
+function FeeBadge({ fee, dynamic, percentage }) {
     if (dynamic || isDynamicFeeTier(fee)) {
-        return <Badge className="border-cyan-400/20 bg-cyan-400/10 text-cyan-200">动态费率</Badge>;
+        const percentageText = formatFeePercentage(percentage);
+        return (
+            <Badge className="border-cyan-400/20 bg-cyan-400/10 text-cyan-200">
+                {percentageText ? `${percentageText} 动态` : '动态费率'}
+            </Badge>
+        );
     }
     const text = formatFeeTier(fee);
     if (!text) return null;
@@ -2469,6 +2475,7 @@ function buildPoolFromWatchActivity(event) {
         display_token_logo_url: event.display_token_logo_url,
         fee_tier: event.fee_tier,
         fee_dynamic: event.fee_dynamic,
+        fee_percentage: event.fee_percentage,
     };
 }
 
@@ -2495,7 +2502,7 @@ function WatchActivityCard({ event, brand, onSelectWallet, onSelectPool }) {
                             {formatWatchActivityAction(event?.event_type)}
                         </Badge>
                         <ProtocolBadge protocol={event?.protocol} />
-                        <FeeBadge fee={event?.fee_tier} dynamic={event?.fee_dynamic} />
+                        <FeeBadge fee={event?.fee_tier} dynamic={event?.fee_dynamic} percentage={event?.fee_percentage} />
                     </div>
                     <div className="mt-1 truncate text-sm font-semibold text-zinc-100">{pairLabel}</div>
                     <div className="mt-2">
@@ -3074,7 +3081,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand, pollInt
                                         <div className="flex flex-wrap items-center gap-1.5">
                                             <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(pool)}</span>
                                             <ProtocolBadge protocol={pool.protocol} />
-                                            <FeeBadge fee={pool.fee_tier} dynamic={pool.fee_dynamic} />
+                                            <FeeBadge fee={pool.fee_tier} dynamic={pool.fee_dynamic} percentage={pool.fee_percentage} />
                                         </div>
                                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                             <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
@@ -3378,7 +3385,7 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, brand, o
                     <div className="flex flex-wrap items-center gap-1.5">
                         <span className="truncate text-sm font-semibold text-zinc-100">{getPairLabel(row)}</span>
                         <ProtocolBadge protocol={row.protocol} />
-                        <FeeBadge fee={row.fee_tier} dynamic={row.fee_dynamic} />
+                        <FeeBadge fee={row.fee_tier} dynamic={row.fee_dynamic} percentage={row.fee_percentage} />
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                         <div className="rounded-2xl border border-white/[0.05] bg-black/20 px-3 py-2">
@@ -3506,7 +3513,11 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                         <div className="flex flex-wrap items-center gap-1.5">
                             <span className="truncate text-lg font-semibold text-zinc-100">{getPairLabel(pool)}</span>
                             <ProtocolBadge protocol={pool.protocol} />
-                            <FeeBadge fee={pool.fee_tier} dynamic={pool.fee_dynamic || poolStats?.fee_dynamic} />
+                            <FeeBadge
+                                fee={pool.fee_tier}
+                                dynamic={pool.fee_dynamic || poolStats?.fee_dynamic}
+                                percentage={Number(poolStats?.fee_percentage) > 0 ? poolStats?.fee_percentage : pool.fee_percentage}
+                            />
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
@@ -4054,12 +4065,14 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     display_token_logo_url: p.display_token_logo_url,
                     fee_tier: p.fee_tier,
                     fee_dynamic: p.fee_dynamic,
+                    fee_percentage: p.fee_percentage,
                     protocol: p.protocol,
                     positions: [],
                     hasOpen: false,
                 };
             }
             if (p.fee_dynamic) groups[p.pool_address].fee_dynamic = true;
+            if (Number(p.fee_percentage) > 0) groups[p.pool_address].fee_percentage = p.fee_percentage;
             groups[p.pool_address].positions.push(p);
             if (p.status === 'open') groups[p.pool_address].hasOpen = true;
         });
@@ -4183,6 +4196,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                                 display_token_logo_url: group.display_token_logo_url,
                                 fee_tier: group.fee_tier,
                                 fee_dynamic: group.fee_dynamic,
+                                fee_percentage: group.fee_percentage,
                                 protocol: group.protocol,
                             })}
                         />
@@ -4214,7 +4228,7 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, posit
                     <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-6">
                         <CompactIdentifier value={group.pool_address} label="池子" />
                         <ProtocolBadge protocol={group.protocol} />
-                        <FeeBadge fee={group.fee_tier} dynamic={group.fee_dynamic} />
+                        <FeeBadge fee={group.fee_tier} dynamic={group.fee_dynamic} percentage={group.fee_percentage} />
                     </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1 text-right">

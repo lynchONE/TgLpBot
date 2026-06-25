@@ -1,6 +1,9 @@
 package pool_sync
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 const (
 	uniswapV4DynamicFeeFlag = 0x800000
@@ -9,7 +12,7 @@ const (
 
 func normalizePoolSyncFee(protocolVersion string, feeTier int, feePercentage float64) (int, float64, bool) {
 	if isPoolSyncDynamicFee(protocolVersion, feeTier, feePercentage) {
-		return 0, 0, true
+		return 0, normalizePoolSyncFeePercentage(feePercentage), true
 	}
 	if feeTier < 0 {
 		feeTier = 0
@@ -17,10 +20,7 @@ func normalizePoolSyncFee(protocolVersion string, feeTier int, feePercentage flo
 	if feeTier > maxStaticPoolFeeTier {
 		feeTier = 0
 	}
-	if feePercentage < 0 || feePercentage > 100 {
-		feePercentage = 0
-	}
-	return feeTier, feePercentage, false
+	return feeTier, normalizePoolSyncFeePercentage(feePercentage), false
 }
 
 func isPoolSyncDynamicFee(protocolVersion string, feeTier int, feePercentage float64) bool {
@@ -31,4 +31,11 @@ func isPoolSyncDynamicFee(protocolVersion string, feeTier int, feePercentage flo
 		return true
 	}
 	return feePercentage > 100
+}
+
+func normalizePoolSyncFeePercentage(feePercentage float64) float64 {
+	if math.IsNaN(feePercentage) || math.IsInf(feePercentage, 0) || feePercentage < 0 || feePercentage > 100 {
+		return 0
+	}
+	return feePercentage
 }

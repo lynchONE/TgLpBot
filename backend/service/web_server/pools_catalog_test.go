@@ -104,3 +104,59 @@ func TestBuildPoolCatalogItemMarksV4DynamicFee(t *testing.T) {
 		t.Fatalf("fee_rate = %.4f, want yield metric untouched", item.FeeRate)
 	}
 }
+
+func TestBuildPoolCatalogItemKeepsValidV4DynamicFeePercentage(t *testing.T) {
+	t.Parallel()
+
+	item := buildPoolCatalogItem(models.Pool{
+		Chain:             "bsc",
+		ProtocolVersion:   "v4",
+		Address:           "0x7b1818047437a598480e552a60a6edd374a5ff6b8afd58aab9d07aff9dd90b31",
+		Name:              "USDT/ARX",
+		PoolMFeeRate:      0x800000,
+		PoolFeePercentage: 4.996,
+		TotalFees:         42,
+		CurrentPoolValue:  1000,
+	}, poolCatalogOptions{Chain: "bsc", TimeframeMinutes: 5})
+
+	if !item.FeeDynamic {
+		t.Fatal("expected v4 dynamic fee flag to be marked dynamic")
+	}
+	if item.FeeTier != 0 || item.FeePercentage != 4.996 {
+		t.Fatalf("dynamic fee output = tier %d pct %.4f, want 0/4.996", item.FeeTier, item.FeePercentage)
+	}
+}
+
+func TestBuildPoolCatalogResponseDoesNotMaxFeeRateFilterDynamicPools(t *testing.T) {
+	t.Parallel()
+
+	maxFeeRate := 1.0
+	resp := (&Server{}).buildPoolCatalogResponse(context.Background(), []models.Pool{
+		{
+			Chain:             "bsc",
+			ProtocolVersion:   "v4",
+			Address:           "0x7b1818047437a598480e552a60a6edd374a5ff6b8afd58aab9d07aff9dd90b31",
+			Name:              "USDT/ARX",
+			Token0Symbol:      "USDT",
+			Token1Symbol:      "ARX",
+			PoolMFeeRate:      0x800000,
+			PoolFeePercentage: 4.996,
+			TotalFees:         42,
+			CurrentPoolValue:  1000,
+			UpdatedAt:         time.Now(),
+		},
+	}, poolCatalogOptions{
+		Chain:            "bsc",
+		Sort:             "fees",
+		TimeframeMinutes: 5,
+		Limit:            10,
+		MaxFeeRate:       &maxFeeRate,
+	})
+
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected dynamic pool to bypass max_fee_rate filter, got %d rows", len(resp.Data))
+	}
+	if !resp.Data[0].FeeDynamic {
+		t.Fatal("expected dynamic pool to remain marked dynamic")
+	}
+}

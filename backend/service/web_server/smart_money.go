@@ -1,6 +1,7 @@
 package web_server
 
 import (
+	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
@@ -24,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 var (
@@ -1138,6 +1141,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.enrichSmartMoneyPoolStatsDynamicFeePercentage(stats)
 		s.enrichSmartMoneyPoolStatsMarketData(ctx, stats)
 		stats.CurrentPrice, stats.PriceChange24h = loadSmartMoneyPoolMarketSnapshot(ctx, poolAddr)
 		applySmartMoneyDisplayToken(
@@ -1232,7 +1236,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		if hasMinSmartMoneyUSD && pool.TotalPositionAmountUSD < minSmartMoneyUSD {
 			continue
 		}
-		if hasMaxFeeRate {
+		if hasMaxFeeRate && !pool.FeeDynamic {
 			if pool.FeeTier == nil {
 				continue
 			}
@@ -1257,6 +1261,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 		end = total
 	}
 	pagedPools := filtered[start:end]
+	s.enrichSmartMoneyPoolAggDynamicFeePercentage(pagedPools)
 
 	addressesByChain := make(map[string][]string)
 	for i := range pagedPools {
@@ -1365,6 +1370,7 @@ func (s *Server) handleSMPoolFeeHeatmap(w http.ResponseWriter, r *http.Request) 
 		end = len(rows)
 	}
 	pagedRows := rows[start:end]
+	s.enrichSmartMoneyHeatmapDynamicFeePercentage(pagedRows)
 	s.enrichSmartMoneyHeatmapMarketData(ctx, pagedRows)
 
 	addressesByChain := make(map[string][]string)
@@ -1674,6 +1680,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		FeeStatus            string     `json:"fee_status,omitempty"`
 		FeeUpdatedAt         *time.Time `json:"fee_updated_at,omitempty"`
 		FeeDynamic           bool       `json:"fee_dynamic,omitempty"`
+		FeePercentage        float64    `json:"fee_percentage,omitempty"`
 		BscscanURL           string     `json:"bscscan_url"`
 		TradingPair          string     `json:"trading_pair"`
 		DisplayTokenAddress  string     `json:"display_token_address,omitempty"`
@@ -1750,6 +1757,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		resp.FeeStatus = amountRow.FeeStatus
 		resp.FeeUpdatedAt = amountRow.FeeUpdatedAt
 		resp.FeeDynamic = sm.IsDynamicFeeTier(p.Protocol, p.FeeTier) || poolMeta.FeeDynamic
+		resp.FeePercentage = smartMoneySanitizeFeePercentage(poolMeta.PoolFeePercentage)
 		resp.TradingPair = buildSmartMoneyTradingPair(p.Token0Symbol, p.Token1Symbol)
 		if resp.DisplayTokenAddress != "" {
 			chain := smartMoneyChainSlug(p.ChainID)
@@ -1894,13 +1902,25 @@ func (s *Server) handleSMEvents(w http.ResponseWriter, r *http.Request) {
 		WalletSource         string  `json:"wallet_source,omitempty"`
 		WalletSourceContract string  `json:"wallet_source_contract,omitempty"`
 		FeeDynamic           bool    `json:"fee_dynamic,omitempty"`
+		FeePercentage        float64 `json:"fee_percentage,omitempty"`
 	}
 	list := make([]eventResp, 0, len(events))
 	walletCache := make(map[string]*models.MonitoredWallet)
+	eventPoolAddresses := make([]string, 0, len(events))
+	for i := range events {
+		eventPoolAddresses = append(eventPoolAddresses, events[i].PoolAddress)
+	}
+	eventPoolInfo, err := smartMoneyLoadPoolFeeInfoByAddress(ctx, eventPoolAddresses)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	for _, event := range events {
+		poolInfo := eventPoolInfo[strings.ToLower(strings.TrimSpace(event.PoolAddress))]
 		resp := eventResp{
 			SmartMoneyLPEvent: event,
-			FeeDynamic:        sm.IsDynamicFeeTier(event.Protocol, event.FeeTier),
+			FeeDynamic:        sm.IsDynamicFeeTier(event.Protocol, event.FeeTier) || poolInfo.Dynamic,
+			FeePercentage:     poolInfo.Percentage,
 		}
 		walletCacheKey := strconv.Itoa(event.ChainID) + "|" + strings.ToLower(strings.TrimSpace(event.WalletAddress))
 		walletRow, ok := walletCache[walletCacheKey]
@@ -2302,8 +2322,13 @@ func smartMoneyLoadPoolsByAddress(ctx context.Context, positions []models.SmartM
 	return out, nil
 }
 
-func smartMoneyLoadPoolFeeDynamicByAddress(ctx context.Context, addresses []string) (map[string]bool, error) {
-	out := make(map[string]bool)
+type smartMoneyPoolFeeInfo struct {
+	Dynamic    bool
+	Percentage float64
+}
+
+func smartMoneyLoadPoolFeeInfoByAddress(ctx context.Context, addresses []string) (map[string]smartMoneyPoolFeeInfo, error) {
+	out := make(map[string]smartMoneyPoolFeeInfo)
 	normalized := make([]string, 0, len(addresses))
 	seen := make(map[string]struct{}, len(addresses))
 	for _, raw := range addresses {
@@ -2324,7 +2349,7 @@ func smartMoneyLoadPoolFeeDynamicByAddress(ctx context.Context, addresses []stri
 	var pools []models.Pool
 	if err := database.DB.WithContext(ctx).
 		Model(&models.Pool{}).
-		Select("address", "fee_dynamic").
+		Select("address", "fee_dynamic", "pool_fee_percentage").
 		Where("address IN ?", normalized).
 		Find(&pools).Error; err != nil {
 		return nil, err
@@ -2334,7 +2359,10 @@ func smartMoneyLoadPoolFeeDynamicByAddress(ctx context.Context, addresses []stri
 		if addr == "" {
 			continue
 		}
-		out[addr] = pool.FeeDynamic
+		out[addr] = smartMoneyPoolFeeInfo{
+			Dynamic:    pool.FeeDynamic,
+			Percentage: smartMoneySanitizeFeePercentage(pool.PoolFeePercentage),
+		}
 	}
 	return out, nil
 }
@@ -2347,19 +2375,21 @@ func (s *Server) enrichSmartMoneyPoolAggFeeDynamic(ctx context.Context, pools []
 	for i := range pools {
 		if sm.IsDynamicFeeTier(pools[i].Protocol, pools[i].FeeTier) {
 			pools[i].FeeDynamic = true
-			continue
 		}
 		addresses = append(addresses, pools[i].PoolAddress)
 	}
-	byAddress, err := smartMoneyLoadPoolFeeDynamicByAddress(ctx, addresses)
+	byAddress, err := smartMoneyLoadPoolFeeInfoByAddress(ctx, addresses)
 	if err != nil {
 		return err
 	}
 	for i := range pools {
-		if pools[i].FeeDynamic {
-			continue
+		info := byAddress[strings.ToLower(strings.TrimSpace(pools[i].PoolAddress))]
+		if info.Dynamic {
+			pools[i].FeeDynamic = true
 		}
-		pools[i].FeeDynamic = byAddress[strings.ToLower(strings.TrimSpace(pools[i].PoolAddress))]
+		if info.Percentage > 0 {
+			pools[i].FeePercentage = info.Percentage
+		}
 	}
 	return nil
 }
@@ -2372,19 +2402,21 @@ func (s *Server) enrichSmartMoneyHeatmapFeeDynamic(ctx context.Context, rows []s
 	for i := range rows {
 		if sm.IsDynamicFeeTier(rows[i].Protocol, rows[i].FeeTier) {
 			rows[i].FeeDynamic = true
-			continue
 		}
 		addresses = append(addresses, rows[i].PoolAddress)
 	}
-	byAddress, err := smartMoneyLoadPoolFeeDynamicByAddress(ctx, addresses)
+	byAddress, err := smartMoneyLoadPoolFeeInfoByAddress(ctx, addresses)
 	if err != nil {
 		return err
 	}
 	for i := range rows {
-		if rows[i].FeeDynamic {
-			continue
+		info := byAddress[strings.ToLower(strings.TrimSpace(rows[i].PoolAddress))]
+		if info.Dynamic {
+			rows[i].FeeDynamic = true
 		}
-		rows[i].FeeDynamic = byAddress[strings.ToLower(strings.TrimSpace(rows[i].PoolAddress))]
+		if info.Percentage > 0 {
+			rows[i].FeePercentage = info.Percentage
+		}
 	}
 	return nil
 }
@@ -2395,14 +2427,98 @@ func (s *Server) enrichSmartMoneyPoolStatsFeeDynamic(ctx context.Context, stats 
 	}
 	if sm.IsDynamicFeeTier(stats.Protocol, stats.FeeTier) {
 		stats.FeeDynamic = true
-		return nil
 	}
-	byAddress, err := smartMoneyLoadPoolFeeDynamicByAddress(ctx, []string{stats.PoolAddress})
+	byAddress, err := smartMoneyLoadPoolFeeInfoByAddress(ctx, []string{stats.PoolAddress})
 	if err != nil {
 		return err
 	}
-	stats.FeeDynamic = byAddress[strings.ToLower(strings.TrimSpace(stats.PoolAddress))]
+	info := byAddress[strings.ToLower(strings.TrimSpace(stats.PoolAddress))]
+	stats.FeeDynamic = stats.FeeDynamic || info.Dynamic
+	if info.Percentage > 0 {
+		stats.FeePercentage = info.Percentage
+	}
 	return nil
+}
+
+func smartMoneySanitizeFeePercentage(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > 100 {
+		return 0
+	}
+	return value
+}
+
+func smartMoneyFeePercentageFromV4LPFee(lpFee uint64) float64 {
+	if lpFee == 0 || lpFee > 1000000 {
+		return 0
+	}
+	return float64(lpFee) / 10000.0
+}
+
+func (s *Server) enrichSmartMoneyPoolStatsDynamicFeePercentage(stats *sm.PoolStats) {
+	if stats == nil || !stats.FeeDynamic || stats.FeePercentage > 0 {
+		return
+	}
+	stats.FeePercentage = s.loadSmartMoneyV4DynamicFeePercentage(
+		stats.ChainID,
+		stats.Protocol,
+		stats.PoolAddress,
+	)
+}
+
+func (s *Server) enrichSmartMoneyPoolAggDynamicFeePercentage(pools []sm.PoolAggRow) {
+	for i := range pools {
+		if !pools[i].FeeDynamic || pools[i].FeePercentage > 0 {
+			continue
+		}
+		pools[i].FeePercentage = s.loadSmartMoneyV4DynamicFeePercentage(
+			pools[i].ChainID,
+			pools[i].Protocol,
+			pools[i].PoolAddress,
+		)
+	}
+}
+
+func (s *Server) enrichSmartMoneyHeatmapDynamicFeePercentage(rows []sm.PoolFeeHeatmapRow) {
+	for i := range rows {
+		if !rows[i].FeeDynamic || rows[i].FeePercentage > 0 {
+			continue
+		}
+		rows[i].FeePercentage = s.loadSmartMoneyV4DynamicFeePercentage(
+			rows[i].ChainID,
+			rows[i].Protocol,
+			rows[i].PoolAddress,
+		)
+	}
+}
+
+func (s *Server) loadSmartMoneyV4DynamicFeePercentage(chainID int, protocol string, poolID string) float64 {
+	if strings.ToLower(strings.TrimSpace(protocol)) != "uniswap_v4" {
+		return 0
+	}
+	poolID = smartMoneyNormalizePoolID(poolID)
+	if poolID == "" {
+		return 0
+	}
+	if config.AppConfig == nil {
+		return 0
+	}
+	cc, ok := config.AppConfig.GetChainConfig(smartMoneyChainSlug(chainID))
+	if !ok {
+		return 0
+	}
+	if !common.IsHexAddress(cc.UniswapV4StateViewAddress) || !common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+		return 0
+	}
+	_, _, _, lpFee, err := blockchain.GetUniswapV4PoolSlot0FullViaStateView(
+		common.HexToAddress(cc.UniswapV4StateViewAddress),
+		common.HexToAddress(cc.UniswapV4PoolManagerAddress),
+		poolID,
+	)
+	if err != nil {
+		log.Printf("[SmartMoney API] read v4 dynamic lpFee failed chain_id=%d pool=%s err=%v", chainID, poolID, err)
+		return 0
+	}
+	return smartMoneyFeePercentageFromV4LPFee(lpFee)
 }
 
 func smartMoneyTokenDecimalsOrDefault(decimals int) int {

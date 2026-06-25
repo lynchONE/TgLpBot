@@ -200,6 +200,12 @@ function formatFeeTier(fee) {
     return `${(n / 10000).toFixed(4)}%`;
 }
 
+function formatFeePercentage(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0 || n > 100) return '';
+    return `${n.toFixed(4)}%`;
+}
+
 function isDynamicFeeTier(fee) {
     const n = Number(fee);
     return Number.isInteger(n) && (n & 0x800000) !== 0;
@@ -639,9 +645,10 @@ function Badge({ children, cls = '', ...rest }) {
     return <span className={`smd-badge ${cls}`} {...rest}>{children}</span>;
 }
 
-function FeeBadge({ fee, dynamic }) {
+function FeeBadge({ fee, dynamic, percentage }) {
     if (dynamic || isDynamicFeeTier(fee)) {
-        return <Badge cls="fee dynamic" title="Uniswap V4 动态费率">动态费率</Badge>;
+        const percentageText = formatFeePercentage(percentage);
+        return <Badge cls="fee dynamic" title="Uniswap V4 动态费率">{percentageText ? `${percentageText} 动态` : '动态费率'}</Badge>;
     }
     const text = formatFeeTier(fee);
     if (!text) return null;
@@ -1448,6 +1455,7 @@ function buildPoolFromWatchActivity(event) {
         display_token_logo_url: event.display_token_logo_url,
         fee_tier: event.fee_tier,
         fee_dynamic: event.fee_dynamic,
+        fee_percentage: event.fee_percentage,
     };
 }
 
@@ -1474,7 +1482,7 @@ function WatchActivityCard({ event, onSelectWallet, onSelectPool }) {
                             {formatWatchActivityAction(event?.event_type)}
                         </Badge>
                         <ProtocolBadge protocol={event?.protocol} />
-                        <FeeBadge fee={event?.fee_tier} dynamic={event?.fee_dynamic} />
+                        <FeeBadge fee={event?.fee_tier} dynamic={event?.fee_dynamic} percentage={event?.fee_percentage} />
                     </div>
                     <div className="smd-watch-activity-pair">{pairLabel}</div>
                     <WalletIdentity
@@ -1822,7 +1830,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                     <div className="pos-pair-row">
                                         <span className="pos-pair-name">{detail?.title || shortAddress(detail?.pool_id || '')}</span>
                                         {position?.fee_dynamic || isDynamicFeeTier(position?.fee_tier) ? (
-                                            <span className="badge badge-fee">动态费率</span>
+                                            <span className="badge badge-fee">{formatFeePercentage(position?.fee_percentage) || '动态费率'}</span>
                                         ) : detailFeeTier > 0 ? (
                                             <span className="badge badge-fee">
                                                 {formatFeeTier(detailFeeTier)}
@@ -2206,7 +2214,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                         <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
                                         <div className="smd-pool-card-badges">
                                             <ProtocolBadge protocol={p.protocol} />
-                                            <FeeBadge fee={p.fee_tier} dynamic={p.fee_dynamic} />
+                                            <FeeBadge fee={p.fee_tier} dynamic={p.fee_dynamic} percentage={p.fee_percentage} />
                                         </div>
                                     </div>
                                     <div className="smd-pool-card-meta">
@@ -2508,7 +2516,7 @@ function PoolFeeHeatmapCard({ row, rank, sort, windowKey, maxIntensity, onSelect
                 <span className="smd-pool-card-pair">{getPairLabel(row)}</span>
                 <div className="smd-pool-card-badges">
                     <ProtocolBadge protocol={row.protocol} />
-                    <FeeBadge fee={row.fee_tier} dynamic={row.fee_dynamic} />
+                    <FeeBadge fee={row.fee_tier} dynamic={row.fee_dynamic} percentage={row.fee_percentage} />
                 </div>
             </div>
             <div className="smd-heatmap-metrics">
@@ -2654,7 +2662,11 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                         <div className="smd-detail-headline">
                             <h3 className="smd-detail-title">{getPairLabel(pool)}</h3>
                             <ProtocolBadge protocol={pool.protocol} />
-                            <FeeBadge fee={pool.fee_tier} dynamic={pool.fee_dynamic || stats?.fee_dynamic} />
+                            <FeeBadge
+                                fee={pool.fee_tier}
+                                dynamic={pool.fee_dynamic || stats?.fee_dynamic}
+                                percentage={Number(stats?.fee_percentage) > 0 ? stats?.fee_percentage : pool.fee_percentage}
+                            />
                         </div>
                         <div className="smd-detail-meta">
                             <CompactIdentifier value={poolIdentifier} label={getPoolIdentifierLabel(poolIdentifier)} />
@@ -3189,11 +3201,13 @@ function WalletDetail({
                 display_token_logo_url: p.display_token_logo_url,
                 fee_tier: p.fee_tier,
                 fee_dynamic: p.fee_dynamic,
+                fee_percentage: p.fee_percentage,
                 protocol: p.protocol,
                 positions: [],
                 hasOpen: false,
             };
             if (p.fee_dynamic) m[p.pool_address].fee_dynamic = true;
+            if (Number(p.fee_percentage) > 0) m[p.pool_address].fee_percentage = p.fee_percentage;
             m[p.pool_address].positions.push(p);
             if (p.status === 'open') m[p.pool_address].hasOpen = true;
         });
@@ -3273,12 +3287,12 @@ function WalletDetail({
                                         <span className="smd-pool-group-pair">{getPairLabel(g)}</span>
                                     </div>
                                     <CompactIdentifier value={g.pool_address} />
-                                    <FeeBadge fee={g.fee_tier} dynamic={g.fee_dynamic} />
+                                    <FeeBadge fee={g.fee_tier} dynamic={g.fee_dynamic} percentage={g.fee_percentage} />
                                     <ProtocolBadge protocol={g.protocol} />
                                     <span className="smd-pool-group-count">{g.positions.length} 个仓位</span>
                                 </div>
                                 <button className="smd-link smd-action-chip" onClick={() => onSelectPool({
-                                    pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, fee_dynamic: g.fee_dynamic, protocol: g.protocol,
+                                    pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, fee_dynamic: g.fee_dynamic, fee_percentage: g.fee_percentage, protocol: g.protocol,
                                 })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
                             </div>
                             <div className="smd-pos-list smd-pos-list--compact">

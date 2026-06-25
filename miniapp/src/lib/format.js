@@ -124,6 +124,12 @@ export function formatFeeTier(fee) {
     return `${(n / 10000).toFixed(4)}%`;
 }
 
+export function formatFeePercentage(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0 || n > 100) return '';
+    return `${n.toFixed(4)}%`;
+}
+
 export function isDynamicFeeTier(fee) {
     const n = Number(fee);
     return Number.isInteger(n) && (n & 0x800000) !== 0;
