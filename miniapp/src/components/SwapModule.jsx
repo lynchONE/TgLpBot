@@ -32,6 +32,10 @@ function quoteSelectionKey(entry) {
     return String(entry?.quote_id || entry?.provider || '').trim();
 }
 
+function isExecutableQuote(entry) {
+    return Boolean(entry && entry.status === 'available' && entry.can_execute !== false && quoteSelectionKey(entry));
+}
+
 function quoteRouteList(quote) {
     if (Array.isArray(quote?.quotes) && quote.quotes.length > 0) return quote.quotes;
     return quote ? [quote] : [];
@@ -40,11 +44,13 @@ function quoteRouteList(quote) {
 function pickQuoteSelectionKey(quote, current = '') {
     const routes = quoteRouteList(quote);
     if (!routes.length) return '';
-    if (current && routes.some((entry) => quoteSelectionKey(entry) === current)) return current;
+    if (current && routes.some((entry) => quoteSelectionKey(entry) === current && isExecutableQuote(entry))) return current;
     const bestQuoteID = String(quote?.best_quote_id || '').trim();
-    if (bestQuoteID && routes.some((entry) => String(entry?.quote_id || '').trim() === bestQuoteID)) return bestQuoteID;
-    const available = routes.find((entry) => entry?.status === 'available') || routes[0];
-    return quoteSelectionKey(available);
+    if (bestQuoteID && routes.some((entry) => String(entry?.quote_id || '').trim() === bestQuoteID && isExecutableQuote(entry))) {
+        return bestQuoteID;
+    }
+    const available = routes.find(isExecutableQuote);
+    return quoteSelectionKey(available || routes[0]);
 }
 
 function TokenChip({ token, onClick, placeholder = '选择代币' }) {
@@ -471,6 +477,7 @@ export default function SwapModule({
             });
             setQuote(resp);
             setSelectedQuoteKey((current) => pickQuoteSelectionKey(resp, current));
+            setQuoteError(Number(resp?.available_count || 0) > 0 ? '' : String(resp?.message || 'No available quote'));
             setLastQuoteAt(Date.now());
         } catch (e) {
             setQuoteError(String(e?.message || e));
@@ -569,15 +576,13 @@ export default function SwapModule({
         if (!quoteRoutes.length) return null;
         if (selectedQuoteKey) {
             const hit = quoteRoutes.find((entry) => quoteSelectionKey(entry) === selectedQuoteKey);
-            if (hit) return hit;
+            if (hit && (isExecutableQuote(hit) || !quoteRoutes.some(isExecutableQuote))) return hit;
         }
         const picked = pickQuoteSelectionKey(quote);
         return quoteRoutes.find((entry) => quoteSelectionKey(entry) === picked) || quoteRoutes[0] || null;
     }, [quote, quoteRoutes, selectedQuoteKey]);
     const selectedRouteAmountText = selectedRoute?.net_to_amount_float || quote?.to_amount_float || '0.0';
-    const canExecuteSelectedRoute = mode === 'limit'
-        ? true
-        : selectedRoute?.status === 'available' && selectedRoute?.can_execute !== false;
+    const canExecuteSelectedRoute = isExecutableQuote(selectedRoute);
 
     const canSubmit =
         hasInitData &&

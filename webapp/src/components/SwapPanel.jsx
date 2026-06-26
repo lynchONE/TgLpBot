@@ -404,6 +404,10 @@ function quoteSelectionKey(quote) {
   return String(quote?.quote_id || quote?.provider || '').trim();
 }
 
+function isExecutableQuote(quote) {
+  return Boolean(quote && quote.status === 'available' && quote.can_execute !== false && quoteSelectionKey(quote));
+}
+
 function DexIconBadge({ name, size = 16 }) {
   const info = getDexIconInfo(name);
   const versionMatch = String(name || '').match(/[vV](\d+)/);
@@ -591,17 +595,17 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     if (!providerQuotes.length) return null;
     if (selectedProvider) {
       const hit = providerQuotes.find((item) => quoteSelectionKey(item) === selectedProvider);
-      if (hit) return hit;
+      if (hit && (isExecutableQuote(hit) || !providerQuotes.some(isExecutableQuote))) return hit;
     }
     if (quoteInfo?.best_quote_id || quoteInfo?.best_provider) {
       const best = providerQuotes.find((item) => {
         const bestQuoteID = String(quoteInfo?.best_quote_id || '').trim();
-        if (bestQuoteID && String(item?.quote_id || '').trim() === bestQuoteID) return true;
-        return !bestQuoteID && item?.provider === quoteInfo.best_provider;
+        if (bestQuoteID && String(item?.quote_id || '').trim() === bestQuoteID) return isExecutableQuote(item);
+        return !bestQuoteID && item?.provider === quoteInfo.best_provider && isExecutableQuote(item);
       });
       if (best) return best;
     }
-    return providerQuotes[0] || null;
+    return providerQuotes.find(isExecutableQuote) || providerQuotes[0] || null;
   }, [providerQuotes, quoteInfo, selectedProvider]);
   const availableProviderCount = useMemo(
     () => providerQuotes.filter((item) => item?.status === 'available').length,
@@ -1073,12 +1077,12 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       if (selectedProvider) setSelectedProvider('');
       return;
     }
-    const currentExists = selectedProvider && providerQuotes.some((item) => quoteSelectionKey(item) === selectedProvider);
-    if (currentExists) return;
+    const currentExecutable = selectedProvider && providerQuotes.some((item) => quoteSelectionKey(item) === selectedProvider && isExecutableQuote(item));
+    if (currentExecutable) return;
     const preferred = quoteInfo?.best_quote_id
-      ? providerQuotes.find((item) => String(item?.quote_id || '').trim() === String(quoteInfo.best_quote_id).trim())
+      ? providerQuotes.find((item) => String(item?.quote_id || '').trim() === String(quoteInfo.best_quote_id).trim() && isExecutableQuote(item))
       : null;
-    const nextQuote = preferred || providerQuotes.find((item) => item?.status === 'available') || providerQuotes[0];
+    const nextQuote = preferred || providerQuotes.find(isExecutableQuote) || providerQuotes[0];
     const nextProvider = quoteSelectionKey(nextQuote);
     if (nextProvider && nextProvider !== selectedProvider) {
       setSelectedProvider(nextProvider);

@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/service/exchange"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -84,6 +85,9 @@ func newUnavailableSwapProviderQuote(provider string, chain string, err error) s
 	if err != nil {
 		msg = strings.TrimSpace(err.Error())
 	}
+	if strings.EqualFold(provider, "binance") {
+		msg = normalizeBinanceUnavailableMessage(err, msg)
+	}
 	return swapProviderQuote{
 		Provider:           provider,
 		ProviderLabel:      swapProviderLabel(provider),
@@ -92,6 +96,17 @@ func newUnavailableSwapProviderQuote(provider string, chain string, err error) s
 		CanExecute:         false,
 		EstimatedGasSymbol: nativeSymbolForChain(chain),
 	}
+}
+
+func normalizeBinanceUnavailableMessage(err error, msg string) string {
+	var apiErr *exchange.BinanceAPIError
+	if errors.As(err, &apiErr) && apiErr.Code == 40304 {
+		return "Binance Web3 is unavailable because of a compliance restriction; use another provider or a non-restricted server region."
+	}
+	if strings.Contains(strings.ToLower(msg), "compliance restriction") {
+		return "Binance Web3 is unavailable because of a compliance restriction; use another provider or a non-restricted server region."
+	}
+	return msg
 }
 
 func nativeSymbolForChain(chain string) string {
