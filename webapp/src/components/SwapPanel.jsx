@@ -397,7 +397,8 @@ function getProviderIcon(provider) {
 }
 
 function shouldShowSwapRoute(provider) {
-  return Boolean(String(provider || '').trim());
+  const key = String(provider || '').toLowerCase().trim();
+  return Boolean(key) && key !== 'okx' && key !== 'binance';
 }
 
 function quoteSelectionKey(quote) {

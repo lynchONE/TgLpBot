@@ -25,6 +25,11 @@ function quoteRouteList(quote) {
     return quote ? [quote] : [];
 }
 
+function shouldShowSwapRoute(provider) {
+    const key = String(provider || '').toLowerCase().trim();
+    return Boolean(key) && key !== 'okx' && key !== 'binance';
+}
+
 function ProviderCard({ entry, isBest, isSelected, toSymbol, nativeSymbol, onSelect }) {
     const provider = entry?.vendor_name
         ? `${entry?.provider_label || entry?.provider || '--'} · ${entry.vendor_name}`
@@ -78,7 +83,7 @@ function ProviderCard({ entry, isBest, isSelected, toSymbol, nativeSymbol, onSel
                 {entry?.estimated_gas_native || entry?.estimated_gas_usd ? (
                     <Row label="Gas" value={formatQuoteGasCostSummary(entry, nativeSymbol)} />
                 ) : null}
-                {entry?.route_summary ? (
+                {shouldShowSwapRoute(entry?.provider) && entry?.route_summary ? (
                     <Row label="路径" value={entry.route_summary} />
                 ) : null}
                 {priceImpact ? (
