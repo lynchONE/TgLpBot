@@ -218,6 +218,7 @@ func autoMigrate() error {
 	ensureColumn("auth_codes", "enabled_modules", "TEXT NULL AFTER mini_app_enabled")
 	ensureColumn("trade_records", "close_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_usdt_received")
 	ensureColumn("trade_records", "close_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_stable_before")
+	ensureColumn("trade_records", "close_tx_details", "TEXT NULL AFTER close_tx_hash")
 	ensureColumn("global_configs", "open_position_target_share_min", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER multi_wallet_enabled")
 	ensureColumn("global_configs", "open_position_target_share_max", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_min")
 	ensureColumn("global_configs", "open_position_risk_cap_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_max")
@@ -228,6 +229,7 @@ func autoMigrate() error {
 	ensureColumn("global_configs", "alpha_airdrop_reminder_intensity", "VARCHAR(32) NOT NULL DEFAULT 'ring' AFTER alpha_airdrop_reminder_minutes")
 	ensureColumn("global_configs", "alpha_airdrop_reminder_sent_keys", "TEXT NULL AFTER alpha_airdrop_reminder_intensity")
 	ensureColumn("strategy_tasks", "out_of_range_mode", "VARCHAR(40) NOT NULL DEFAULT 'exit_all' AFTER rebalance_enabled")
+	ensureColumn("strategy_tasks", "swap_provider_policy", "VARCHAR(16) NOT NULL DEFAULT 'best' AFTER allow_entry_swap")
 	ensureColumn("strategy_tasks", "dca_retry_count", "INT NOT NULL DEFAULT 0 AFTER dca_executed_count")
 	ensureColumn("strategy_tasks", "range_activation_pending", "TINYINT(1) NOT NULL DEFAULT 0 AFTER out_of_range_since")
 	ensureColumn("system_configs", "open_position_target_share_min", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER zap_min_pool_liquidity_usd")
@@ -242,6 +244,11 @@ func autoMigrate() error {
 			ELSE 'exit_all'
 		END
 		WHERE COALESCE(TRIM(out_of_range_mode), '') = ''
+	`)
+	DB.Exec(`
+		UPDATE strategy_tasks
+		SET swap_provider_policy = 'best'
+		WHERE COALESCE(TRIM(swap_provider_policy), '') = ''
 	`)
 	DB.Exec(`
 		UPDATE strategy_tasks

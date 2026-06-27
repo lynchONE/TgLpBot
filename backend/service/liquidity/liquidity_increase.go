@@ -329,9 +329,13 @@ func (s *LiquidityService) IncreaseLiquidityForTaskWithOptions(userID uint, task
 			// For increase liquidity, always allow the swap
 			task.AllowEntrySwap = true
 		}
-		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, task.SlippageTolerance)
+		swapRes, swapErr := s.executeSwapByPolicy(exec, privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if swapErr != nil {
 			return nil, fmt.Errorf("swap USDT to %s failed: %w", plan.EntrySymbol, swapErr)
+		}
+		swapped := big.NewInt(0)
+		if swapRes != nil && swapRes.AmountOut != nil {
+			swapped = cloneBig(swapRes.AmountOut)
 		}
 		if swapped == nil || swapped.Sign() <= 0 {
 			return nil, fmt.Errorf("swap USDT to %s returned 0", plan.EntrySymbol)
@@ -488,9 +492,13 @@ func (s *LiquidityService) increaseV3Liquidity(
 			swapTokenOut = token0
 		}
 
-		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
+		swapRes, swapErr := s.executeSwapByPolicy(exec, privateKey, walletAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if swapErr != nil {
 			return nil, fmt.Errorf("optimal swap failed: %w", swapErr)
+		}
+		swapped := big.NewInt(0)
+		if swapRes != nil && swapRes.AmountOut != nil {
+			swapped = cloneBig(swapRes.AmountOut)
 		}
 
 		// After swap, recalculate actual amounts from wallet balances
@@ -845,9 +853,13 @@ func (s *LiquidityService) increaseV4Liquidity(
 		if err != nil {
 			return nil, err
 		}
-		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, swapFromFunding, swapToFunding, swapAmount, task.SlippageTolerance)
+		swapRes, swapErr := s.executeSwapByPolicy(exec, privateKey, walletAddr, swapFromFunding, swapToFunding, swapAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if swapErr != nil {
 			return nil, fmt.Errorf("V4 optimal swap failed: %w", swapErr)
+		}
+		swapped := big.NewInt(0)
+		if swapRes != nil && swapRes.AmountOut != nil {
+			swapped = cloneBig(swapRes.AmountOut)
 		}
 		time.Sleep(500 * time.Millisecond)
 		if swapped != nil && swapped.Sign() > 0 {

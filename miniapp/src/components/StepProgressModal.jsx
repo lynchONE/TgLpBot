@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getBrandTheme } from '../lib/brand';
+import { formatSwapRouteList } from '../lib/swapProviderPolicy';
 
 function StatusIcon({ tone, brand }) {
     if (tone === 'done') {
@@ -225,6 +226,10 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
     const [retrying, setRetrying] = useState(false);
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
+    const swapRouteLabel = useMemo(
+        () => formatSwapRouteList(progress?.swapRoutes || progress?.swap_routes),
+        [progress],
+    );
     const isCompact = operation === 'close_position' || operation === 'open_position';
     const canRetry = view.tone === 'error' && typeof onRetry === 'function';
     const onCloseRef = useRef(onClose);
@@ -354,6 +359,11 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                                     任务 #{progress.taskId}
                                 </div>
                             ) : null}
+                            {isOpen && swapRouteLabel ? (
+                                <div className="mt-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold leading-4 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">
+                                    本次开仓兑换：{swapRouteLabel}
+                                </div>
+                            ) : null}
                             <div className={`mt-2 flex items-center gap-1.5 text-[11px] leading-5 ${toastHintClass}`}>
                                 {isActive ? (
                                     <>
@@ -458,6 +468,12 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                         {progress?.taskId ? (
                             <div className="mx-auto inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[12px] font-semibold text-zinc-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/70">
                                 任务 #{progress.taskId}
+                            </div>
+                        ) : null}
+
+                        {operation === 'open_position' && swapRouteLabel ? (
+                            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-[12px] font-semibold leading-5 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">
+                                本次开仓兑换：{swapRouteLabel}
                             </div>
                         ) : null}
 

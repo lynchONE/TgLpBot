@@ -31,7 +31,8 @@ import (
 )
 
 type EnterResult struct {
-	TxHash string
+	TxHash     string
+	SwapRoutes []SwapRouteInfo
 
 	V3PositionManagerAddress string
 	V3TokenID                string
@@ -512,20 +513,23 @@ func (s *LiquidityService) maybeRefineV3OneSidedSwap(
 	zeroForOne bool,
 	entryToken common.Address,
 	entryDecimals int,
-) (*big.Int, blockchain.SwapParamsSimple, *big.Int) {
+	swapInfo SwapRouteInfo,
+	swapPolicy models.StrategySwapProviderPolicy,
+) (*big.Int, blockchain.SwapParamsSimple, *big.Int, SwapRouteInfo) {
 	if s == nil || client == nil || zap == nil || task == nil {
-		return swapAmount, swapParams, okxExpectedOut
+		return swapAmount, swapParams, okxExpectedOut, swapInfo
 	}
 	if swapAmount == nil || swapAmount.Sign() <= 0 {
-		return swapAmount, swapParams, okxExpectedOut
+		return swapAmount, swapParams, okxExpectedOut, swapInfo
 	}
 	if (amount0In.Sign() > 0 && amount1In.Sign() > 0) || (amount0In.Sign() <= 0 && amount1In.Sign() <= 0) {
-		return swapAmount, swapParams, okxExpectedOut
+		return swapAmount, swapParams, okxExpectedOut, swapInfo
 	}
 
 	currentSwapAmount := cloneBig(swapAmount)
 	currentSwapParams := swapParams
 	currentExpectedOut := cloneBig(okxExpectedOut)
+	currentSwapInfo := swapInfo
 
 	for round := 0; round < v3OneSidedSwapRefineMaxRounds; round++ {
 		params := buildZapInV3Params(
@@ -570,7 +574,7 @@ func (s *LiquidityService) maybeRefineV3OneSidedSwap(
 			break
 		}
 
-		nextParams, nextExpectedOut, err := s.prepareOKXSwapParams(cc, zap.Address(), swapTokenIn, swapTokenOut, nextSwapAmount, task.SlippageTolerance)
+		nextParams, nextExpectedOut, nextInfo, err := s.prepareProviderSwapParams(cc, zap.Address(), swapTokenIn, swapTokenOut, nextSwapAmount, task.SlippageTolerance, swapPolicy)
 		if err != nil {
 			log.Printf("[Liquidity] V3 enter: swap refinement requote failed: %v", err)
 			break
@@ -606,9 +610,10 @@ func (s *LiquidityService) maybeRefineV3OneSidedSwap(
 		currentSwapAmount = nextSwapAmount
 		currentSwapParams = *nextParams
 		currentExpectedOut = cloneBig(nextExpectedOut)
+		currentSwapInfo = nextInfo
 	}
 
-	return currentSwapAmount, currentSwapParams, currentExpectedOut
+	return currentSwapAmount, currentSwapParams, currentExpectedOut, currentSwapInfo
 }
 
 func (s *LiquidityService) maybeRefineV4OneSidedSwap(
@@ -635,20 +640,23 @@ func (s *LiquidityService) maybeRefineV4OneSidedSwap(
 	entryDecimals int,
 	chain string,
 	slippageTolerance float64,
-) (*big.Int, blockchain.SwapParamsSimple, *big.Int) {
+	swapInfo SwapRouteInfo,
+	swapPolicy models.StrategySwapProviderPolicy,
+) (*big.Int, blockchain.SwapParamsSimple, *big.Int, SwapRouteInfo) {
 	if s == nil || client == nil || zap == nil {
-		return swapAmount, swapParams, okxExpectedOut
+		return swapAmount, swapParams, okxExpectedOut, swapInfo
 	}
 	if swapAmount == nil || swapAmount.Sign() <= 0 {
-		return swapAmount, swapParams, okxExpectedOut
+		return swapAmount, swapParams, okxExpectedOut, swapInfo
 	}
 	if (amount0In.Sign() > 0 && amount1In.Sign() > 0) || (amount0In.Sign() <= 0 && amount1In.Sign() <= 0) {
-		return swapAmount, swapParams, okxExpectedOut
+		return swapAmount, swapParams, okxExpectedOut, swapInfo
 	}
 
 	currentSwapAmount := cloneBig(swapAmount)
 	currentSwapParams := swapParams
 	currentExpectedOut := cloneBig(okxExpectedOut)
+	currentSwapInfo := swapInfo
 
 	for round := 0; round < v3OneSidedSwapRefineMaxRounds; round++ {
 		params := buildZapInV4Params(
@@ -691,7 +699,7 @@ func (s *LiquidityService) maybeRefineV4OneSidedSwap(
 			break
 		}
 
-		nextParams, nextExpectedOut, err := s.prepareOKXSwapParams(cc, zap.Address(), swapTokenIn, swapTokenOut, nextSwapAmount, slippageTolerance)
+		nextParams, nextExpectedOut, nextInfo, err := s.prepareProviderSwapParams(cc, zap.Address(), swapTokenIn, swapTokenOut, nextSwapAmount, slippageTolerance, swapPolicy)
 		if err != nil {
 			log.Printf("[Liquidity] V4 enter: swap refinement requote failed: %v", err)
 			break
@@ -720,9 +728,10 @@ func (s *LiquidityService) maybeRefineV4OneSidedSwap(
 		currentSwapAmount = nextSwapAmount
 		currentSwapParams = *nextParams
 		currentExpectedOut = cloneBig(nextExpectedOut)
+		currentSwapInfo = nextInfo
 	}
 
-	return currentSwapAmount, currentSwapParams, currentExpectedOut
+	return currentSwapAmount, currentSwapParams, currentExpectedOut, currentSwapInfo
 }
 
 func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyTask) (*EnterResult, error) {
@@ -820,6 +829,8 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	entryToken := usdtAddr
 	entryAmount := new(big.Int).Set(usdtAmount)
 	allowEntrySwap := task.AllowEntrySwap
+	swapPolicy := effectiveTaskSwapProviderPolicy(task)
+	swapRoutes := make([]SwapRouteInfo, 0, 2)
 	if plan.RequiresSwap {
 		entrySwapSlippage := resolveEntrySwapSlippage(
 			task.SlippageTolerance,
@@ -914,10 +925,17 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 					StableSymbol: cc.StableSymbol,
 				}
 			}
-			log.Printf("[Liquidity] Entry swap: USDT -> %s amount=%s", plan.EntrySymbol, usdtAmount.String())
-			swapped, err := s.swapExactInViaOKX(exec, privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, entrySwapSlippage)
+			log.Printf("[Liquidity] Entry swap: policy=%s USDT -> %s amount=%s", swapPolicy, plan.EntrySymbol, usdtAmount.String())
+			entrySwapRes, err := s.executeSwapByPolicy(exec, privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, entrySwapSlippage, swapPolicy)
 			if err != nil {
 				return nil, fmt.Errorf("swap USDT to %s failed: %w", plan.EntrySymbol, err)
+			}
+			swapped := big.NewInt(0)
+			if entrySwapRes != nil {
+				swapRoutes = append(swapRoutes, entrySwapRes.Info)
+				if entrySwapRes.AmountOut != nil {
+					swapped = cloneBig(entrySwapRes.AmountOut)
+				}
 			}
 			if swapped == nil || swapped.Sign() <= 0 {
 				// Best-effort: 有些 RPC 会出现“交易已成功但余额暂时读不到”的情况，回退到读取钱包余额（仅限 USDC）。
@@ -961,6 +979,9 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 	if res == nil {
 		return nil, fmt.Errorf("enter result is nil")
+	}
+	if len(swapRoutes) > 0 {
+		res.SwapRoutes = append(swapRoutes, res.SwapRoutes...)
 	}
 
 	// 等待 RPC 节点状态同步，避免读取到旧的余额值
@@ -1277,15 +1298,17 @@ func (s *LiquidityService) enterV3FromToken(
 		CallData:      []byte{},
 	}
 	var okxExpectedOut *big.Int
+	var zapSwapInfo SwapRouteInfo
 	if swapAmount != nil && swapAmount.Sign() > 0 {
-		p, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
+		p, out, info, err := s.prepareProviderSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			return nil, err
 		}
 		okxExpectedOut = out
+		zapSwapInfo = info
 		if p != nil {
 			swapParams = *p
-			log.Printf("[Liquidity] V3 enter: OKX swap target=%s minOut=%s", swapParams.Target.Hex(), swapParams.MinAmountOut.String())
+			log.Printf("[Liquidity] V3 enter: swap provider=%s target=%s minOut=%s", strings.TrimSpace(info.ProviderName), swapParams.Target.Hex(), swapParams.MinAmountOut.String())
 		}
 	}
 
@@ -1386,7 +1409,7 @@ func (s *LiquidityService) enterV3FromToken(
 	}
 
 	// 4. 构建 zapInV3 参数
-	swapAmount, swapParams, okxExpectedOut = s.maybeRefineV3OneSidedSwap(
+	swapAmount, swapParams, okxExpectedOut, zapSwapInfo = s.maybeRefineV3OneSidedSwap(
 		client,
 		zap,
 		walletAddr,
@@ -1406,6 +1429,8 @@ func (s *LiquidityService) enterV3FromToken(
 		zeroForOne,
 		tokenIn,
 		entryDecimals,
+		zapSwapInfo,
+		effectiveTaskSwapProviderPolicy(task),
 	)
 	log.Printf("[Liquidity] V3 enter: final swap after refinement: zeroForOne=%v swapAmount=%s", zeroForOne, cloneBig(swapAmount).String())
 
@@ -1551,8 +1576,14 @@ func (s *LiquidityService) enterV3FromToken(
 		dust1 = nil
 	}
 
+	var swapRoutes []SwapRouteInfo
+	if strings.TrimSpace(zapSwapInfo.Provider) != "" {
+		swapRoutes = append(swapRoutes, zapSwapInfo)
+	}
+
 	return &EnterResult{
 		TxHash:                   tx.Hash().Hex(),
+		SwapRoutes:               swapRoutes,
 		V3PositionManagerAddress: pmAddr.Hex(),
 		V3TokenID:                tokenId.String(),
 		CurrentLiquidity:         liq.String(),
@@ -1929,8 +1960,19 @@ func (s *LiquidityService) prepareOKXSwapParams(
 	amountIn *big.Int,
 	slippageTolerance float64,
 ) (*blockchain.SwapParamsSimple, *big.Int, error) {
+	params, out, _, err := s.prepareOKXSwapParamsWithInfo(cc, executorAddr, tokenIn, tokenOut, amountIn, slippageTolerance)
+	return params, out, err
+}
+
+func (s *LiquidityService) prepareOKXSwapParamsWithInfo(
+	cc config.ChainConfig,
+	executorAddr common.Address,
+	tokenIn, tokenOut common.Address,
+	amountIn *big.Int,
+	slippageTolerance float64,
+) (*blockchain.SwapParamsSimple, *big.Int, SwapRouteInfo, error) {
 	if amountIn == nil || amountIn.Sign() <= 0 {
-		return nil, nil, nil // No swap needed
+		return nil, nil, SwapRouteInfo{}, nil // No swap needed
 	}
 
 	if s.okxService == nil {
@@ -1948,10 +1990,10 @@ func (s *LiquidityService) prepareOKXSwapParams(
 
 	okxData, err := s.okxService.GetSwapData(swapReq)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get OKX swap data failed: %w", err)
+		return nil, nil, SwapRouteInfo{}, fmt.Errorf("get OKX swap data failed: %w", err)
 	}
 	if okxData == nil || len(okxData.Data) == 0 {
-		return nil, nil, fmt.Errorf("OKX returned empty data")
+		return nil, nil, SwapRouteInfo{}, fmt.Errorf("OKX returned empty data")
 	}
 
 	expectedOutText := strings.TrimSpace(okxData.Data[0].RouterResult.ToTokenAmount)
@@ -2000,12 +2042,15 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		}
 	}
 	if txValue.Sign() != 0 {
-		return nil, nil, fmt.Errorf("OKX swap(zap) 要求 native value=%s，Zap 合约不支持此路由", txValue.String())
+		return nil, nil, SwapRouteInfo{}, fmt.Errorf("OKX swap(zap) requires native value=%s; Zap contract cannot execute this route", txValue.String())
 	}
 
 	callData := []byte{}
 	if okxData.Data[0].Tx.Data != "" {
 		callData, _ = hex.DecodeString(strings.TrimPrefix(okxData.Data[0].Tx.Data, "0x"))
+	}
+	if len(callData) == 0 {
+		return nil, nil, SwapRouteInfo{}, fmt.Errorf("OKX swap(zap) returned empty calldata")
 	}
 
 	approveTarget := common.HexToAddress(okxData.Data[0].Tx.To)
@@ -2023,6 +2068,14 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		target = confTarget
 	}
 
+	info := SwapRouteInfo{
+		Provider:     "okx",
+		ProviderName: "OKX",
+		RouteSummary: okxRouteSummary(okxData.Data[0].RouterResult.DexRouterList),
+		AmountInRaw:  amountIn.String(),
+		AmountOutRaw: baseOut.String(),
+	}
+
 	return &blockchain.SwapParamsSimple{
 		Target:        target,
 		ApproveTarget: approveTarget,
@@ -2031,7 +2084,7 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		AmountIn:      amountIn,
 		MinAmountOut:  minOut,
 		CallData:      callData,
-	}, baseOut, nil
+	}, baseOut, info, nil
 }
 
 func (s *LiquidityService) enterV4FromToken(
@@ -2282,6 +2335,7 @@ func (s *LiquidityService) enterV4FromToken(
 	swapParams.MinAmountOut = big.NewInt(0)
 	swapParams.CallData = []byte{}
 	var okxExpectedOut *big.Int
+	var zapSwapInfo SwapRouteInfo
 
 	if swapAmount.Sign() > 0 {
 		swapTokenIn, err := v4CurrencyFundingToken(cc, tokenIn)
@@ -2292,18 +2346,19 @@ func (s *LiquidityService) enterV4FromToken(
 		if err != nil {
 			return nil, err
 		}
-		sParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
+		sParams, out, info, err := s.prepareProviderSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			estimatedLiquidity, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, tickLower, tickUpper, amount0In, amount1In)
 			if liqErr != nil {
-				return nil, fmt.Errorf("prepare OKX swap failed: %w (estimate zero-swap liquidity failed: %v)", err, liqErr)
+				return nil, fmt.Errorf("prepare swap failed: %w (estimate zero-swap liquidity failed: %v)", err, liqErr)
 			}
 			if estimatedLiquidity == nil || estimatedLiquidity.Sign() <= 0 {
-				return nil, fmt.Errorf("prepare OKX swap failed and zero-swap would mint zero liquidity: %w", err)
+				return nil, fmt.Errorf("prepare swap failed and zero-swap would mint zero liquidity: %w", err)
 			}
-			log.Printf("[Liquidity] Warning: prepare OKX swap failed, proceeding without swap because zero-swap liquidity=%s: %v", estimatedLiquidity.String(), err)
+			log.Printf("[Liquidity] Warning: prepare swap failed, proceeding without swap because zero-swap liquidity=%s: %v", estimatedLiquidity.String(), err)
 		} else if sParams != nil {
 			okxExpectedOut = out
+			zapSwapInfo = info
 			swapParams = *sParams
 
 			// Zap 安全检查：价格偏差（V4 已有 sqrtPriceX96，流动性检查传零地址跳过）
@@ -2311,7 +2366,7 @@ func (s *LiquidityService) enterV4FromToken(
 				c0, c1, tokenIn, entryDecimals, common.Address{}, task.Chain); safeErr != nil {
 				return nil, safeErr
 			}
-			swapAmount, swapParams, okxExpectedOut = s.maybeRefineV4OneSidedSwap(
+			swapAmount, swapParams, okxExpectedOut, zapSwapInfo = s.maybeRefineV4OneSidedSwap(
 				client,
 				zap,
 				walletAddr,
@@ -2335,6 +2390,8 @@ func (s *LiquidityService) enterV4FromToken(
 				entryDecimals,
 				task.Chain,
 				task.SlippageTolerance,
+				zapSwapInfo,
+				effectiveTaskSwapProviderPolicy(task),
 			)
 			log.Printf("[Liquidity] V4 enter: final swap after refinement: zeroForOne=%v swapAmount=%s", zeroForOne, cloneBig(swapAmount).String())
 		}
@@ -2519,8 +2576,14 @@ func (s *LiquidityService) enterV4FromToken(
 		dust1 = nil
 	}
 
+	var swapRoutes []SwapRouteInfo
+	if strings.TrimSpace(zapSwapInfo.Provider) != "" {
+		swapRoutes = append(swapRoutes, zapSwapInfo)
+	}
+
 	return &EnterResult{
 		TxHash:           tx.Hash().Hex(),
+		SwapRoutes:       swapRoutes,
 		V4TokenID:        tokenId.String(),
 		CurrentLiquidity: liq.String(),
 		Dust0:            dust0,

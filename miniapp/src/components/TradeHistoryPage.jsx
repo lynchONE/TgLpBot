@@ -67,6 +67,13 @@ function formatDuration(openedAt, closedAt) {
     return `${day}天${hour % 24 ? `${hour % 24}小时` : ''}`;
 }
 
+function formatCloseTxDetailLabel(detail) {
+    const text = String(detail || '').trim();
+    if (!text) return '';
+    const parts = text.split('|');
+    return String(parts[0] || text).trim();
+}
+
 function aggregateSummary(records) {
     const closed = records.filter((record) => record.status === 'closed');
     const totalInvested = records.reduce((acc, record) => acc + (Number(record.open_usdt_spent) || 0), 0);
@@ -247,6 +254,9 @@ function TradeRecordCard({ rec }) {
     const hasCloseSnapshot = Number(rec.close_stable_before || 0) > 0 || Number(rec.close_stable_after || 0) > 0;
     const showProfit = rec.status === 'closed' && Number.isFinite(profitNum);
     const duration = formatDuration(rec.opened_at, rec.closed_at);
+    const closeTxDetails = Array.isArray(rec.close_tx_details)
+        ? rec.close_tx_details.map(formatCloseTxDetailLabel).filter(Boolean)
+        : [];
 
     return (
         <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#14171c]">
@@ -318,6 +328,19 @@ function TradeRecordCard({ rec }) {
                     <DetailTile label="Gas 费用" value={formatUsd(rec.total_gas_usdt)} />
                 ) : null}
             </div>
+
+            {closeTxDetails.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-1.5 border-t border-zinc-100 pt-3 dark:border-white/5">
+                    {closeTxDetails.map((detail, index) => (
+                        <span
+                            key={`${detail}-${index}`}
+                            className="inline-flex items-center rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/15 dark:bg-emerald-400/10 dark:text-emerald-200 dark:ring-emerald-400/20"
+                        >
+                            撤仓路由：{detail}
+                        </span>
+                    ))}
+                </div>
+            ) : null}
 
             {(rec.open_tx_url || rec.close_tx_url) ? (
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-100 pt-3 dark:border-white/5">

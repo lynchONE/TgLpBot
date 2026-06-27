@@ -4,6 +4,12 @@ import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition,
 import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
 import { TASK_MODE_OPTIONS, getOutOfRangeActionSummary as getTaskModeActionSummary } from '../taskModes';
 import {
+  SWAP_PROVIDER_POLICY_OPTIONS,
+  formatSwapRouteInfo,
+  getSwapProviderPolicyOption,
+  normalizeSwapProviderPolicy,
+} from '../swapProviderPolicy';
+import {
   normalizeTokenRisk,
   shortAddress as shortAddressShared,
   tokenRiskLabel,
@@ -464,6 +470,7 @@ export default function OpenPositionModal({
   const [gridBoundaryTarget, setGridBoundaryTarget] = useState('lower');
   const [slippage, setSlippage] = useState('');
   const [entrySwapSlippage, setEntrySwapSlippage] = useState('');
+  const [swapProviderPolicy, setSwapProviderPolicy] = useState('best');
   const [entrySwapSlippageDirty, setEntrySwapSlippageDirty] = useState(false);
   const [entrySwapPreview, setEntrySwapPreview] = useState(null);
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
@@ -656,6 +663,14 @@ export default function OpenPositionModal({
         return '';
     }
   }, [rangeEditor]);
+  const selectedSwapProviderOption = useMemo(
+    () => getSwapProviderPolicyOption(swapProviderPolicy),
+    [swapProviderPolicy],
+  );
+  const entrySwapRouteLabel = useMemo(
+    () => formatSwapRouteInfo(entrySwapPreview),
+    [entrySwapPreview],
+  );
 
   const token0Decimals = Number(pool?.token0_decimals ?? pool?.token0?.decimals ?? 18) || 18;
   const token1Decimals = Number(pool?.token1_decimals ?? pool?.token1?.decimals ?? 18) || 18;
@@ -761,6 +776,7 @@ export default function OpenPositionModal({
       slippageTolerance: taskSlippage.value,
       entrySwapSlippageTolerance: entrySwapSlippageValue.value,
       allowEntrySwap: true,
+      swapProviderPolicy,
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
       taskMode,
@@ -801,6 +817,7 @@ export default function OpenPositionModal({
     resolvedWalletId,
     riskAck,
     taskMode,
+    swapProviderPolicy,
   ]);
 
   useEffect(() => {
@@ -817,6 +834,7 @@ export default function OpenPositionModal({
     setPrepareTokenRisk(null);
     setPreviewTokenRisk(null);
     setEntrySwapSlippage('');
+    setSwapProviderPolicy('best');
     setEntrySwapSlippageDirty(false);
     setPrepareRangeEditor(null);
     setPreviewRangeEditor(null);
@@ -1657,6 +1675,7 @@ export default function OpenPositionModal({
       entrySwapSlippageTolerance: entrySwapPreview?.required ? entrySwapSlippageValue.value : undefined,
       allowEntrySwap: true,
       confirmEntrySwap: Boolean(entrySwapPreview?.required),
+      swapProviderPolicy: normalizeSwapProviderPolicy(swapProviderPolicy),
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
       dcaEnabled: submitDcaEnabled,
@@ -1694,6 +1713,7 @@ export default function OpenPositionModal({
     dcaSumValid,
     dcaInterval,
     taskMode,
+    swapProviderPolicy,
   ]);
 
 
@@ -2675,6 +2695,44 @@ export default function OpenPositionModal({
 
             </div>
 
+            <div className="opm-section" style={{
+              padding: 10,
+              borderRadius: 10,
+              border: '1px solid rgba(34, 197, 94, 0.2)',
+              background: 'rgba(34, 197, 94, 0.06)',
+              display: 'grid',
+              gap: 8,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, fontSize: 12 }}>兑换渠道</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {selectedSwapProviderOption.description}
+                </span>
+              </div>
+              <div className="opm-toggle-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                {SWAP_PROVIDER_POLICY_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      clearErrors();
+                      setSwapProviderPolicy(option.value);
+                    }}
+                    disabled={busy}
+                    className={`opm-toggle-btn${swapProviderPolicy === option.value ? ' active' : ''}`}
+                    title={option.description}
+                  >
+                    <span className="opm-toggle-copy">
+                      <span className="opm-toggle-title">{option.label}</span>
+                    </span>
+                    <span className="opm-toggle-pill">
+                      {swapProviderPolicy === option.value ? '当前' : '选'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
               <div className="modal-info-note opm-section">
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>前置兑换</div>
@@ -2691,6 +2749,9 @@ export default function OpenPositionModal({
                     </div>
                     <div style={{ marginTop: 4 }}>
                       预计到账：{entrySwapPreview?.expected_amount_out || '--'} {entrySwapPreview?.to_token_symbol || ''}
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      报价渠道：{entrySwapRouteLabel || selectedSwapProviderOption.label}
                     </div>
                     <div style={{ marginTop: 4 }}>
                       兑换路径：{entrySwapPreview?.amount_in || '--'} {entrySwapPreview?.from_token_symbol || ''} 到 {entrySwapPreview?.to_token_symbol || ''}

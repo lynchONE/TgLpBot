@@ -40,6 +40,26 @@ const zapSimpleAdminABI = `[
   },
   {
     "inputs": [
+      { "internalType": "address[]", "name": "targets", "type": "address[]" },
+      { "internalType": "bool", "name": "trusted", "type": "bool" }
+    ],
+    "name": "setTrustedSwapTargets",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address[]", "name": "targets", "type": "address[]" },
+      { "internalType": "bool", "name": "trusted", "type": "bool" }
+    ],
+    "name": "setTrustedApproveTargets",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
       { "internalType": "address", "name": "_wrappedNative", "type": "address" }
     ],
     "name": "setWrappedNative",
@@ -138,6 +158,46 @@ func ZapSimpleSetTrustedV3PositionManagers(
 		return nil, err
 	}
 	return c.Transact(auth, "setTrustedV3PositionManagers", positionManagers, trusted)
+}
+
+func ZapSimpleSetTrustedSwapTargets(
+	auth *bind.TransactOpts,
+	client *ethclient.Client,
+	zapAddr common.Address,
+	targets []common.Address,
+	trusted bool,
+) (*types.Transaction, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("auth is nil")
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	c, err := zapSimpleAdminContract(zapAddr, client)
+	if err != nil {
+		return nil, err
+	}
+	return c.Transact(auth, "setTrustedSwapTargets", targets, trusted)
+}
+
+func ZapSimpleSetTrustedApproveTargets(
+	auth *bind.TransactOpts,
+	client *ethclient.Client,
+	zapAddr common.Address,
+	targets []common.Address,
+	trusted bool,
+) (*types.Transaction, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("auth is nil")
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	c, err := zapSimpleAdminContract(zapAddr, client)
+	if err != nil {
+		return nil, err
+	}
+	return c.Transact(auth, "setTrustedApproveTargets", targets, trusted)
 }
 
 func ZapSimpleSetWrappedNative(

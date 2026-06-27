@@ -83,6 +83,14 @@ function uniqueAddressList(addresses) {
   return [...map.values()];
 }
 
+function readAddressListForNetwork(networkName, key) {
+  const value = readEnvForNetwork(networkName, key);
+  if (!value) {
+    return [];
+  }
+  return uniqueAddressList(value.split(/[,\s;]+/));
+}
+
 function resolveV3ManagersForNetwork(networkName) {
   const primaryPrefix = getNetworkPrefixes(networkName)[0];
 
@@ -142,6 +150,8 @@ function resolveTrustedConfigForNetwork(networkName) {
   const primaryPrefix = getNetworkPrefixes(networkName)[0];
   const okxRouter = readEnvForNetwork(networkName, "OKX_SWAP_ROUTER");
   const okxApprove = readEnvForNetwork(networkName, "OKX_TOKEN_APPROVE_ADDRESS");
+  const binanceSwapTargets = readAddressListForNetwork(networkName, "BINANCE_SWAP_TARGETS");
+  const binanceApproveTargets = readAddressListForNetwork(networkName, "BINANCE_APPROVE_TARGETS");
   const v3 = resolveV3ManagersForNetwork(networkName);
   const v4pm = readFirstEnvForNetwork(networkName, [
     "UNISWAP_V4_POSITION_MANAGER_ADDRESS",
@@ -168,6 +178,8 @@ function resolveTrustedConfigForNetwork(networkName) {
   return {
     okxRouter,
     okxApprove,
+    binanceSwapTargets,
+    binanceApproveTargets,
     v3Primary: v3.primary,
     v3Extras: v3.extras,
     v4pm,
@@ -237,6 +249,7 @@ module.exports = {
   readEnvForNetwork,
   readFirstEnvForNetwork,
   readZapAddressForNetwork,
+  readAddressListForNetwork,
   resolveV3ManagersForNetwork,
   resolveTrustedConfigForNetwork,
   getExplorerApiKeyForNetwork,

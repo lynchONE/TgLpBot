@@ -139,6 +139,44 @@
                        {
                            "indexed":  true,
                            "internalType":  "address",
+                           "name":  "target",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "bool",
+                           "name":  "trusted",
+                           "type":  "bool"
+                       }
+                   ],
+        "name":  "TrustedApproveTargetUpdated",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "target",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "bool",
+                           "name":  "trusted",
+                           "type":  "bool"
+                       }
+                   ],
+        "name":  "TrustedSwapTargetUpdated",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
                            "name":  "positionManager",
                            "type":  "address"
                        },
@@ -341,6 +379,46 @@
         "inputs":  [
                        {
                            "internalType":  "address[]",
+                           "name":  "targets",
+                           "type":  "address[]"
+                       },
+                       {
+                           "internalType":  "bool",
+                           "name":  "trusted",
+                           "type":  "bool"
+                       }
+                   ],
+        "name":  "setTrustedApproveTargets",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address[]",
+                           "name":  "targets",
+                           "type":  "address[]"
+                       },
+                       {
+                           "internalType":  "bool",
+                           "name":  "trusted",
+                           "type":  "bool"
+                       }
+                   ],
+        "name":  "setTrustedSwapTargets",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address[]",
                            "name":  "positionManagers",
                            "type":  "address[]"
                        },
@@ -385,6 +463,44 @@
 
                     ],
         "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "trustedApproveTargets",
+        "outputs":  [
+                        {
+                            "internalType":  "bool",
+                            "name":  "",
+                            "type":  "bool"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "trustedSwapTargets",
+        "outputs":  [
+                        {
+                            "internalType":  "bool",
+                            "name":  "",
+                            "type":  "bool"
+                        }
+                    ],
+        "stateMutability":  "view",
         "type":  "function"
     },
     {

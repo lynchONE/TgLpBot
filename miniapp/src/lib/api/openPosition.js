@@ -15,6 +15,7 @@ function buildOpenPositionPayload({
     entrySwapSlippageTolerance,
     allowEntrySwap,
     confirmEntrySwap,
+    swapProviderPolicy,
     walletId,
     ackLiquidityRisk,
     dcaEnabled,
@@ -54,6 +55,9 @@ function buildOpenPositionPayload({
     }
     if (confirmEntrySwap) {
         payload.confirm_entry_swap = true;
+    }
+    if (swapProviderPolicy !== undefined && swapProviderPolicy !== null && String(swapProviderPolicy).trim()) {
+        payload.swap_provider_policy = String(swapProviderPolicy).trim();
     }
     if (ackLiquidityRisk) {
         payload.ack_liquidity_risk = true;
@@ -137,6 +141,7 @@ export async function previewOpenPosition({
     slippageTolerance,
     entrySwapSlippageTolerance,
     allowEntrySwap,
+    swapProviderPolicy,
     walletId,
     ackLiquidityRisk,
     dcaEnabled,
@@ -161,6 +166,7 @@ export async function previewOpenPosition({
         slippageTolerance,
         entrySwapSlippageTolerance,
         allowEntrySwap,
+        swapProviderPolicy,
         walletId,
         ackLiquidityRisk,
         dcaEnabled,
@@ -229,6 +235,7 @@ export async function openPosition({
     entrySwapSlippageTolerance,
     allowEntrySwap,
     confirmEntrySwap,
+    swapProviderPolicy,
     walletId,
     ackLiquidityRisk,
     dcaEnabled,
@@ -255,6 +262,7 @@ export async function openPosition({
         entrySwapSlippageTolerance,
         allowEntrySwap,
         confirmEntrySwap,
+        swapProviderPolicy,
         walletId,
         ackLiquidityRisk,
         dcaEnabled,

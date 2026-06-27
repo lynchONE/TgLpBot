@@ -101,11 +101,11 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 			if usdtBefore == nil {
 				usdtBefore = big.NewInt(0)
 			}
-			txHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token0Addr, usdtAddr, dust0, task.SlippageTolerance)
+			swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, token0Addr, usdtAddr, dust0, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 			if err != nil {
 				return txHashes, err
 			}
-			if txHash != "" {
+			if swapRes != nil && strings.TrimSpace(swapRes.TxHash) != "" {
 				nativeAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
 				if nativeAfter == nil {
 					nativeAfter = big.NewInt(0)
@@ -126,7 +126,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 				if usdtDeltaRaw.Sign() < 0 {
 					usdtDeltaRaw = big.NewInt(0)
 				}
-				if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(txHash)); rerr == nil && receipt != nil {
+				if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(swapRes.TxHash)); rerr == nil && receipt != nil {
 					if d := ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
 						usdtDeltaRaw = d
 					}
@@ -159,7 +159,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 				if sym == "" {
 					sym = token0Addr.Hex()
 				}
-				txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT|%s", sym, txHash))
+				txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT (%s)|%s", sym, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 			}
 		}
 	}
@@ -174,11 +174,11 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 			if usdtBefore == nil {
 				usdtBefore = big.NewInt(0)
 			}
-			txHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token1Addr, usdtAddr, dust1, task.SlippageTolerance)
+			swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, token1Addr, usdtAddr, dust1, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 			if err != nil {
 				return txHashes, err
 			}
-			if txHash != "" {
+			if swapRes != nil && strings.TrimSpace(swapRes.TxHash) != "" {
 				nativeAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
 				if nativeAfter == nil {
 					nativeAfter = big.NewInt(0)
@@ -199,7 +199,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 				if usdtDeltaRaw.Sign() < 0 {
 					usdtDeltaRaw = big.NewInt(0)
 				}
-				if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(txHash)); rerr == nil && receipt != nil {
+				if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(swapRes.TxHash)); rerr == nil && receipt != nil {
 					if d := ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
 						usdtDeltaRaw = d
 					}
@@ -232,7 +232,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 				if sym == "" {
 					sym = token1Addr.Hex()
 				}
-				txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT|%s", sym, txHash))
+				txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT (%s)|%s", sym, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 			}
 		}
 	}
@@ -282,11 +282,11 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 			if usdtBefore == nil {
 				usdtBefore = big.NewInt(0)
 			}
-			txHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, tokenAddr, usdtAddr, amount, task.SlippageTolerance)
+			swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, tokenAddr, usdtAddr, amount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 			if err != nil {
 				return txHashes, err
 			}
-			if txHash == "" {
+			if swapRes == nil || strings.TrimSpace(swapRes.TxHash) == "" {
 				idx++
 				continue
 			}
@@ -311,7 +311,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 			if usdtDeltaRaw.Sign() < 0 {
 				usdtDeltaRaw = big.NewInt(0)
 			}
-			if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(txHash)); rerr == nil && receipt != nil {
+			if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(swapRes.TxHash)); rerr == nil && receipt != nil {
 				if d := ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
 					usdtDeltaRaw = d
 				}
@@ -326,7 +326,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 					openSpentWei = big.NewInt(0)
 				}
 			}
-			txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT|%s", sym, txHash))
+			txHashes = append(txHashes, fmt.Sprintf("Dust %s->USDT (%s)|%s", sym, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 			remainingExtra = append(remainingExtra[:idx], remainingExtra[idx+1:]...)
 			persistExtraDust()
 		}

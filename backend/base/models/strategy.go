@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,6 +27,14 @@ const (
 	StrategyOutOfRangeModeExitAll             StrategyOutOfRangeMode = "exit_all"
 	StrategyOutOfRangeModeRebalanceUpExitDown StrategyOutOfRangeMode = "rebalance_up_exit_down"
 	StrategyTaskModePause                     string                 = "pause"
+)
+
+type StrategySwapProviderPolicy string
+
+const (
+	StrategySwapProviderBest    StrategySwapProviderPolicy = "best"
+	StrategySwapProviderOKX     StrategySwapProviderPolicy = "okx"
+	StrategySwapProviderBinance StrategySwapProviderPolicy = "binance"
 )
 
 // StrategyTask represents a monitoring task for a V4 pool position
@@ -83,6 +92,7 @@ type StrategyTask struct {
 	ResidualTolerance    float64 `gorm:"type:decimal(5,2);default:1.0" json:"residual_tolerance"`
 	ZapLossTolerance     float64 `gorm:"type:decimal(5,2);default:0.5" json:"zap_loss_tolerance"` // Swap loss tolerance (0 = disabled)
 	AllowEntrySwap       bool    `gorm:"default:false" json:"allow_entry_swap"`                   // Allow swapping USDT to entry token when pool lacks USDT
+	SwapProviderPolicy   string  `gorm:"size:16;not null;default:'best'" json:"swap_provider_policy"`
 	StopLossEnabled      bool    `gorm:"default:false" json:"stop_loss_enabled"`
 	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
 	RebalanceEnabled     bool    `gorm:"default:false" json:"rebalance_enabled"`   // When false, out-of-range positions exit to USDT and stop after the same delay
@@ -170,6 +180,29 @@ func NormalizeStrategyTaskMode(value string) string {
 	}
 }
 
+func NormalizeStrategySwapProviderPolicy(value string) StrategySwapProviderPolicy {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(StrategySwapProviderBest):
+		return StrategySwapProviderBest
+	case string(StrategySwapProviderOKX):
+		return StrategySwapProviderOKX
+	case string(StrategySwapProviderBinance), "binnace":
+		return StrategySwapProviderBinance
+	default:
+		return ""
+	}
+}
+
+func ResolveStrategySwapProviderPolicy(task *StrategyTask) StrategySwapProviderPolicy {
+	if task == nil {
+		return StrategySwapProviderBest
+	}
+	if policy := NormalizeStrategySwapProviderPolicy(task.SwapProviderPolicy); policy != "" {
+		return policy
+	}
+	return StrategySwapProviderBest
+}
+
 func RebalanceEnabledForOutOfRangeMode(mode StrategyOutOfRangeMode) bool {
 	switch mode {
 	case StrategyOutOfRangeModeRebalanceAll, StrategyOutOfRangeModeRebalanceUpExitDown:
@@ -212,6 +245,21 @@ func (t *StrategyTask) SyncOutOfRangeModeFields() {
 	}
 	t.OutOfRangeMode = string(mode)
 	t.RebalanceEnabled = RebalanceEnabledForOutOfRangeMode(mode)
+}
+
+func (t *StrategyTask) SyncSwapProviderPolicyField() error {
+	if t == nil {
+		return nil
+	}
+	if strings.TrimSpace(t.SwapProviderPolicy) == "" {
+		t.SwapProviderPolicy = string(StrategySwapProviderBest)
+		return nil
+	}
+	if policy := NormalizeStrategySwapProviderPolicy(t.SwapProviderPolicy); policy != "" {
+		t.SwapProviderPolicy = string(policy)
+		return nil
+	}
+	return fmt.Errorf("invalid swap provider policy: %s", t.SwapProviderPolicy)
 }
 
 // CreateOverrideUpdates returns the zero/false values that must be persisted
@@ -279,5 +327,5 @@ func (t *StrategyTask) AfterCreate(tx *gorm.DB) error {
 
 func (t *StrategyTask) BeforeSave(tx *gorm.DB) error {
 	t.SyncOutOfRangeModeFields()
-	return nil
+	return t.SyncSwapProviderPolicyField()
 }

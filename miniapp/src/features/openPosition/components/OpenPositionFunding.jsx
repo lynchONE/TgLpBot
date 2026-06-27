@@ -1,6 +1,11 @@
 import { AlertTriangle, Check, Eye, EyeOff } from 'lucide-react';
 
 import { formatUsdCompact, tokenRiskLabel, tokenRiskSummary } from '../../../lib/format';
+import {
+    SWAP_PROVIDER_POLICY_OPTIONS,
+    getSwapProviderPolicyOption,
+    normalizeSwapProviderPolicy,
+} from '../../../lib/swapProviderPolicy';
 import { tokenRiskPanelClass } from '../tokenRiskClass';
 
 const OPEN_POSITION_AMOUNT_PRESETS = [200, 500, 1000, 1500, 2000];
@@ -238,6 +243,49 @@ export function OpenPositionAmountSlippagePanel({
     );
 }
 
+export function OpenPositionSwapProviderPanel({
+    value,
+    loading,
+    brand,
+    onChange,
+}) {
+    const selected = getSwapProviderPolicyOption(value);
+
+    return (
+        <div className="op-funding-card rounded-2xl border border-zinc-200/60 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-white/5">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">兑换渠道</div>
+                    <div className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/45">{selected.description}</div>
+                </div>
+                <div className="shrink-0 rounded-full border border-zinc-200/60 bg-white/70 px-2 py-0.5 text-[10px] font-bold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    {selected.shortLabel}
+                </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-1.5">
+                {SWAP_PROVIDER_POLICY_OPTIONS.map((option) => {
+                    const active = normalizeSwapProviderPolicy(value) === option.value;
+                    return (
+                        <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => onChange?.(option.value)}
+                            disabled={loading}
+                            title={option.description}
+                            className={`h-9 rounded-xl border px-1.5 text-[11px] font-extrabold transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45 ${active
+                                ? `${brand.selectionClass} text-zinc-900 dark:text-white`
+                                : 'border-zinc-200/70 bg-white/70 text-zinc-600 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10'
+                                }`}
+                        >
+                            {option.shortLabel}
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 export function OpenPositionRecommendedAmounts({
     positions,
     onApplyAmount,
@@ -284,6 +332,7 @@ export function OpenPositionFundingStep({
     amount,
     maxAmount,
     slippage,
+    swapProviderPolicy,
     slippagePlaceholder,
     globalSlippageHint,
     needsHighSlippageConfirm,
@@ -294,6 +343,7 @@ export function OpenPositionFundingStep({
     onSelectWallet,
     onAmountChange,
     onSlippageChange,
+    onSwapProviderPolicyChange,
     onApplyRecommendedAmount,
 }) {
     return (
@@ -330,6 +380,13 @@ export function OpenPositionFundingStep({
                 brand={brand}
                 onAmountChange={onAmountChange}
                 onSlippageChange={onSlippageChange}
+            />
+
+            <OpenPositionSwapProviderPanel
+                value={swapProviderPolicy}
+                loading={false}
+                brand={brand}
+                onChange={onSwapProviderPolicyChange}
             />
 
             <OpenPositionRecommendedAmounts

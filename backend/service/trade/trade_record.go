@@ -447,6 +447,47 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithStableAfter(
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(updates).Error
 }
 
+func (s *TradeRecordService) UpdateCloseTxDetails(task *models.StrategyTask, details []string) error {
+	if task == nil || task.ID == 0 {
+		return fmt.Errorf("task is nil")
+	}
+	normalized := make([]string, 0, len(details))
+	seen := make(map[string]struct{}, len(details))
+	for _, item := range details {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+	var rec models.TradeRecord
+	err = database.DB.
+		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
+		Order("opened_at DESC").
+		First(&rec).Error
+	if err != nil {
+		err = database.DB.
+			Where("user_id = ? AND task_id = ?", task.UserID, task.ID).
+			Order("opened_at DESC").
+			First(&rec).Error
+		if err != nil {
+			return err
+		}
+	}
+	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Update("close_tx_details", string(raw)).Error
+}
+
 // ApplyExitDelta accumulates exit-phase deltas (received USDT + gas spent) into the latest trade record.
 // It prefers the latest OPEN record; if none exists, it falls back to the latest record for this task
 // (so a previously-closed-too-early record can still be corrected across retries).

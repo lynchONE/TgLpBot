@@ -6,6 +6,7 @@ import NumberFlowValue from './NumberFlowValue.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../lib/taskModes';
+import { getSwapProviderPolicyOption } from '../lib/swapProviderPolicy';
 import { formatUsd, formatUsdCompact, formatFeeUsd, formatBotAmount, formatRangePercentPlain } from '../lib/format';
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -385,6 +386,7 @@ export default function PositionCard({
 
     const taskPaused = Boolean(position?.task_paused);
     const currentStrategyMode = normalizeDisplayStrategyMode(position, taskPaused);
+    const swapProviderOption = getSwapProviderPolicyOption(position?.swap_provider_policy);
     const statusLabel = String(position?.status_label || '');
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤仓中') || statusLabel.includes('处理中');
     const isStoppedState = isStoppedStatus(statusLabel);
@@ -505,6 +507,11 @@ export default function PositionCard({
                                 {taskId > 0 && (
                                     <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30 shrink-0">
                                         #<NumberFlowValue value={taskId} formatOptions={{ maximumFractionDigits: 0 }} />
+                                    </span>
+                                )}
+                                {taskId > 0 && (
+                                    <span className="inline-flex shrink-0 items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
+                                        兑换 {swapProviderOption.shortLabel}
                                     </span>
                                 )}
                                 {updateTimeText ? (

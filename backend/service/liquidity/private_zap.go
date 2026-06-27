@@ -28,11 +28,11 @@ import (
 const walletChainContractKindZapSimple = "zap_simple"
 const walletChainContractStatusDeployed = "deployed"
 const walletChainContractStatusReady = "ready"
-const privateZapSimpleBindingVersion = 3
-const privateAtomicIncreaseZapBindingVersion = 3
+const privateZapSimpleBindingVersion = 5
+const privateAtomicIncreaseZapBindingVersion = 5
 const privateZapCacheTTL = time.Hour
-const privateZapSimpleCachePrefix = "private_zap:binding:v3"
-const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v3"
+const privateZapSimpleCachePrefix = "private_zap:binding:v5"
+const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v5"
 
 var privateZapMuByKey sync.Map // key=chain|walletID -> *sync.Mutex
 
@@ -411,14 +411,6 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		return nil
 	}
 
-	// Validate required chain-scoped trusted addresses before deploying.
-	if !common.IsHexAddress(cc.OKXSwapRouter) {
-		return common.Address{}, fmt.Errorf("OKX_SWAP_ROUTER not set for chain=%s", chain)
-	}
-	if !common.IsHexAddress(cc.OKXTokenApproveAddress) {
-		return common.Address{}, fmt.Errorf("OKX_TOKEN_APPROVE_ADDRESS not set for chain=%s", chain)
-	}
-
 	v3Primary := strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
 	if !common.IsHexAddress(v3Primary) {
 		for _, dep := range cc.V3Deployments {
@@ -432,8 +424,14 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		return common.Address{}, fmt.Errorf("V3 position manager not configured for chain=%s", chain)
 	}
 
-	okxRouter := common.HexToAddress(cc.OKXSwapRouter)
-	okxApprove := common.HexToAddress(cc.OKXTokenApproveAddress)
+	okxRouter := common.Address{}
+	if common.IsHexAddress(cc.OKXSwapRouter) {
+		okxRouter = common.HexToAddress(cc.OKXSwapRouter)
+	}
+	okxApprove := common.Address{}
+	if common.IsHexAddress(cc.OKXTokenApproveAddress) {
+		okxApprove = common.HexToAddress(cc.OKXTokenApproveAddress)
+	}
 	v3pm := common.HexToAddress(v3Primary)
 	v4pm := common.Address{}
 	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {

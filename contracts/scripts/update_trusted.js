@@ -71,6 +71,8 @@ async function main() {
   console.log("Applying new trusted config:");
   console.log("- OKX Router:", okxRouter);
   console.log("- OKX TokenApprove:", okxApprove);
+  console.log("- Binance Swap Targets:", trusted.binanceSwapTargets.length ? trusted.binanceSwapTargets.join(", ") : "(none)");
+  console.log("- Binance Approve Targets:", trusted.binanceApproveTargets.length ? trusted.binanceApproveTargets.join(", ") : "(none)");
   console.log("- V3 PositionManager:", v3pm);
   console.log("- V4 PositionManager:", v4pm || ethers.ZeroAddress);
   console.log("- Wrapped Native:", wrappedNative || ethers.ZeroAddress);
@@ -79,6 +81,22 @@ async function main() {
   console.log("setTrustedAddresses tx:", tx.hash);
   await tx.wait();
   console.log("Trusted addresses updated successfully.");
+
+  const swapTargets = [okxRouter, ...trusted.binanceSwapTargets].filter((item) => ethers.isAddress(item));
+  if (swapTargets.length > 0) {
+    const txSwapTargets = await zap.setTrustedSwapTargets([...new Set(swapTargets.map((item) => ethers.getAddress(item)))], true);
+    console.log("setTrustedSwapTargets tx:", txSwapTargets.hash);
+    await txSwapTargets.wait();
+    console.log("Trusted swap targets updated.");
+  }
+
+  const approveTargets = [okxApprove, ...trusted.binanceApproveTargets].filter((item) => ethers.isAddress(item));
+  if (approveTargets.length > 0) {
+    const txApproveTargets = await zap.setTrustedApproveTargets([...new Set(approveTargets.map((item) => ethers.getAddress(item)))], true);
+    console.log("setTrustedApproveTargets tx:", txApproveTargets.hash);
+    await txApproveTargets.wait();
+    console.log("Trusted approve targets updated.");
+  }
 
   if (wrappedNative) {
     try {

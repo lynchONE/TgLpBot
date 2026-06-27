@@ -7,7 +7,7 @@ import (
 
 func TestPrivateZapCacheKey_NormalizesChain(t *testing.T) {
 	key := privateZapCacheKey("BASE", 123)
-	want := "private_zap:binding:v3:base:123:zap_simple"
+	want := "private_zap:binding:v5:base:123:zap_simple"
 	if key != want {
 		t.Fatalf("unexpected cache key: got=%s want=%s", key, want)
 	}
@@ -15,7 +15,7 @@ func TestPrivateZapCacheKey_NormalizesChain(t *testing.T) {
 
 func TestPrivateZapCacheScanPattern_NormalizesChain(t *testing.T) {
 	pattern := privateZapCacheScanPattern("BSC")
-	want := "private_zap:binding:v3:bsc:*"
+	want := "private_zap:binding:v5:bsc:*"
 	if pattern != want {
 		t.Fatalf("unexpected cache pattern: got=%s want=%s", pattern, want)
 	}
@@ -23,7 +23,7 @@ func TestPrivateZapCacheScanPattern_NormalizesChain(t *testing.T) {
 
 func TestPrivateContractCacheKey_AtomicIndependentPrefix(t *testing.T) {
 	key := privateContractCacheKey("BASE", 123, walletChainContractKindAtomicIncreaseZap)
-	want := "private_atomic_increase_zap:binding:v3:base:123:atomic_increase_zap"
+	want := "private_atomic_increase_zap:binding:v5:base:123:atomic_increase_zap"
 	if key != want {
 		t.Fatalf("unexpected atomic cache key: got=%s want=%s", key, want)
 	}

@@ -20,32 +20,33 @@ type tradeHistoryRequest struct {
 }
 
 type tradeRecordRow struct {
-	ID                uint    `json:"id"`
-	TaskID            uint    `json:"task_id"`
-	Chain             string  `json:"chain"`
-	PoolVersion       string  `json:"pool_version"`
-	PoolID            string  `json:"pool_id"`
-	Exchange          string  `json:"exchange"`
-	Token0Symbol      string  `json:"token0_symbol"`
-	Token1Symbol      string  `json:"token1_symbol"`
-	OpenedAt          string  `json:"opened_at"`
-	OpenTxHash        string  `json:"open_tx_hash"`
-	OpenUSDTSpent     float64 `json:"open_usdt_spent"`
-	OpenStableBefore  float64 `json:"open_stable_before,omitempty"`
-	OpenStableAfter   float64 `json:"open_stable_after,omitempty"`
-	OpenGasSpentWei   float64 `json:"open_gas_spent_wei"`
-	ClosedAt          string  `json:"closed_at,omitempty"`
-	CloseTxHash       string  `json:"close_tx_hash,omitempty"`
-	CloseUSDTRecv     float64 `json:"close_usdt_received,omitempty"`
-	CloseStableBefore float64 `json:"close_stable_before,omitempty"`
-	CloseStableAfter  float64 `json:"close_stable_after,omitempty"`
-	CloseGasSpentWei  float64 `json:"close_gas_spent_wei,omitempty"`
-	TotalGasUSDT      float64 `json:"total_gas_usdt,omitempty"`
-	ProfitUSDT        float64 `json:"profit_usdt,omitempty"`
-	ProfitPct         float64 `json:"profit_pct"`
-	Status            string  `json:"status"`
-	OpenTxURL         string  `json:"open_tx_url,omitempty"`
-	CloseTxURL        string  `json:"close_tx_url,omitempty"`
+	ID                uint     `json:"id"`
+	TaskID            uint     `json:"task_id"`
+	Chain             string   `json:"chain"`
+	PoolVersion       string   `json:"pool_version"`
+	PoolID            string   `json:"pool_id"`
+	Exchange          string   `json:"exchange"`
+	Token0Symbol      string   `json:"token0_symbol"`
+	Token1Symbol      string   `json:"token1_symbol"`
+	OpenedAt          string   `json:"opened_at"`
+	OpenTxHash        string   `json:"open_tx_hash"`
+	OpenUSDTSpent     float64  `json:"open_usdt_spent"`
+	OpenStableBefore  float64  `json:"open_stable_before,omitempty"`
+	OpenStableAfter   float64  `json:"open_stable_after,omitempty"`
+	OpenGasSpentWei   float64  `json:"open_gas_spent_wei"`
+	ClosedAt          string   `json:"closed_at,omitempty"`
+	CloseTxHash       string   `json:"close_tx_hash,omitempty"`
+	CloseTxDetails    []string `json:"close_tx_details,omitempty"`
+	CloseUSDTRecv     float64  `json:"close_usdt_received,omitempty"`
+	CloseStableBefore float64  `json:"close_stable_before,omitempty"`
+	CloseStableAfter  float64  `json:"close_stable_after,omitempty"`
+	CloseGasSpentWei  float64  `json:"close_gas_spent_wei,omitempty"`
+	TotalGasUSDT      float64  `json:"total_gas_usdt,omitempty"`
+	ProfitUSDT        float64  `json:"profit_usdt,omitempty"`
+	ProfitPct         float64  `json:"profit_pct"`
+	Status            string   `json:"status"`
+	OpenTxURL         string   `json:"open_tx_url,omitempty"`
+	CloseTxURL        string   `json:"close_tx_url,omitempty"`
 }
 
 type tradeHistoryResponse struct {
@@ -68,6 +69,31 @@ func explorerTxURLHelper(chain string, txHash string) string {
 	default:
 		return "https://bscscan.com/tx/" + txHash
 	}
+}
+
+func parseCloseTxDetails(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var details []string
+	if err := json.Unmarshal([]byte(raw), &details); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(details))
+	seen := make(map[string]struct{}, len(details))
+	for _, detail := range details {
+		detail = strings.TrimSpace(detail)
+		if detail == "" {
+			continue
+		}
+		if _, ok := seen[detail]; ok {
+			continue
+		}
+		seen[detail] = struct{}{}
+		out = append(out, detail)
+	}
+	return out
 }
 
 func (s *Server) handleTradeHistory(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +182,7 @@ func (s *Server) handleTradeHistory(w http.ResponseWriter, r *http.Request) {
 		if rec.ClosedAt != nil {
 			row.ClosedAt = rec.ClosedAt.Format("2006-01-02 15:04:05")
 			row.CloseTxHash = rec.CloseTxHash
+			row.CloseTxDetails = parseCloseTxDetails(rec.CloseTxDetails)
 			row.CloseUSDTRecv = amountToFloat(rec.CloseUSDTReceived, 18)
 			row.CloseStableBefore = amountToFloat(rec.CloseStableBefore, 18)
 			row.CloseStableAfter = amountToFloat(rec.CloseStableAfter, 18)
@@ -255,6 +282,7 @@ func (s *Server) handleTradeHistoryGET(w http.ResponseWriter, r *http.Request) {
 		if rec.ClosedAt != nil {
 			row.ClosedAt = rec.ClosedAt.Format("2006-01-02 15:04:05")
 			row.CloseTxHash = rec.CloseTxHash
+			row.CloseTxDetails = parseCloseTxDetails(rec.CloseTxDetails)
 			row.CloseUSDTRecv = amountToFloat(rec.CloseUSDTReceived, 18)
 			row.CloseStableBefore = amountToFloat(rec.CloseStableBefore, 18)
 			row.CloseStableAfter = amountToFloat(rec.CloseStableAfter, 18)

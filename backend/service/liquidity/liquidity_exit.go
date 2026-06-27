@@ -822,17 +822,26 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		gasSpentCopy := cloneBig(gasSpent)
 		closeStableBeforeCopy := cloneBig(closeStableBeforeWei)
 		closeStableAfterCopy := cloneBig(closeStableAfterWei)
+		txDetailsCopy := append([]string(nil), txHashes...)
 		nativePriceUSD := 0.0
 		if finalizeTradeRecord {
 			nativePriceUSD = pricing.GetNativePriceUSD(exec.Chain())
 		}
 		s.runAsync("exit_trade_record", func() error {
 			trSvc := trade.NewTradeRecordService()
-			if _, err := trSvc.ApplyExitDeltaWithStableAfter(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, closeStableAfterCopy, finalizeTradeRecord, nativePriceUSD); err != nil && finalizeTradeRecord {
-				return trSvc.CloseLatestOpenRecordWithStableAfter(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, closeStableAfterCopy, nativePriceUSD)
+			var err error
+			if _, applyErr := trSvc.ApplyExitDeltaWithStableAfter(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, closeStableAfterCopy, finalizeTradeRecord, nativePriceUSD); applyErr != nil && finalizeTradeRecord {
+				err = trSvc.CloseLatestOpenRecordWithStableAfter(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, closeStableAfterCopy, nativePriceUSD)
 			} else {
+				err = applyErr
+			}
+			if detailErr := trSvc.UpdateCloseTxDetails(&taskCopy, txDetailsCopy); detailErr != nil {
+				log.Printf("[Liquidity] Warning: update close tx details failed task_id=%d err=%v", taskCopy.ID, detailErr)
+			}
+			if err != nil {
 				return err
 			}
+			return nil
 		})
 	}
 
@@ -972,12 +981,12 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			continue
 		}
 
-		swapTxHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, tok.addr, usdtAddr, toSwap, effectiveExitSlippagePercent(task))
+		swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, tok.addr, usdtAddr, toSwap, effectiveExitSlippagePercent(task), effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 失败 (%s) amount=%s: %w", label, tok.addr.Hex(), toSwap.String(), err))
 			continue
 		}
-		if swapTxHash == "" {
+		if swapRes == nil || strings.TrimSpace(swapRes.TxHash) == "" {
 			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 返回空交易哈希 (%s) amount=%s", label, tok.addr.Hex(), toSwap.String()))
 			continue
 		}
@@ -986,7 +995,7 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 		if symbol == "" {
 			symbol = tok.addr.Hex()
 		}
-		txHashes = append(txHashes, fmt.Sprintf("清仓 %s→USDT|%s", symbol, swapTxHash))
+		txHashes = append(txHashes, fmt.Sprintf("清仓 %s→USDT (%s)|%s", symbol, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 	}
 
 	// 校验：swap 后检查是否仍有余额（仅打印警告，不返回错误以避免重试导致重复兑换）
@@ -1488,10 +1497,10 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 				symbol = task.Token0Symbol
 			}
 			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, token0, d0, walletAddr, symbol); !skip {
-				if swapTxHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
+				if swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, token0, usdtAddr, d0, effectiveExitSlippagePercent(task), effectiveTaskSwapProviderPolicy(task)); err != nil {
 					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
-				} else if swapTxHash != "" {
-					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
+				} else if swapRes != nil && strings.TrimSpace(swapRes.TxHash) != "" {
+					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT (%s)|%s", symbol, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 				} else {
 					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 				}
@@ -1504,10 +1513,10 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 				symbol = task.Token1Symbol
 			}
 			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, token1, d1, walletAddr, symbol); !skip {
-				if swapTxHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
+				if swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, token1, usdtAddr, d1, effectiveExitSlippagePercent(task), effectiveTaskSwapProviderPolicy(task)); err != nil {
 					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
-				} else if swapTxHash != "" {
-					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
+				} else if swapRes != nil && strings.TrimSpace(swapRes.TxHash) != "" {
+					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT (%s)|%s", symbol, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 				} else {
 					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 				}
@@ -1788,10 +1797,10 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, c0, d0, walletAddr, sym0); skip {
 				goto swap1
 			}
-			if hash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, c0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
+			if swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, c0, usdtAddr, d0, effectiveExitSlippagePercent(task), effectiveTaskSwapProviderPolicy(task)); err != nil {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym0, err))
-			} else if hash != "" {
-				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym0, hash))
+			} else if swapRes != nil && strings.TrimSpace(swapRes.TxHash) != "" {
+				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT (%s)|%s", sym0, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 			} else {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", sym0))
 			}
@@ -1801,10 +1810,10 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, c1, d1, walletAddr, sym1); skip {
 				goto afterSwap
 			}
-			if hash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, c1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
+			if swapRes, err := s.swapDeltaToUSDTWithResult(exec, privateKey, walletAddr, c1, usdtAddr, d1, effectiveExitSlippagePercent(task), effectiveTaskSwapProviderPolicy(task)); err != nil {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym1, err))
-			} else if hash != "" {
-				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym1, hash))
+			} else if swapRes != nil && strings.TrimSpace(swapRes.TxHash) != "" {
+				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT (%s)|%s", sym1, formatSwapRouteLabel(swapRes.Info), swapRes.TxHash))
 			} else {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", sym1))
 			}
@@ -1962,6 +1971,19 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 
 	txHash, err := s.swapExactInViaOKXWithHash(exec, privateKey, walletAddr, tokenIn, usdtAddr, amountIn, slippagePercent)
 	return txHash, err
+}
+
+func (s *LiquidityService) swapDeltaToUSDTWithResult(
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	usdtAddr common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+	policy models.StrategySwapProviderPolicy,
+) (*providerExecutionResult, error) {
+	return s.executeSwapToUSDTByPolicy(exec, privateKey, walletAddr, tokenIn, usdtAddr, amountIn, slippagePercent, policy)
 }
 
 // swapExactInViaOKXWithHash 与 swapExactInViaOKX 类似，但返回交易哈希

@@ -1921,6 +1921,7 @@ export default function App() {
           taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : prev.taskId,
           currentStep: 3,
           status: 'active',
+          swapRoutes: Array.isArray(resp?.swap_routes) ? resp.swap_routes : prev.swapRoutes,
         } : prev);
       setOpenPosSubmitError('');
       setOpenPosRisk(null);
@@ -1933,6 +1934,7 @@ export default function App() {
           taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : prev.taskId,
           currentStep: 4,
           status: 'done',
+          swapRoutes: Array.isArray(resp?.swap_routes) ? resp.swap_routes : prev.swapRoutes,
         } : prev);
       setOpenPosPool(null);
     } catch (e) {

@@ -6,6 +6,7 @@ import {
     previewOpenPosition,
 } from '../../lib/api';
 import { storage } from '../../lib/storage';
+import { normalizeSwapProviderPolicy } from '../../lib/swapProviderPolicy';
 import { STORAGE_OPEN_POSITION_WALLET_ID } from './constants';
 import { parseOptionalPercent } from './format';
 import { parseRangeInput } from './range';
@@ -51,6 +52,7 @@ export default function useOpenPositionFlow({
         openPositionPriceLower,
         openPositionPriceUpper,
         openPositionSlippage,
+        openPositionSwapProviderPolicy,
         openPositionError,
         setOpenPositionError,
         setOpenPositionPrepareChecks,
@@ -335,6 +337,7 @@ export default function useOpenPositionFlow({
                     slippageTolerance: taskSlippage.value,
                     entrySwapSlippageTolerance: entrySwapSlippage.value,
                     allowEntrySwap: true,
+                    swapProviderPolicy: normalizeSwapProviderPolicy(openPositionSwapProviderPolicy),
                     walletId,
                     ackLiquidityRisk: openPositionRiskAck,
                     taskMode: openPositionTaskMode,
@@ -397,6 +400,7 @@ export default function useOpenPositionFlow({
         openPositionPriceLower,
         openPositionPriceUpper,
         openPositionSlippage,
+        openPositionSwapProviderPolicy,
         openPositionEntrySwapSlippage,
         openPositionRiskAck,
         multiWalletEnabled,
@@ -438,6 +442,7 @@ export default function useOpenPositionFlow({
         try {
             const resp = await openPosition(submitPayload);
             const taskId = Number(resp?.task_id);
+            const swapRoutes = Array.isArray(resp?.swap_routes) ? resp.swap_routes : undefined;
             lastOpenPositionRequestRef.current = null;
             setOpenPositionError('');
             setOpenPositionChecks([]);
@@ -452,6 +457,7 @@ export default function useOpenPositionFlow({
                     currentStep: dcaEnabled ? 1 : totalBatches,
                     status: dcaEnabled ? 'active_dca' : 'done',
                     error: '',
+                    swapRoutes: swapRoutes || prev.swapRoutes,
                 }
                 : prev));
             try {
@@ -635,6 +641,7 @@ export default function useOpenPositionFlow({
             entrySwapSlippageTolerance: openPositionEntrySwapPreview?.required ? entrySwapSlippageParsed.value : undefined,
             allowEntrySwap: true,
             confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required),
+            swapProviderPolicy: normalizeSwapProviderPolicy(openPositionSwapProviderPolicy),
             walletId,
             ackLiquidityRisk: requiresAck && openPositionRiskAck,
             dcaEnabled: effectiveOpenPositionDCAEnabled,
@@ -678,6 +685,7 @@ export default function useOpenPositionFlow({
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
         openPositionSlippage,
+        openPositionSwapProviderPolicy,
         openPositionEntrySwapSlippage,
         openPositionWalletId,
         openPositionPreviewPending,

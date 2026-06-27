@@ -18,6 +18,11 @@ import (
 
 type EntrySwapPreview struct {
 	Required                     bool
+	Provider                     string
+	ProviderName                 string
+	QuoteID                      string
+	VendorName                   string
+	RouteSummary                 string
 	FromTokenAddress             string
 	FromTokenSymbol              string
 	ToTokenAddress               string
@@ -239,13 +244,17 @@ func (s *LiquidityService) PreviewEntrySwap(
 		cc,
 	)
 
-	expectedOut, err := s.quoteOKXSwapExactIn(exec, walletAddr, stableAddr, plan.EntryToken, requestedAmount, effectiveSlippage)
+	quote, err := s.quoteSwapByPolicy(exec, walletAddr, stableAddr, plan.EntryToken, requestedAmount, effectiveSlippage, effectiveTaskSwapProviderPolicy(task))
 	if err != nil {
 		return nil, err
 	}
+	expectedOut := big.NewInt(0)
+	if quote != nil && quote.amountOut != nil {
+		expectedOut = quote.amountOut
+	}
 
 	entryDecimals := tokenDecimalsWithFallback(client, plan.EntryToken, cc.StableDecimals)
-	return &EntrySwapPreview{
+	preview := &EntrySwapPreview{
 		Required:                     true,
 		FromTokenAddress:             stableAddr.Hex(),
 		FromTokenSymbol:              strings.ToUpper(strings.TrimSpace(cc.StableSymbol)),
@@ -257,5 +266,13 @@ func (s *LiquidityService) PreviewEntrySwap(
 		ExpectedAmountOutRaw:         expectedOut.String(),
 		RecommendedSlippageTolerance: recommendedSlippage,
 		CurrentSlippageTolerance:     effectiveSlippage,
-	}, nil
+	}
+	if quote != nil {
+		preview.Provider = strings.TrimSpace(quote.info.Provider)
+		preview.ProviderName = strings.TrimSpace(quote.info.ProviderName)
+		preview.QuoteID = strings.TrimSpace(quote.info.QuoteID)
+		preview.VendorName = strings.TrimSpace(quote.info.VendorName)
+		preview.RouteSummary = strings.TrimSpace(quote.info.RouteSummary)
+	}
+	return preview, nil
 }

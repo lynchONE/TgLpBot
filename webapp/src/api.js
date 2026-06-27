@@ -1068,6 +1068,7 @@ export async function openPosition({
   entrySwapSlippageTolerance,
   allowEntrySwap,
   confirmEntrySwap,
+  swapProviderPolicy,
   walletId,
   ackLiquidityRisk,
   dcaEnabled,
@@ -1094,6 +1095,7 @@ export async function openPosition({
     entrySwapSlippageTolerance,
     allowEntrySwap,
     confirmEntrySwap,
+    swapProviderPolicy,
     walletId,
     ackLiquidityRisk,
     dcaEnabled,
@@ -1125,6 +1127,7 @@ function buildOpenPositionPayload({
   entrySwapSlippageTolerance,
   allowEntrySwap,
   confirmEntrySwap,
+  swapProviderPolicy,
   walletId,
   ackLiquidityRisk,
   dcaEnabled,
@@ -1157,6 +1160,9 @@ function buildOpenPositionPayload({
     payload.entry_swap_slippage_tolerance = entrySwapSlippageTolerance;
   }
   if (confirmEntrySwap) payload.confirm_entry_swap = true;
+  if (swapProviderPolicy !== undefined && swapProviderPolicy !== null && String(swapProviderPolicy).trim()) {
+    payload.swap_provider_policy = String(swapProviderPolicy).trim();
+  }
   const wid = Number(walletId);
   if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
   if (ackLiquidityRisk) payload.ack_liquidity_risk = true;
@@ -1211,6 +1217,7 @@ export async function previewOpenPosition({
   slippageTolerance,
   entrySwapSlippageTolerance,
   allowEntrySwap,
+  swapProviderPolicy,
   walletId,
   ackLiquidityRisk,
   dcaEnabled,
@@ -1235,6 +1242,7 @@ export async function previewOpenPosition({
       slippageTolerance,
     entrySwapSlippageTolerance,
     allowEntrySwap,
+    swapProviderPolicy,
     walletId,
     ackLiquidityRisk,
     dcaEnabled,

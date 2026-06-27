@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatSwapRouteList } from '../swapProviderPolicy';
 
 function StatusIcon({ tone }) {
   if (tone === 'done') {
@@ -288,6 +289,10 @@ export default function StepProgressModal({ operation, progress, onClose }) {
   const overlayRef = useRef(null);
   const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
   const isCompactClosePosition = operation === 'close_position';
+  const swapRouteLabel = useMemo(
+    () => formatSwapRouteList(progress?.swapRoutes || progress?.swap_routes),
+    [progress],
+  );
 
   useEffect(() => {
     if (isCompactClosePosition) return undefined;
@@ -411,6 +416,12 @@ export default function StepProgressModal({ operation, progress, onClose }) {
 
           {progress?.taskId ? (
             <div style={styles.taskMeta}>任务 #{progress.taskId}</div>
+          ) : null}
+
+          {swapRouteLabel ? (
+            <div style={styles.note}>
+              本次开仓兑换：{swapRouteLabel}
+            </div>
           ) : null}
 
           {isActive && allowClose ? (

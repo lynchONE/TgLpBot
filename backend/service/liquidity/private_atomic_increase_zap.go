@@ -209,13 +209,6 @@ func (s *LiquidityService) ensurePrivateAtomicIncreaseZap(
 		return nil
 	}
 
-	if !common.IsHexAddress(cc.OKXSwapRouter) {
-		return common.Address{}, fmt.Errorf("OKX_SWAP_ROUTER not set for chain=%s", chain)
-	}
-	if !common.IsHexAddress(cc.OKXTokenApproveAddress) {
-		return common.Address{}, fmt.Errorf("OKX_TOKEN_APPROVE_ADDRESS not set for chain=%s", chain)
-	}
-
 	v3Primary := strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
 	if !common.IsHexAddress(v3Primary) {
 		for _, dep := range cc.V3Deployments {
@@ -229,8 +222,14 @@ func (s *LiquidityService) ensurePrivateAtomicIncreaseZap(
 		return common.Address{}, fmt.Errorf("V3 position manager not configured for chain=%s", chain)
 	}
 
-	okxRouter := common.HexToAddress(cc.OKXSwapRouter)
-	okxApprove := common.HexToAddress(cc.OKXTokenApproveAddress)
+	okxRouter := common.Address{}
+	if common.IsHexAddress(cc.OKXSwapRouter) {
+		okxRouter = common.HexToAddress(cc.OKXSwapRouter)
+	}
+	okxApprove := common.Address{}
+	if common.IsHexAddress(cc.OKXTokenApproveAddress) {
+		okxApprove = common.HexToAddress(cc.OKXTokenApproveAddress)
+	}
 	v3pm := common.HexToAddress(v3Primary)
 	v4pm := common.Address{}
 	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {

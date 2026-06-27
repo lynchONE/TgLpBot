@@ -2500,6 +2500,7 @@ func buildFollowTask(ctx context.Context, cfg *models.SmartMoneyFollowConfig, ev
 		SlippageTolerance:      globalCfg.SlippageTolerance,
 		AutoReinvest:           globalCfg.AutoReinvest,
 		AllowEntrySwap:         true,
+		SwapProviderPolicy:     string(models.StrategySwapProviderBest),
 		RebalanceEnabled:       false,
 		OutOfRangeMode:         string(models.StrategyOutOfRangeModeExitAll),
 		RangeActivationPending: false,

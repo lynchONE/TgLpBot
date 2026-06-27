@@ -25,22 +25,23 @@ import (
 )
 
 type openPositionRequest struct {
-	InitData          string   `json:"initData"`
-	WalletID          uint     `json:"wallet_id,omitempty"`
-	Chain             string   `json:"chain"`
-	PoolAddress       string   `json:"pool_address"`
-	PoolVersion       string   `json:"pool_version"`
-	Amount            float64  `json:"amount"`
-	RangeInputMode    string   `json:"range_input_mode,omitempty"`
-	RangeLowerPct     float64  `json:"range_lower_pct"`
-	RangeUpperPct     float64  `json:"range_upper_pct"`
-	TickLower         *int     `json:"tick_lower,omitempty"`
-	TickUpper         *int     `json:"tick_upper,omitempty"`
-	Slippage          *float64 `json:"slippage_tolerance,omitempty"`
-	EntrySwapSlippage *float64 `json:"entry_swap_slippage_tolerance,omitempty"`
-	AllowEntrySwap    bool     `json:"allow_entry_swap"`
-	ConfirmEntrySwap  bool     `json:"confirm_entry_swap,omitempty"`
-	AckLiquidityRisk  bool     `json:"ack_liquidity_risk,omitempty"`
+	InitData           string   `json:"initData"`
+	WalletID           uint     `json:"wallet_id,omitempty"`
+	Chain              string   `json:"chain"`
+	PoolAddress        string   `json:"pool_address"`
+	PoolVersion        string   `json:"pool_version"`
+	Amount             float64  `json:"amount"`
+	RangeInputMode     string   `json:"range_input_mode,omitempty"`
+	RangeLowerPct      float64  `json:"range_lower_pct"`
+	RangeUpperPct      float64  `json:"range_upper_pct"`
+	TickLower          *int     `json:"tick_lower,omitempty"`
+	TickUpper          *int     `json:"tick_upper,omitempty"`
+	Slippage           *float64 `json:"slippage_tolerance,omitempty"`
+	EntrySwapSlippage  *float64 `json:"entry_swap_slippage_tolerance,omitempty"`
+	AllowEntrySwap     bool     `json:"allow_entry_swap"`
+	ConfirmEntrySwap   bool     `json:"confirm_entry_swap,omitempty"`
+	SwapProviderPolicy string   `json:"swap_provider_policy,omitempty"`
+	AckLiquidityRisk   bool     `json:"ack_liquidity_risk,omitempty"`
 
 	// DCA overrides (single-open overrides over GlobalConfig defaults).
 	// When DCAEnabled is nil, global default is used; when set, any non-nil sibling fields override.
@@ -52,9 +53,10 @@ type openPositionRequest struct {
 }
 
 type openPositionResponse struct {
-	TaskID uint   `json:"task_id"`
-	TxHash string `json:"tx_hash,omitempty"`
-	Status string `json:"status"`
+	TaskID     uint                      `json:"task_id"`
+	TxHash     string                    `json:"tx_hash,omitempty"`
+	Status     string                    `json:"status"`
+	SwapRoutes []liquidity.SwapRouteInfo `json:"swap_routes,omitempty"`
 }
 
 type openPositionPreviewResponse struct {
@@ -69,6 +71,11 @@ type openPositionPreviewResponse struct {
 type openPositionEntrySwapInfo struct {
 	Required                     bool    `json:"required"`
 	NeedsConfirmation            bool    `json:"needs_confirmation,omitempty"`
+	Provider                     string  `json:"provider,omitempty"`
+	ProviderName                 string  `json:"provider_name,omitempty"`
+	QuoteID                      string  `json:"quote_id,omitempty"`
+	VendorName                   string  `json:"vendor_name,omitempty"`
+	RouteSummary                 string  `json:"route_summary,omitempty"`
 	FromTokenAddress             string  `json:"from_token_address,omitempty"`
 	FromTokenSymbol              string  `json:"from_token_symbol,omitempty"`
 	ToTokenAddress               string  `json:"to_token_address,omitempty"`
@@ -342,6 +349,7 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 	req.PoolAddress = strings.TrimSpace(req.PoolAddress)
 	req.PoolVersion = strings.ToLower(strings.TrimSpace(req.PoolVersion))
 	req.TaskMode = strings.TrimSpace(req.TaskMode)
+	req.SwapProviderPolicy = strings.ToLower(strings.TrimSpace(req.SwapProviderPolicy))
 	req.RangeInputMode = normalizeOpenPositionRangeInputMode(req.RangeInputMode)
 
 	if req.PoolAddress == "" {
@@ -376,6 +384,10 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 		http.Error(w, "前置兑换滑点参数无效", http.StatusBadRequest)
 		return nil, false
 	}
+	if models.NormalizeStrategySwapProviderPolicy(req.SwapProviderPolicy) == "" {
+		http.Error(w, "invalid swap provider policy", http.StatusBadRequest)
+		return nil, false
+	}
 	if config.AppConfig == nil {
 		http.Error(w, "系统配置未加载", http.StatusInternalServerError)
 		return nil, false
@@ -391,6 +403,11 @@ func buildOpenPositionEntrySwapInfo(preview *liquidity.EntrySwapPreview) *openPo
 	return &openPositionEntrySwapInfo{
 		Required:                     preview.Required,
 		NeedsConfirmation:            preview.Required,
+		Provider:                     strings.TrimSpace(preview.Provider),
+		ProviderName:                 strings.TrimSpace(preview.ProviderName),
+		QuoteID:                      strings.TrimSpace(preview.QuoteID),
+		VendorName:                   strings.TrimSpace(preview.VendorName),
+		RouteSummary:                 strings.TrimSpace(preview.RouteSummary),
 		FromTokenAddress:             strings.TrimSpace(preview.FromTokenAddress),
 		FromTokenSymbol:              strings.TrimSpace(preview.FromTokenSymbol),
 		ToTokenAddress:               strings.TrimSpace(preview.ToTokenAddress),
@@ -646,6 +663,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		SlippageTolerance:      taskSlippage,
 		AutoReinvest:           cfg.AutoReinvest,
 		AllowEntrySwap:         req.AllowEntrySwap,
+		SwapProviderPolicy:     string(models.NormalizeStrategySwapProviderPolicy(req.SwapProviderPolicy)),
 		RebalanceEnabled:       models.RebalanceEnabledForOutOfRangeMode(outOfRangeMode),
 		OutOfRangeMode:         string(outOfRangeMode),
 		Paused:                 paused,
@@ -983,8 +1001,9 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionResponse{
-		TaskID: ctx.task.ID,
-		TxHash: enterRes.TxHash,
-		Status: "ok",
+		TaskID:     ctx.task.ID,
+		TxHash:     enterRes.TxHash,
+		Status:     "ok",
+		SwapRoutes: enterRes.SwapRoutes,
 	})
 }

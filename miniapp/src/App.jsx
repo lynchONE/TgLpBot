@@ -278,6 +278,8 @@ export default function App() {
         setOpenPositionInvertPrice,
         openPositionSlippage,
         setOpenPositionSlippage,
+        openPositionSwapProviderPolicy,
+        setOpenPositionSwapProviderPolicy,
         openPositionError,
         setOpenPositionError,
         openPositionPrepareChecks,
@@ -3607,6 +3609,7 @@ export default function App() {
                                 amount={openPositionAmount}
                                 maxAmount={openPositionSelectedWalletStableBalance}
                                 slippage={openPositionSlippage}
+                                swapProviderPolicy={openPositionSwapProviderPolicy}
                                 slippagePlaceholder={openPositionSlippagePlaceholder}
                                 globalSlippageHint={openPositionGlobalSlippageHint}
                                 needsHighSlippageConfirm={openPositionNeedsHighSlippageConfirm}
@@ -3626,6 +3629,10 @@ export default function App() {
                                 }}
                                 onSlippageChange={(value) => {
                                     setOpenPositionSlippage(value);
+                                    setOpenPositionError('');
+                                }}
+                                onSwapProviderPolicyChange={(value) => {
+                                    setOpenPositionSwapProviderPolicy(value);
                                     setOpenPositionError('');
                                 }}
                                 onApplyRecommendedAmount={(value) => {
@@ -4063,6 +4070,7 @@ export default function App() {
                             <OpenPositionEntrySwapPreviewPanel
                                 loading={openPositionEntrySwapPreviewLoading}
                                 preview={openPositionEntrySwapPreview}
+                                swapProviderPolicy={openPositionSwapProviderPolicy}
                                 slippage={openPositionEntrySwapSlippage}
                                 brand={brand}
                                 onSlippageChange={(value) => {

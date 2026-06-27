@@ -20,6 +20,7 @@ export default function useOpenPositionDraft() {
     const [openPositionInvertPrice, setOpenPositionInvertPrice] = useState(false);
     const [openPositionGridBoundaryTarget, setOpenPositionGridBoundaryTarget] = useState('lower');
     const [openPositionSlippage, setOpenPositionSlippage] = useState('');
+    const [openPositionSwapProviderPolicy, setOpenPositionSwapProviderPolicy] = useState('best');
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionPrepareChecks, setOpenPositionPrepareChecks] = useState([]);
     const [openPositionChecks, setOpenPositionChecks] = useState([]);
@@ -74,6 +75,7 @@ export default function useOpenPositionDraft() {
         setOpenPositionPriceUpper('');
         setOpenPositionGridBoundaryTarget('lower');
         setOpenPositionSlippage('');
+        setOpenPositionSwapProviderPolicy('best');
         setOpenPositionPrepareChecks([]);
         setOpenPositionEntrySwapPreview(null);
         setOpenPositionEntrySwapPreviewLoading(false);
@@ -127,6 +129,8 @@ export default function useOpenPositionDraft() {
         setOpenPositionGridBoundaryTarget,
         openPositionSlippage,
         setOpenPositionSlippage,
+        openPositionSwapProviderPolicy,
+        setOpenPositionSwapProviderPolicy,
         openPositionError,
         setOpenPositionError,
         openPositionPrepareChecks,

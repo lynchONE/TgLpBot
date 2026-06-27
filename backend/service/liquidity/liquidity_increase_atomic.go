@@ -404,7 +404,7 @@ func (s *LiquidityService) increaseV3LiquidityAtomic(
 			plan.EntrySymbol,
 			cc,
 		)
-		swapParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, stableToken, entryToken, stableAmount, entrySlippage)
+		swapParams, out, _, err := s.prepareProviderSwapParams(cc, zapAddr, stableToken, entryToken, stableAmount, entrySlippage, effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			return nil, fmt.Errorf("prepare entry swap failed: %w", err)
 		}
@@ -436,7 +436,7 @@ func (s *LiquidityService) increaseV3LiquidityAtomic(
 			swapTokenIn = token1
 			swapTokenOut = token0
 		}
-		swapParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
+		swapParams, out, _, err := s.prepareProviderSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			return nil, fmt.Errorf("prepare rebalance swap failed: %w", err)
 		}
@@ -625,7 +625,7 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 			plan.EntrySymbol,
 			cc,
 		)
-		swapParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, stableToken, entryToken, stableAmount, entrySlippage)
+		swapParams, out, _, err := s.prepareProviderSwapParams(cc, zapAddr, stableToken, entryToken, stableAmount, entrySlippage, effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			return nil, fmt.Errorf("prepare entry swap failed: %w", err)
 		}
@@ -660,7 +660,7 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 		if err != nil {
 			return nil, err
 		}
-		swapParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapFromFunding, swapToFunding, swapAmount, task.SlippageTolerance)
+		swapParams, out, _, err := s.prepareProviderSwapParams(cc, zapAddr, swapFromFunding, swapToFunding, swapAmount, task.SlippageTolerance, effectiveTaskSwapProviderPolicy(task))
 		if err != nil {
 			return nil, fmt.Errorf("prepare rebalance swap failed: %w", err)
 		}

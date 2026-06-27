@@ -13,6 +13,7 @@ import {
   shortAddress,
 } from '../utils';
 import { TASK_MODE_OPTIONS, getTaskModeMeta, normalizeTaskMode } from '../taskModes';
+import { getSwapProviderPolicyOption } from '../swapProviderPolicy';
 
 const POSITION_SM_RANGE_LIMIT = 4;
 const FEE_TIER_BY_TICK_SPACING = {
@@ -230,6 +231,7 @@ function PositionCard({
   const dex = getDexIcon(`${String(p?.exchange || '').trim()} ${String(p?.version || '').trim()}`);
   const currentTaskMode = normalizeTaskMode(p?.task_mode, p?.task_paused);
   const currentTaskModeMeta = getTaskModeMeta(currentTaskMode);
+  const swapProviderOption = getSwapProviderPolicyOption(p?.swap_provider_policy);
 
   const statusClass = statusLabel.includes('错误') ? 'st-error' :
     statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
@@ -274,6 +276,7 @@ function PositionCard({
             <span className="pos-wallet-chip">钱包 {positionWalletText}</span>
             {taskId > 0 && <span className="pos-task-id">#{taskId}</span>}
             {taskId > 0 && <span className="pos-wallet-chip">{currentTaskModeMeta.shortLabel}</span>}
+            {taskId > 0 && <span className="pos-wallet-chip">兑换 {swapProviderOption.shortLabel}</span>}
             <span className={`range-pill ${inRange ? 'in' : 'out'}`}>
               {inRange ? 'In Range' : 'Out'}
               {priceRange?.outOfRange && (

@@ -78,6 +78,8 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
 
     address public okxSwapRouter;
     address public okxTokenApprove;
+    mapping(address => bool) public trustedSwapTargets;
+    mapping(address => bool) public trustedApproveTargets;
     address public v3PositionManager;
     mapping(address => bool) public trustedV3PositionManagers;
     address public v4PositionManager;
@@ -91,6 +93,8 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     );
 
     event TrustedV3PositionManagerUpdated(address indexed positionManager, bool trusted);
+    event TrustedSwapTargetUpdated(address indexed target, bool trusted);
+    event TrustedApproveTargetUpdated(address indexed target, bool trusted);
     event WrappedNativeUpdated(address indexed wrappedNative);
 
     event ZapIncreaseV3(
@@ -186,7 +190,33 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         okxTokenApprove = _okxTokenApprove;
         v3PositionManager = _v3PositionManager;
         v4PositionManager = _v4PositionManager;
+        if (_okxSwapRouter != address(0)) {
+            trustedSwapTargets[_okxSwapRouter] = true;
+            emit TrustedSwapTargetUpdated(_okxSwapRouter, true);
+        }
+        if (_okxTokenApprove != address(0)) {
+            trustedApproveTargets[_okxTokenApprove] = true;
+            emit TrustedApproveTargetUpdated(_okxTokenApprove, true);
+        }
         emit TrustedAddressesUpdated(_okxSwapRouter, _okxTokenApprove, _v3PositionManager, _v4PositionManager);
+    }
+
+    function setTrustedSwapTargets(address[] calldata targets, bool trusted) external onlyOwner {
+        for (uint256 i = 0; i < targets.length; i++) {
+            address target = targets[i];
+            require(target != address(0), "bad swap target");
+            trustedSwapTargets[target] = trusted;
+            emit TrustedSwapTargetUpdated(target, trusted);
+        }
+    }
+
+    function setTrustedApproveTargets(address[] calldata targets, bool trusted) external onlyOwner {
+        for (uint256 i = 0; i < targets.length; i++) {
+            address target = targets[i];
+            require(target != address(0), "bad approve target");
+            trustedApproveTargets[target] = trusted;
+            emit TrustedApproveTargetUpdated(target, trusted);
+        }
     }
 
     function setTrustedV3PositionManagers(address[] calldata positionManagers, bool trusted) external onlyOwner {
@@ -206,6 +236,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
 
     function zapIncreaseV3(ZapIncreaseV3Params calldata params)
         external
+        onlyOwner
         nonReentrant
         returns (ZapResult memory result)
     {
@@ -305,6 +336,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
 
     function zapIncreaseV4(ZapIncreaseV4Params calldata params)
         external
+        onlyOwner
         nonReentrant
         returns (ZapResult memory result)
     {
@@ -589,12 +621,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     }
 
     function _validateTrustedSwap(SwapParams calldata swap) internal view {
-        require(swap.target == okxSwapRouter, "swap target");
-        if (okxTokenApprove != address(0)) {
-            require(swap.approveTarget == okxTokenApprove, "approve target");
-        } else {
-            require(swap.approveTarget == address(0), "approve target");
-        }
+        require(swap.target != address(0), "swap target");
         require(swap.tokenIn != address(0) && swap.tokenOut != address(0), "swap token");
         require(swap.tokenIn != swap.tokenOut, "swap same");
         require(swap.amountIn > 0, "swap amount");
@@ -602,13 +629,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
 
     function _executeSwap(SwapParams calldata swap) internal {
         require(swap.amountIn > 0, "swap amount");
-        require(okxSwapRouter != address(0), "router unset");
-        require(swap.target == okxSwapRouter, "swap target");
-        if (okxTokenApprove != address(0)) {
-            require(swap.approveTarget == okxTokenApprove, "approve target");
-        } else {
-            require(swap.approveTarget == address(0), "approve target");
-        }
+        require(swap.target != address(0), "swap target");
 
         address spender = swap.approveTarget != address(0) ? swap.approveTarget : swap.target;
         IERC20(swap.tokenIn).forceApprove(spender, swap.amountIn);

@@ -46,6 +46,7 @@ type TradeRecord struct {
 
 	ClosedAt          *time.Time        `gorm:"index" json:"closed_at"`
 	CloseTxHash       string            `gorm:"size:66" json:"close_tx_hash"`
+	CloseTxDetails    string            `gorm:"type:text" json:"close_tx_details"`
 	CloseUSDTReceived string            `gorm:"type:varchar(78)" json:"close_usdt_received"`    // wei (1e18)
 	CloseStableBefore string            `gorm:"type:varchar(78)" json:"close_stable_before"`    // stable balance before exit, normalized to 1e18
 	CloseStableAfter  string            `gorm:"type:varchar(78)" json:"close_stable_after"`     // stable balance after exit, normalized to 1e18

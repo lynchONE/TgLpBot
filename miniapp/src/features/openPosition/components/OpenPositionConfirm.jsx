@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 
+import { formatSwapRouteInfo, getSwapProviderPolicyOption } from '../../../lib/swapProviderPolicy';
 import { TASK_MODE_OPTIONS } from '../../../lib/taskModes';
 import { formatDCAIntervalHint } from '../format';
 
@@ -192,11 +193,14 @@ export function OpenPositionPrecheckPanel({
 export function OpenPositionEntrySwapPreviewPanel({
     loading,
     preview,
+    swapProviderPolicy,
     slippage,
     brand,
     onSlippageChange,
 }) {
     if (!loading && !preview?.required) return null;
+    const routeLabel = formatSwapRouteInfo(preview);
+    const policyOption = getSwapProviderPolicyOption(swapProviderPolicy);
 
     return (
         <div className="rounded-xl border border-amber-400/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent px-3 py-2 dark:border-amber-400/25 dark:from-amber-400/10 dark:via-amber-400/5">
@@ -218,6 +222,9 @@ export function OpenPositionEntrySwapPreviewPanel({
                         <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
                             建议滑点 {Number(preview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
                         </span>
+                    </div>
+                    <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-[10px] font-semibold leading-4 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100">
+                        报价渠道：{routeLabel || policyOption.label}
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-3">
                         <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-200">本次前置兑换滑点</span>

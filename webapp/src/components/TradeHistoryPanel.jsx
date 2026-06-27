@@ -50,6 +50,13 @@ function formatPositionDuration(openedAt, closedAt) {
   return `${day}天${hour % 24 ? `${hour % 24}小时` : ''}`;
 }
 
+function formatCloseTxDetailLabel(detail) {
+  const text = String(detail || '').trim();
+  if (!text) return '';
+  const parts = text.split('|');
+  return String(parts[0] || text).trim();
+}
+
 function aggregateTradeSummary(records) {
   const closed = records.filter((record) => record.status === 'closed');
   const totalInvested = records.reduce((acc, record) => acc + (Number(record.open_usdt_spent) || 0), 0);
@@ -185,6 +192,9 @@ function TradeRecordCard({ record }) {
   const hasCloseSnapshot = Number(record.close_stable_before || 0) > 0 || Number(record.close_stable_after || 0) > 0;
   const showGas = record.status === 'closed' && Number(record.total_gas_usdt || 0) > 0;
   const duration = formatPositionDuration(record.opened_at, record.closed_at);
+  const closeTxDetails = Array.isArray(record.close_tx_details)
+    ? record.close_tx_details.map(formatCloseTxDetailLabel).filter(Boolean)
+    : [];
 
   return (
     <div className={`trade-record-card trade-record-card--asset${record.status === 'closed' ? (profitPositive ? ' has-profit' : profitNegative ? ' has-loss' : '') : ''}`}>
@@ -245,6 +255,16 @@ function TradeRecordCard({ record }) {
         ) : null}
         {showGas ? <DetailCell label="Gas 费" value={formatUsd(record.total_gas_usdt)} accent="warn" /> : null}
       </div>
+
+      {closeTxDetails.length > 0 ? (
+        <div className="trade-record-links">
+          {closeTxDetails.map((detail, index) => (
+            <span key={`${detail}-${index}`} className="am-badge">
+              撤仓路由：{detail}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {(record.open_tx_url || record.close_tx_url) ? (
         <div className="trade-record-links">
