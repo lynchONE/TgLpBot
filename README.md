@@ -145,8 +145,6 @@ ENCRYPTION_KEY=your_32_byte_hex_key_here
 OKX_API_KEY=your_okx_api_key
 OKX_SECRET_KEY=your_okx_secret_key
 OKX_PASSPHRASE=your_okx_passphrase
-OKX_SWAP_ROUTER=0x...  # OKX DEX Router 地址
-OKX_TOKEN_APPROVE_ADDRESS=0x...  # OKX DEX TokenApprove 合约地址（BSC: 0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f）
 OKX_SWAP_FEE_RECIPIENT=0x7FC630A70948A8d21cD7C7cFA8f203D7b7e120F2
 OKX_SWAP_FEE_PERCENT=0.000000001  # OKX feePercent，按百分比填写，最小启用值
 OKX_SWAP_FEE_TOKEN=to  # to=toToken 分佣，from=fromToken 分佣
@@ -440,12 +438,10 @@ UNISWAP_V3_NPM_ADDRESS=0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613
 
 ### OKX Swap 调用失败 (Swap call failed)
 **常见原因**：
-1. **未配置 OKX_TOKEN_APPROVE_ADDRESS**：OKX DEX 使用单独的 TokenApprove 合约接收代币 approve，而非直接 approve 给 Router。
-   - BSC 主网地址: `0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f`
-   - 请在 `.env` 中添加: `OKX_TOKEN_APPROVE_ADDRESS=0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f`
-2. **OKX calldata 过期**：OKX 返回的 swap 数据有 deadline（通常几分钟），如果交易确认慢，可能过期。
-3. **滑点设置太小**：如果价格变动超过设置的滑点，swap 会失败。
-4. **Zap 合约代币余额不足**：确保用户已经 approve 足够的代币给 Zap 合约。
+1. **OKX calldata 过期**：OKX 返回的 swap 数据有 deadline（通常几分钟），如果交易确认慢，可能过期。
+2. **滑点设置太小**：如果价格变动超过设置的滑点，swap 会失败。
+3. **余额或授权不足**：确保钱包或私有 Zap 合约有足够余额，并且已完成必要授权。
+4. **单一路由失败**：系统会在 OKX/Binance 之间尝试备用路由；如果两边都失败，需要检查代币流动性、黑名单/税费机制或链上 revert 原因。
 
 ### Redis connection errors
 - Verify Redis is running

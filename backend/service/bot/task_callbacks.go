@@ -273,9 +273,9 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 				"error_message":       "",
 			})
 			stableSym, _, _ := stableSymbolForChain(task.Chain)
-			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已切换为手动停止：系统将继续撤出并兑换 %s（最多重试 3 次）。", stableSym))
+			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已切换为手动停止：系统将继续撤出并兑换 %s（最多重试 %d 次）。", stableSym, strategy.MaxExitRetryAttempts))
 		} else {
-			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("⏳ 正在撤出中（已失败 %d 次，最多 3 次），请稍候…", task.ExitRetryCount))
+			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("⏳ 正在撤出中（已失败 %d 次，最多 %d 次），请稍候…", task.ExitRetryCount, strategy.MaxExitRetryAttempts))
 		}
 		task, _ = b.taskService.GetByID(user.ID, taskID)
 		b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
@@ -360,7 +360,7 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	}
 
 	stableSym, _, _ := stableSymbolForChain(task.Chain)
-	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已提交手动停止：后台将撤出流动性并兑换成 %s（最多重试 3 次）。", stableSym))
+	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已提交手动停止：后台将撤出流动性并兑换成 %s（最多重试 %d 次）。", stableSym, strategy.MaxExitRetryAttempts))
 
 	task, _ = b.taskService.GetByID(user.ID, taskID)
 	finalText := "🛑 *已提交停止请求* (后台处理中)\n\n" + rewriteRebalanceTimeoutText(b.formatTaskCard(task))

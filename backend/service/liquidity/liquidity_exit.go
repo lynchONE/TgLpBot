@@ -2084,9 +2084,6 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 
 	swapTx := blockchain.OkxSwapTx{To: to, Value: value, Data: data}
 	_ = ValidateOkxSmartSwapTx("swap", swapTx)
-	if err := EnforceOkxSwapRouter("swap", cc.OKXSwapRouter, swapTx); err != nil {
-		return "", err
-	}
 
 	// 获取 OKX TokenApprove 合约地址
 	chainIDText := fmt.Sprintf("%d", cc.ChainID)

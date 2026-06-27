@@ -19,6 +19,8 @@ const (
 	ExitActionFollowDownside = "follow_downside_exit"
 	ExitActionRebalance      = "rebalance"
 	ExitActionSwitch         = "switch"
+
+	MaxExitRetryAttempts = 5
 )
 
 func localizeExitReason(reason string) string {
@@ -368,6 +370,16 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		return true
 	}
 
+	if task.ExitRetryCount >= MaxExitRetryAttempts {
+		err := fmt.Errorf("exit retry reached max attempts (%d)", MaxExitRetryAttempts)
+		if lastErr := strings.TrimSpace(task.ExitLastError); lastErr != "" {
+			err = fmt.Errorf("exit retry reached max attempts (%d): %s", MaxExitRetryAttempts, lastErr)
+		}
+		s.giveUpExitRetry(task, err, MaxExitRetryAttempts)
+		s.notify(task.UserID, fmt.Sprintf("⚠️ 撤仓/兑换已失败 %d 次，已停止自动重试。任务保持运行中，请手动处理剩余 token。\n最后错误：%v", MaxExitRetryAttempts, err))
+		return true
+	}
+
 	// 检查内存锁：如果任务已在执行中，跳过本次提交
 	s.inflightTasksMu.Lock()
 	if submitTime, exists := s.inflightTasks[task.ID]; exists {
@@ -462,6 +474,15 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 	// 如果在这里检查会导致直接返回而不执行撤退操作。
 
 	attempt := task.ExitRetryCount + 1
+	if attempt > MaxExitRetryAttempts {
+		err := fmt.Errorf("exit retry reached max attempts (%d)", MaxExitRetryAttempts)
+		if lastErr := strings.TrimSpace(task.ExitLastError); lastErr != "" {
+			err = fmt.Errorf("exit retry reached max attempts (%d): %s", MaxExitRetryAttempts, lastErr)
+		}
+		s.giveUpExitRetry(&task, err, MaxExitRetryAttempts)
+		s.notify(task.UserID, fmt.Sprintf("⚠️ 撤仓/兑换已失败 %d 次，已停止自动重试。任务保持运行中，请手动处理剩余 token。\n最后错误：%v", MaxExitRetryAttempts, err))
+		return
+	}
 	pendingReason := strings.TrimSpace(task.ExitPendingReason)
 	reason := pendingReason
 	if reason == "" {
@@ -876,11 +897,21 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 	}
 
 	if !shouldRetryExitError(err) {
-		s.giveUpExitRetry(task, err)
+		s.giveUpExitRetry(task, err, attempt)
 		if swapFailed {
 			s.notify(task.UserID, fmt.Sprintf("❌ 已撤出流动性，但兑换 USDT 失败且该错误不会自动重试。\n任务保持运行中，请到钱包手动处理剩余 token。\n最后错误：%v%s", err, txText))
 		} else {
 			s.notify(task.UserID, fmt.Sprintf("❌ 撤出/兑换失败，且该错误不会自动重试。\n任务保持运行中，请确认钱包、授权和链配置后再手动重试。\n最后错误：%v%s", err, txText))
+		}
+		return
+	}
+
+	if attempt >= MaxExitRetryAttempts {
+		s.giveUpExitRetry(task, err, attempt)
+		if swapFailed {
+			s.notify(task.UserID, fmt.Sprintf("⚠️ 已撤出流动性，但兑换 USDT 连续失败 %d 次，已停止自动重试。\n任务保持运行中，请到钱包手动处理剩余 token。\n最后错误：%v%s", MaxExitRetryAttempts, err, txText))
+		} else {
+			s.notify(task.UserID, fmt.Sprintf("⚠️ 撤出/兑换连续失败 %d 次，已停止自动重试。\n任务保持运行中，请确认钱包、授权和链配置后再手动处理。\n最后错误：%v%s", MaxExitRetryAttempts, err, txText))
 		}
 		return
 	}
@@ -940,21 +971,26 @@ func (s *StrategyService) clearExitRetryState(task *models.StrategyTask) {
 	task.ExitGiveUpAt = nil
 }
 
-func (s *StrategyService) giveUpExitRetry(task *models.StrategyTask, err error) {
+func (s *StrategyService) giveUpExitRetry(task *models.StrategyTask, err error, attempts int) {
 	if task == nil {
 		return
 	}
 
 	now := time.Now()
 	errText := strings.TrimSpace(fmt.Sprintf("%v", err))
+	if attempts < task.ExitRetryCount {
+		attempts = task.ExitRetryCount
+	}
 
 	updates := map[string]interface{}{
 		"status":              models.StrategyStatusRunning,
 		"exit_pending_action": "",
 		"exit_pending_reason": "",
+		"exit_retry_count":    attempts,
 		"exit_next_retry_at":  nil,
 		"exit_last_error":     errText,
 		"exit_give_up_at":     &now,
+		"exit_gas_multiplier": 1.0,
 		"error_message":       "",
 	}
 	_ = database.DB.Model(task).Updates(updates).Error
@@ -962,9 +998,11 @@ func (s *StrategyService) giveUpExitRetry(task *models.StrategyTask, err error) 
 	task.Status = models.StrategyStatusRunning
 	task.ExitPendingAction = ""
 	task.ExitPendingReason = ""
+	task.ExitRetryCount = attempts
 	task.ExitNextRetryAt = nil
 	task.ExitLastError = errText
 	task.ExitGiveUpAt = &now
+	task.ExitGasMultiplier = 1.0
 }
 
 func (s *StrategyService) executeRebalanceAfterExit(task *models.StrategyTask, now time.Time) {

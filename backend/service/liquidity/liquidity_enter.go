@@ -295,21 +295,6 @@ func ValidateOkxSmartSwapTx(label string, tx blockchain.OkxSwapTx) error {
 	return nil
 }
 
-func EnforceOkxSwapRouter(label string, expectedRouter string, tx blockchain.OkxSwapTx) error {
-	expectedStr := strings.TrimSpace(expectedRouter)
-	if expectedStr == "" || !common.IsHexAddress(expectedStr) {
-		return nil
-	}
-	if len(tx.Data) == 0 {
-		return nil
-	}
-	expected := common.HexToAddress(expectedStr)
-	if tx.To != expected {
-		return fmt.Errorf("%s OKX tx.to mismatch: got %s, want %s (OKX_SWAP_ROUTER)", label, tx.To.Hex(), expected.Hex())
-	}
-	return nil
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -2053,19 +2038,14 @@ func (s *LiquidityService) prepareOKXSwapParamsWithInfo(
 		return nil, nil, SwapRouteInfo{}, fmt.Errorf("OKX swap(zap) returned empty calldata")
 	}
 
-	approveTarget := common.HexToAddress(okxData.Data[0].Tx.To)
-	if strings.TrimSpace(cc.OKXTokenApproveAddress) != "" && common.IsHexAddress(cc.OKXTokenApproveAddress) {
-		approveTarget = common.HexToAddress(cc.OKXTokenApproveAddress)
-	}
-
 	apiTarget := common.HexToAddress(okxData.Data[0].Tx.To)
-	target := apiTarget
-	if strings.TrimSpace(cc.OKXSwapRouter) != "" && common.IsHexAddress(cc.OKXSwapRouter) {
-		confTarget := common.HexToAddress(cc.OKXSwapRouter)
-		if confTarget != apiTarget {
-			log.Printf("[Liquidity] ⚠️ WARNING: Configured OKX Router (%s) mismatch API returned (%s). Using Configured.", confTarget.Hex(), apiTarget.Hex())
-		}
-		target = confTarget
+	approveTarget := apiTarget
+	if spender, err := s.okxService.GetApproveSpender(fmt.Sprintf("%d", cc.ChainID), okxTokenAddressParam(tokenIn)); err != nil {
+		log.Printf("[Liquidity] Warning: failed to get OKX approve spender for zap, using swap target as fallback: %v", err)
+	} else if !common.IsHexAddress(spender) {
+		return nil, nil, SwapRouteInfo{}, fmt.Errorf("OKX approve spender invalid: %s", spender)
+	} else {
+		approveTarget = common.HexToAddress(spender)
 	}
 
 	info := SwapRouteInfo{
@@ -2077,7 +2057,7 @@ func (s *LiquidityService) prepareOKXSwapParamsWithInfo(
 	}
 
 	return &blockchain.SwapParamsSimple{
-		Target:        target,
+		Target:        apiTarget,
 		ApproveTarget: approveTarget,
 		TokenIn:       tokenIn,
 		TokenOut:      tokenOut,

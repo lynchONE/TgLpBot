@@ -60,10 +60,6 @@ type ChainConfig struct {
 	WrappedNativeSymbol  string
 	WrappedNativeAddress string
 
-	// OKX DEX router validation (used by direct OKX swap execution).
-	OKXSwapRouter          string
-	OKXTokenApproveAddress string
-
 	// Zap contracts (V3/V4 can be same address).
 	ZapV3Address string
 	ZapV4Address string
@@ -133,8 +129,6 @@ type Config struct {
 	OKXAPIKey                 string
 	OKXSecretKey              string
 	OKXPassphrase             string
-	OKXSwapRouter             string
-	OKXTokenApproveAddress    string // OKX DEX TokenApprove contract address
 	OKXDebug                  bool
 	OKXSwapFeeRecipient       string
 	OKXSwapFeePercent         string
@@ -369,8 +363,6 @@ func LoadConfig() error {
 		OKXAPIKey:                 getEnv("OKX_API_KEY", ""),
 		OKXSecretKey:              getEnv("OKX_SECRET_KEY", ""),
 		OKXPassphrase:             getEnv("OKX_PASSPHRASE", ""),
-		OKXSwapRouter:             getEnv("OKX_SWAP_ROUTER", ""),
-		OKXTokenApproveAddress:    getEnv("OKX_TOKEN_APPROVE_ADDRESS", ""),
 		OKXDebug:                  getEnvBool("OKX_DEBUG", false),
 		OKXSwapFeeRecipient:       strings.TrimSpace(getEnv("OKX_SWAP_FEE_RECIPIENT", defaultOKXSwapFeeRecipient)),
 		OKXSwapFeePercent:         strings.TrimSpace(getEnv("OKX_SWAP_FEE_PERCENT", defaultOKXSwapFeePercent)),
@@ -485,8 +477,6 @@ func LoadConfig() error {
 	log.Printf("   - Uniswap V4 Debug: %v", AppConfig.UniswapV4Debug)
 	log.Printf("   - Zap V3: %s", AppConfig.ZapV3Address)
 	log.Printf("   - Zap V4: %s", AppConfig.ZapV4Address)
-	log.Printf("   - OKX Swap Router: %s", AppConfig.OKXSwapRouter)
-	log.Printf("   - OKX TokenApprove: %s", AppConfig.OKXTokenApproveAddress)
 	log.Printf("   - OKX Debug: %v", AppConfig.OKXDebug)
 	log.Printf("   - OKX Swap Fee Recipient: %s", AppConfig.OKXSwapFeeRecipient)
 	log.Printf("   - OKX Swap Fee Percent: %s", AppConfig.OKXSwapFeePercent)
@@ -731,9 +721,6 @@ func (c *Config) initChainConfigs() {
 			pancakeFactory := getEnv("PANCAKE_V3_FACTORY_ADDRESS", "0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865")
 			uniswapFactory := getEnv("UNISWAP_V3_FACTORY_ADDRESS", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7")
 
-			okxRouter := pickFirstNonEmpty(getEnvStr("OKX_SWAP_ROUTER_BSC"), c.OKXSwapRouter)
-			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BSC"), c.OKXTokenApproveAddress)
-
 			cc := ChainConfig{
 				Chain:             "bsc",
 				Kind:              ChainKindEVM,
@@ -751,9 +738,6 @@ func (c *Config) initChainConfigs() {
 
 				WrappedNativeSymbol:  "WBNB",
 				WrappedNativeAddress: strings.TrimSpace(c.WBNBAddress),
-
-				OKXSwapRouter:          okxRouter,
-				OKXTokenApproveAddress: okxApprove,
 
 				ZapV3Address: strings.TrimSpace(c.ZapV3Address),
 				ZapV4Address: strings.TrimSpace(c.ZapV4Address),
@@ -773,10 +757,6 @@ func (c *Config) initChainConfigs() {
 			chains[chain] = cc
 
 		case "base":
-			// Allow per-chain overrides; fall back to global OKX router settings when not set.
-			okxRouter := pickFirstNonEmpty(getEnvStr("OKX_SWAP_ROUTER_BASE"), c.OKXSwapRouter)
-			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BASE"), c.OKXTokenApproveAddress)
-
 			uniswapFactory := getEnvStr("BASE_UNISWAP_V3_FACTORY_ADDRESS")
 			uniswapNPM := getEnvStr("BASE_UNISWAP_V3_NPM_ADDRESS")
 			aeroFactory := getEnvStr("BASE_AERODROME_V3_FACTORY_ADDRESS")
@@ -798,9 +778,6 @@ func (c *Config) initChainConfigs() {
 
 				WrappedNativeSymbol:  "WETH",
 				WrappedNativeAddress: strings.TrimSpace(getEnvStr("BASE_WETH_ADDRESS")),
-
-				OKXSwapRouter:          okxRouter,
-				OKXTokenApproveAddress: okxApprove,
 
 				ZapV3Address: strings.TrimSpace(getEnvStr("BASE_ZAP_V3_ADDRESS")),
 				ZapV4Address: strings.TrimSpace(getEnvStr("BASE_ZAP_V4_ADDRESS")),

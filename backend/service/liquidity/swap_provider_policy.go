@@ -8,6 +8,7 @@ import (
 	"TgLpBot/service/exchange"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -301,23 +302,104 @@ func (s *LiquidityService) quoteBestBinanceSwapRoute(
 	return best, nil
 }
 
-func betterProviderQuote(a *providerQuote, b *providerQuote) *providerQuote {
+func sortProviderQuotesByAmountOut(quotes []*providerQuote) {
+	for i := 1; i < len(quotes); i++ {
+		q := quotes[i]
+		j := i - 1
+		for ; j >= 0; j-- {
+			if providerQuoteAmountCmp(quotes[j], q) >= 0 {
+				break
+			}
+			quotes[j+1] = quotes[j]
+		}
+		quotes[j+1] = q
+	}
+}
+
+func providerQuoteAmountCmp(a *providerQuote, b *providerQuote) int {
+	if a == nil && b == nil {
+		return 0
+	}
 	if a == nil {
-		return b
+		return -1
 	}
 	if b == nil {
-		return a
+		return 1
+	}
+	if a.amountOut == nil && b.amountOut == nil {
+		return 0
 	}
 	if a.amountOut == nil {
-		return b
+		return -1
 	}
 	if b.amountOut == nil {
-		return a
+		return 1
 	}
-	if b.amountOut.Cmp(a.amountOut) > 0 {
-		return b
+	return a.amountOut.Cmp(b.amountOut)
+}
+
+func swapProviderFallbackOrder(policy models.StrategySwapProviderPolicy) []models.StrategySwapProviderPolicy {
+	switch policy {
+	case models.StrategySwapProviderOKX:
+		return []models.StrategySwapProviderPolicy{models.StrategySwapProviderOKX, models.StrategySwapProviderBinance}
+	case models.StrategySwapProviderBinance:
+		return []models.StrategySwapProviderPolicy{models.StrategySwapProviderBinance, models.StrategySwapProviderOKX}
+	default:
+		return nil
 	}
-	return a
+}
+
+func (s *LiquidityService) quoteSwapRoutesByPolicy(
+	exec chainexec.EVMExecutor,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	tokenOut common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+	policy models.StrategySwapProviderPolicy,
+) ([]*providerQuote, []error, error) {
+	var (
+		quotes []*providerQuote
+		errs   []error
+	)
+	addQuote := func(provider models.StrategySwapProviderPolicy) {
+		var (
+			q   *providerQuote
+			err error
+		)
+		switch provider {
+		case models.StrategySwapProviderOKX:
+			q, err = s.quoteOKXSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+		case models.StrategySwapProviderBinance:
+			q, err = s.quoteBestBinanceSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn)
+		default:
+			err = fmt.Errorf("unsupported swap provider policy: %s", provider)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s quote failed: %w", swapProviderDisplayName(string(provider)), err))
+			return
+		}
+		if q != nil {
+			quotes = append(quotes, q)
+		}
+	}
+
+	switch policy {
+	case models.StrategySwapProviderBest:
+		addQuote(models.StrategySwapProviderOKX)
+		addQuote(models.StrategySwapProviderBinance)
+		sortProviderQuotesByAmountOut(quotes)
+	case models.StrategySwapProviderOKX, models.StrategySwapProviderBinance:
+		for _, provider := range swapProviderFallbackOrder(policy) {
+			addQuote(provider)
+		}
+	default:
+		return nil, errs, fmt.Errorf("unsupported swap provider policy: %s", policy)
+	}
+	if len(quotes) == 0 {
+		return nil, errs, fmt.Errorf("no executable swap quote: %v", errs)
+	}
+	return quotes, errs, nil
 }
 
 func (s *LiquidityService) quoteSwapByPolicy(
@@ -329,36 +411,20 @@ func (s *LiquidityService) quoteSwapByPolicy(
 	slippagePercent float64,
 	policy models.StrategySwapProviderPolicy,
 ) (*providerQuote, error) {
-	switch policy {
-	case models.StrategySwapProviderOKX:
+	if policy == models.StrategySwapProviderOKX {
 		return s.quoteOKXSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
-	case models.StrategySwapProviderBinance:
-		return s.quoteBestBinanceSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn)
-	case models.StrategySwapProviderBest:
-		var (
-			best *providerQuote
-			errs []error
-		)
-		if q, err := s.quoteOKXSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent); err != nil {
-			errs = append(errs, fmt.Errorf("OKX quote failed: %w", err))
-		} else {
-			best = betterProviderQuote(best, q)
-		}
-		if q, err := s.quoteBestBinanceSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn); err != nil {
-			errs = append(errs, fmt.Errorf("Binance quote failed: %w", err))
-		} else {
-			best = betterProviderQuote(best, q)
-		}
-		if best == nil {
-			return nil, fmt.Errorf("no executable swap quote: %v", errs)
-		}
-		return best, nil
-	default:
-		return nil, fmt.Errorf("unsupported swap provider policy: %s", policy)
 	}
+	if policy == models.StrategySwapProviderBinance {
+		return s.quoteBestBinanceSwapRoute(exec, walletAddr, tokenIn, tokenOut, amountIn)
+	}
+	quotes, _, err := s.quoteSwapRoutesByPolicy(exec, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent, policy)
+	if err != nil {
+		return nil, err
+	}
+	return quotes[0], nil
 }
 
-func (s *LiquidityService) executeSwapByPolicy(
+func (s *LiquidityService) executeProviderQuote(
 	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
@@ -366,24 +432,15 @@ func (s *LiquidityService) executeSwapByPolicy(
 	tokenOut common.Address,
 	amountIn *big.Int,
 	slippagePercent float64,
-	policy models.StrategySwapProviderPolicy,
+	quote *providerQuote,
 ) (*providerExecutionResult, error) {
-	if amountIn == nil || amountIn.Sign() <= 0 || tokenIn == tokenOut {
-		return &providerExecutionResult{
-			AmountOut: cloneBig(amountIn),
-			Info: SwapRouteInfo{
-				Provider:     string(policy),
-				ProviderName: swapProviderDisplayName(string(policy)),
-				AmountInRaw:  "0",
-				AmountOutRaw: "0",
-			},
-		}, nil
+	if quote == nil {
+		return nil, fmt.Errorf("swap quote is nil")
 	}
-	quote, err := s.quoteSwapByPolicy(exec, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent, policy)
-	if err != nil {
-		return nil, err
-	}
-	var r *okxSwapExecutionResult
+	var (
+		r   *okxSwapExecutionResult
+		err error
+	)
 	switch quote.info.Provider {
 	case "okx":
 		r, err = s.executeOKXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
@@ -411,6 +468,47 @@ func (s *LiquidityService) executeSwapByPolicy(
 		AmountOut: amountOut,
 		Info:      info,
 	}, nil
+}
+
+func (s *LiquidityService) executeSwapByPolicy(
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	tokenOut common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+	policy models.StrategySwapProviderPolicy,
+) (*providerExecutionResult, error) {
+	if amountIn == nil || amountIn.Sign() <= 0 || tokenIn == tokenOut {
+		return &providerExecutionResult{
+			AmountOut: cloneBig(amountIn),
+			Info: SwapRouteInfo{
+				Provider:     string(policy),
+				ProviderName: swapProviderDisplayName(string(policy)),
+				AmountInRaw:  "0",
+				AmountOutRaw: "0",
+			},
+		}, nil
+	}
+	quotes, quoteErrs, err := s.quoteSwapRoutesByPolicy(exec, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent, policy)
+	if err != nil {
+		return nil, err
+	}
+	errs := append([]error{}, quoteErrs...)
+	for idx, quote := range quotes {
+		result, execErr := s.executeProviderQuote(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent, quote)
+		if execErr == nil {
+			return result, nil
+		}
+		errs = append(errs, fmt.Errorf("%s execution failed: %w", quote.info.ProviderName, execErr))
+		if idx+1 < len(quotes) {
+			next := quotes[idx+1]
+			log.Printf("[Liquidity] swap provider %s failed, trying fallback %s: %v",
+				quote.info.ProviderName, next.info.ProviderName, execErr)
+		}
+	}
+	return nil, fmt.Errorf("all swap providers failed: %w", errors.Join(errs...))
 }
 
 func formatSwapRouteLabel(info SwapRouteInfo) string {

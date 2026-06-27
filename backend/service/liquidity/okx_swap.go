@@ -280,9 +280,6 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 
 	swapTx := blockchain.OkxSwapTx{To: to, Value: value, Data: data}
 	_ = ValidateOkxSmartSwapTx("swap", swapTx)
-	if err := EnforceOkxSwapRouter("swap", cc.OKXSwapRouter, swapTx); err != nil {
-		return nil, err
-	}
 
 	if tokenInIsNative {
 		log.Printf("[Liquidity] OKX native swap: chain=%s %s -> %s amount=%s router=%s value=%s",
@@ -298,17 +295,6 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 			return nil, fmt.Errorf("OKX approve spender invalid: %s", approveSpender)
 		}
 		approveAddr := common.HexToAddress(approveSpender)
-
-		allowedSpenders := map[common.Address]struct{}{
-			to:                        {},
-			blockchain.Permit2Address: {},
-		}
-		if common.IsHexAddress(cc.OKXTokenApproveAddress) {
-			allowedSpenders[common.HexToAddress(cc.OKXTokenApproveAddress)] = struct{}{}
-		}
-		if _, ok := allowedSpenders[approveAddr]; !ok {
-			return nil, fmt.Errorf("OKX approve spender not allowed: %s (router=%s tokenApprove=%s)", approveAddr.Hex(), to.Hex(), strings.TrimSpace(cc.OKXTokenApproveAddress))
-		}
 
 		log.Printf("[Liquidity] OKX swap: chain=%s %s -> %s amount=%s router=%s approveTarget=%s",
 			exec.Chain(), tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())

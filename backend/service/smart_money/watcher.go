@@ -814,10 +814,6 @@ func buildKnownProtocolAddresses(chainID int) map[string]struct{} {
 			addAddr(cc.UniswapV4PositionManagerAddress)
 			addAddr(cc.UniswapV4StateViewAddress)
 
-			// DEX routers / approve helpers
-			addAddr(cc.OKXSwapRouter)
-			addAddr(cc.OKXTokenApproveAddress)
-
 			// Wrapped native token (wrap/unwrap is not a real transfer)
 			addAddr(cc.WrappedNativeAddress)
 		}
@@ -829,8 +825,6 @@ func buildKnownProtocolAddresses(chainID int) map[string]struct{} {
 		addAddr(config.AppConfig.UniswapV4PositionManagerAddress)
 		addAddr(config.AppConfig.ZapV3Address)
 		addAddr(config.AppConfig.ZapV4Address)
-		addAddr(config.AppConfig.OKXSwapRouter)
-		addAddr(config.AppConfig.OKXTokenApproveAddress)
 		addAddr(config.AppConfig.PancakeV3SwapRouter)
 		addAddr(config.AppConfig.UniswapV3SwapRouter)
 		addAddr(config.AppConfig.PancakeRouterV2)
