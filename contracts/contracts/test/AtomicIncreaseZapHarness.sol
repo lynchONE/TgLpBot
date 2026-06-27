@@ -8,7 +8,8 @@ contract AtomicIncreaseZapHarness is AtomicIncreaseZap {
         _executeSwap(swap);
     }
 
-    function validateSwapForTest(SwapParams calldata swap) external view {
-        _validateTrustedSwap(swap);
+    function validateSwapForTest(SwapParams calldata swap) external pure {
+        _validateSwapParams(swap);
     }
 }
+

@@ -120,18 +120,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
                                  CONFIG
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Trusted OKX DEX router (BSC)
-    address public okxSwapRouter;
-
-    /// @notice Trusted OKX TokenApprove contract (BSC)
-    address public okxTokenApprove;
-
-    /// @notice Trusted swap call targets. Includes OKX router and optional Binance Web3 targets.
-    mapping(address => bool) public trustedSwapTargets;
-
-    /// @notice Trusted token approve spenders for external swap targets.
-    mapping(address => bool) public trustedApproveTargets;
-
     /// @notice Trusted V3 NonfungiblePositionManager (Pancake/Uniswap V3 style)
     address public v3PositionManager;
 
@@ -148,18 +136,9 @@ contract ZapSimple is ReentrancyGuard, Ownable {
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    event TrustedAddressesUpdated(
-        address okxSwapRouter,
-        address okxTokenApprove,
-        address v3PositionManager,
-        address v4PositionManager
-    );
+    event PositionManagersUpdated(address v3PositionManager, address v4PositionManager);
 
     event TrustedV3PositionManagerUpdated(address indexed positionManager, bool trusted);
-
-    event TrustedSwapTargetUpdated(address indexed target, bool trusted);
-
-    event TrustedApproveTargetUpdated(address indexed target, bool trusted);
 
     event WrappedNativeUpdated(address indexed wrappedNative);
 
@@ -284,47 +263,14 @@ contract ZapSimple is ReentrancyGuard, Ownable {
                            CORE FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Sets trusted external addresses (onlyOwner).
-    /// @dev Set these before enabling production usage; unsafe if left unset.
-    function setTrustedAddresses(
-        address _okxSwapRouter,
-        address _okxTokenApprove,
+    /// @notice Sets position manager addresses (onlyOwner).
+    function setPositionManagers(
         address _v3PositionManager,
         address _v4PositionManager
     ) external onlyOwner {
-        okxSwapRouter = _okxSwapRouter;
-        okxTokenApprove = _okxTokenApprove;
         v3PositionManager = _v3PositionManager;
         v4PositionManager = _v4PositionManager;
-        if (_okxSwapRouter != address(0)) {
-            trustedSwapTargets[_okxSwapRouter] = true;
-            emit TrustedSwapTargetUpdated(_okxSwapRouter, true);
-        }
-        if (_okxTokenApprove != address(0)) {
-            trustedApproveTargets[_okxTokenApprove] = true;
-            emit TrustedApproveTargetUpdated(_okxTokenApprove, true);
-        }
-        emit TrustedAddressesUpdated(_okxSwapRouter, _okxTokenApprove, _v3PositionManager, _v4PositionManager);
-    }
-
-    /// @notice Adds/removes trusted swap call targets (onlyOwner).
-    function setTrustedSwapTargets(address[] calldata targets, bool trusted) external onlyOwner {
-        for (uint256 i = 0; i < targets.length; i++) {
-            address target = targets[i];
-            require(target != address(0), "Invalid swap target");
-            trustedSwapTargets[target] = trusted;
-            emit TrustedSwapTargetUpdated(target, trusted);
-        }
-    }
-
-    /// @notice Adds/removes trusted approve targets for external swaps (onlyOwner).
-    function setTrustedApproveTargets(address[] calldata targets, bool trusted) external onlyOwner {
-        for (uint256 i = 0; i < targets.length; i++) {
-            address target = targets[i];
-            require(target != address(0), "Invalid approve target");
-            trustedApproveTargets[target] = trusted;
-            emit TrustedApproveTargetUpdated(target, trusted);
-        }
+        emit PositionManagersUpdated(_v3PositionManager, _v4PositionManager);
     }
 
     /// @notice Adds/removes trusted V3 NPMs (onlyOwner).

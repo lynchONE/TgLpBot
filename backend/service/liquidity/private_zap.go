@@ -28,11 +28,11 @@ import (
 const walletChainContractKindZapSimple = "zap_simple"
 const walletChainContractStatusDeployed = "deployed"
 const walletChainContractStatusReady = "ready"
-const privateZapSimpleBindingVersion = 5
-const privateAtomicIncreaseZapBindingVersion = 5
+const privateZapSimpleBindingVersion = 6
+const privateAtomicIncreaseZapBindingVersion = 6
 const privateZapCacheTTL = time.Hour
-const privateZapSimpleCachePrefix = "private_zap:binding:v5"
-const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v5"
+const privateZapSimpleCachePrefix = "private_zap:binding:v6"
+const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v6"
 
 var privateZapMuByKey sync.Map // key=chain|walletID -> *sync.Mutex
 
@@ -424,14 +424,6 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		return common.Address{}, fmt.Errorf("V3 position manager not configured for chain=%s", chain)
 	}
 
-	okxRouter := common.Address{}
-	if common.IsHexAddress(cc.OKXSwapRouter) {
-		okxRouter = common.HexToAddress(cc.OKXSwapRouter)
-	}
-	okxApprove := common.Address{}
-	if common.IsHexAddress(cc.OKXTokenApproveAddress) {
-		okxApprove = common.HexToAddress(cc.OKXTokenApproveAddress)
-	}
 	v3pm := common.HexToAddress(v3Primary)
 	v4pm := common.Address{}
 	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
@@ -476,7 +468,7 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		log.Printf("[PrivateZap] configuring existing deployed zap_simple chain=%s wallet_id=%d address=%s", chain, wallet.ID, zapAddr.Hex())
 	}
 
-	// 2) Configure trusted addresses (nonce N+1 ...)
+	// 2) Configure position managers (nonce N+1 ...)
 	nonce2, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return common.Address{}, err
@@ -485,16 +477,16 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 	if err != nil {
 		return common.Address{}, err
 	}
-	tuneZapTxGasLimit("PrivateZap setTrustedAddresses", cfgAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
-		return blockchain.ZapSimpleSetTrustedAddresses(o, client, zapAddr, okxRouter, okxApprove, v3pm, v4pm)
+	tuneZapTxGasLimit("PrivateZap setPositionManagers", cfgAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return blockchain.ZapSimpleSetPositionManagers(o, client, zapAddr, v3pm, v4pm)
 	})
-	cfgTx, err := blockchain.ZapSimpleSetTrustedAddresses(cfgAuth, client, zapAddr, okxRouter, okxApprove, v3pm, v4pm)
+	cfgTx, err := blockchain.ZapSimpleSetPositionManagers(cfgAuth, client, zapAddr, v3pm, v4pm)
 	if err != nil {
-		return common.Address{}, fmt.Errorf("setTrustedAddresses failed: %w", err)
+		return common.Address{}, fmt.Errorf("setPositionManagers failed: %w", err)
 	}
 	cfgHash := cfgTx.Hash().Hex()
 	if _, werr := s.waitMined(client, chainID, cfgTx); werr != nil {
-		return common.Address{}, fmt.Errorf("setTrustedAddresses tx failed: %w", werr)
+		return common.Address{}, fmt.Errorf("setPositionManagers tx failed: %w", werr)
 	}
 
 	if wrappedNative != (common.Address{}) {

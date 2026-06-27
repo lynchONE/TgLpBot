@@ -83,14 +83,6 @@ function uniqueAddressList(addresses) {
   return [...map.values()];
 }
 
-function readAddressListForNetwork(networkName, key) {
-  const value = readEnvForNetwork(networkName, key);
-  if (!value) {
-    return [];
-  }
-  return uniqueAddressList(value.split(/[,\s;]+/));
-}
-
 function resolveV3ManagersForNetwork(networkName) {
   const primaryPrefix = getNetworkPrefixes(networkName)[0];
 
@@ -146,12 +138,7 @@ function resolveV3ManagersForNetwork(networkName) {
   };
 }
 
-function resolveTrustedConfigForNetwork(networkName) {
-  const primaryPrefix = getNetworkPrefixes(networkName)[0];
-  const okxRouter = readEnvForNetwork(networkName, "OKX_SWAP_ROUTER");
-  const okxApprove = readEnvForNetwork(networkName, "OKX_TOKEN_APPROVE_ADDRESS");
-  const binanceSwapTargets = readAddressListForNetwork(networkName, "BINANCE_SWAP_TARGETS");
-  const binanceApproveTargets = readAddressListForNetwork(networkName, "BINANCE_APPROVE_TARGETS");
+function resolvePositionManagerConfigForNetwork(networkName) {
   const v3 = resolveV3ManagersForNetwork(networkName);
   const v4pm = readFirstEnvForNetwork(networkName, [
     "UNISWAP_V4_POSITION_MANAGER_ADDRESS",
@@ -159,27 +146,11 @@ function resolveTrustedConfigForNetwork(networkName) {
   ]);
 
   const missingHints = [];
-  if (!okxRouter) {
-    missingHints.push(`${primaryPrefix}_OKX_SWAP_ROUTER`);
-    if (usesGlobalFallback(networkName)) {
-      missingHints.push("OKX_SWAP_ROUTER");
-    }
-  }
-  if (!okxApprove) {
-    missingHints.push(`${primaryPrefix}_OKX_TOKEN_APPROVE_ADDRESS`);
-    if (usesGlobalFallback(networkName)) {
-      missingHints.push("OKX_TOKEN_APPROVE_ADDRESS");
-    }
-  }
   if (!v3.primary) {
     missingHints.push(...v3.requiredHints);
   }
 
   return {
-    okxRouter,
-    okxApprove,
-    binanceSwapTargets,
-    binanceApproveTargets,
     v3Primary: v3.primary,
     v3Extras: v3.extras,
     v4pm,
@@ -249,9 +220,8 @@ module.exports = {
   readEnvForNetwork,
   readFirstEnvForNetwork,
   readZapAddressForNetwork,
-  readAddressListForNetwork,
   resolveV3ManagersForNetwork,
-  resolveTrustedConfigForNetwork,
+  resolvePositionManagerConfigForNetwork,
   getExplorerApiKeyForNetwork,
   isTruthyEnv,
   getNativeSymbolForNetwork,

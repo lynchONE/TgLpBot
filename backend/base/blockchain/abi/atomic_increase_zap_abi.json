@@ -69,6 +69,25 @@
         "anonymous":  false,
         "inputs":  [
                        {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "v3PositionManager",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "v4PositionManager",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "PositionManagersUpdated",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
                            "indexed":  true,
                            "internalType":  "address",
                            "name":  "target",
@@ -100,75 +119,6 @@
                        }
                    ],
         "name":  "SwapExecuted",
-        "type":  "event"
-    },
-    {
-        "anonymous":  false,
-        "inputs":  [
-                       {
-                           "indexed":  false,
-                           "internalType":  "address",
-                           "name":  "okxSwapRouter",
-                           "type":  "address"
-                       },
-                       {
-                           "indexed":  false,
-                           "internalType":  "address",
-                           "name":  "okxTokenApprove",
-                           "type":  "address"
-                       },
-                       {
-                           "indexed":  false,
-                           "internalType":  "address",
-                           "name":  "v3PositionManager",
-                           "type":  "address"
-                       },
-                       {
-                           "indexed":  false,
-                           "internalType":  "address",
-                           "name":  "v4PositionManager",
-                           "type":  "address"
-                       }
-                   ],
-        "name":  "TrustedAddressesUpdated",
-        "type":  "event"
-    },
-    {
-        "anonymous":  false,
-        "inputs":  [
-                       {
-                           "indexed":  true,
-                           "internalType":  "address",
-                           "name":  "target",
-                           "type":  "address"
-                       },
-                       {
-                           "indexed":  false,
-                           "internalType":  "bool",
-                           "name":  "trusted",
-                           "type":  "bool"
-                       }
-                   ],
-        "name":  "TrustedApproveTargetUpdated",
-        "type":  "event"
-    },
-    {
-        "anonymous":  false,
-        "inputs":  [
-                       {
-                           "indexed":  true,
-                           "internalType":  "address",
-                           "name":  "target",
-                           "type":  "address"
-                       },
-                       {
-                           "indexed":  false,
-                           "internalType":  "bool",
-                           "name":  "trusted",
-                           "type":  "bool"
-                       }
-                   ],
-        "name":  "TrustedSwapTargetUpdated",
         "type":  "event"
     },
     {
@@ -293,36 +243,6 @@
         "inputs":  [
 
                    ],
-        "name":  "okxSwapRouter",
-        "outputs":  [
-                        {
-                            "internalType":  "address",
-                            "name":  "",
-                            "type":  "address"
-                        }
-                    ],
-        "stateMutability":  "view",
-        "type":  "function"
-    },
-    {
-        "inputs":  [
-
-                   ],
-        "name":  "okxTokenApprove",
-        "outputs":  [
-                        {
-                            "internalType":  "address",
-                            "name":  "",
-                            "type":  "address"
-                        }
-                    ],
-        "stateMutability":  "view",
-        "type":  "function"
-    },
-    {
-        "inputs":  [
-
-                   ],
         "name":  "owner",
         "outputs":  [
                         {
@@ -349,16 +269,6 @@
         "inputs":  [
                        {
                            "internalType":  "address",
-                           "name":  "_okxSwapRouter",
-                           "type":  "address"
-                       },
-                       {
-                           "internalType":  "address",
-                           "name":  "_okxTokenApprove",
-                           "type":  "address"
-                       },
-                       {
-                           "internalType":  "address",
                            "name":  "_v3PositionManager",
                            "type":  "address"
                        },
@@ -368,47 +278,7 @@
                            "type":  "address"
                        }
                    ],
-        "name":  "setTrustedAddresses",
-        "outputs":  [
-
-                    ],
-        "stateMutability":  "nonpayable",
-        "type":  "function"
-    },
-    {
-        "inputs":  [
-                       {
-                           "internalType":  "address[]",
-                           "name":  "targets",
-                           "type":  "address[]"
-                       },
-                       {
-                           "internalType":  "bool",
-                           "name":  "trusted",
-                           "type":  "bool"
-                       }
-                   ],
-        "name":  "setTrustedApproveTargets",
-        "outputs":  [
-
-                    ],
-        "stateMutability":  "nonpayable",
-        "type":  "function"
-    },
-    {
-        "inputs":  [
-                       {
-                           "internalType":  "address[]",
-                           "name":  "targets",
-                           "type":  "address[]"
-                       },
-                       {
-                           "internalType":  "bool",
-                           "name":  "trusted",
-                           "type":  "bool"
-                       }
-                   ],
-        "name":  "setTrustedSwapTargets",
+        "name":  "setPositionManagers",
         "outputs":  [
 
                     ],
@@ -463,44 +333,6 @@
 
                     ],
         "stateMutability":  "nonpayable",
-        "type":  "function"
-    },
-    {
-        "inputs":  [
-                       {
-                           "internalType":  "address",
-                           "name":  "",
-                           "type":  "address"
-                       }
-                   ],
-        "name":  "trustedApproveTargets",
-        "outputs":  [
-                        {
-                            "internalType":  "bool",
-                            "name":  "",
-                            "type":  "bool"
-                        }
-                    ],
-        "stateMutability":  "view",
-        "type":  "function"
-    },
-    {
-        "inputs":  [
-                       {
-                           "internalType":  "address",
-                           "name":  "",
-                           "type":  "address"
-                       }
-                   ],
-        "name":  "trustedSwapTargets",
-        "outputs":  [
-                        {
-                            "internalType":  "bool",
-                            "name":  "",
-                            "type":  "bool"
-                        }
-                    ],
-        "stateMutability":  "view",
         "type":  "function"
     },
     {

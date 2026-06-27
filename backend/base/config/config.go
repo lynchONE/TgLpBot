@@ -60,11 +60,9 @@ type ChainConfig struct {
 	WrappedNativeSymbol  string
 	WrappedNativeAddress string
 
-	// OKX DEX allowlist (optional, but strongly recommended).
+	// OKX DEX router validation (used by direct OKX swap execution).
 	OKXSwapRouter          string
 	OKXTokenApproveAddress string
-	BinanceSwapTargets     []string
-	BinanceApproveTargets  []string
 
 	// Zap contracts (V3/V4 can be same address).
 	ZapV3Address string
@@ -152,8 +150,6 @@ type Config struct {
 	BinanceWeb3QuotePath   string
 	BinanceWeb3BuildTxPath string
 	BinanceWeb3RecvWindow  int64
-	BinanceSwapTargets     []string
-	BinanceApproveTargets  []string
 
 	// Zap (V3/V4): GasLimit safety buffer (avoid out of gas / reentrancy sentry)
 	ZapGasLimitMultiplier       float64
@@ -390,8 +386,6 @@ func LoadConfig() error {
 		BinanceWeb3QuotePath:   strings.TrimSpace(getEnv("BINANCE_WEB3_AGGREGATED_QUOTE_PATH", "/build/api/v1/dex/aggregator/quote")),
 		BinanceWeb3BuildTxPath: strings.TrimSpace(getEnv("BINANCE_WEB3_BUILD_SWAP_TX_PATH", "/build/api/v1/dex/aggregator/swap")),
 		BinanceWeb3RecvWindow:  binanceWeb3RecvWindow,
-		BinanceSwapTargets:     parseAddressList(getEnv("BINANCE_SWAP_TARGETS", "")),
-		BinanceApproveTargets:  parseAddressList(getEnv("BINANCE_APPROVE_TARGETS", "")),
 
 		// Zap (V3/V4): GasLimit safety buffer
 		ZapGasLimitMultiplier:       zapGasLimitMult,
@@ -505,8 +499,6 @@ func LoadConfig() error {
 	log.Printf("   - Binance Web3 Quote Path: %s", AppConfig.BinanceWeb3QuotePath)
 	log.Printf("   - Binance Web3 Build Tx Path: %s", AppConfig.BinanceWeb3BuildTxPath)
 	log.Printf("   - Binance Web3 Recv Window: %d", AppConfig.BinanceWeb3RecvWindow)
-	log.Printf("   - Binance Trusted Swap Targets: %d", len(AppConfig.BinanceSwapTargets))
-	log.Printf("   - Binance Trusted Approve Targets: %d", len(AppConfig.BinanceApproveTargets))
 	log.Printf("   - Zap GasLimit Multiplier: %.4f", AppConfig.ZapGasLimitMultiplier)
 	log.Printf("   - Zap GasLimit Min/Max: %d/%d", AppConfig.ZapGasLimitMin, AppConfig.ZapGasLimitMax)
 	log.Printf("   - Zap Price Deviation Max Percent: %.4f", AppConfig.ZapPriceDeviationMaxPercent)
@@ -652,49 +644,6 @@ func parseChainList(v string) []string {
 	return out
 }
 
-func parseAddressList(v string) []string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	fields := strings.FieldsFunc(v, func(r rune) bool {
-		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
-	})
-	seen := make(map[string]struct{}, len(fields))
-	out := make([]string, 0, len(fields))
-	for _, field := range fields {
-		item := strings.TrimSpace(field)
-		if item == "" {
-			continue
-		}
-		key := strings.ToLower(item)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, item)
-	}
-	return out
-}
-
-func uniqueStringList(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		item := strings.TrimSpace(value)
-		if item == "" {
-			continue
-		}
-		key := strings.ToLower(item)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, item)
-	}
-	return out
-}
-
 func getEnvInt(key string, defaultValue int) int {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -784,8 +733,6 @@ func (c *Config) initChainConfigs() {
 
 			okxRouter := pickFirstNonEmpty(getEnvStr("OKX_SWAP_ROUTER_BSC"), c.OKXSwapRouter)
 			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BSC"), c.OKXTokenApproveAddress)
-			binanceSwapTargets := uniqueStringList(append(parseAddressList(getEnvStr("BSC_BINANCE_SWAP_TARGETS")), c.BinanceSwapTargets...))
-			binanceApproveTargets := uniqueStringList(append(parseAddressList(getEnvStr("BSC_BINANCE_APPROVE_TARGETS")), c.BinanceApproveTargets...))
 
 			cc := ChainConfig{
 				Chain:             "bsc",
@@ -807,8 +754,6 @@ func (c *Config) initChainConfigs() {
 
 				OKXSwapRouter:          okxRouter,
 				OKXTokenApproveAddress: okxApprove,
-				BinanceSwapTargets:     binanceSwapTargets,
-				BinanceApproveTargets:  binanceApproveTargets,
 
 				ZapV3Address: strings.TrimSpace(c.ZapV3Address),
 				ZapV4Address: strings.TrimSpace(c.ZapV4Address),
@@ -828,11 +773,9 @@ func (c *Config) initChainConfigs() {
 			chains[chain] = cc
 
 		case "base":
-			// Allow per-chain overrides; fall back to global OKX allowlist when not set.
+			// Allow per-chain overrides; fall back to global OKX router settings when not set.
 			okxRouter := pickFirstNonEmpty(getEnvStr("OKX_SWAP_ROUTER_BASE"), c.OKXSwapRouter)
 			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BASE"), c.OKXTokenApproveAddress)
-			binanceSwapTargets := uniqueStringList(append(parseAddressList(getEnvStr("BASE_BINANCE_SWAP_TARGETS")), c.BinanceSwapTargets...))
-			binanceApproveTargets := uniqueStringList(append(parseAddressList(getEnvStr("BASE_BINANCE_APPROVE_TARGETS")), c.BinanceApproveTargets...))
 
 			uniswapFactory := getEnvStr("BASE_UNISWAP_V3_FACTORY_ADDRESS")
 			uniswapNPM := getEnvStr("BASE_UNISWAP_V3_NPM_ADDRESS")
@@ -858,8 +801,6 @@ func (c *Config) initChainConfigs() {
 
 				OKXSwapRouter:          okxRouter,
 				OKXTokenApproveAddress: okxApprove,
-				BinanceSwapTargets:     binanceSwapTargets,
-				BinanceApproveTargets:  binanceApproveTargets,
 
 				ZapV3Address: strings.TrimSpace(getEnvStr("BASE_ZAP_V3_ADDRESS")),
 				ZapV4Address: strings.TrimSpace(getEnvStr("BASE_ZAP_V4_ADDRESS")),

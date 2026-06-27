@@ -76,25 +76,14 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
     address private constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     bytes4 private constant PERMIT2_ALLOWANCE_IS_FIXED_AT_INFINITY = 0x3f68539a;
 
-    address public okxSwapRouter;
-    address public okxTokenApprove;
-    mapping(address => bool) public trustedSwapTargets;
-    mapping(address => bool) public trustedApproveTargets;
     address public v3PositionManager;
     mapping(address => bool) public trustedV3PositionManagers;
     address public v4PositionManager;
     address public wrappedNative;
 
-    event TrustedAddressesUpdated(
-        address okxSwapRouter,
-        address okxTokenApprove,
-        address v3PositionManager,
-        address v4PositionManager
-    );
+    event PositionManagersUpdated(address v3PositionManager, address v4PositionManager);
 
     event TrustedV3PositionManagerUpdated(address indexed positionManager, bool trusted);
-    event TrustedSwapTargetUpdated(address indexed target, bool trusted);
-    event TrustedApproveTargetUpdated(address indexed target, bool trusted);
     event WrappedNativeUpdated(address indexed wrappedNative);
 
     event ZapIncreaseV3(
@@ -180,43 +169,13 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
 
     constructor() Ownable(msg.sender) {}
 
-    function setTrustedAddresses(
-        address _okxSwapRouter,
-        address _okxTokenApprove,
+    function setPositionManagers(
         address _v3PositionManager,
         address _v4PositionManager
     ) external onlyOwner {
-        okxSwapRouter = _okxSwapRouter;
-        okxTokenApprove = _okxTokenApprove;
         v3PositionManager = _v3PositionManager;
         v4PositionManager = _v4PositionManager;
-        if (_okxSwapRouter != address(0)) {
-            trustedSwapTargets[_okxSwapRouter] = true;
-            emit TrustedSwapTargetUpdated(_okxSwapRouter, true);
-        }
-        if (_okxTokenApprove != address(0)) {
-            trustedApproveTargets[_okxTokenApprove] = true;
-            emit TrustedApproveTargetUpdated(_okxTokenApprove, true);
-        }
-        emit TrustedAddressesUpdated(_okxSwapRouter, _okxTokenApprove, _v3PositionManager, _v4PositionManager);
-    }
-
-    function setTrustedSwapTargets(address[] calldata targets, bool trusted) external onlyOwner {
-        for (uint256 i = 0; i < targets.length; i++) {
-            address target = targets[i];
-            require(target != address(0), "bad swap target");
-            trustedSwapTargets[target] = trusted;
-            emit TrustedSwapTargetUpdated(target, trusted);
-        }
-    }
-
-    function setTrustedApproveTargets(address[] calldata targets, bool trusted) external onlyOwner {
-        for (uint256 i = 0; i < targets.length; i++) {
-            address target = targets[i];
-            require(target != address(0), "bad approve target");
-            trustedApproveTargets[target] = trusted;
-            emit TrustedApproveTargetUpdated(target, trusted);
-        }
+        emit PositionManagersUpdated(_v3PositionManager, _v4PositionManager);
     }
 
     function setTrustedV3PositionManagers(address[] calldata positionManagers, bool trusted) external onlyOwner {
@@ -294,7 +253,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         uint256 fundingAvailable = IERC20(params.funding.token).balanceOf(address(this)) - fundingBalBefore;
 
         if (params.entrySwap.amountIn > 0 && params.entrySwap.callData.length > 0) {
-            _validateTrustedSwap(params.entrySwap);
+            _validateSwapParams(params.entrySwap);
             require(params.entrySwap.tokenIn == params.funding.token, "entry tokenIn");
             require(params.entrySwap.tokenOut == token0 || params.entrySwap.tokenOut == token1, "entry tokenOut");
             require(params.entrySwap.amountIn <= fundingAvailable, "entry amount");
@@ -304,7 +263,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         uint256 rebalanceAvail0 = IERC20(token0).balanceOf(address(this)) - token0BalBefore;
         uint256 rebalanceAvail1 = IERC20(token1).balanceOf(address(this)) - token1BalBefore;
         if (params.rebalanceSwap.amountIn > 0 && params.rebalanceSwap.callData.length > 0) {
-            _validateTrustedSwap(params.rebalanceSwap);
+            _validateSwapParams(params.rebalanceSwap);
             require(
                 (params.rebalanceSwap.tokenIn == token0 && params.rebalanceSwap.tokenOut == token1)
                     || (params.rebalanceSwap.tokenIn == token1 && params.rebalanceSwap.tokenOut == token0),
@@ -369,7 +328,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         uint256 fundingAvailable = IERC20(params.funding.token).balanceOf(address(this)) - fundingBalBefore;
 
         if (params.entrySwap.amountIn > 0 && params.entrySwap.callData.length > 0) {
-            _validateTrustedSwap(params.entrySwap);
+            _validateSwapParams(params.entrySwap);
             require(params.entrySwap.tokenIn == params.funding.token, "entry tokenIn");
             require(
                 _matchesPoolCurrency(params.entrySwap.tokenOut, poolKey.currency0)
@@ -383,7 +342,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         uint256 rebalanceAvail0 = _fundingBalanceForCurrency(poolKey.currency0) - token0FundingBefore;
         uint256 rebalanceAvail1 = _fundingBalanceForCurrency(poolKey.currency1) - token1FundingBefore;
         if (params.rebalanceSwap.amountIn > 0 && params.rebalanceSwap.callData.length > 0) {
-            _validateTrustedSwap(params.rebalanceSwap);
+            _validateSwapParams(params.rebalanceSwap);
             require(
                 (_matchesPoolCurrency(params.rebalanceSwap.tokenIn, poolKey.currency0)
                     && _matchesPoolCurrency(params.rebalanceSwap.tokenOut, poolKey.currency1))
@@ -620,7 +579,7 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         return token == currency;
     }
 
-    function _validateTrustedSwap(SwapParams calldata swap) internal view {
+    function _validateSwapParams(SwapParams calldata swap) internal pure {
         require(swap.target != address(0), "swap target");
         require(swap.tokenIn != address(0) && swap.tokenOut != address(0), "swap token");
         require(swap.tokenIn != swap.tokenOut, "swap same");
@@ -700,3 +659,4 @@ contract AtomicIncreaseZap is ReentrancyGuard, Ownable {
         IERC20(token).forceApprove(PERMIT2, type(uint256).max);
     }
 }
+

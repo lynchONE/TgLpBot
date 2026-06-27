@@ -1,7 +1,7 @@
 const { ethers, run, network } = require("hardhat");
 const {
   getNetworkPrefixes,
-  resolveTrustedConfigForNetwork,
+  resolvePositionManagerConfigForNetwork,
   getExplorerApiKeyForNetwork,
   isTruthyEnv,
   getNativeSymbolForNetwork,
@@ -78,41 +78,21 @@ async function main() {
   console.log("ZapSimple deployed successfully.");
   console.log("Contract address:", address);
 
-  // Optional: configure trusted addresses (recommended)
-  const trusted = resolveTrustedConfigForNetwork(networkName);
-  const okxRouter = trusted.okxRouter;
-  const okxApprove = trusted.okxApprove;
-  const v3pm = trusted.v3Primary;
-  const v4pm = trusted.v4pm;
+  // Optional: configure position managers (recommended)
+  const positionManagers = resolvePositionManagerConfigForNetwork(networkName);
+  const v3pm = positionManagers.v3Primary;
+  const v4pm = positionManagers.v4pm;
   const wrappedNative = getWrappedNativeForNetwork(networkName);
 
-  if (okxRouter && okxApprove && v3pm) {
-    console.log("Setting trusted addresses...");
-    const tx = await zapSimple.setTrustedAddresses(okxRouter, okxApprove, v3pm, v4pm || ethers.ZeroAddress);
-    console.log("setTrustedAddresses tx:", tx.hash);
+  if (v3pm) {
+    console.log("Setting position managers...");
+    const tx = await zapSimple.setPositionManagers(v3pm, v4pm || ethers.ZeroAddress);
+    console.log("setPositionManagers tx:", tx.hash);
     await tx.wait();
 
-    console.log("Trusted addresses set.");
-    console.log("OKX Router:", okxRouter);
-    console.log("OKX TokenApprove:", okxApprove);
-    console.log("Binance Swap Targets:", trusted.binanceSwapTargets.length ? trusted.binanceSwapTargets.join(", ") : "(none)");
-    console.log("Binance Approve Targets:", trusted.binanceApproveTargets.length ? trusted.binanceApproveTargets.join(", ") : "(none)");
+    console.log("Position managers set.");
     console.log("V3 PositionManager:", v3pm);
     console.log("V4 PositionManager:", v4pm || ethers.ZeroAddress);
-
-    const swapTargets = [okxRouter, ...trusted.binanceSwapTargets].filter((item) => ethers.isAddress(item));
-    if (swapTargets.length > 0) {
-      const txSwapTargets = await zapSimple.setTrustedSwapTargets([...new Set(swapTargets.map((item) => ethers.getAddress(item)))], true);
-      console.log("setTrustedSwapTargets tx:", txSwapTargets.hash);
-      await txSwapTargets.wait();
-    }
-
-    const approveTargets = [okxApprove, ...trusted.binanceApproveTargets].filter((item) => ethers.isAddress(item));
-    if (approveTargets.length > 0) {
-      const txApproveTargets = await zapSimple.setTrustedApproveTargets([...new Set(approveTargets.map((item) => ethers.getAddress(item)))], true);
-      console.log("setTrustedApproveTargets tx:", txApproveTargets.hash);
-      await txApproveTargets.wait();
-    }
 
     if (wrappedNative) {
       console.log("Setting wrapped native:", wrappedNative);
@@ -124,7 +104,7 @@ async function main() {
     }
 
     // If multiple V3 position managers are configured for this chain family, allowlist additional ones.
-    const uniqueExtras = trusted.v3Extras
+    const uniqueExtras = positionManagers.v3Extras
       .filter((item) => ethers.isAddress(item))
       .filter((item) => item.toLowerCase() !== v3pm.toLowerCase());
 
@@ -136,12 +116,12 @@ async function main() {
       console.log("Extra trusted V3 position managers:", uniqueExtras.join(", "));
     }
   } else {
-    console.log("Skipped setTrustedAddresses because required env is missing.");
+    console.log("Skipped setPositionManagers because required env is missing.");
     console.log(`Required keys for ${networkName}:`);
-    for (const hint of trusted.missingHints) {
+    for (const hint of positionManagers.missingHints) {
       console.log(`- ${hint}`);
     }
-    if (trusted.family === "base") {
+    if (positionManagers.family === "base") {
       console.log(
         `- ${preferredPrefix} uses Uniswap/Aerodrome V3 managers only (no Pancake for Base networks)`
       );

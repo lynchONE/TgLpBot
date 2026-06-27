@@ -222,14 +222,6 @@ func (s *LiquidityService) ensurePrivateAtomicIncreaseZap(
 		return common.Address{}, fmt.Errorf("V3 position manager not configured for chain=%s", chain)
 	}
 
-	okxRouter := common.Address{}
-	if common.IsHexAddress(cc.OKXSwapRouter) {
-		okxRouter = common.HexToAddress(cc.OKXSwapRouter)
-	}
-	okxApprove := common.Address{}
-	if common.IsHexAddress(cc.OKXTokenApproveAddress) {
-		okxApprove = common.HexToAddress(cc.OKXTokenApproveAddress)
-	}
 	v3pm := common.HexToAddress(v3Primary)
 	v4pm := common.Address{}
 	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
@@ -276,16 +268,16 @@ func (s *LiquidityService) ensurePrivateAtomicIncreaseZap(
 	if err != nil {
 		return common.Address{}, err
 	}
-	tuneZapTxGasLimit("PrivateZap setTrustedAddresses (atomic)", cfgAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
-		return blockchain.AtomicIncreaseZapSetTrustedAddresses(o, client, zapAddr, okxRouter, okxApprove, v3pm, v4pm)
+	tuneZapTxGasLimit("PrivateZap setPositionManagers (atomic)", cfgAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return blockchain.AtomicIncreaseZapSetPositionManagers(o, client, zapAddr, v3pm, v4pm)
 	})
-	cfgTx, err := blockchain.AtomicIncreaseZapSetTrustedAddresses(cfgAuth, client, zapAddr, okxRouter, okxApprove, v3pm, v4pm)
+	cfgTx, err := blockchain.AtomicIncreaseZapSetPositionManagers(cfgAuth, client, zapAddr, v3pm, v4pm)
 	if err != nil {
-		return common.Address{}, fmt.Errorf("setTrustedAddresses failed: %w", err)
+		return common.Address{}, fmt.Errorf("setPositionManagers failed: %w", err)
 	}
 	cfgHash := cfgTx.Hash().Hex()
 	if _, werr := s.waitMined(client, chainID, cfgTx); werr != nil {
-		return common.Address{}, fmt.Errorf("setTrustedAddresses tx failed: %w", werr)
+		return common.Address{}, fmt.Errorf("setPositionManagers tx failed: %w", werr)
 	}
 
 	if wrappedNative != (common.Address{}) {

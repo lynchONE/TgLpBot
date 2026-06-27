@@ -18,12 +18,10 @@ var zapSimpleBytecodeHex string
 const zapSimpleAdminABI = `[
   {
     "inputs": [
-      { "internalType": "address", "name": "_okxSwapRouter", "type": "address" },
-      { "internalType": "address", "name": "_okxTokenApprove", "type": "address" },
       { "internalType": "address", "name": "_v3PositionManager", "type": "address" },
       { "internalType": "address", "name": "_v4PositionManager", "type": "address" }
     ],
-    "name": "setTrustedAddresses",
+    "name": "setPositionManagers",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -34,26 +32,6 @@ const zapSimpleAdminABI = `[
       { "internalType": "bool", "name": "trusted", "type": "bool" }
     ],
     "name": "setTrustedV3PositionManagers",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address[]", "name": "targets", "type": "address[]" },
-      { "internalType": "bool", "name": "trusted", "type": "bool" }
-    ],
-    "name": "setTrustedSwapTargets",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address[]", "name": "targets", "type": "address[]" },
-      { "internalType": "bool", "name": "trusted", "type": "bool" }
-    ],
-    "name": "setTrustedApproveTargets",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -121,12 +99,10 @@ func zapSimpleAdminContract(zapAddr common.Address, client *ethclient.Client) (*
 	return bind.NewBoundContract(zapAddr, parsed, rc, rc, rc), nil
 }
 
-func ZapSimpleSetTrustedAddresses(
+func ZapSimpleSetPositionManagers(
 	auth *bind.TransactOpts,
 	client *ethclient.Client,
 	zapAddr common.Address,
-	okxSwapRouter common.Address,
-	okxTokenApprove common.Address,
 	v3PositionManager common.Address,
 	v4PositionManager common.Address,
 ) (*types.Transaction, error) {
@@ -137,7 +113,7 @@ func ZapSimpleSetTrustedAddresses(
 	if err != nil {
 		return nil, err
 	}
-	return c.Transact(auth, "setTrustedAddresses", okxSwapRouter, okxTokenApprove, v3PositionManager, v4PositionManager)
+	return c.Transact(auth, "setPositionManagers", v3PositionManager, v4PositionManager)
 }
 
 func ZapSimpleSetTrustedV3PositionManagers(
@@ -158,46 +134,6 @@ func ZapSimpleSetTrustedV3PositionManagers(
 		return nil, err
 	}
 	return c.Transact(auth, "setTrustedV3PositionManagers", positionManagers, trusted)
-}
-
-func ZapSimpleSetTrustedSwapTargets(
-	auth *bind.TransactOpts,
-	client *ethclient.Client,
-	zapAddr common.Address,
-	targets []common.Address,
-	trusted bool,
-) (*types.Transaction, error) {
-	if auth == nil {
-		return nil, fmt.Errorf("auth is nil")
-	}
-	if len(targets) == 0 {
-		return nil, nil
-	}
-	c, err := zapSimpleAdminContract(zapAddr, client)
-	if err != nil {
-		return nil, err
-	}
-	return c.Transact(auth, "setTrustedSwapTargets", targets, trusted)
-}
-
-func ZapSimpleSetTrustedApproveTargets(
-	auth *bind.TransactOpts,
-	client *ethclient.Client,
-	zapAddr common.Address,
-	targets []common.Address,
-	trusted bool,
-) (*types.Transaction, error) {
-	if auth == nil {
-		return nil, fmt.Errorf("auth is nil")
-	}
-	if len(targets) == 0 {
-		return nil, nil
-	}
-	c, err := zapSimpleAdminContract(zapAddr, client)
-	if err != nil {
-		return nil, err
-	}
-	return c.Transact(auth, "setTrustedApproveTargets", targets, trusted)
 }
 
 func ZapSimpleSetWrappedNative(

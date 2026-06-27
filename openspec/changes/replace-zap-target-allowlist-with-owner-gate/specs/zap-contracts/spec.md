@@ -8,12 +8,12 @@ The binding MUST be used for all Zap interactions for that wallet and chain, inc
 - `zapInV3` / `zapInV4` calls
 - receipt/event parsing that relies on the Zap contract address
 
-私有 Zap 合约的资金入口 MUST 只允许部署该合约的钱包调用。外部聚合器 swap target 和 approve target MUST NOT 作为 Zap 执行外部 swap 的链上白名单前置条件。
+私有 Zap 合约的资金入口 MUST 只允许部署该合约的钱包调用。外部聚合器 swap target 和 approve target MUST NOT 作为 Zap 执行外部 swap 的链上白名单前置条件。Zap 配置流程 MUST NOT 要求 OKX/Binance swap target 或 approve target 地址；它只需要配置 V3/V4 Position Manager 和 wrapped native。
 
 #### Scenario: First open deploys and binds a private Zap contract
 - **GIVEN** wallet `W` has no private Zap binding on chain `bsc`
 - **WHEN** the user opens a new position on `bsc` using wallet `W`
-- **THEN** the backend deploys a new Zap contract from wallet `W`, configures trusted addresses, persists the binding, and uses that address for the entry transaction.
+- **THEN** the backend deploys a new Zap contract from wallet `W`, configures position managers, persists the binding, and uses that address for the entry transaction.
 
 #### Scenario: Two wallets are isolated
 - **GIVEN** a user has two wallets `A` and `B`

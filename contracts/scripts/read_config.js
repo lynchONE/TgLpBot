@@ -2,7 +2,6 @@ const { ethers, network } = require("hardhat");
 const {
   getNetworkPrefixes,
   usesGlobalFallback,
-  readEnvForNetwork,
   readZapAddressForNetwork,
 } = require("./utils/network_env");
 
@@ -31,28 +30,19 @@ async function main() {
   const zap = ZapSimple.attach(zapAddress);
 
   try {
-    const router = await zap.okxSwapRouter();
-    const okxApprove = await zap.okxTokenApprove();
     const v3pm = await zap.v3PositionManager();
     const v4pm = await zap.v4PositionManager();
+    let wrappedNative = ethers.ZeroAddress;
+    try {
+      wrappedNative = await zap.wrappedNative();
+    } catch (error) {
+      console.log("Current contract does not expose wrappedNative().");
+    }
 
     console.log("On-chain configuration:");
-    console.log(`- okxSwapRouter: ${router}`);
-    console.log(`- okxTokenApprove: ${okxApprove}`);
     console.log(`- v3PositionManager: ${v3pm}`);
     console.log(`- v4PositionManager: ${v4pm}`);
-
-    const envRouter = readEnvForNetwork(networkName, "OKX_SWAP_ROUTER");
-    if (envRouter && envRouter.toLowerCase() !== router.toLowerCase()) {
-      console.log("WARNING: environment router does not match contract router.");
-      console.log("- env router:", envRouter);
-      console.log("- contract router:", router);
-    } else if (!envRouter) {
-      const globalHint = usesGlobalFallback(networkName) ? " (or OKX_SWAP_ROUTER)" : "";
-      console.log(`Environment router missing: ${preferredPrefix}_OKX_SWAP_ROUTER${globalHint}.`);
-    } else {
-      console.log("Environment router matches contract.");
-    }
+    console.log(`- wrappedNative: ${wrappedNative}`);
   } catch (error) {
     console.error("Error reading contract:", error);
   }
